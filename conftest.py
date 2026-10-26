@@ -68,7 +68,7 @@ def db(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[ApiConfig, Ap
         command.upgrade(alembic_config(owner), "head")
         yield owner, app
     finally:
-        docker("rm", "-f", container, check=False)
+        docker("rm", "-f", "-v", container, check=False)  # -v：同时删除镜像声明的数据卷
 
 
 async def autocommit(config: ApiConfig, sql: str) -> None:
