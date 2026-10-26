@@ -18,6 +18,7 @@ class Error(ContractModel):
 
 
 class Role(RootModel[Literal["viewer", "operator", "admin", "auditor"]]):
+    model_config = {"allow_inf_nan": False}
     root: Literal["viewer", "operator", "admin", "auditor"]
 
 
@@ -33,10 +34,12 @@ class LoginResponse(ContractModel):
 
 
 class Wall(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=4, min_length=4)
 
 
 class PolygonItem(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=2, min_length=2)
 
 
@@ -48,18 +51,22 @@ class Zone(ContractModel):
 
 
 class CalibrationItem(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=4, min_length=4)
 
 
 class HomographyItem(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=3, min_length=3)
 
 
 class Homography(RootModel[list[HomographyItem]]):
+    model_config = {"allow_inf_nan": False}
     root: list[HomographyItem] = Field(..., max_length=3, min_length=3)
 
 
 class ReprojErrorM(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
     root: float = Field(..., ge=0.0)
 
 
