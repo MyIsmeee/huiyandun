@@ -1,10 +1,12 @@
 """数据库连接与迁移入口（C-ST-01）。"""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from alembic.config import Config
 from sqlalchemy import URL
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from api_server.config import ApiConfig
 
@@ -25,6 +27,17 @@ def create_engine(config: ApiConfig) -> AsyncEngine:
         pool_timeout=config.db_timeout_s,
         connect_args={"timeout": config.db_timeout_s, "command_timeout": config.db_timeout_s},
     )
+
+
+@asynccontextmanager
+async def transaction(config: ApiConfig) -> AsyncIterator[AsyncConnection]:
+    """一次性连接上的单个事务，供命令行等服务进程之外的调用方使用。"""
+    engine = create_engine(config)
+    try:
+        async with engine.begin() as conn:
+            yield conn
+    finally:
+        await engine.dispose()
 
 
 def alembic_config(config: ApiConfig) -> Config:

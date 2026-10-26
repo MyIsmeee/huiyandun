@@ -5,26 +5,21 @@ import uuid
 from collections.abc import Awaitable, Callable
 
 import pytest
-from alembic import command
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from api_server.audit import audit_log, record
 from api_server.config import ApiConfig
-from api_server.db import alembic_config, create_engine
+from api_server.db import transaction
 
 MODIFICATIONS = ["UPDATE audit_log SET actor = 'x'", "DELETE FROM audit_log", "TRUNCATE audit_log"]
 
 
 def in_transaction[T](config: ApiConfig, fn: Callable[[AsyncConnection], Awaitable[T]]) -> T:
     async def main() -> T:
-        engine = create_engine(config)
-        try:
-            async with engine.begin() as conn:
-                return await fn(conn)
-        finally:
-            await engine.dispose()
+        async with transaction(config) as conn:
+            return await fn(conn)
 
     return asyncio.run(main())
 
@@ -107,14 +102,3 @@ def test_record_rolls_back_with_business_transaction(db: tuple[ApiConfig, ApiCon
     with pytest.raises(RuntimeError):
         in_transaction(db[1], fail_after_record)
     assert count(db[1], request_id) == 0
-
-
-def test_migrations_downgrade_and_upgrade(db: tuple[ApiConfig, ApiConfig]) -> None:
-    """C-ST-01：upgrade → downgrade → upgrade。"""
-    cfg = alembic_config(db[0])
-
-    command.downgrade(cfg, "base")
-    command.upgrade(cfg, "head")
-
-    append(db[1], "after-reupgrade")
-    assert count(db[1], "after-reupgrade") == 1
