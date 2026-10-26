@@ -1,0 +1,15 @@
+{
+  "title": "EventBase",
+  "description": "所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）",
+  "type": "object",
+  "required": ["schema_version", "event_id", "ts"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1[.][0-9]+[.][0-9]+$",
+      "description": "语义化版本，主版本与文件名中的 v1 一致"
+    },
+    "event_id": { "type": "string", "format": "uuid" },
+    "ts": { "type": "string", "format": "date-time", "description": "UTC，RFC 3339，毫秒精度" }
+  }
+}
