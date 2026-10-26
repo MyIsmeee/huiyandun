@@ -199,9 +199,9 @@ jobs:
           fi
           uv sync --frozen --all-packages
           # 精确匹配 PyPI 分类名与 SPDX 标识；子串匹配会放过 HPND（含 isc）、Proprietary...permitted（含 mit）
-          # 复合表达式整串匹配，只列出各项均在白名单内的组合（greenlet：MIT AND PSF-2.0）
+          # 复合表达式整串匹配，只列出各项均在白名单内的组合（greenlet、cryptography）；MIT-0 为去掉署名要求的 MIT（cffi）
           uv run --frozen pip-licenses --packages $pkgs --from=mixed \
-            --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;ISC License (ISCL);ISC;Mozilla Public License 2.0 (MPL 2.0);MPL-2.0;PostgreSQL License;PostgreSQL;zlib/libpng License;Zlib;CC0 1.0 Universal (CC0 1.0) Public Domain Dedication;CC0-1.0;Python Software Foundation License;PSF-2.0;MIT AND PSF-2.0"
+            --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;ISC License (ISCL);ISC;Mozilla Public License 2.0 (MPL 2.0);MPL-2.0;PostgreSQL License;PostgreSQL;zlib/libpng License;Zlib;CC0 1.0 Universal (CC0 1.0) Public Domain Dedication;CC0-1.0;Python Software Foundation License;PSF-2.0;MIT AND PSF-2.0;Apache-2.0 OR BSD-3-Clause;MIT-0"
       - name: npm 运行时依赖
         run: |
           pnpm install --frozen-lockfile
