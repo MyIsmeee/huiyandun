@@ -13,6 +13,7 @@ from py_contracts.api import (
     IncidentList,
     LlmProvider,
     LlmProviderCreate,
+    LlmProviderUpdate,
     LoginResponse,
     ProviderCheck,
     Report,
@@ -180,6 +181,17 @@ def test_provider_response_never_carries_api_key() -> None:
     assert "api_key" not in LlmProvider.model_fields
     assert schemas["LlmProviderCreate"]["properties"]["api_key"]["writeOnly"] is True
     assert schemas["LlmProviderUpdate"]["properties"]["api_key"]["writeOnly"] is True
+
+
+@pytest.mark.parametrize("model", [LlmProviderCreate, LlmProviderUpdate])
+def test_api_key_is_masked_in_repr(model: type) -> None:
+    key = "not-a-real-key-1234"
+    base = {"name": "n", "preset": "custom", "base_url": "http://10.0.0.5/v1", "model": "m"}
+    provider = model.model_validate(base | {"api_key": key})
+
+    assert key not in repr(provider)
+    assert key not in str(provider)
+    assert provider.api_key.get_secret_value() == key
 
 
 def test_provider_create_allows_missing_api_key_and_defaults_timeout() -> None:

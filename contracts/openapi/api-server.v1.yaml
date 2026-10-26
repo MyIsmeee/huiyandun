@@ -546,7 +546,7 @@ components:
         name: { type: string }
         preset: { $ref: "#/components/schemas/Preset" }
         base_url: { type: string }
-        api_key: { type: string, writeOnly: true, description: 本地服务未设 Key 时省略 }
+        api_key: { type: string, format: password, writeOnly: true, description: 本地服务未设 Key 时省略 }
         model: { type: string }
         network: { $ref: "#/components/schemas/Network" }
         timeout_s: { type: integer, minimum: 1, default: 60 }
@@ -556,7 +556,7 @@ components:
         name: { type: string }
         preset: { $ref: "#/components/schemas/Preset" }
         base_url: { type: string }
-        api_key: { type: string, writeOnly: true }
+        api_key: { type: string, format: password, writeOnly: true }
         model: { type: string }
         network: { $ref: "#/components/schemas/Network" }
         timeout_s: { type: integer, minimum: 1 }

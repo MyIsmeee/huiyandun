@@ -154,6 +154,7 @@ class Preset(
         ]
     ]
 ):
+    model_config = {"allow_inf_nan": False}
     root: Literal[
         "llama_cpp",
         "ollama",
@@ -172,6 +173,7 @@ class Preset(
 
 
 class Network(RootModel[Literal["internal", "public"]]):
+    model_config = {"allow_inf_nan": False}
     root: Literal["internal", "public"]
     """
     自动判定：回环、私有网段、链路本地为 internal，其余含所有域名为 public（C-LLM-13）
@@ -179,6 +181,7 @@ class Network(RootModel[Literal["internal", "public"]]):
 
 
 class ApiKeyLast4(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
     root: str = Field(..., max_length=4)
 
 
@@ -218,7 +221,7 @@ class LlmProviderCreate(ContractModel):
     name: str
     preset: Preset
     base_url: str
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     """
     本地服务未设 Key 时省略
     """
@@ -231,7 +234,7 @@ class LlmProviderUpdate(ContractModel):
     name: str | None = None
     preset: Preset | None = None
     base_url: str | None = None
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     model: str | None = None
     network: Network | None = None
     timeout_s: int | None = Field(None, ge=1)
@@ -239,6 +242,7 @@ class LlmProviderUpdate(ContractModel):
 
 
 class LatencyMs(RootModel[int]):
+    model_config = {"allow_inf_nan": False}
     root: int = Field(..., ge=0)
 
 
