@@ -11,10 +11,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 PLACEHOLDERS = {
-    "doctor": "TK-004",
-    "demo-up": "TK-004",
-    "demo-down": "TK-004",
-    "demo-health": "TK-004",
     "verify-models": "TK-021",
     "test-rules": "TK-030",
     "llm-check": "TK-060",

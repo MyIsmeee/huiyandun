@@ -1,0 +1,46 @@
+# 全部服务定义（HYD-DEP-005 §3.1）；镜像与 deploy/third-party.yaml 一致（C-RU-01）
+name: huiyandun
+
+services:
+  postgres:
+    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    profiles: [core]
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [core-net]
+    healthcheck:
+      # 走 TCP：首次初始化期间的临时实例只监听 socket，不应被判为就绪
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats:
+    image: nats:2.15.1-alpine@sha256:7ae34c25dfd6fe2e01c6483eabef20d796690fdcac6c4d94ca780a6cf9877fde
+    profiles: [core]
+    # 不使用镜像自带配置：其中含集群示例口令
+    command: ["nats-server", "--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    volumes:
+      - natsdata:/data
+    networks: [core-net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  core-net:
+    internal: true
+
+volumes:
+  pgdata:
+  natsdata:
+
+# 口令由 make demo-up 首次运行时生成，不入库（G-14）
+secrets:
+  postgres_password:
+    file: .secrets/postgres_password
