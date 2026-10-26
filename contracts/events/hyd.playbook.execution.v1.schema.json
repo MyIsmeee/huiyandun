@@ -1,0 +1,5 @@
+{
+  "title": "PlaybookExecutionV1",
+  "description": "处置执行状态，字段即 PlaybookExecution 实体（生产者 playbook-executor）",
+  "allOf": [{ "$ref": "event_base.schema.json" }, { "$ref": "playbook_execution.schema.json" }]
+}
