@@ -10,6 +10,8 @@ from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
+from py_contracts.events.incident_schema import Incident
+from py_contracts.events.playbook_execution_schema import PlaybookExecution
 from pydantic import BaseModel, ValidationError
 
 EVENTS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "events"
@@ -198,3 +200,13 @@ def test_nullable_field_is_required_but_accepts_null(subject: str, field: str) -
 
     with pytest.raises(ValidationError):
         validate(subject, data)
+
+
+@pytest.mark.parametrize(
+    ("entity", "subject"),
+    [(Incident, "hyd.correlator.incident.v1"), (PlaybookExecution, "hyd.playbook.execution.v1")],
+)
+def test_entity_validates_without_event_envelope(entity: type[BaseModel], subject: str) -> None:
+    fields = SAMPLES[subject][1]
+
+    assert entity.model_validate(fields).model_dump(mode="json").keys() == fields.keys()
