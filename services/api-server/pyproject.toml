@@ -1,0 +1,18 @@
+[project]
+name = "api-server"
+version = "0.0.0"
+description = "对外 REST 与 WebSocket 接口：登录、RBAC、审计日志（HYD-PLAN-007 §3）"
+requires-python = "==3.12.*"
+dependencies = [
+    "alembic>=1.20.1,<2",
+    "asyncpg>=0.32.0,<0.33",
+    "py-common",
+    "sqlalchemy[asyncio]>=2.1.6,<2.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+py-common = { workspace = true }

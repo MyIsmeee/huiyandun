@@ -1,0 +1,28 @@
+# api-server
+
+对外 REST 与 WebSocket 接口，契约见 `contracts/openapi/api-server.v2.yaml`。
+
+## 职责
+
+- 审计日志：`api_server.audit.record` 与业务变更在同一事务内写入；表只追加（G-13）
+
+## 数据库账号
+
+| 账号 | 用途 | 权限 |
+|---|---|---|
+| `postgres`（属主） | 仅执行迁移 | 建表、授权 |
+| `hyd_app` | 服务运行 | 按表授予；`audit_log` 只有 SELECT 与 INSERT，不能写 `id`、`ts` |
+
+`hyd_app` 由 `deploy/compose/postgres-init/` 在数据库首次初始化时创建。审计表另有触发器，拒绝任何账号的 UPDATE / DELETE / TRUNCATE；触发器只有属主能停用，因此服务不以属主账号连接。
+
+## 配置项
+
+见 `src/api_server/config.py`，环境变量前缀 `HYD_`。口令只从 `HYD_DB_PASSWORD_FILE` 指向的文件读取（G-14）。
+
+## 本地运行
+
+测试以 `compose.yaml` 锁定的 PostgreSQL 镜像启动临时容器：
+
+```sh
+uv run --all-packages pytest services/api-server
+```

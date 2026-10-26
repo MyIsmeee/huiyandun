@@ -62,7 +62,7 @@ select = [
 
 # ruff 无法自动识别 libs/*/src 下的工作区包；生成代码还在临时目录中格式化
 [tool.ruff.lint.isort]
-known-first-party = ["py_common", "py_contracts"]
+known-first-party = ["api_server", "py_common", "py_contracts"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "requests".msg = "请求路径全部 async，不使用同步 HTTP 客户端（C-BE-06）"
