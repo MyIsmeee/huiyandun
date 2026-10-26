@@ -117,6 +117,25 @@ def test_site_rejects_wrong_array_length(mutate) -> None:
         Site.model_validate(site)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda s, v: s["walls"].append([0, 0, v, 0]),
+        lambda s, v: s["zones"][0]["polygon"].append([v, 1]),
+        lambda s, v: s["devices"][0]["camera"]["calibration"].append([1, 2, v, 4]),
+        lambda s, v: s["devices"][0]["camera"].update(reproj_error_m=v),
+    ],
+    ids=["wall", "polygon", "calibration", "reproj-error"],
+)
+def test_site_rejects_non_finite_number_in_nested_array(mutate, value: float) -> None:
+    site = site_sample()
+    mutate(site, value)
+
+    with pytest.raises(ValidationError):
+        Site.model_validate(site)
+
+
 @pytest.mark.parametrize(
     ("field", "value"), [("state", "blocked"), ("ip", "x"), ("mode", "inline")]
 )
