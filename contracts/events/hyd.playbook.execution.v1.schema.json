@@ -1,0 +1,47 @@
+{
+  "title": "PlaybookExecutionV1",
+  "description": "处置执行状态，字段即 PlaybookExecution 实体（生产者 playbook-executor）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": [
+    "id",
+    "playbook_id",
+    "playbook_version",
+    "incident_id",
+    "target",
+    "state",
+    "ttl_s",
+    "expires_at",
+    "verify_result"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "playbook_id": { "type": "string" },
+    "playbook_version": { "type": "string" },
+    "incident_id": { "type": "string" },
+    "target": { "type": "string" },
+    "state": {
+      "enum": ["pending", "executing", "verifying", "contained", "failed", "rolled_back"]
+    },
+    "ttl_s": { "type": "integer", "minimum": 1, "maximum": 86400, "description": "C-BE-05" },
+    "expires_at": {
+      "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }],
+      "description": "执行前为 null"
+    },
+    "verify_result": {
+      "anyOf": [
+        {
+          "title": "VerifyResult",
+          "type": "object",
+          "required": ["passed", "reason"],
+          "properties": {
+            "passed": { "type": "boolean" },
+            "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+          }
+        },
+        { "type": "null" }
+      ],
+      "description": "verify() 检查真实效果的结果（DP-10）；校验前为 null"
+    }
+  }
+}

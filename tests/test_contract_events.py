@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
+from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
+from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
@@ -12,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 EVENTS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "events"
 TS = "2026-10-26T08:00:00.000Z"
 BASE = {"schema_version": "1.0.0", "event_id": "8d2f3c1e-4b5a-4c6d-9e7f-0a1b2c3d4e5f", "ts": TS}
+HIT = "1f0e2d3c-4b5a-4968-8776-655443322110"
 
 SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "hyd.vision.track.v1": (
@@ -33,6 +37,52 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "hyd.vision.integrity.v1": (
         VisionIntegrityV1,
         {"camera_id": "cam-02", "type": "freeze", "duration_s": 12.0},
+    ),
+    "hyd.security.alert.v1": (
+        SecurityAlertV1,
+        {
+            "rule_id": "2024897",
+            "rule_version": "3",
+            "category": "auth_bruteforce",
+            "severity": "high",
+            "src_ip": "172.30.0.66",
+            "dst_ip": "172.30.0.12",
+            "device_id": "cam-02",
+            "technique": "T1110",
+            "evidence_ref": "suricata:eve:1024",
+        },
+    ),
+    "hyd.correlator.incident.v1": (
+        CorrelatorIncidentV1,
+        {
+            "id": "inc-0001",
+            "rule_id": "HYD-X-0001",
+            "rule_version": "1.0.0",
+            "title": "摄像头疑似被入侵且画面遭篡改",
+            "severity": "critical",
+            "device_ids": ["cam-02"],
+            "source_ip": "172.30.0.66",
+            "techniques": ["T1110", "T0832"],
+            "tactics": ["Credential Access"],
+            "evidence_refs": ["suricata:eve:1024"],
+            "hit_path": [HIT],
+            "status": "open",
+            "created_at": TS,
+        },
+    ),
+    "hyd.playbook.execution.v1": (
+        PlaybookExecutionV1,
+        {
+            "id": "exe-0001",
+            "playbook_id": "isolate-attacker",
+            "playbook_version": "1.0.0",
+            "incident_id": "inc-0001",
+            "target": "172.30.0.66",
+            "state": "contained",
+            "ttl_s": 180,
+            "expires_at": TS,
+            "verify_result": {"passed": True, "reason": None},
+        },
     ),
 }
 
@@ -83,6 +133,8 @@ def test_rejects_naive_timestamp() -> None:
         ("hyd.vision.track.v1", "ts"),
         ("hyd.vision.behavior.v1", "ts_start"),
         ("hyd.vision.behavior.v1", "ts_end"),
+        ("hyd.correlator.incident.v1", "created_at"),
+        ("hyd.playbook.execution.v1", "expires_at"),
     ],
 )
 def test_rejects_non_utc_timestamp(subject: str, field: str) -> None:
@@ -114,8 +166,35 @@ def test_ignores_unknown_field_from_newer_minor() -> None:
         ("hyd.vision.behavior.v1", "behavior", "run"),
         ("hyd.vision.behavior.v1", "confidence_avg", 1.5),
         ("hyd.vision.integrity.v1", "type", "blur"),
+        ("hyd.security.alert.v1", "severity", "urgent"),
+        ("hyd.security.alert.v1", "src_ip", "999.0.0.1"),
+        ("hyd.security.alert.v1", "technique", "X1110"),
+        ("hyd.correlator.incident.v1", "status", "done"),
+        ("hyd.correlator.incident.v1", "techniques", ["Brute Force"]),
+        ("hyd.correlator.incident.v1", "hit_path", ["not-a-uuid"]),
+        ("hyd.playbook.execution.v1", "state", "blocked"),
+        ("hyd.playbook.execution.v1", "ttl_s", 0),
+        ("hyd.playbook.execution.v1", "ttl_s", 86401),
     ],
 )
 def test_rejects_invalid_value(subject: str, field: str, value: Any) -> None:
     with pytest.raises(ValidationError):
         validate(subject, event(subject, **{field: value}))
+
+
+@pytest.mark.parametrize(
+    ("subject", "field"),
+    [
+        ("hyd.security.alert.v1", "device_id"),
+        ("hyd.correlator.incident.v1", "source_ip"),
+        ("hyd.playbook.execution.v1", "expires_at"),
+        ("hyd.playbook.execution.v1", "verify_result"),
+    ],
+)
+def test_nullable_field_is_required_but_accepts_null(subject: str, field: str) -> None:
+    validate(subject, event(subject, **{field: None}))
+    data = event(subject)
+    del data[field]
+
+    with pytest.raises(ValidationError):
+        validate(subject, data)

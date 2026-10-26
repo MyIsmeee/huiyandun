@@ -1,0 +1,44 @@
+{
+  "title": "SecurityAlertV1",
+  "description": "归一化后的 Suricata / Zeek 告警（生产者 correlator）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": [
+    "rule_id",
+    "rule_version",
+    "category",
+    "severity",
+    "src_ip",
+    "dst_ip",
+    "device_id",
+    "technique",
+    "evidence_ref"
+  ],
+  "properties": {
+    "rule_id": { "type": "string" },
+    "rule_version": { "type": "string" },
+    "category": { "type": "string", "description": "如 auth_bruteforce" },
+    "severity": {
+      "enum": ["critical", "high", "medium", "low"],
+      "description": "告警等级（V-S4）"
+    },
+    "src_ip": {
+      "anyOf": [
+        { "type": "string", "format": "ipv4" },
+        { "type": "string", "format": "ipv6" }
+      ]
+    },
+    "dst_ip": {
+      "anyOf": [
+        { "type": "string", "format": "ipv4" },
+        { "type": "string", "format": "ipv6" }
+      ]
+    },
+    "device_id": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "目标 IP 未登记为设备时为 null，告警仍然产生（FR-203）"
+    },
+    "technique": { "type": "string", "pattern": "^T[0-9]{4}([.][0-9]{3})?$" },
+    "evidence_ref": { "type": "string" }
+  }
+}

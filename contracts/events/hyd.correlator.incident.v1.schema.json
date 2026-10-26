@@ -1,0 +1,55 @@
+{
+  "title": "CorrelatorIncidentV1",
+  "description": "关联事件，字段即 Incident 实体（生产者 correlator）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": [
+    "id",
+    "rule_id",
+    "rule_version",
+    "title",
+    "severity",
+    "device_ids",
+    "source_ip",
+    "techniques",
+    "tactics",
+    "evidence_refs",
+    "hit_path",
+    "status",
+    "created_at"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "rule_id": { "type": "string" },
+    "rule_version": { "type": "string" },
+    "title": { "type": "string", "description": "来自规则 emit.title" },
+    "severity": { "enum": ["critical", "high", "medium", "low"] },
+    "device_ids": { "type": "array", "items": { "type": "string" } },
+    "source_ip": {
+      "anyOf": [
+        { "type": "string", "format": "ipv4" },
+        { "type": "string", "format": "ipv6" },
+        { "type": "null" }
+      ],
+      "description": "纯视觉规则没有攻击源时为 null"
+    },
+    "techniques": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^T[0-9]{4}([.][0-9]{3})?$" },
+      "description": "来自规则 emit.techniques"
+    },
+    "tactics": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "按 techniques 查 ATT&CK 离线数据得出（REUSE-11）"
+    },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "hit_path": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "规则每一步命中事件的 event_id"
+    },
+    "status": { "enum": ["open", "containing", "contained", "closed"] },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}
