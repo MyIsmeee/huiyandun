@@ -1,8 +1,9 @@
-"""由 contracts/ 生成 libs/py-contracts 的 Pydantic v2 模型（R-05、CD-09）。
+"""由 contracts/ 生成 libs/py-contracts 包（R-05、CD-09）。
 
 用法：python tools/codegen/codegen.py [--check]
+整个包均为生成结果：静态文件取自 tools/codegen/package/，模型由 datamodel-codegen 生成，
 生成参数见 pyproject.toml 的 [tool.datamodel-codegen]。
---check：生成到临时目录并与仓库中的生成代码比较；不一致时输出 diff 并以 1 退出（CI-08）。
+--check：生成到临时目录并与仓库中的包比较；不一致时输出 diff 并以 1 退出（CI-08）。
 """
 
 import difflib
@@ -12,58 +13,67 @@ import sys
 import tempfile
 from pathlib import Path
 
-# (契约目录, 输入格式, 生成目录)
+PACKAGE = Path("libs/py-contracts")
+TEMPLATE = Path("tools/codegen/package")
+# (契约目录, 输入格式, 包内生成目录)
 TARGETS = [
-    (Path("contracts/events"), "jsonschema", Path("libs/py-contracts/src/py_contracts/events")),
+    (Path("contracts/events"), "jsonschema", Path("src/py_contracts/events")),
 ]
 
 
-def generate(src: Path, kind: str, out: Path) -> dict[str, str]:
-    subprocess.run(
-        ["datamodel-codegen", "--input", str(src), "--input-file-type", kind, "--output", str(out)],
-        check=True,
-        timeout=120,
-    )
-    return modules(out)
+def build(root: Path) -> dict[str, str]:
+    shutil.copytree(TEMPLATE, root, ignore=shutil.ignore_patterns("__pycache__"))
+    for src, kind, out in TARGETS:
+        subprocess.run(
+            ["datamodel-codegen", "--input", str(src), "--input-file-type", kind]
+            + ["--output", str(root / out)],
+            check=True,
+            timeout=120,
+        )
+    return files(root)
 
 
-def modules(root: Path) -> dict[str, str]:
-    return {p.relative_to(root).as_posix(): p.read_text() for p in sorted(root.rglob("*.py"))}
+def files(root: Path) -> dict[str, str]:
+    return {
+        p.relative_to(root).as_posix(): p.read_text()
+        for p in sorted(root.rglob("*"))
+        if p.is_file() and "__pycache__" not in p.parts
+    }
 
 
-def diff(out: Path, expected: dict[str, str]) -> list[str]:
-    actual = modules(out) if out.exists() else {}
+def diff(expected: dict[str, str]) -> list[str]:
+    actual = files(PACKAGE) if PACKAGE.exists() else {}
     return [
         line
         for name in sorted(expected.keys() | actual.keys())
         for line in difflib.unified_diff(
             actual.get(name, "").splitlines(keepends=True),
             expected.get(name, "").splitlines(keepends=True),
-            f"{out}/{name}",
-            f"{out}/{name}（由契约生成）",
+            f"{PACKAGE}/{name}",
+            f"{PACKAGE}/{name}（由契约生成）",
         )
     ]
 
 
-def write(out: Path, expected: dict[str, str]) -> None:
-    if out.exists():
-        shutil.rmtree(out)
+def write(expected: dict[str, str]) -> None:
+    if PACKAGE.exists():
+        shutil.rmtree(PACKAGE)
     for name, text in expected.items():
-        (out / name).parent.mkdir(parents=True, exist_ok=True)
-        (out / name).write_text(text)
+        (PACKAGE / name).parent.mkdir(parents=True, exist_ok=True)
+        (PACKAGE / name).write_text(text)
 
 
 def main(args: list[str]) -> int:
-    check = args == ["--check"]
-    stale: list[str] = []
+    if args not in ([], ["--check"]):
+        print(f"未知参数：{' '.join(args)}；用法：codegen.py [--check]", file=sys.stderr)
+        return 2
     # 临时目录放在仓库内，使 ruff 读取与 make lint 相同的配置
     with tempfile.TemporaryDirectory(dir=".") as tmp:
-        for src, kind, out in TARGETS:
-            expected = generate(src, kind, Path(tmp) / out.name)
-            if check:
-                stale += diff(out, expected)
-            else:
-                write(out, expected)
+        expected = build(Path(tmp) / PACKAGE.name)
+    if not args:
+        write(expected)
+        return 0
+    stale = diff(expected)
     if stale:
         sys.stdout.writelines(stale)
         print(

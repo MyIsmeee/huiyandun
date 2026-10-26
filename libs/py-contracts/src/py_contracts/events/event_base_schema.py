@@ -5,10 +5,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, constr
+from pydantic import AwareDatetime, constr
+
+from py_contracts.base import ContractModel
 
 
-class EventBase(BaseModel):
+class EventBase(ContractModel):
     """
     所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
     """

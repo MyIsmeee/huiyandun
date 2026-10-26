@@ -25,6 +25,7 @@ markers = ["ci11: 公网供应商默认状态与网络位置判定，由 CI-11 �
 # tools/codegen 的生成参数（R-05）；输入与输出目录由脚本指定
 [tool.datamodel-codegen]
 output-model-type = "pydantic_v2.BaseModel"
+base-class = "py_contracts.base.ContractModel"
 target-python-version = "3.12"
 disable-timestamp = true
 output-datetime-class = "AwareDatetime"

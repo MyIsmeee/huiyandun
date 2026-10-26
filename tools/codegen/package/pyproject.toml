@@ -1,0 +1,10 @@
+[project]
+name = "py-contracts"
+version = "0.0.0"
+description = "由 contracts/ 生成的 Pydantic v2 模型；只能通过 make codegen 更新（CD-09）"
+requires-python = "==3.12.*"
+dependencies = ["pydantic>=2.14,<3"]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"

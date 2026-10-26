@@ -9,7 +9,7 @@ from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from pydantic import BaseModel, ValidationError
 
-EVENTS_DIR = Path(__file__).resolve().parents[3] / "contracts" / "events"
+EVENTS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "events"
 TS = "2026-10-26T08:00:00.000Z"
 BASE = {"schema_version": "1.0.0", "event_id": "8d2f3c1e-4b5a-4c6d-9e7f-0a1b2c3d4e5f", "ts": TS}
 
@@ -75,6 +75,32 @@ def test_rejects_schema_version_of_other_major(version: str) -> None:
 def test_rejects_naive_timestamp() -> None:
     with pytest.raises(ValidationError):
         validate("hyd.vision.track.v1", event("hyd.vision.track.v1", ts="2026-10-26T08:00:00"))
+
+
+@pytest.mark.parametrize(
+    ("subject", "field"),
+    [
+        ("hyd.vision.track.v1", "ts"),
+        ("hyd.vision.behavior.v1", "ts_start"),
+        ("hyd.vision.behavior.v1", "ts_end"),
+    ],
+)
+def test_rejects_non_utc_timestamp(subject: str, field: str) -> None:
+    with pytest.raises(ValidationError):
+        validate(subject, event(subject, **{field: "2026-10-26T16:00:00.000+08:00"}))
+
+
+def test_accepts_utc_offset_form() -> None:
+    validate(
+        "hyd.vision.track.v1", event("hyd.vision.track.v1", ts="2026-10-26T08:00:00.000+00:00")
+    )
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+@pytest.mark.parametrize("field", ["x", "y", "uncertainty_m"])
+def test_rejects_non_finite_number(field: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        validate("hyd.vision.track.v1", event("hyd.vision.track.v1", **{field: value}))
 
 
 def test_ignores_unknown_field_from_newer_minor() -> None:
