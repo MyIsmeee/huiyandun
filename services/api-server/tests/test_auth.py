@@ -99,3 +99,9 @@ def test_expired_session_is_rejected(
 
     asyncio.run(expire())
     assert client.get("/t/viewer").status_code == 401
+
+
+def test_healthz_checks_database_without_login(client: TestClient) -> None:
+    client.cookies.clear()
+
+    assert client.get("/healthz").status_code == 204

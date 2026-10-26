@@ -17,19 +17,23 @@ codegen-check:
 
 COMPOSE = docker compose -f deploy/compose/compose.yaml \
 	--profile core --profile vision --profile security --profile demo
-PG_SECRET = deploy/compose/.secrets/postgres_password
+SECRETS = deploy/compose/.secrets
+DB_SECRETS = $(SECRETS)/postgres_password $(SECRETS)/db_app_password
 
 doctor:
 	tools/dev/doctor.sh
 
 # 数据库口令首次启动时生成，只存于本机（G-14）
-# 口令只在 pgdata 卷首次初始化时写入：删除此文件须同时删除卷（docker volume rm huiyandun_pgdata）
-$(PG_SECRET):
-	@mkdir -p $(@D)
+# 口令只在 pgdata 卷首次初始化时写入：删除这些文件须同时删除卷（docker volume rm huiyandun_pgdata）
+$(DB_SECRETS):
+	@mkdir -p -m 700 $(@D)
 	@umask 077 && head -c 32 /dev/urandom | base64 | tr -d '+/=' > $@
 
-demo-up: $(PG_SECRET)
-	$(COMPOSE) up -d
+# 目录只有本机属主可进入；文件须对容器内的非 root 进程可读（C-OPS-04）
+# --build：自研服务镜像随代码更新；源码未变时全部命中缓存，无需联网
+demo-up: $(DB_SECRETS)
+	@chmod 700 $(SECRETS) && chmod 644 $(DB_SECRETS)
+	$(COMPOSE) up -d --build
 
 demo-down:
 	$(COMPOSE) down

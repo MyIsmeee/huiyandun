@@ -2,6 +2,7 @@
 # 等待全部服务 healthy 并打印就绪耗时（HYD-DEP-005 §5.2）
 # 用法：wait-healthy.sh <compose 命令...>；超时秒数取 HEALTH_TIMEOUT，默认 120
 # 以 config --services 为应有清单：未创建、未定义健康检查或已退出的服务均按未就绪处理
+# 例外：标签 hyd.oneshot=true 的一次性服务（如数据库迁移）以退出码 0 视为就绪
 set -euo pipefail
 
 timeout=${HEALTH_TIMEOUT:-120}
@@ -14,9 +15,15 @@ fi
 
 while :; do
   declare -A health=()
-  while read -r service state; do
-    [ -n "$service" ] && health[$service]=$state
-  done <<<"$("$@" ps -a --format '{{.Service}} {{.Health}}')"
+  # 以 | 分隔：Health 可能为空，Labels 含逗号分隔的 k=v
+  while IFS='|' read -r service state status code labels; do
+    [ -n "$service" ] || continue
+    if [[ ",$labels," == *,hyd.oneshot=true,* && $status == exited ]]; then
+      state="exited($code)"
+      [ "$code" = 0 ] && state=healthy
+    fi
+    health[$service]=$state
+  done <<<"$("$@" ps -a --format '{{.Service}}|{{.Health}}|{{.State}}|{{.ExitCode}}|{{.Labels}}')"
 
   pending=""
   for service in $expected; do

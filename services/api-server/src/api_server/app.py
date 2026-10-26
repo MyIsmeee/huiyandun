@@ -5,9 +5,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -84,4 +85,12 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(ws.router)
+
+    @app.get("/healthz", status_code=204)
+    async def healthz() -> Response:
+        """容器健康检查：数据库可达即就绪。不经 web-console 代理，不属于对外接口。"""
+        async with app.state.engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return Response(status_code=204)
+
     return app

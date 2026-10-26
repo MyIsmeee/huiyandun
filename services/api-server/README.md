@@ -32,6 +32,14 @@ hyd-api create-user <用户名> --role admin   # 交互输入口令，写审计�
 
 M0 不做网页端账号管理；账户只能经命令行创建。
 
+Compose 中由一次性服务 `migrate` 以属主账号执行迁移，`api-server` 只持有应用账号口令。`make demo-up` 后创建账户：
+
+```sh
+docker compose -f deploy/compose/compose.yaml --profile core exec api-server hyd-api create-user <用户名> --role admin
+```
+
+`GET /healthz` 供容器健康检查（数据库可达返回 204），不经 web-console 代理，不属于对外接口。
+
 测试以 `compose.yaml` 锁定的 PostgreSQL 镜像启动临时容器：
 
 ```sh
