@@ -15,9 +15,10 @@ from pathlib import Path
 
 PACKAGE = Path("libs/py-contracts")
 TEMPLATE = Path("tools/codegen/package")
-# (契约目录, 输入格式, 包内生成目录)
+# (契约, 输入格式, 包内生成位置)
 TARGETS = [
     (Path("contracts/events"), "jsonschema", Path("src/py_contracts/events")),
+    (Path("contracts/openapi/api-server.v1.yaml"), "openapi", Path("src/py_contracts/api.py")),
 ]
 
 

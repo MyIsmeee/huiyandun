@@ -10,6 +10,7 @@ dev = [
     "pre-commit",
     "pre-commit-hooks",
     "pytest",
+    "pyyaml",
     "ruff",
 ]
 
@@ -26,6 +27,8 @@ markers = ["ci11: 公网供应商默认状态与网络位置判定，由 CI-11 �
 [tool.datamodel-codegen]
 output-model-type = "pydantic_v2.BaseModel"
 base-class = "py_contracts.base.ContractModel"
+# RootModel 不继承 base-class，由自定义模板补上 allow_inf_nan=False
+custom-template-dir = "tools/codegen/templates"
 target-python-version = "3.12"
 disable-timestamp = true
 output-datetime-class = "AwareDatetime"
@@ -34,6 +37,8 @@ use-union-operator = true
 use-schema-description = true
 use-field-description = true
 enum-field-as-literal = "all"
+# 不加时嵌套数组的 minItems / maxItems 会丢失（如标定点 [u, v, x, y]）
+field-constraints = true
 formatters = ["ruff-format", "ruff-check"]
 
 [tool.ruff]
@@ -54,6 +59,10 @@ select = [
     "S110",   # except Exception: pass（CD-03）
     "TID251", # 禁用 API，见 banned-api
 ]
+
+# 生成代码在临时目录中格式化，无法自动识别本仓库的包
+[tool.ruff.lint.isort]
+known-first-party = ["py_contracts"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "requests".msg = "请求路径全部 async，不使用同步 HTTP 客户端（C-BE-06）"

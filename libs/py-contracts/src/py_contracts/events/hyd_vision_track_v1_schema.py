@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from pydantic import confloat
+from pydantic import Field
 
 from .event_base_schema import EventBase
 
@@ -23,4 +23,4 @@ class VisionTrackV1(EventBase):
     """
     平面坐标，单位米
     """
-    uncertainty_m: confloat(ge=0.0)
+    uncertainty_m: float = Field(..., ge=0.0)

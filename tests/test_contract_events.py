@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel, ValidationError
+
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
@@ -12,7 +14,6 @@ from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from py_contracts.events.incident_schema import Incident
 from py_contracts.events.playbook_execution_schema import PlaybookExecution
-from pydantic import BaseModel, ValidationError
 
 EVENTS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "events"
 TS = "2026-10-26T08:00:00.000Z"

@@ -1,0 +1,18 @@
+{#- RootModel 不继承 base-class（ContractModel），在此补上 allow_inf_nan=False。
+    只覆盖本仓库契约用到的写法（自定义模板拿到的是未加引号的说明文字，须经 format_docstring）；新写法导致生成结果不对时由 tests/test_contract_models.py 发现。 -#}
+{%- set field = fields[0] -%}
+class {{ class_name }}({{ base_class }}[{{ field.type_hint }}]):
+{%- if description %}
+    {{ description | format_docstring(4) }}
+{%- endif %}
+    model_config = {"allow_inf_nan": False}
+{%- if field.annotated %}
+    root: {{ field.annotated }}
+{%- elif field.field %}
+    root: {{ field.type_hint }} = {{ field.field }}
+{%- else %}
+    root: {{ field.type_hint }}
+{%- endif %}
+{%- if field.docstring %}
+    {{ field.docstring | format_docstring(4) }}
+{%- endif %}

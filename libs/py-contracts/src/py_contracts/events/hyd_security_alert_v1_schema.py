@@ -6,7 +6,7 @@ from __future__ import annotations
 from ipaddress import IPv4Address, IPv6Address
 from typing import Literal
 
-from pydantic import constr
+from pydantic import Field
 
 from .event_base_schema import EventBase
 
@@ -32,5 +32,5 @@ class SecurityAlertV1(EventBase):
     """
     目标 IP 未登记为设备时为 null，告警仍然产生（FR-203）
     """
-    technique: constr(pattern=r"^T[0-9]{4}([.][0-9]{3})?$")
+    technique: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
     evidence_ref: str
