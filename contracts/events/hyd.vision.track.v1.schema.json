@@ -1,0 +1,14 @@
+{
+  "title": "VisionTrackV1",
+  "description": "人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["camera_id", "track_id", "x", "y", "uncertainty_m"],
+  "properties": {
+    "camera_id": { "type": "string" },
+    "track_id": { "type": "integer" },
+    "x": { "type": "number", "description": "平面坐标，单位米" },
+    "y": { "type": "number", "description": "平面坐标，单位米" },
+    "uncertainty_m": { "type": "number", "minimum": 0 }
+  }
+}

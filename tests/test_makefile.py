@@ -11,8 +11,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 PLACEHOLDERS = {
-    "codegen": "TK-003",
-    "codegen-check": "TK-003",
     "doctor": "TK-004",
     "demo-up": "TK-004",
     "demo-down": "TK-004",

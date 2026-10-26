@@ -193,13 +193,13 @@ jobs:
           uv sync --frozen --all-packages
           # 精确匹配 PyPI 分类名与 SPDX 标识；子串匹配会放过 HPND（含 isc）、Proprietary...permitted（含 mit）
           uv run --frozen pip-licenses --packages $pkgs --from=mixed \
-            --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;ISC License (ISCL);ISC;Mozilla Public License 2.0 (MPL 2.0);MPL-2.0;PostgreSQL License;PostgreSQL;zlib/libpng License;Zlib;CC0 1.0 Universal (CC0 1.0) Public Domain Dedication;CC0-1.0"
+            --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;ISC License (ISCL);ISC;Mozilla Public License 2.0 (MPL 2.0);MPL-2.0;PostgreSQL License;PostgreSQL;zlib/libpng License;Zlib;CC0 1.0 Universal (CC0 1.0) Public Domain Dedication;CC0-1.0;Python Software Foundation License;PSF-2.0"
       - name: npm 运行时依赖
         run: |
           pnpm install --frozen-lockfile
           # -r 须放在子命令前：不加时只扫描根项目，漏掉 web/* 工作区包
           bad=$(pnpm -r licenses list --prod --json | jq -r 'to_entries[]
-            | select(.key | test("^(MIT|ISC|0BSD|BSD-[23]-Clause|Apache-2\\.0|MPL-2\\.0|PostgreSQL|Zlib|CC0-1\\.0)$") | not)
+            | select(.key | test("^(MIT|ISC|0BSD|BSD-[23]-Clause|Apache-2\\.0|MPL-2\\.0|PostgreSQL|Zlib|CC0-1\\.0|PSF-2\\.0)$") | not)
             | "\(.key): \([.value[].name] | join(", "))"')
           if [ -n "$bad" ]; then
             echo "非白名单许可证（G-08）："
@@ -232,7 +232,7 @@ jobs:
           version: 0.13.5
       - run: |
           set +e
-          uv run pytest -m ci11
+          uv run --all-packages pytest -m ci11
           code=$?
           if [ "$code" -eq 5 ]; then
             echo "::notice title=CI-11 跳过::尚无 @pytest.mark.ci11 用例，由 TK-060 接入"

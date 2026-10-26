@@ -1,0 +1,24 @@
+{
+  "title": "VisionBehaviorV1",
+  "description": "骨骼行为事件（生产者 vision-engine）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": [
+    "camera_id",
+    "track_id",
+    "behavior",
+    "confidence_avg",
+    "duration_s",
+    "ts_start",
+    "ts_end"
+  ],
+  "properties": {
+    "camera_id": { "type": "string" },
+    "track_id": { "type": "integer" },
+    "behavior": { "enum": ["fall", "climb"] },
+    "confidence_avg": { "type": "number", "minimum": 0, "maximum": 1 },
+    "duration_s": { "type": "number", "minimum": 0 },
+    "ts_start": { "type": "string", "format": "date-time" },
+    "ts_end": { "type": "string", "format": "date-time" }
+  }
+}

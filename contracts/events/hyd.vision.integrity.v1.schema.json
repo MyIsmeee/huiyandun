@@ -1,0 +1,12 @@
+{
+  "title": "VisionIntegrityV1",
+  "description": "画面完整性异常（生产者 vision-engine）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["camera_id", "type", "duration_s"],
+  "properties": {
+    "camera_id": { "type": "string" },
+    "type": { "enum": ["freeze", "replay", "occlusion", "shift", "stream_lost"] },
+    "duration_s": { "type": "number", "minimum": 0 }
+  }
+}
