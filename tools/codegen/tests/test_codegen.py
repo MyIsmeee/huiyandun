@@ -25,7 +25,7 @@ def run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    for path in ("pyproject.toml", "contracts/events", "tools/codegen/codegen.py", GENERATED):
+    for path in ("pyproject.toml", "contracts/events", "tools/codegen", "libs/py-contracts"):
         src, dst = ROOT / path, tmp_path / path
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
@@ -49,6 +49,26 @@ def test_check_fails_when_generated_code_is_edited(repo: Path) -> None:
 
     assert result.returncode == 1
     assert "hyd_vision_track_v1_schema.py" in result.stdout
+
+
+def test_check_fails_when_package_file_is_edited(repo: Path) -> None:
+    manifest = repo / "libs/py-contracts/pyproject.toml"
+    manifest.write_text(manifest.read_text() + "# 手改\n")
+
+    result = run(repo, "--check")
+
+    assert result.returncode == 1
+    assert "libs/py-contracts/pyproject.toml" in result.stdout
+
+
+def test_rejects_unknown_argument_without_writing(repo: Path) -> None:
+    (repo / GENERATED / "stale.py").write_text("")
+
+    result = run(repo, "--chek")
+
+    assert result.returncode == 2
+    assert "--chek" in result.stderr
+    assert (repo / GENERATED / "stale.py").exists()
 
 
 def test_check_fails_when_schema_is_not_regenerated(repo: Path) -> None:
