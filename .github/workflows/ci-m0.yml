@@ -1,0 +1,241 @@
+# M0 必选检查 CI-01～CI-11（HYD-PROC-002 §4.1）
+# 检查对象尚未建立时输出 notice 注明接入任务后跳过；Action 按 commit SHA 锁定，下载的二进制校验 sha256（G-15）
+name: ci-m0
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# 显式指定后 GitHub 以 -eo pipefail 运行：管道中任一命令失败即失败，避免空输出被当作扫描通过
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  ci-01:
+    name: CI-01 提交规范
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - run: pnpm install --frozen-lockfile
+      - env:
+          FROM: ${{ github.event.pull_request.base.sha || github.event.before }}
+          TO: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: pnpm exec commitlint --from "$FROM" --to "$TO" --verbose
+
+  ci-02:
+    name: CI-02 密钥扫描
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: 安装 gitleaks
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+      # --redact：命中内容不进入日志（G-14）
+      - run: /tmp/gitleaks git --redact --no-banner --verbose .
+
+  ci-03:
+    name: CI-03 Python Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+      - run: make lint
+
+  ci-04:
+    name: CI-04 前端 Lint 与类型
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - run: |
+          if [ ! -f web/console/package.json ]; then
+            echo "::notice title=CI-04 跳过::web/console 尚未建立，由 TK-013 接入"
+            exit 0
+          fi
+          pnpm install --frozen-lockfile
+          pnpm --dir web/console exec eslint .
+          pnpm --dir web/console exec tsc --noEmit
+
+  ci-05:
+    name: CI-05 单元测试
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - run: pnpm install --frozen-lockfile
+      - run: make test
+      - name: vitest
+        run: |
+          if [ ! -f web/console/package.json ]; then
+            echo "::notice title=CI-05::web/console 尚未建立，跳过 vitest（由 TK-013 接入）"
+            exit 0
+          fi
+          pnpm --dir web/console exec vitest run
+
+  ci-06:
+    name: CI-06 模块依赖边界
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+      - run: |
+          if [ ! -f .importlinter ] && ! grep -q '^\[tool\.importlinter\]' pyproject.toml; then
+            echo "::notice title=CI-06 跳过::尚未配置 import-linter 契约（D-01～D-05、C-LLM-01），由 #4 接入"
+            exit 0
+          fi
+          uv run lint-imports
+
+  ci-07:
+    name: CI-07 公网资源扫描
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - name: 源码与配置
+        run: python3 tools/lint/no_public_url.py
+      - name: 前端构建产物（C-FE-01）
+        run: |
+          if [ ! -f web/console/package.json ]; then
+            echo "::notice title=CI-07::web/console 尚未建立，跳过 dist/ 扫描（由 TK-013 接入）"
+            exit 0
+          fi
+          pnpm install --frozen-lockfile
+          pnpm --dir web/console run build
+          python3 tools/lint/no_public_url.py web/console/dist
+
+  ci-08:
+    name: CI-08 契约一致性
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+      - name: 生成代码一致性
+        run: |
+          if [ ! -d contracts ]; then
+            echo "::notice title=CI-08 跳过::contracts/ 尚未建立，由 TK-003 接入"
+            exit 0
+          fi
+          make codegen-check
+      # 主版本编码在文件名中：同一文件内不允许破坏性变更，须新建下一主版本文件（如 api-server.v2.yaml）
+      - name: OpenAPI 破坏性变更
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          files=$(git ls-tree -r --name-only "$BASE" -- contracts/openapi | grep '\.yaml$' || true)
+          if [ -z "$files" ]; then
+            echo "::notice title=CI-08::基准分支没有 OpenAPI 契约，跳过 diff"
+            exit 0
+          fi
+          curl -sSfL -o /tmp/oasdiff.tar.gz https://github.com/oasdiff/oasdiff/releases/download/v1.34.1/oasdiff_1.34.1_linux_amd64.tar.gz
+          echo "75775f65b0adebd26a8e013af51a799342dfdc6262d89efa9e3b7bdf89657d90  /tmp/oasdiff.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
+          for f in $files; do
+            git show "$BASE:$f" > /tmp/base.yaml
+            /tmp/oasdiff breaking /tmp/base.yaml "$f" --fail-on ERR
+          done
+
+  ci-09:
+    name: CI-09 许可证扫描
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      # 只扫描运行时依赖，白名单见 G-08
+      - name: Python 运行时依赖
+        run: |
+          pkgs=$(uv export --frozen --no-dev --all-packages --no-emit-workspace --no-hashes --no-header --no-annotate | sed -n 's/^\([^ =;]*\)==.*/\1/p')
+          if [ -z "$pkgs" ]; then
+            echo "::notice title=CI-09::暂无 Python 运行时依赖"
+            exit 0
+          fi
+          uv sync --frozen --all-packages
+          # 精确匹配 PyPI 分类名与 SPDX 标识；子串匹配会放过 HPND（含 isc）、Proprietary...permitted（含 mit）
+          uv run --frozen pip-licenses --packages $pkgs --from=mixed \
+            --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;ISC License (ISCL);ISC;Mozilla Public License 2.0 (MPL 2.0);MPL-2.0;PostgreSQL License;PostgreSQL;zlib/libpng License;Zlib;CC0 1.0 Universal (CC0 1.0) Public Domain Dedication;CC0-1.0"
+      - name: npm 运行时依赖
+        run: |
+          pnpm install --frozen-lockfile
+          # -r 须放在子命令前：不加时只扫描根项目，漏掉 web/* 工作区包
+          bad=$(pnpm -r licenses list --prod --json | jq -r 'to_entries[]
+            | select(.key | test("^(MIT|ISC|0BSD|BSD-[23]-Clause|Apache-2\\.0|MPL-2\\.0|PostgreSQL|Zlib|CC0-1\\.0)$") | not)
+            | "\(.key): \([.value[].name] | join(", "))"')
+          if [ -n "$bad" ]; then
+            echo "非白名单许可证（G-08）："
+            echo "$bad"
+            exit 1
+          fi
+
+  ci-10:
+    name: CI-10 依赖锁定
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - run: uv lock --check
+      - run: pnpm install --frozen-lockfile
+
+  ci-11:
+    name: CI-11 公网供应商默认状态
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: 0.13.5
+      - run: |
+          set +e
+          uv run pytest -m ci11
+          code=$?
+          if [ "$code" -eq 5 ]; then
+            echo "::notice title=CI-11 跳过::尚无 @pytest.mark.ci11 用例，由 TK-060 接入"
+            exit 0
+          fi
+          exit "$code"

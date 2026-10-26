@@ -1,4 +1,6 @@
-# 钩子经 uv 调用 uv.lock 锁定的版本，不从网络拉取钩子仓库（G-05、G-15）
+# 钩子经 uv / pnpm 调用锁文件锁定的版本，不从网络拉取钩子仓库（G-05、G-15）
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
 repos:
   - repo: local
     hooks:
@@ -18,3 +20,8 @@ repos:
         entry: uv run ruff format
         language: system
         types: [python]
+      - id: commitlint
+        name: commitlint（CM-05）
+        entry: pnpm exec commitlint --edit
+        language: system
+        stages: [commit-msg]

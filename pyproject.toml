@@ -4,13 +4,16 @@ version = "0.0.0"
 requires-python = "==3.12.*"
 
 [dependency-groups]
-dev = ["pre-commit", "pre-commit-hooks", "pytest", "ruff"]
+dev = ["pip-licenses", "pre-commit", "pre-commit-hooks", "pytest", "ruff"]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
 members = ["services/*", "libs/*"]
+
+[tool.pytest.ini_options]
+markers = ["ci11: 公网供应商默认状态与网络位置判定，由 CI-11 单独运行（G-02、C-LLM-13）"]
 
 [tool.ruff]
 line-length = 100
