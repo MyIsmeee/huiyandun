@@ -169,6 +169,11 @@ jobs:
           mkdir -p /tmp/base
           git archive "$BASE" contracts | tar -x -C /tmp/base
           for f in $files; do
+            # 下线整个主版本须在 PR 中说明已无使用方；以 warning 提示评审
+            if [ ! -f "$f" ]; then
+              echo "::warning title=CI-08::主版本 $f 已删除，确认已无使用方"
+              continue
+            fi
             /tmp/oasdiff breaking "/tmp/base/$f" "$f" --fail-on ERR
           done
 

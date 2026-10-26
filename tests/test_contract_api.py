@@ -22,7 +22,7 @@ from py_contracts.api import (
 )
 
 SPEC = yaml.safe_load(
-    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v1.yaml").read_text()
+    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v2.yaml").read_text()
 )
 WRITE_METHODS = {"post", "put", "patch", "delete"}
 
@@ -63,7 +63,18 @@ def test_declares_min_role_and_auth(method: str, path: str, role: str | None) ->
     op = SPEC["paths"][path][method]
 
     assert op.get("x-min-role") == role
-    assert op.get("security", SPEC["security"]) == ([] if role is None else [{"bearer": []}])
+    assert op.get("security", SPEC["security"]) == ([] if role is None else [{"session": []}])
+
+
+def test_session_is_carried_by_cookie_only() -> None:
+    """浏览器脚本不持有凭证（C-FE-06、DP-12）：令牌只在 Cookie 中，不出现在响应体。"""
+    login = SPEC["paths"]["/api/auth/login"]["post"]["responses"]["200"]
+
+    assert SPEC["components"]["securitySchemes"] == {
+        "session": {"type": "apiKey", "in": "cookie", "name": "hyd_session"}
+    }
+    assert "Set-Cookie" in login["headers"]
+    assert "token" not in LoginResponse.model_fields
 
 
 @pytest.mark.parametrize(("method", "path", "op"), OPERATIONS)
@@ -71,6 +82,14 @@ def test_write_operation_requires_request_id(method: str, path: str, op: dict) -
     refs = [p.get("$ref") for p in op.get("parameters", [])]
 
     assert ("#/components/parameters/RequestId" in refs) == (method in WRITE_METHODS)
+
+
+@pytest.mark.parametrize(("method", "path", "op"), OPERATIONS)
+def test_operation_with_input_declares_bad_request(method: str, path: str, op: dict) -> None:
+    refs = {p.get("$ref") for p in op.get("parameters", [])}
+    has_query = bool(refs & {"#/components/parameters/Limit", "#/components/parameters/Before"})
+
+    assert ("400" in op["responses"]) == (method in WRITE_METHODS or has_query)
 
 
 def site_sample() -> dict:
@@ -149,9 +168,7 @@ def test_device_rejects_invalid_value(field: str, value: str) -> None:
 
 def test_login_response_role_is_enumerated() -> None:
     with pytest.raises(ValidationError):
-        LoginResponse.model_validate(
-            {"token": "t", "role": "root", "expires_at": "2026-10-26T08:00:00Z"}
-        )
+        LoginResponse.model_validate({"role": "root", "expires_at": "2026-10-26T08:00:00Z"})
 
 
 def test_template_report_has_null_ai() -> None:
