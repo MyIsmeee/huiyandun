@@ -13,6 +13,7 @@ from py_contracts.base import ContractModel
 
 
 class Technique(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
     root: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
 
 
