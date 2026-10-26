@@ -138,6 +138,166 @@ class Report(ContractModel):
     reviewed_at: AwareDatetime | None
 
 
+class Preset(
+    RootModel[
+        Literal[
+            "llama_cpp",
+            "ollama",
+            "lm_studio",
+            "vllm",
+            "deepseek",
+            "bailian",
+            "kimi",
+            "zhipu",
+            "siliconflow",
+            "custom",
+        ]
+    ]
+):
+    model_config = {"allow_inf_nan": False}
+    root: Literal[
+        "llama_cpp",
+        "ollama",
+        "lm_studio",
+        "vllm",
+        "deepseek",
+        "bailian",
+        "kimi",
+        "zhipu",
+        "siliconflow",
+        "custom",
+    ]
+    """
+    选择后由前端填入地址模板与默认端口（HYD-ARCH-001 §5.3）
+    """
+
+
+class Network(RootModel[Literal["internal", "public"]]):
+    model_config = {"allow_inf_nan": False}
+    root: Literal["internal", "public"]
+    """
+    自动判定：回环、私有网段、链路本地为 internal，其余含所有域名为 public（C-LLM-13）
+    """
+
+
+class ApiKeyLast4(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
+    root: str = Field(..., max_length=4)
+
+
+class LlmProvider(ContractModel):
+    """
+    不含 API Key，只返回末 4 位（C-LLM-15）
+    """
+
+    id: str
+    name: str
+    preset: Preset
+    base_url: str
+    """
+    OpenAI 兼容 base URL
+    """
+    api_key_last4: ApiKeyLast4 | None
+    model: str
+    network: Network
+    network_overridden: bool
+    """
+    管理员改判过网络位置
+    """
+    structured_output: Literal["json_schema", "json_object", "none"] | None
+    """
+    由测试连接探测；未测试时为 null
+    """
+    timeout_s: int = Field(..., ge=1)
+    enabled: bool
+    order: int = Field(..., ge=0)
+
+
+class LlmProviderList(ContractModel):
+    items: list[LlmProvider]
+
+
+class LlmProviderCreate(ContractModel):
+    name: str
+    preset: Preset
+    base_url: str
+    api_key: SecretStr | None = None
+    """
+    本地服务未设 Key 时省略
+    """
+    model: str
+    network: Network | None = None
+    timeout_s: int | None = Field(60, ge=1)
+
+
+class LlmProviderUpdate(ContractModel):
+    name: str | None = None
+    preset: Preset | None = None
+    base_url: str | None = None
+    api_key: SecretStr | None = None
+    model: str | None = None
+    network: Network | None = None
+    timeout_s: int | None = Field(None, ge=1)
+    enabled: bool | None = None
+
+
+class LatencyMs(RootModel[int]):
+    model_config = {"allow_inf_nan": False}
+    root: int = Field(..., ge=0)
+
+
+class ProviderCheck(ContractModel):
+    check: Literal["connectivity", "model", "structured_output"]
+    ok: bool
+    latency_ms: LatencyMs | None
+    reason: str | None
+
+
+class ModelList(ContractModel):
+    models: list[str]
+
+
+class ProviderOrder(ContractModel):
+    provider_ids: list[str]
+
+
+class LlmSettings(ContractModel):
+    block_public: bool
+
+
+class EgressTarget(ContractModel):
+    ip: IPv4Address | IPv6Address
+    count: int = Field(..., ge=1)
+
+
+class AuditLog(ContractModel):
+    """
+    追加写，禁止修改与删除
+    """
+
+    id: str
+    ts: AwareDatetime
+    actor: str
+    action: str
+    target: str
+    before: dict[str, Any] | None
+    after: dict[str, Any] | None
+    request_id: str
+
+
+class AuditLogList(ContractModel):
+    items: list[AuditLog]
+
+
+class WsFrame(ContractModel):
+    """
+    WS /ws 推送帧（FR-102、FR-606）
+    """
+
+    channel: Literal["tracks", "devices", "alerts", "incidents", "system"]
+    data: dict[str, Any]
+
+
 class CameraInfo(ContractModel):
     stream: str
     """
@@ -154,6 +314,16 @@ class CameraInfo(ContractModel):
 
 class IncidentList(ContractModel):
     items: list[Incident]
+
+
+class ProviderTestResult(ContractModel):
+    checks: list[ProviderCheck]
+
+
+class EgressStats(ContractModel):
+    window_s: Literal[600]
+    count: int = Field(..., ge=0)
+    targets: list[EgressTarget]
 
 
 class Device(ContractModel):
