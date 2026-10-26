@@ -1,4 +1,4 @@
-"""api-server 配置项（CD-05）。"""
+"""配置项（CD-05）。"""
 
 from pathlib import Path
 
@@ -7,8 +7,9 @@ from pydantic import Field
 from py_common.config import ServiceConfig
 
 
-class ApiConfig(ServiceConfig):
-    port: int = Field(8000, ge=1, le=65535, description="HTTP 监听端口")
+class DbConfig(ServiceConfig):
+    """连接业务库的服务共用的配置项；表结构由 api-server 的迁移定义。"""
+
     db_host: str = Field("postgres", description="PostgreSQL 主机")
     db_port: int = Field(5432, ge=1, le=65535, description="PostgreSQL 端口")
     db_name: str = Field("hyd", description="数据库名")
@@ -22,6 +23,10 @@ class ApiConfig(ServiceConfig):
     db_timeout_s: float = Field(
         5.0, gt=0, le=60, description="数据库建连、取连接与单条语句的超时，单位秒（CD-04）"
     )
+
+
+class ApiConfig(DbConfig):
+    port: int = Field(8000, ge=1, le=65535, description="HTTP 监听端口")
     session_ttl_s: int = Field(
         28800, ge=300, le=86400, description="会话有效期，单位秒；到期须重新登录（C-BE-07）"
     )

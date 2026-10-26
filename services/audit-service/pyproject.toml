@@ -1,0 +1,17 @@
+[project]
+name = "audit-service"
+version = "0.0.0"
+description = "审计日志每日哈希链封存与校验（HYD-ARCH-001 §10.1、G-13）"
+requires-python = "==3.12.*"
+dependencies = ["api-server"]
+
+[project.scripts]
+hyd-audit = "audit_service.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+# 审计表结构、数据库连接配置由 api-server 定义
+api-server = { workspace = true }

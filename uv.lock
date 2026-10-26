@@ -5,6 +5,7 @@ requires-python = "==3.12.*"
 [manifest]
 members = [
     "api-server",
+    "audit-service",
     "huiyandun",
     "py-common",
     "py-contracts",
@@ -107,6 +108,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/af/42/f4d333a3f67b0e7cf58ea855f9d5d9104ce38c21f2a2f22bf7dce524428c/asyncpg-0.32.0-cp312-cp312-win_amd64.whl", hash = "sha256:cd7157a86817730c3239bc687abf8186a471525d695e225c187b9a523a808a98", size = 626763, upload-time = "2026-10-06T20:31:04.927Z" },
     { url = "https://files.pythonhosted.org/packages/a8/82/9d82e16e1d0b4e2a639a2db649d4b444b8a479cd52553a9c36ba0d6320a8/asyncpg-0.32.0-cp312-cp312-win_arm64.whl", hash = "sha256:9509e21fc526f1fc27cf80ad9f9b8dde3f3e21935d46be66d649635321d3407c", size = 577288, upload-time = "2026-10-06T20:31:06.776Z" },
 ]
+
+[[package]]
+name = "audit-service"
+version = "0.0.0"
+source = { editable = "services/audit-service" }
+dependencies = [
+    { name = "api-server" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "api-server", editable = "services/api-server" }]
 
 [[package]]
 name = "black"
