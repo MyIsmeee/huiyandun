@@ -15,19 +15,27 @@ from pathlib import Path
 
 PACKAGE = Path("libs/py-contracts")
 TEMPLATE = Path("tools/codegen/package")
-# (契约, 输入格式, 包内生成位置)
+# OpenAPI 以相对路径引用 contracts/events 的实体 Schema，输入目录之外的本地文件须显式放行；
+# 该开关同时放行 HTTP 引用，但 contracts/ 中的公网 URL 由 CI-07 拦截，且只在构建期生效
+OPENAPI_ARGS = ["--use-title-as-name", "--allow-remote-refs"]
+# (契约, 输入格式, 包内生成位置, 额外参数)
 TARGETS = [
-    (Path("contracts/events"), "jsonschema", Path("src/py_contracts/events")),
-    (Path("contracts/openapi/api-server.v1.yaml"), "openapi", Path("src/py_contracts/api.py")),
+    (Path("contracts/events"), "jsonschema", Path("src/py_contracts/events"), []),
+    (
+        Path("contracts/openapi/api-server.v1.yaml"),
+        "openapi",
+        Path("src/py_contracts/api.py"),
+        OPENAPI_ARGS,
+    ),
 ]
 
 
 def build(root: Path) -> dict[str, str]:
     shutil.copytree(TEMPLATE, root, ignore=shutil.ignore_patterns("__pycache__"))
-    for src, kind, out in TARGETS:
+    for src, kind, out, extra in TARGETS:
         subprocess.run(
             ["datamodel-codegen", "--input", str(src), "--input-file-type", kind]
-            + ["--output", str(root / out)],
+            + ["--output", str(root / out), *extra],
             check=True,
             timeout=120,
         )
