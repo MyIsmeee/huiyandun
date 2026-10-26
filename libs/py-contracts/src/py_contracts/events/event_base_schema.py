@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import AwareDatetime, constr
+from pydantic import AwareDatetime, Field
 
 from py_contracts.base import ContractModel
 
@@ -15,7 +15,7 @@ class EventBase(ContractModel):
     所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
     """
 
-    schema_version: constr(pattern=r"^1[.][0-9]+[.][0-9]+$")
+    schema_version: str = Field(..., pattern="^1[.][0-9]+[.][0-9]+$")
     """
     语义化版本，主版本与文件名中的 v1 一致
     """

@@ -1,0 +1,203 @@
+# api-server 对外接口（HYD-PLAN-007 §3、C-BE-01）
+# 主版本编码在文件名中；破坏性变更须新建 api-server.v2.yaml（CI-08）
+# x-min-role：最低角色（C-BE-07）；写操作要求 X-Request-ID（C-BE-08）
+openapi: 3.1.0
+info:
+  title: 慧眼盾 api-server
+  version: 1.0.0
+security:
+  - bearer: []
+
+paths:
+  /api/auth/login:
+    post:
+      operationId: login
+      security: []
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/auth/logout:
+    post:
+      operationId: logout
+      x-min-role: viewer
+      parameters: [{ $ref: "#/components/parameters/RequestId" }]
+      responses:
+        "204": { description: token 已失效 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/site:
+    get:
+      operationId: getSite
+      x-min-role: viewer
+      responses:
+        "200":
+          description: 平面图、区域、设备、标定状态（FR-901）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/devices/{id}:
+    get:
+      operationId: getDevice
+      x-min-role: viewer
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: 设备详情（FR-203）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/devices/{id}/webrtc:
+    post:
+      operationId: webrtcSignal
+      description: 原样转发 SDP 至 go2rtc（FR-106、D-02）
+      x-min-role: viewer
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/sdp:
+            schema: { type: string, description: SDP offer }
+      responses:
+        "200":
+          description: SDP answer
+          content:
+            application/sdp:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string } }
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: true
+      description: 全链路透传至审计日志与事件（C-BE-08）
+      schema: { type: string, minLength: 1 }
+
+  responses:
+    Unauthorized:
+      description: 未登录或 token 失效
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: 资源不存在
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        request_id: { type: string }
+    Role: { enum: [viewer, operator, admin, auditor] }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+    LoginResponse:
+      type: object
+      required: [token, role, expires_at]
+      properties:
+        token: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        expires_at: { type: string, format: date-time }
+    Site:
+      type: object
+      required: [id, name, width_m, height_m, walls, zones, devices]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        width_m: { type: number, exclusiveMinimum: 0 }
+        height_m: { type: number, exclusiveMinimum: 0 }
+        walls:
+          type: array
+          description: 线段 [x1, y1, x2, y2]，单位米
+          items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+        zones: { type: array, items: { $ref: "#/components/schemas/Zone" } }
+        devices: { type: array, items: { $ref: "#/components/schemas/Device" } }
+    Zone:
+      type: object
+      required: [id, name, polygon, no_climb]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        polygon:
+          type: array
+          minItems: 3
+          items: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+        no_climb: { type: boolean }
+    Device:
+      type: object
+      required: [id, type, ip, mode, state, camera]
+      properties:
+        id: { type: string }
+        type: { enum: [camera, nvr, switch] }
+        ip:
+          anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
+        mode: { enum: [bypass, host_probe] }
+        state:
+          description: HYD-UIX-004 §5.2
+          enum:
+            - normal
+            - offline
+            - uncalibrated
+            - physical_alert
+            - cyber_alert
+            - both
+            - pending_action
+            - contained
+            - notify_only
+        camera:
+          anyOf: [{ $ref: "#/components/schemas/CameraInfo" }, { type: "null" }]
+          description: type 为 camera 时必有
+    CameraInfo:
+      type: object
+      required: [stream, pose, calibration, homography, reproj_error_m]
+      properties:
+        stream: { type: string, description: go2rtc 流名 }
+        pose: { $ref: "#/components/schemas/Pose" }
+        calibration:
+          type: array
+          description: 标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时 state 为 uncalibrated
+          items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+        homography:
+          anyOf:
+            - type: array
+              minItems: 3
+              maxItems: 3
+              items: { type: array, items: { type: number }, minItems: 3, maxItems: 3 }
+            - type: "null"
+        reproj_error_m: { anyOf: [{ type: number, minimum: 0 }, { type: "null" }] }
+    Pose:
+      type: object
+      required: [x, y, height_m, yaw_deg, pitch_deg, hfov_deg, range_m]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        height_m: { type: number }
+        yaw_deg: { type: number }
+        pitch_deg: { type: number }
+        hfov_deg: { type: number }
+        range_m: { type: number }

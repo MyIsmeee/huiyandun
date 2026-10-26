@@ -25,7 +25,7 @@ def run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    for path in ("pyproject.toml", "contracts/events", "tools/codegen", "libs/py-contracts"):
+    for path in ("pyproject.toml", "contracts", "tools/codegen", "libs/py-contracts"):
         src, dst = ROOT / path, tmp_path / path
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():

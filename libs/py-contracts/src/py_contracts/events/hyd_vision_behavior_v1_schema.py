@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AwareDatetime, confloat
+from pydantic import AwareDatetime, Field
 
 from .event_base_schema import EventBase
 
@@ -18,7 +18,7 @@ class VisionBehaviorV1(EventBase):
     camera_id: str
     track_id: int
     behavior: Literal["fall", "climb"]
-    confidence_avg: confloat(ge=0.0, le=1.0)
-    duration_s: confloat(ge=0.0)
+    confidence_avg: float = Field(..., ge=0.0, le=1.0)
+    duration_s: float = Field(..., ge=0.0)
     ts_start: AwareDatetime
     ts_end: AwareDatetime

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AwareDatetime, conint
+from pydantic import AwareDatetime, Field
 
 from py_contracts.base import ContractModel
 
@@ -30,7 +30,7 @@ class PlaybookExecution(ContractModel):
     incident_id: str
     target: str
     state: Literal["pending", "executing", "verifying", "contained", "failed", "rolled_back"]
-    ttl_s: conint(ge=1, le=86400)
+    ttl_s: int = Field(..., ge=1, le=86400)
     """
     C-BE-05
     """

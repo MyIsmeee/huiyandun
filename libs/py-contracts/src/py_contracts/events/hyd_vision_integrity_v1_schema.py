@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import confloat
+from pydantic import Field
 
 from .event_base_schema import EventBase
 
@@ -17,4 +17,4 @@ class VisionIntegrityV1(EventBase):
 
     camera_id: str
     type: Literal["freeze", "replay", "occlusion", "shift", "stream_lost"]
-    duration_s: confloat(ge=0.0)
+    duration_s: float = Field(..., ge=0.0)

@@ -7,9 +7,13 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, constr
+from pydantic import AwareDatetime, Field, RootModel
 
 from py_contracts.base import ContractModel
+
+
+class Technique(RootModel[str]):
+    root: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
 
 
 class Incident(ContractModel):
@@ -30,7 +34,7 @@ class Incident(ContractModel):
     """
     纯视觉规则没有攻击源时为 null
     """
-    techniques: list[constr(pattern=r"^T[0-9]{4}([.][0-9]{3})?$")]
+    techniques: list[Technique]
     """
     来自规则 emit.techniques
     """
