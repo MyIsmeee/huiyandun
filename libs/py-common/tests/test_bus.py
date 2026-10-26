@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import nats
@@ -85,7 +86,7 @@ def test_js_publish_deduplicates_by_event_id(nats_url: str) -> None:
     assert asyncio.run(main()) == 1
 
 
-def test_js_publish_without_stream_fails_within_timeout(nats_url: str) -> None:
+def test_js_publish_without_stream_rejected(nats_url: str) -> None:
     async def main() -> None:
         bus = await Bus.connect(nats_url, name="test", timeout_s=1)
         try:
@@ -93,10 +94,59 @@ def test_js_publish_without_stream_fails_within_timeout(nats_url: str) -> None:
         finally:
             await bus.close()
 
-    start = time.monotonic()
-    with pytest.raises(nats.errors.Error):
+    with pytest.raises(nats.js.errors.NoStreamResponseError):
         asyncio.run(main())
-    assert time.monotonic() - start < 3
+
+
+def test_handler_failure_logged_with_subject(
+    nats_url: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def main() -> VisionTrackV1:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        received: asyncio.Queue[VisionTrackV1] = asyncio.Queue()
+
+        async def handler(event: VisionTrackV1) -> None:
+            if event.track_id == 1:
+                raise RuntimeError("boom")
+            await received.put(event)
+
+        await bus.subscribe(SUBJECT, VisionTrackV1, handler)
+        await bus.publish(SUBJECT, track(1))
+        await bus.publish(SUBJECT, track(2))
+        try:
+            return await asyncio.wait_for(received.get(), 2)
+        finally:
+            await bus.close()
+
+    with caplog.at_level(logging.ERROR):
+        assert asyncio.run(main()).track_id == 2  # 订阅不因 handler 异常中断
+    [record] = [r for r in caplog.records if r.getMessage() == "bus.handler_failed"]
+    assert record.subject == SUBJECT
+    assert record.exc_info
+
+
+def test_disconnected_publish_times_out_and_close_succeeds(
+    disposable_nats: tuple[str, Callable[[], None]], caplog: pytest.LogCaptureFixture
+) -> None:
+    url, stop = disposable_nats
+
+    async def main() -> Bus:
+        bus = await Bus.connect(url, name="test", timeout_s=1)
+        stop()
+        await asyncio.sleep(2.5)  # 容器被强制删除，连接立即断开；等待至少一次重连失败
+        start = time.monotonic()
+        with pytest.raises(nats.errors.TimeoutError):
+            await bus.js_publish("hyd.test.down", track())
+        assert time.monotonic() - start < 2
+        await bus.close()
+        return bus
+
+    with caplog.at_level(logging.DEBUG, logger="py_common.bus"):
+        bus = asyncio.run(main())
+    assert bus._client.is_closed  # 不再后台重连
+    messages = [(r.levelno, r.getMessage()) for r in caplog.records]
+    assert (logging.WARNING, "bus.disconnected") in messages
+    assert not [m for m in messages if m[0] >= logging.ERROR]  # 断线重试不刷 ERROR
 
 
 @pytest.mark.parametrize(
