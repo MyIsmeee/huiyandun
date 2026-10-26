@@ -1,0 +1,12 @@
+[project]
+name = "py-common"
+version = "0.0.0"
+description = "后端服务公共组件：结构化日志、配置 Schema、带超时的 NATS 客户端（CD-04～CD-06）"
+requires-python = "==3.12.*"
+dependencies = [
+    "pydantic>=2.14,<3",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
