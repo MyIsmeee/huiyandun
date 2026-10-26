@@ -1,0 +1,35 @@
+[project]
+name = "huiyandun"
+version = "0.0.0"
+requires-python = "==3.12.*"
+
+[dependency-groups]
+dev = ["pre-commit", "pre-commit-hooks", "pytest", "ruff"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["services/*", "libs/*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# 显式列出规则，不随 ruff 升级改变默认集
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
+    "B",
+    "UP",
+    "ASYNC",  # async 路径中的阻塞调用（C-BE-06）
+    "DTZ",    # 不带时区的时间（CD-07）
+    "S110",   # except Exception: pass（CD-03）
+    "TID251", # 禁用 API，见 banned-api
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"requests".msg = "请求路径全部 async，不使用同步 HTTP 客户端（C-BE-06）"

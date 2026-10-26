@@ -1,0 +1,15 @@
+# Python / uv
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Node / pnpm
+node_modules/
+
+# 密钥不入库（G-14）
+.env
+.env.*
+!.env.example
+*.pem
+*.key

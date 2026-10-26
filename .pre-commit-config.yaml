@@ -1,0 +1,20 @@
+# 钩子经 uv 调用 uv.lock 锁定的版本，不从网络拉取钩子仓库（G-05、G-15）
+repos:
+  - repo: local
+    hooks:
+      - id: no-commit-to-branch
+        name: 禁止直接提交到 main（P-01）
+        entry: uv run no-commit-to-branch --branch main
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
