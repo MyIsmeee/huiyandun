@@ -5,20 +5,21 @@
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from api_server.auth import COOKIE, lookup_session
 from py_contracts.api import WsFrame
 
-log = logging.getLogger(__name__)
-
 QUEUE_SIZE = 256
 POLICY_VIOLATION = 1008
 TRY_AGAIN_LATER = 1013
+
+
+class _Stop(Exception):
+    """连接任务之一正常结束（客户端断开或需服务端关闭），结束整个连接。"""
 
 
 @dataclass(eq=False)
@@ -84,21 +85,24 @@ async def push(websocket: WebSocket) -> None:
         # 只推送不接收；读取以便感知客户端断开
         while (await websocket.receive())["type"] != "websocket.disconnect":
             pass
+        raise _Stop
 
-    tasks = [asyncio.create_task(c) for c in (send(), receive(), subscriber.closed.wait())]
+    async def watch() -> None:
+        await subscriber.closed.wait()
+        raise _Stop
+
+    remaining_s = (principal.expires_at - datetime.now(UTC)).total_seconds()
     try:
-        remaining_s = (principal.expires_at - datetime.now(UTC)).total_seconds()
-        done, _ = await asyncio.wait(tasks, timeout=remaining_s, return_when="FIRST_COMPLETED")
-        if not done:
-            subscriber.close(POLICY_VIOLATION, "会话已过期")
-        if subscriber.closed.is_set():
-            await websocket.close(subscriber.close_code, subscriber.close_reason)
-        for task in done:
-            if not task.cancelled() and task.exception():
-                # 客户端断开时发送失败属正常结束
-                log.debug("ws.connection_lost", extra={"error": repr(task.exception())})
+        try:
+            # TaskGroup：任一任务结束即取消其余任务，外部取消（如服务停止）同样正确传播
+            async with asyncio.timeout(remaining_s), asyncio.TaskGroup() as tg:
+                for coro in (send(), receive(), watch()):
+                    tg.create_task(coro)
+        except* (_Stop, WebSocketDisconnect):
+            pass  # 客户端断开时发送失败（WebSocketDisconnect）属正常结束
+    except TimeoutError:
+        subscriber.close(POLICY_VIOLATION, "会话已过期")
     finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
         hub.unsubscribe(subscriber)
+    if subscriber.closed.is_set():
+        await websocket.close(subscriber.close_code, subscriber.close_reason)
