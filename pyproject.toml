@@ -6,6 +6,7 @@ requires-python = "==3.12.*"
 [dependency-groups]
 dev = [
     "datamodel-code-generator",
+    "httpx2",
     "pip-licenses",
     "pre-commit",
     "pre-commit-hooks",
