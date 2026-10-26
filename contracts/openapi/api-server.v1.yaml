@@ -187,6 +187,166 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/llm/providers:
+    get:
+      operationId: listProviders
+      description: 按 order 升序，即故障转移顺序（FR-603）
+      x-min-role: admin
+      responses:
+        "200":
+          description: 供应商列表
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LlmProviderList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createProvider
+      description: 公网供应商新增后为停用状态（G-02、FR-604）；变更写入审计日志
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LlmProviderCreate" }
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LlmProvider" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/llm/providers/{id}:
+    patch:
+      operationId: updateProvider
+      description: 启用公网供应商前由前端弹出确认；全局禁止公网时不可启用（FR-604）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LlmProviderUpdate" }
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LlmProvider" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteProvider
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "204": { description: 已删除 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/llm/providers/{id}/test:
+    post:
+      operationId: testProvider
+      description: 依次检查连通与延迟、模型是否存在、结构化输出能力（FR-602）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "200":
+          description: 分项结果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderTestResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/llm/providers/{id}/models:
+    get:
+      operationId: listProviderModels
+      description: 调用供应商 GET /models（V-M6）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+      responses:
+        "200":
+          description: 模型列表
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/llm/providers/order:
+    put:
+      operationId: reorderProviders
+      description: 立即生效并写入审计日志（FR-603）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProviderOrder" }
+      responses:
+        "204": { description: 已生效 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/llm/settings:
+    put:
+      operationId: updateLlmSettings
+      description: block_public 开启时所有公网供应商强制停用（FR-604）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LlmSettings" }
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LlmSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/egress/stats:
+    get:
+      operationId: getEgressStats
+      x-min-role: viewer
+      responses:
+        "200":
+          description: 近 10 分钟发往非私有地址的连接（FR-801）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EgressStats" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/audit-logs:
+    get:
+      operationId: listAuditLogs
+      x-min-role: auditor
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Before" }
+      responses:
+        "200":
+          description: 按 ts 倒序（G-13）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditLogList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
 components:
   securitySchemes:
@@ -337,3 +497,133 @@ components:
         provider_id: { anyOf: [{ type: string }, { type: "null" }] }
         reviewed_by: { anyOf: [{ type: string }, { type: "null" }] }
         reviewed_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+    Preset:
+      description: 选择后由前端填入地址模板与默认端口（HYD-ARCH-001 §5.3）
+      enum: [llama_cpp, ollama, lm_studio, vllm, deepseek, bailian, kimi, zhipu, siliconflow, custom]
+    Network:
+      description: 自动判定：回环、私有网段、链路本地为 internal，其余含所有域名为 public（C-LLM-13）
+      enum: [internal, public]
+    LlmProvider:
+      type: object
+      description: 不含 API Key，只返回末 4 位（C-LLM-15）
+      required:
+        - id
+        - name
+        - preset
+        - base_url
+        - api_key_last4
+        - model
+        - network
+        - network_overridden
+        - structured_output
+        - timeout_s
+        - enabled
+        - order
+      properties:
+        id: { type: string }
+        name: { type: string }
+        preset: { $ref: "#/components/schemas/Preset" }
+        base_url: { type: string, description: OpenAI 兼容 base URL }
+        api_key_last4: { anyOf: [{ type: string, maxLength: 4 }, { type: "null" }] }
+        model: { type: string }
+        network: { $ref: "#/components/schemas/Network" }
+        network_overridden: { type: boolean, description: 管理员改判过网络位置 }
+        structured_output:
+          anyOf: [{ enum: [json_schema, json_object, none] }, { type: "null" }]
+          description: 由测试连接探测；未测试时为 null
+        timeout_s: { type: integer, minimum: 1 }
+        enabled: { type: boolean }
+        order: { type: integer, minimum: 0 }
+    LlmProviderList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/LlmProvider" } }
+    LlmProviderCreate:
+      type: object
+      required: [name, preset, base_url, model]
+      properties:
+        name: { type: string }
+        preset: { $ref: "#/components/schemas/Preset" }
+        base_url: { type: string }
+        api_key: { type: string, writeOnly: true, description: 本地服务未设 Key 时省略 }
+        model: { type: string }
+        network: { $ref: "#/components/schemas/Network" }
+        timeout_s: { type: integer, minimum: 1, default: 60 }
+    LlmProviderUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        preset: { $ref: "#/components/schemas/Preset" }
+        base_url: { type: string }
+        api_key: { type: string, writeOnly: true }
+        model: { type: string }
+        network: { $ref: "#/components/schemas/Network" }
+        timeout_s: { type: integer, minimum: 1 }
+        enabled: { type: boolean }
+    ProviderTestResult:
+      type: object
+      required: [checks]
+      properties:
+        checks: { type: array, items: { $ref: "#/components/schemas/ProviderCheck" } }
+    ProviderCheck:
+      type: object
+      required: [check, ok, latency_ms, reason]
+      properties:
+        check: { enum: [connectivity, model, structured_output] }
+        ok: { type: boolean }
+        latency_ms: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
+        reason: { anyOf: [{ type: string }, { type: "null" }] }
+    ModelList:
+      type: object
+      required: [models]
+      properties:
+        models: { type: array, items: { type: string } }
+    ProviderOrder:
+      type: object
+      required: [provider_ids]
+      properties:
+        provider_ids: { type: array, items: { type: string }, uniqueItems: true }
+    LlmSettings:
+      type: object
+      required: [block_public]
+      properties:
+        block_public: { type: boolean }
+    EgressStats:
+      type: object
+      required: [window_s, count, targets]
+      properties:
+        window_s: { const: 600 }
+        count: { type: integer, minimum: 0 }
+        targets: { type: array, items: { $ref: "#/components/schemas/EgressTarget" } }
+    EgressTarget:
+      type: object
+      required: [ip, count]
+      properties:
+        ip: { anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }] }
+        count: { type: integer, minimum: 1 }
+    AuditLog:
+      type: object
+      description: 追加写，禁止修改与删除
+      required: [id, ts, actor, action, target, before, after, request_id]
+      properties:
+        id: { type: string }
+        ts: { type: string, format: date-time }
+        actor: { type: string }
+        action: { type: string }
+        target: { type: string }
+        before: { anyOf: [{ type: object }, { type: "null" }] }
+        after: { anyOf: [{ type: object }, { type: "null" }] }
+        request_id: { type: string }
+    AuditLogList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AuditLog" } }
+    WsFrame:
+      type: object
+      description: WS /ws 推送帧（FR-102、FR-606）
+      required: [channel, data]
+      properties:
+        channel: { enum: [tracks, devices, alerts, incidents, system] }
+        data: { type: object }

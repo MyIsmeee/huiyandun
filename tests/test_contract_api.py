@@ -6,7 +6,19 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from py_contracts.api import Device, IncidentList, LoginResponse, Report, Site
+from py_contracts.api import (
+    AuditLog,
+    Device,
+    EgressStats,
+    IncidentList,
+    LlmProvider,
+    LlmProviderCreate,
+    LoginResponse,
+    ProviderCheck,
+    Report,
+    Site,
+    WsFrame,
+)
 
 SPEC = yaml.safe_load(
     (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v1.yaml").read_text()
@@ -27,6 +39,16 @@ ENDPOINTS = [
     ("post", "/api/reports/{id}/review", "operator"),
     ("post", "/api/executions/{id}/rollback", "operator"),
     ("post", "/api/incidents/{id}/evidence/export", "operator"),
+    ("get", "/api/llm/providers", "admin"),
+    ("post", "/api/llm/providers", "admin"),
+    ("patch", "/api/llm/providers/{id}", "admin"),
+    ("delete", "/api/llm/providers/{id}", "admin"),
+    ("post", "/api/llm/providers/{id}/test", "admin"),
+    ("get", "/api/llm/providers/{id}/models", "admin"),
+    ("put", "/api/llm/providers/order", "admin"),
+    ("put", "/api/llm/settings", "admin"),
+    ("get", "/api/egress/stats", "viewer"),
+    ("get", "/api/audit-logs", "auditor"),
 ]
 OPERATIONS = [(m, p, op) for p, item in SPEC["paths"].items() for m, op in item.items()]
 
@@ -131,3 +153,43 @@ def test_report_rejects_unknown_source() -> None:
 def test_incident_list_reuses_incident_entity() -> None:
     with pytest.raises(ValidationError):
         IncidentList.model_validate({"items": [{"id": "inc-0001"}]})
+
+
+def test_provider_response_never_carries_api_key() -> None:
+    schemas = SPEC["components"]["schemas"]
+
+    assert "api_key" not in LlmProvider.model_fields
+    assert schemas["LlmProviderCreate"]["properties"]["api_key"]["writeOnly"] is True
+    assert schemas["LlmProviderUpdate"]["properties"]["api_key"]["writeOnly"] is True
+
+
+def test_provider_create_allows_missing_api_key_and_defaults_timeout() -> None:
+    created = LlmProviderCreate.model_validate(
+        {
+            "name": "家用 5070",
+            "preset": "llama_cpp",
+            "base_url": "http://192.168.1.50:8888/v1",
+            "model": "q",
+        }
+    )
+
+    assert created.api_key is None
+    assert created.timeout_s == 60
+
+
+@pytest.mark.parametrize(
+    ("model", "data"),
+    [
+        (ProviderCheck, {"check": "latency", "ok": True, "latency_ms": 5, "reason": None}),
+        (EgressStats, {"window_s": 300, "count": 0, "targets": []}),
+        (WsFrame, {"channel": "metrics", "data": {}}),
+        (
+            AuditLog,
+            {"id": "a", "ts": "2026-10-26T08:00:00Z", "actor": "u", "action": "x", "target": "t"},
+        ),
+    ],
+    ids=["check-enum", "egress-window", "ws-channel", "audit-request-id"],
+)
+def test_rejects_invalid_admin_payload(model, data: dict) -> None:
+    with pytest.raises(ValidationError):
+        model.model_validate(data | ({"before": None, "after": None} if model is AuditLog else {}))
