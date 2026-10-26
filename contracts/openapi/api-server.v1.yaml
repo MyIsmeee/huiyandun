@@ -79,6 +79,114 @@ paths:
               schema: { type: string }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/incidents:
+    get:
+      operationId: listIncidents
+      x-min-role: viewer
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Before" }
+      responses:
+        "200":
+          description: 按 created_at 倒序（FR-303）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IncidentList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/incidents/{id}:
+    get:
+      operationId: getIncident
+      x-min-role: viewer
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: 关联事件详情
+          content:
+            application/json:
+              schema: { $ref: "../events/incident.schema.json" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/incidents/{id}/reports:
+    post:
+      operationId: createReport
+      description: 同步生成；全部供应商不可用时 3 s 内返回模板报告（FR-501、FR-502）
+      x-min-role: operator
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "201":
+          description: 报告已生成
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/reports/{id}:
+    get:
+      operationId: getReport
+      x-min-role: viewer
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: 报告
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/reports/{id}/review:
+    post:
+      operationId: reviewReport
+      description: 记录当前用户与时间，写入审计日志（FR-504）
+      x-min-role: operator
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "200":
+          description: 已复核
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/executions/{id}/rollback:
+    post:
+      operationId: rollbackExecution
+      description: 立即手动回滚（FR-405）
+      x-min-role: operator
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "200":
+          description: 回滚后的执行状态
+          content:
+            application/json:
+              schema: { $ref: "../events/playbook_execution.schema.json" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/incidents/{id}/evidence/export:
+    post:
+      operationId: exportEvidence
+      description: 写入审计日志（FR-702）；包内格式由存证任务定义
+      x-min-role: operator
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "200":
+          description: 证据包文件
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   securitySchemes:
@@ -92,10 +200,19 @@ components:
       required: true
       description: 全链路透传至审计日志与事件（C-BE-08）
       schema: { type: string, minLength: 1 }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    Before:
+      name: before
+      in: query
+      description: 只返回该时间之前的记录
+      schema: { type: string, format: date-time }
 
   responses:
     Unauthorized:
       description: 未登录或 token 失效
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: 角色不足
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
       description: 资源不存在
@@ -201,3 +318,22 @@ components:
         pitch_deg: { type: number }
         hfov_deg: { type: number }
         range_m: { type: number }
+    IncidentList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "../events/incident.schema.json" } }
+    Report:
+      type: object
+      required: [id, incident_id, facts, ai, source, provider_id, reviewed_by, reviewed_at]
+      properties:
+        id: { type: string }
+        incident_id: { type: string }
+        facts: { type: object, description: 事实区，全部来自结构化数据（V-AI1） }
+        ai:
+          anyOf: [{ type: object }, { type: "null" }]
+          description: AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定
+        source: { enum: [llm, template] }
+        provider_id: { anyOf: [{ type: string }, { type: "null" }] }
+        reviewed_by: { anyOf: [{ type: string }, { type: "null" }] }
+        reviewed_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }

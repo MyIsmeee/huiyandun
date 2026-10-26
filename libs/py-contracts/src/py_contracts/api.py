@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 from ipaddress import IPv4Address, IPv6Address
-from typing import Literal
+from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import AwareDatetime, Field, RootModel, SecretStr
 
@@ -80,6 +81,63 @@ class Pose(ContractModel):
     range_m: float
 
 
+class Technique(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
+    root: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
+
+
+class Incident(ContractModel):
+    """
+    关联事件实体（HYD-PLAN-007 §1），事件与 API 共用
+    """
+
+    id: str
+    rule_id: str
+    rule_version: str
+    title: str
+    """
+    来自规则 emit.title
+    """
+    severity: Literal["critical", "high", "medium", "low"]
+    device_ids: list[str]
+    source_ip: IPv4Address | IPv6Address | None
+    """
+    纯视觉规则没有攻击源时为 null
+    """
+    techniques: list[Technique]
+    """
+    来自规则 emit.techniques
+    """
+    tactics: list[str]
+    """
+    按 techniques 查 ATT&CK 离线数据得出（REUSE-11）
+    """
+    evidence_refs: list[str]
+    hit_path: list[UUID]
+    """
+    规则每一步命中事件的 event_id
+    """
+    status: Literal["open", "containing", "contained", "closed"]
+    created_at: AwareDatetime
+
+
+class Report(ContractModel):
+    id: str
+    incident_id: str
+    facts: dict[str, Any]
+    """
+    事实区，全部来自结构化数据（V-AI1）
+    """
+    ai: dict[str, Any] | None
+    """
+    AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定
+    """
+    source: Literal["llm", "template"]
+    provider_id: str | None
+    reviewed_by: str | None
+    reviewed_at: AwareDatetime | None
+
+
 class CameraInfo(ContractModel):
     stream: str
     """
@@ -92,6 +150,10 @@ class CameraInfo(ContractModel):
     """
     homography: Homography | None
     reproj_error_m: ReprojErrorM | None
+
+
+class IncidentList(ContractModel):
+    items: list[Incident]
 
 
 class Device(ContractModel):

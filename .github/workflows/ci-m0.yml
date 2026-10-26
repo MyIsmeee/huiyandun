@@ -165,9 +165,11 @@ jobs:
           curl -sSfL -o /tmp/oasdiff.tar.gz https://github.com/oasdiff/oasdiff/releases/download/v1.34.1/oasdiff_1.34.1_linux_amd64.tar.gz
           echo "75775f65b0adebd26a8e013af51a799342dfdc6262d89efa9e3b7bdf89657d90  /tmp/oasdiff.tar.gz" | sha256sum -c -
           tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
+          # 取出基准分支的整个 contracts/：OpenAPI 以相对路径引用 contracts/events 的实体 Schema
+          mkdir -p /tmp/base
+          git archive "$BASE" contracts | tar -x -C /tmp/base
           for f in $files; do
-            git show "$BASE:$f" > /tmp/base.yaml
-            /tmp/oasdiff breaking /tmp/base.yaml "$f" --fail-on ERR
+            /tmp/oasdiff breaking "/tmp/base/$f" "$f" --fail-on ERR
           done
 
   ci-09:

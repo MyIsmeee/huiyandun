@@ -6,7 +6,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from py_contracts.api import Device, LoginResponse, Site
+from py_contracts.api import Device, IncidentList, LoginResponse, Report, Site
 
 SPEC = yaml.safe_load(
     (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v1.yaml").read_text()
@@ -20,6 +20,13 @@ ENDPOINTS = [
     ("get", "/api/site", "viewer"),
     ("get", "/api/devices/{id}", "viewer"),
     ("post", "/api/devices/{id}/webrtc", "viewer"),
+    ("get", "/api/incidents", "viewer"),
+    ("get", "/api/incidents/{id}", "viewer"),
+    ("post", "/api/incidents/{id}/reports", "operator"),
+    ("get", "/api/reports/{id}", "viewer"),
+    ("post", "/api/reports/{id}/review", "operator"),
+    ("post", "/api/executions/{id}/rollback", "operator"),
+    ("post", "/api/incidents/{id}/evidence/export", "operator"),
 ]
 OPERATIONS = [(m, p, op) for p, item in SPEC["paths"].items() for m, op in item.items()]
 
@@ -122,3 +129,24 @@ def test_login_response_role_is_enumerated() -> None:
         LoginResponse.model_validate(
             {"token": "t", "role": "root", "expires_at": "2026-10-26T08:00:00Z"}
         )
+
+
+def test_template_report_has_null_ai() -> None:
+    report = {"id": "rep-01", "incident_id": "inc-0001", "facts": {"rule_id": "HYD-X-0001"}}
+    nulls = dict.fromkeys(["ai", "provider_id", "reviewed_by", "reviewed_at"])
+
+    assert Report.model_validate(report | nulls | {"source": "template"}).ai is None
+
+
+def test_report_rejects_unknown_source() -> None:
+    report = {"id": "rep-01", "incident_id": "inc-0001", "facts": {}, "source": "manual"}
+
+    with pytest.raises(ValidationError):
+        Report.model_validate(
+            report | dict.fromkeys(["ai", "provider_id", "reviewed_by", "reviewed_at"])
+        )
+
+
+def test_incident_list_reuses_incident_entity() -> None:
+    with pytest.raises(ValidationError):
+        IncidentList.model_validate({"items": [{"id": "inc-0001"}]})
