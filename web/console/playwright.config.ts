@@ -11,7 +11,7 @@ export default defineConfig({
     locale: "zh-CN",
   },
   webServer: {
-    command: "pnpm run build && pnpm exec vite preview --port 4173 --strictPort",
+    command: "pnpm exec vite build --mode e2e && pnpm exec vite preview --mode e2e --port 4173 --strictPort",
     url: "http://localhost:4173",
     reuseExistingServer: false,
   },
