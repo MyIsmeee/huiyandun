@@ -54,3 +54,28 @@ components:
     purpose: make doctor GPU 自检
     owner: MyIsmeee
     telemetry: 无
+
+# Python 包自带的二进制库（wheel 内 *.libs/）：随 wheel 分发、进程内动态链接、未经修改（G-08）
+# 版本取自 wheel 内的 SBOM、库的 soname 与版本接口；所属包升级时须重新核对
+bundled:
+  - package: opencv-python-headless==5.0.0.93
+    owner: MyIsmeee
+    libraries:
+      # 构建配置不含 --enable-gpl / --enable-nonfree（avutil_license 返回 LGPL version 2.1 or later）
+      - { name: FFmpeg（libavcodec、libavformat、libavutil、libswresample、libswscale）, version: 8.1.1, license: LGPL-2.1-or-later }
+      - { name: libgfortran, version: 8.5.0, license: GPL-3.0-or-later WITH GCC-exception-3.1 }
+      - { name: libquadmath, version: 8.5.0, license: LGPL-2.1-or-later }
+      # 已停止维护，镜像加固时替换（#71）
+      - { name: OpenSSL（libssl、libcrypto）, version: 1.1.1k, license: OpenSSL }
+      - { name: libpng, version: 1.6.58, license: libpng-2.0 }
+      - { name: libaom, version: 3.14.1, license: BSD-2-Clause }
+      - { name: libavif, version: 1.4.2, license: BSD-2-Clause }
+      - { name: libvpx, version: 1.15.2, license: BSD-3-Clause }
+      - { name: OpenBLAS, version: 0.3.15, license: BSD-3-Clause }
+      - { name: libdrm, version: 2.4.115, license: MIT }
+  - package: numpy==2.5.4
+    owner: MyIsmeee
+    libraries:
+      - { name: OpenBLAS（scipy-openblas64）, version: 0.3.34, license: BSD-3-Clause }
+      - { name: libgfortran, version: 8.5.0, license: GPL-3.0-or-later WITH GCC-exception-3.1 }
+      - { name: libquadmath, version: 8.5.0, license: LGPL-2.1-or-later }

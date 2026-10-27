@@ -1,0 +1,13 @@
+[project]
+name = "vision-engine"
+version = "0.0.0"
+description = "视觉引擎：go2rtc 拉流 → rtmlib 人体检测与骨骼 → 跟踪 → 结构化事件（HYD-ARCH-001 §8）"
+requires-python = "==3.12.*"
+dependencies = [
+    "numpy>=2.5.4,<3",
+    "opencv-python-headless>=5.0.0.93,<6",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
