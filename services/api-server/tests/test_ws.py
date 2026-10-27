@@ -8,14 +8,27 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from starlette.websockets import WebSocketDisconnect
 
+from api_server import ws as ws_module
 from api_server.app import create_app
 from api_server.config import ApiConfig
 from api_server.db import transaction
-from api_server.ws import QUEUE_SIZE
+from api_server.ws import HEARTBEAT, QUEUE_SIZE
 from py_contracts.api import WsFrame
 
 WS_URL = "wss://testserver/ws"  # Secure Cookie 只随加密连接发送
 FRAME = WsFrame(channel="system", data={"llm": "template"})
+
+
+@pytest.fixture(autouse=True)
+def no_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """其余用例断言"下一帧"是什么，心跳不得插入其间。"""
+    monkeypatch.setattr(ws_module, "HEARTBEAT_S", 3600)
+
+
+@pytest.fixture
+def fast_heartbeat(no_heartbeat: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """须在 client 之前请求：应用启动时心跳即开始第一次等待。"""
+    monkeypatch.setattr(ws_module, "HEARTBEAT_S", 0.05)
 
 
 @pytest.fixture
@@ -49,6 +62,20 @@ def test_pushes_contract_frames(client: TestClient) -> None:
         broadcast(client, FRAME)
 
         assert WsFrame.model_validate(ws.receive_json()) == FRAME
+
+
+def test_pushes_heartbeat_when_idle(fast_heartbeat: None, client: TestClient) -> None:
+    async def fallback() -> None:
+        # receive_json 无超时：心跳失效时以普通帧结束等待，使用例失败而非挂起
+        await asyncio.sleep(2)
+        client.app.state.hub.broadcast(FRAME)
+
+    with client.websocket_connect(WS_URL) as ws:
+        pending = client.portal.start_task_soon(fallback)
+        try:
+            assert WsFrame.model_validate(ws.receive_json()) == HEARTBEAT
+        finally:
+            pending.cancel()
 
 
 def test_logout_closes_connection(client: TestClient) -> None:

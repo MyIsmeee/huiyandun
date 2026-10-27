@@ -16,6 +16,9 @@ from py_contracts.api import WsFrame
 QUEUE_SIZE = 256
 POLICY_VIOLATION = 1008
 TRY_AGAIN_LATER = 1013
+# 空闲时前端据此区分"连接正常但无事件"与"数据已停止"：超过 2 个周期无帧即显示"延迟"
+HEARTBEAT_S = 5
+HEARTBEAT = WsFrame(channel="system", data={"type": "heartbeat"})
 
 
 class _Stop(Exception):
@@ -62,6 +65,12 @@ class Hub:
         for subscriber in self._subscribers:
             if subscriber.token_hash == token_hash:
                 subscriber.close(POLICY_VIOLATION, "已登出")
+
+
+async def heartbeat(hub: Hub) -> None:
+    while True:
+        await asyncio.sleep(HEARTBEAT_S)
+        hub.broadcast(HEARTBEAT)
 
 
 router = APIRouter()
