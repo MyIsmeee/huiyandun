@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
 import { expectNoOverflow, freezeClock, mockSocket, presetTheme, SITE, sceneSettled, signedIn } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
@@ -47,7 +47,15 @@ test("无 WebGL2 时降级为 2D 平面图（C-FE-08）", async ({ page }) => {
   await page.goto("/");
   await sceneSettled(page, "2d");
 
-  await expect(scene(page).getByText("2D 平面视图 · 浏览器不支持 WebGL2")).toBeVisible();
+  await expect(scene(page).getByText("2D 视图 · 不支持 WebGL2")).toBeVisible();
+  // V-P3：最窄的 1366 宽下，含降级说明的控件组不与 KPI 底板重叠
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const [kpi, toolbar] = await Promise.all([
+    page.getByRole("list", { name: "关键指标" }).boundingBox(),
+    page.getByRole("toolbar", { name: "视角" }).boundingBox(),
+  ]);
+  expect((kpi?.x ?? 0) + (kpi?.width ?? 0)).toBeLessThan(toolbar?.x ?? 0);
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(scene(page).getByText("设备间外墙 · 禁止攀爬")).toBeVisible();
   await expectNoOverflow(page);
   await expect(scene(page)).toHaveScreenshot("scene-2d.png");
@@ -81,3 +89,115 @@ for (const [name, time] of [
     await expect(scene(page)).toHaveScreenshot(`scene-${name}.png`);
   });
 }
+
+// V-I1、V-I5、V-A2、V-A4：相机控件
+test.describe("相机控件", () => {
+  const LABEL = "设备间外墙 · 禁止攀爬";
+  const button = (page: Page, name: string) => page.getByRole("toolbar", { name: "视角" }).getByRole("button", { name });
+  const labelAt = async (page: Page) => {
+    const box = await scene(page).getByText(LABEL).boundingBox();
+    return box && [Math.round(box.x), Math.round(box.y)];
+  };
+  const transition = (page: Page) => page.clock.runFor(600); // 转场 ≤ 600 ms
+
+  let sockets: WebSocketRoute[] = [];
+
+  test.beforeEach(async ({ page }) => {
+    sockets = await signedIn(page);
+    await page.goto("/");
+    await sceneSettled(page);
+  });
+
+  test("四个旋转档位，返回总览回到默认机位", async ({ page }) => {
+    for (const k of [1, 2, 3]) {
+      await button(page, "向右旋转 90°").click();
+      await transition(page);
+      await expect(scene(page)).toHaveScreenshot(`scene-rotate-${k}.png`);
+    }
+    await button(page, "放大").click();
+    await button(page, "返回总览").click();
+    await transition(page);
+
+    await expect(scene(page)).toHaveScreenshot("scene-ready.png");
+  });
+
+  test("缩放限定为总览的 1～4 倍", async ({ page }) => {
+    await expect(button(page, "缩小")).toBeDisabled();
+    for (let i = 0; i < 4; i += 1) await button(page, "放大").click();
+
+    await expect(button(page, "放大")).toBeDisabled();
+    await expect(button(page, "缩小")).toBeEnabled();
+  });
+
+  test("放大后拖拽平移，画面跟随指针", async ({ page }) => {
+    await button(page, "放大").click();
+    await transition(page);
+    const before = await labelAt(page);
+
+    const box = await scene(page).boundingBox();
+    const [x, y] = [(box?.x ?? 0) + 300, (box?.y ?? 0) + 400];
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 40, y - 30);
+    await page.mouse.up();
+
+    await expect.poll(() => labelAt(page)).toEqual([(before?.[0] ?? 0) - 40, (before?.[1] ?? 0) - 30]);
+  });
+
+  test("转场以动画进行；开启降低动效后瞬时切换", async ({ page }) => {
+    const start = await labelAt(page);
+    await button(page, "向右旋转 90°").click();
+    expect(await labelAt(page)).toEqual(start); // 时钟暂停，转场尚未推进
+    await transition(page);
+    const rotated = await labelAt(page);
+    expect(rotated).not.toEqual(start);
+
+    await page.getByRole("button", { name: "降低动效" }).click();
+    await button(page, "向左旋转 90°").click();
+
+    await expect.poll(() => labelAt(page)).toEqual(start);
+  });
+
+  test("转场中断线：立即到位，不再继续（V-U3）", async ({ page }) => {
+    await button(page, "向右旋转 90°").click();
+    await page.clock.runFor(100);
+    const midway = await labelAt(page);
+
+    await sockets[0]?.close({ code: 1011 });
+    await expect(page.getByRole("status", { name: "连接状态" })).toHaveText("断线 · 重连中");
+    await expect.poll(() => labelAt(page)).not.toEqual(midway);
+    const end = await labelAt(page);
+    await page.clock.runFor(100); // 不足 1 s，不会重连
+
+    expect(await labelAt(page)).toEqual(end);
+  });
+
+  test("浏览器取消手势后结束拖拽", async ({ page }) => {
+    await button(page, "放大").click();
+    await transition(page);
+    const box = await scene(page).boundingBox();
+    const [x, y] = [(box?.x ?? 0) + 300, (box?.y ?? 0) + 400];
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.locator("[data-scene]").dispatchEvent("pointercancel");
+    const before = await labelAt(page);
+
+    await page.mouse.move(x - 40, y - 30);
+
+    expect(await labelAt(page)).toEqual(before);
+    await page.mouse.up();
+  });
+
+  test("断线时瞬时切换，不播放转场（C-FE-05）", async ({ page }) => {
+    const start = await labelAt(page);
+    await sockets[0]?.close({ code: 1011 }); // 时钟暂停，重连不会发生
+    await expect(page.getByRole("status", { name: "连接状态" })).toHaveText("断线 · 重连中");
+
+    await button(page, "向右旋转 90°").click();
+
+    await expect.poll(() => labelAt(page)).not.toEqual(start);
+    const moved = await labelAt(page);
+    await transition(page);
+    expect(await labelAt(page)).toEqual(moved); // 已在终点，没有后续转场
+  });
+});

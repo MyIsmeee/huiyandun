@@ -178,7 +178,14 @@ function Wall({ piece, near, color }: { piece: WallPiece; near: boolean; color: 
       <roundedBoxGeometry
         args={[Math.hypot(x2 - x1, y2 - y1), piece.top - piece.bottom, WALL_THICKNESS_M, 2, 0.04]}
       />
-      <meshLambertMaterial color={color} transparent={near} opacity={near ? 0.22 : 1} depthWrite={!near} />
+      {/* 切换透明需重新编译着色器：以 key 在旋转后近侧变化时重建材质 */}
+      <meshLambertMaterial
+        key={near ? "near" : "far"}
+        color={color}
+        transparent={near}
+        opacity={near ? 0.22 : 1}
+        depthWrite={!near}
+      />
     </mesh>
   );
 }
