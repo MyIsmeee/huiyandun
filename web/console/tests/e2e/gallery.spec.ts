@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 // 组件全部状态的截图基线（V-G3、V-P2）；新增组件时在 gallery/main.tsx 登记并在此列出状态
 const COMPONENTS = {
   KpiTile: ["normal", "empty", "loading", "stale"],
+  FloorPlan2D: ["normal", "empty"],
 };
 
 for (const [component, states] of Object.entries(COMPONENTS)) {
