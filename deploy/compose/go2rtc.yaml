@@ -6,7 +6,7 @@ rtsp:
   listen: ":8554"
 webrtc:
   listen: ":8555"
-  ice_servers: []  # 默认使用公网 STUN 服务器，运行时不访问外部地址（G-05）
+  ice_servers: []  # 清空 go2rtc 默认的公网 STUN 服务器，运行时不访问外部地址（G-05），不得删除
 
 streams:
   cam-01: rtsp://mediamtx:8554/cam-01
