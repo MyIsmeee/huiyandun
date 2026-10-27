@@ -87,8 +87,8 @@ for (const mode of ["auto", "dark", "light"] as const) {
     await signedIn(page);
     await page.goto("/");
 
-    const group = page.getByRole("radiogroup", { name: "主题" });
-    await expect(group.getByRole("radio", { checked: true })).toHaveAttribute("aria-label", new RegExp(mode === "auto" ? "自动" : mode === "dark" ? "暗色" : "亮色"));
+    const group = page.getByRole("group", { name: "主题" });
+    await expect(group.getByRole("button", { pressed: true })).toHaveAttribute("aria-label", new RegExp(mode === "auto" ? "自动" : mode === "dark" ? "暗色" : "亮色"));
     await expect(group.locator("..")).toHaveScreenshot(`theme-toggle-${mode}.png`);
   });
 }

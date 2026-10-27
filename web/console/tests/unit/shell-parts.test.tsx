@@ -49,13 +49,13 @@ describe("ThemeToggle", () => {
 
   it("三档切换并标示当前档位", () => {
     render(<ThemeToggle />);
-    const light = screen.getByRole("radio", { name: "主题：亮色" });
-    expect(screen.getByRole("radio", { name: /主题：自动/ }).getAttribute("aria-checked")).toBe("true");
+    const light = screen.getByRole("button", { name: "主题：亮色" });
+    expect(screen.getByRole("button", { name: /主题：自动/ }).getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(light);
 
     expect(useTheme.getState()).toMatchObject({ mode: "light", theme: "light" });
-    expect(light.getAttribute("aria-checked")).toBe("true");
+    expect(light.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("开关降低动效并标示当前状态", () => {

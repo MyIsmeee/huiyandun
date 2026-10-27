@@ -13,9 +13,9 @@ export function ThemeToggle() {
   const { mode, reducedMotion, setMode, setReducedMotion } = useTheme();
   return (
     <div className="flex items-center rounded-full border border-line p-0.5">
-      <div role="radiogroup" aria-label="主题" className="flex items-center">
+      <div role="group" aria-label="主题" className="flex items-center">
         {MODES.map(([value, Icon, label]) => (
-          <IconButton key={value} label={label} checked={mode === value} onClick={() => setMode(value)}>
+          <IconButton key={value} label={label} pressed={mode === value} onClick={() => setMode(value)}>
             <Icon className="size-4" />
           </IconButton>
         ))}
@@ -28,22 +28,14 @@ export function ThemeToggle() {
   );
 }
 
-function IconButton(props: {
-  label: string;
-  checked?: boolean;
-  pressed?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+function IconButton(props: { label: string; pressed: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
-      role={props.checked === undefined ? undefined : "radio"}
-      aria-checked={props.checked}
       aria-label={props.label}
       title={props.label}
       aria-pressed={props.pressed}
       onClick={props.onClick}
-      className="grid size-8 place-items-center rounded-full text-fg-2 transition-colors hover:bg-raised hover:text-fg aria-checked:bg-raised aria-checked:text-fg aria-pressed:bg-raised aria-pressed:text-fg"
+      className="grid size-8 place-items-center rounded-full text-fg-2 transition-colors hover:bg-raised hover:text-fg aria-pressed:bg-raised aria-pressed:text-fg"
     >
       {props.children}
     </button>
