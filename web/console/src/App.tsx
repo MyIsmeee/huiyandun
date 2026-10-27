@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api } from "./lib/api";
+import { ApiError, api, type Site } from "./lib/api";
 import { LoginPage } from "./panels/LoginPage/LoginPage";
+import { Shell } from "./panels/Shell/Shell";
 
-type Gate = "checking" | "login" | "ready" | "unreachable";
+type Gate = { kind: "checking" | "login" | "unreachable" } | { kind: "ready"; site: Site };
 
 export function App() {
-  const [gate, setGate] = useState<Gate>("checking");
+  const [gate, setGate] = useState<Gate>({ kind: "checking" });
 
   // 没有"当前会话"接口：以 viewer 即可访问的 GET /api/site 探测是否已登录
   const probe = useCallback(
     () =>
       api.getSite().then(
-        () => setGate("ready"),
-        (e: unknown) => setGate(e instanceof ApiError && e.status === 401 ? "login" : "unreachable"),
+        (site) => setGate({ kind: "ready", site }),
+        (e: unknown) =>
+          setGate({ kind: e instanceof ApiError && e.status === 401 ? "login" : "unreachable" }),
       ),
     [],
   );
+  // 无论登出请求成败都重新探测：以服务端的实际会话状态决定显示哪一页
+  const logout = useCallback(() => api.logout().then(probe, probe), [probe]);
   // 请求 ID（crypto.randomUUID）与 Secure 会话 Cookie 都要求安全上下文：http 访问时直接说明，不发请求
   const secure = window.isSecureContext;
   useEffect(() => {
@@ -23,9 +27,9 @@ export function App() {
   }, [secure, probe]);
 
   if (!secure) return <Notice text="请通过 HTTPS 地址访问控制台" />;
-  if (gate === "login") return <LoginPage onLogin={probe} />;
-  if (gate === "unreachable") return <Notice text="无法连接服务器" onRetry={probe} />;
-  // TODO(#33): ready 时接入主界面布局
+  if (gate.kind === "login") return <LoginPage onLogin={probe} />;
+  if (gate.kind === "unreachable") return <Notice text="无法连接服务器" onRetry={probe} />;
+  if (gate.kind === "ready") return <Shell site={gate.site} onLogout={logout} />;
   return <main className="h-full bg-page" />;
 }
 

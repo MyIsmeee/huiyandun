@@ -1,8 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
-import { expectNoOverflow, presetTheme } from "./helpers";
+import { expectNoOverflow, presetTheme, SITE, UNAUTHORIZED } from "./helpers";
 
-const SITE = { id: "demo", name: "演示办公区", width_m: 40, height_m: 24, walls: [], zones: [], devices: [] };
-const UNAUTHORIZED = { code: "unauthorized", message: "未登录或会话失效", request_id: "r" };
 
 async function signedOut(page: Page) {
   await page.route("/api/site", (route) => route.fulfill({ status: 401, json: UNAUTHORIZED }));

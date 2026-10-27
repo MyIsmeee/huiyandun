@@ -1,5 +1,8 @@
 import { expect, type Page } from "@playwright/test";
 
+export const SITE = { id: "demo", name: "演示办公区", width_m: 40, height_m: 24, walls: [], zones: [], devices: [] };
+export const UNAUTHORIZED = { code: "unauthorized", message: "未登录或会话失效", request_id: "r" };
+
 /** V-P3：截图前检查文字溢出——块级元素的内容宽度不得超出自身 */
 export async function expectNoOverflow(page: Page): Promise<void> {
   const overflowing = await page.evaluate(() =>

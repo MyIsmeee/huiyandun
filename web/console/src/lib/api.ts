@@ -1,7 +1,7 @@
 import type { components } from "../api/schema";
 
 type Schemas = components["schemas"];
-type Site = Schemas["Site"];
+export type Site = Schemas["Site"];
 
 const TIMEOUT_MS = 10_000;
 
@@ -36,5 +36,6 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   login: (body: Schemas["LoginRequest"]) =>
     request<Schemas["LoginResponse"]>("POST", "/api/auth/login", body),
+  logout: () => request<undefined>("POST", "/api/auth/logout"),
   getSite: () => request<Site>("GET", "/api/site"),
 };
