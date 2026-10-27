@@ -8,12 +8,12 @@ from alembic.config import Config
 from sqlalchemy import URL
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from api_server.config import ApiConfig
+from api_server.config import DbConfig
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 
 
-def create_engine(config: ApiConfig) -> AsyncEngine:
+def create_engine(config: DbConfig) -> AsyncEngine:
     url = URL.create(
         "postgresql+asyncpg",
         username=config.db_user,
@@ -36,7 +36,7 @@ def create_engine(config: ApiConfig) -> AsyncEngine:
 
 
 @asynccontextmanager
-async def transaction(config: ApiConfig) -> AsyncIterator[AsyncConnection]:
+async def transaction(config: DbConfig) -> AsyncIterator[AsyncConnection]:
     """一次性连接上的单个事务，供命令行等服务进程之外的调用方使用。"""
     engine = create_engine(config)
     try:
@@ -46,7 +46,7 @@ async def transaction(config: ApiConfig) -> AsyncIterator[AsyncConnection]:
         await engine.dispose()
 
 
-def alembic_config(config: ApiConfig) -> Config:
+def alembic_config(config: DbConfig) -> Config:
     """迁移以属主账号执行：config 的 db_user 与 db_password_file 须指向属主。"""
     cfg = Config()
     cfg.set_main_option("script_location", str(MIGRATIONS))
