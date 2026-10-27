@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Site } from "../../src/lib/api";
 import { isEmpty, isoView, planView, WALL_HEIGHT_M, zoneAnchor, zoneLabel } from "../../src/scene/layout";
 
-const SITE: Site = { id: "s", name: "站点", width_m: 40, height_m: 24, walls: [], zones: [], devices: [] };
+const SITE: Site = { id: "s", name: "站点", width_m: 40, height_m: 24, walls: [], doors: [], zones: [], devices: [] };
 const SIZE = { width: 1100, height: 700 };
 // 与 layout.ts 的 INSET 一致：顶部留出 KPI 底板，底部留出断线提示
 const AREA = { left: 24, top: 112, right: SIZE.width - 24, bottom: SIZE.height - 56 };

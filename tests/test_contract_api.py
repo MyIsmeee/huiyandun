@@ -109,6 +109,7 @@ def site_sample() -> dict:
         "width_m": 40,
         "height_m": 24,
         "walls": [[0, 0, 40, 0]],
+        "doors": [[18, 0, 20, 0]],
         "zones": [zone | {"no_climb": True}],
         "devices": [device | {"state": "uncalibrated", "camera": camera}],
     }
@@ -122,12 +123,20 @@ def test_site_accepts_site_yaml_shape() -> None:
     "mutate",
     [
         lambda s: s["walls"].append([0, 0, 40]),
+        lambda s: s["doors"].append([18, 0, 20]),
         lambda s: s["zones"][0]["polygon"].append([1, 2, 3]),
         lambda s: s["devices"][0]["camera"]["calibration"].append([1, 2, 3]),
         lambda s: s["devices"][0]["camera"].update(homography=[[1, 0, 0], [0, 1, 0]]),
         lambda s: s["devices"][0]["camera"].update(homography=[[1, 0], [0, 1], [0, 0]]),
     ],
-    ids=["wall", "polygon-point", "calibration-point", "homography-rows", "homography-cols"],
+    ids=[
+        "wall",
+        "door",
+        "polygon-point",
+        "calibration-point",
+        "homography-rows",
+        "homography-cols",
+    ],
 )
 def test_site_rejects_wrong_array_length(mutate) -> None:
     site = site_sample()

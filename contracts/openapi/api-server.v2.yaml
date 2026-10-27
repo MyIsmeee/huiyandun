@@ -424,7 +424,7 @@ components:
         expires_at: { type: string, format: date-time }
     Site:
       type: object
-      required: [id, name, width_m, height_m, walls, zones, devices]
+      required: [id, name, width_m, height_m, walls, doors, zones, devices]
       properties:
         id: { type: string }
         name: { type: string }
@@ -433,6 +433,10 @@ components:
         walls:
           type: array
           description: 线段 [x1, y1, x2, y2]，单位米
+          items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+        doors:
+          type: array
+          description: 门洞线段 [x1, y1, x2, y2]，单位米，位于某段墙体上
           items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
         zones: { type: array, items: { $ref: "#/components/schemas/Zone" } }
         devices: { type: array, items: { $ref: "#/components/schemas/Device" } }
