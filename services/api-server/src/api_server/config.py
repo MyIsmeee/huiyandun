@@ -30,3 +30,6 @@ class ApiConfig(DbConfig):
     session_ttl_s: int = Field(
         28800, ge=300, le=86400, description="会话有效期，单位秒；到期须重新登录（C-BE-07）"
     )
+    site_file: Path = Field(
+        Path("/etc/hyd/site.yaml"), description="站点配置 site.yaml，启动时导入（FR-901）"
+    )

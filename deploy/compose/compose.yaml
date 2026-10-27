@@ -55,6 +55,7 @@ services:
     build: { context: ../.., dockerfile: services/api-server/Dockerfile }
     profiles: [core]
     secrets: [db_app_password]
+    volumes: ["../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro"]  # 站点配置（FR-901）
     depends_on: { migrate: { condition: service_completed_successfully } }
     networks: [core-net]
     healthcheck:

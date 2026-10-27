@@ -1,0 +1,92 @@
+{
+  "title": "SiteConfig",
+  "description": "站点配置 site.yaml：平面图、区域、摄像头、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["site", "walls", "zones", "cameras", "whitelist"],
+  "properties": {
+    "site": { "$ref": "#/$defs/SiteInfo" },
+    "walls": {
+      "type": "array",
+      "description": "线段 [x1, y1, x2, y2]，单位米",
+      "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+    },
+    "zones": { "type": "array", "items": { "$ref": "#/$defs/ZoneConfig" } },
+    "cameras": { "type": "array", "items": { "$ref": "#/$defs/CameraConfig" } },
+    "whitelist": {
+      "type": "array",
+      "description": "核心业务地址段，不得被处置（C-SEC-03）",
+      "items": {
+        "anyOf": [
+          { "type": "string", "format": "ipv4-network" },
+          { "type": "string", "format": "ipv6-network" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "SiteInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "width_m", "height_m", "mode"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "width_m": { "type": "number", "exclusiveMinimum": 0 },
+        "height_m": { "type": "number", "exclusiveMinimum": 0 },
+        "mode": {
+          "enum": ["bypass", "host_probe"],
+          "description": "部署模式，整个站点统一（HYD-ARCH-001 §6.2）；设备的 mode 取此值"
+        }
+      }
+    },
+    "ZoneConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "polygon", "no_climb"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "polygon": {
+          "type": "array",
+          "description": "平面坐标 [x, y]，单位米",
+          "minItems": 3,
+          "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+        },
+        "no_climb": { "type": "boolean" }
+      }
+    },
+    "CameraConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ip", "stream", "pose", "calibration"],
+      "properties": {
+        "id": { "type": "string" },
+        "ip": {
+          "anyOf": [{ "type": "string", "format": "ipv4" }, { "type": "string", "format": "ipv6" }]
+        },
+        "stream": { "type": "string", "description": "go2rtc 流名" },
+        "pose": { "$ref": "#/$defs/PoseConfig" },
+        "calibration": {
+          "type": "array",
+          "description": "标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时摄像头为 uncalibrated（FR-902）",
+          "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+        }
+      }
+    },
+    "PoseConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "height_m", "yaw_deg", "pitch_deg", "hfov_deg", "range_m"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "height_m": { "type": "number" },
+        "yaw_deg": { "type": "number" },
+        "pitch_deg": { "type": "number" },
+        "hfov_deg": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 180 },
+        "range_m": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

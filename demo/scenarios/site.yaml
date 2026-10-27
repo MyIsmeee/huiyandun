@@ -1,0 +1,17 @@
+# 演示站点（HYD-PLAN-007 §7、FR-901）；格式见 contracts/config/site.schema.json
+site: { id: demo-office, name: 演示办公区, width_m: 40, height_m: 24, mode: host_probe }  # 主剧本以主机探针模式运行
+walls: [[0, 0, 40, 0], [40, 0, 40, 24], [40, 24, 0, 24], [0, 24, 0, 0]]  # 线段 [x1, y1, x2, y2]
+zones:
+  - { id: z-01, name: 设备间外墙, polygon: [[30, 0], [40, 0], [40, 6], [30, 6]], no_climb: true }
+cameras:
+  - id: cam-01
+    ip: 172.30.0.11
+    stream: cam-01                               # go2rtc 流名
+    pose: { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 }
+    calibration: [[312, 540, 4.0, 6.0], [980, 552, 9.5, 6.2], [450, 300, 5.1, 14.0], [870, 310, 10.2, 13.8]]
+  - id: cam-02                                   # 主剧本中被攻击的摄像头
+    ip: 172.30.0.12
+    stream: cam-02
+    pose: { x: 38, y: 22, height_m: 3, yaw_deg: 225, pitch_deg: -30, hfov_deg: 90, range_m: 15 }
+    calibration: [[300, 545, 34.0, 18.0], [975, 550, 28.5, 17.8], [440, 305, 33.0, 10.0], [880, 300, 27.8, 10.2]]
+whitelist: [172.30.0.0/28]                        # 核心业务地址，不得被处置（C-SEC-03）

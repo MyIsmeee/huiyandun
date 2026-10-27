@@ -22,6 +22,7 @@ from api_server.app import create_app
 from api_server.auth import ROLES, hash_password, users
 from api_server.config import ApiConfig
 from api_server.db import alembic_config, transaction
+from api_server.site import SiteError
 from py_common.config import load_config
 from py_common.log import configure_logging
 
@@ -83,5 +84,9 @@ def main() -> None:
     elif args.command == "create-user":
         asyncio.run(_create_user(config, args.username, args.role, _read_password()))
     else:
+        try:
+            app = create_app(config)
+        except SiteError as e:
+            sys.exit(str(e))
         # log_config=None：uvicorn 的日志沿用根 logger 的 JSON 格式（CD-06）
-        uvicorn.run(create_app(config), host="0.0.0.0", port=config.port, log_config=None)
+        uvicorn.run(app, host="0.0.0.0", port=config.port, log_config=None)

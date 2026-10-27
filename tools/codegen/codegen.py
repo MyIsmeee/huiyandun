@@ -21,6 +21,7 @@ OPENAPI_ARGS = ["--use-title-as-name", "--allow-remote-refs"]
 # (契约, 输入格式, 包内生成位置, 额外参数)
 TARGETS = [
     (Path("contracts/events"), "jsonschema", Path("src/py_contracts/events"), []),
+    (Path("contracts/config"), "jsonschema", Path("src/py_contracts/config"), []),
     (
         Path("contracts/openapi/api-server.v2.yaml"),
         "openapi",
