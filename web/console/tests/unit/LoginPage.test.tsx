@@ -26,13 +26,13 @@ describe("登录页", () => {
     expect(api.login).toHaveBeenCalledWith({ username: "viewer", password: "secret" });
   });
 
-  it("登录成功但仍停留在登录页时提示会话未保存，不一直显示提交中", async () => {
+  it("登录成功但仍停留在登录页时提示未生效，不一直显示提交中", async () => {
     vi.spyOn(api, "login").mockResolvedValue({ role: "viewer", expires_at: "2026-10-27T00:00:00Z" });
     render(<LoginPage onLogin={() => Promise.resolve()} />);
 
     submit();
 
-    expect((await screen.findByRole("alert")).textContent).toBe("会话未能保存，请通过 HTTPS 地址访问");
+    expect((await screen.findByRole("alert")).textContent).toBe("登录未生效，请刷新页面后重试");
     expect(screen.getByRole("button", { name: "登录" })).toHaveProperty("disabled", false);
   });
 
@@ -48,13 +48,25 @@ describe("登录页", () => {
     expect(onLogin).not.toHaveBeenCalled();
   });
 
-  it("服务不可达时提示稍后重试", async () => {
-    vi.spyOn(api, "login").mockRejectedValue(new TypeError("Failed to fetch"));
+  it.each([
+    ["网络不通", new TypeError("Failed to fetch")],
+    ["服务端 5xx", new ApiError(500, "服务器内部错误")],
+  ])("%s时提示稍后重试", async (_, error) => {
+    vi.spyOn(api, "login").mockRejectedValue(error);
     render(<LoginPage onLogin={vi.fn()} />);
 
     submit();
 
     expect((await screen.findByRole("alert")).textContent).toBe("无法连接服务器，请稍后重试");
+  });
+
+  it("其他请求错误时显示服务端说明", async () => {
+    vi.spyOn(api, "login").mockRejectedValue(new ApiError(400, "password: Field required"));
+    render(<LoginPage onLogin={vi.fn()} />);
+
+    submit();
+
+    expect((await screen.findByRole("alert")).textContent).toBe("登录失败：password: Field required");
   });
 
   it("可切换显示密码", () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api } from "../../src/lib/api";
+import { ApiError, api } from "../../src/lib/api";
 
 function respond(status: number, body: unknown) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body, { status }));
@@ -25,5 +25,15 @@ describe("api", () => {
     respond(401, { code: "unauthorized", message: "未登录或会话失效", request_id: "r" });
 
     await expect(api.getSite()).rejects.toMatchObject({ status: 401, message: "未登录或会话失效" });
+  });
+
+  it("错误响应不是契约格式时按连接失败处理", async () => {
+    // 如 api-server 不可用时反向代理返回的 502 页面
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("<html>502</html>", { status: 502 }));
+
+    const error: unknown = await api.getSite().catch((e: unknown) => e);
+
+    expect(error).not.toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ message: "HTTP 502" });
   });
 });

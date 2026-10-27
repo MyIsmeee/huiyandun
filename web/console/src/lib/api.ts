@@ -25,8 +25,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) {
-    const error = (await res.json().catch(() => null)) as Schemas["Error"] | null;
-    throw new ApiError(res.status, error?.message ?? res.statusText);
+    const error = (await res.json().catch(() => null)) as Partial<Schemas["Error"]> | null;
+    // 非契约格式的错误响应来自 api-server 之外（如其不可用时反向代理返回的 502 页面），按连接失败处理
+    if (typeof error?.message !== "string") throw new Error(`HTTP ${res.status}`);
+    throw new ApiError(res.status, error.message);
   }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }

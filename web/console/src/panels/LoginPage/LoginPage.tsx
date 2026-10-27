@@ -22,11 +22,11 @@ const CAPABILITIES: { icon: LucideIcon; title: string; text: string }[] = [
 ];
 
 function reason(error: unknown): string {
-  if (!(error instanceof ApiError)) return "无法连接服务器，请稍后重试";
+  if (!(error instanceof ApiError) || error.status >= 500) return "无法连接服务器，请稍后重试";
   return error.status === 401 ? "用户名或密码错误" : `登录失败：${error.message}`;
 }
 
-/** onLogin 完成后若仍渲染登录页，说明会话 Cookie 未被保存（Secure Cookie 不随 http 访问保存） */
+/** onLogin 完成后若仍渲染登录页，说明登录未生效（如会话 Cookie 未被浏览器保存），不能一直停在提交中 */
 export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -41,7 +41,7 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
     try {
       await api.login({ username, password });
       await onLogin();
-      setError("会话未能保存，请通过 HTTPS 地址访问");
+      setError("登录未生效，请刷新页面后重试");
     } catch (e) {
       setError(reason(e));
     }
