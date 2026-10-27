@@ -6,18 +6,24 @@ const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 10_000;
 const POLICY_VIOLATION = 1008; // 会话失效或已登出
 
-export type Freshness = "live" | "delayed" | "offline";
+export type Freshness = "connecting" | "live" | "delayed" | "offline";
 
 interface ConnectionState {
   open: boolean;
+  /** 首次连接尚无结果：不按断线呈现 */
+  connecting: boolean;
   /** 最后收到数据的时刻（毫秒时间戳）；连上时记为当前时刻 */
   lastFrameAt: number | null;
 }
 
-export const useConnection = create<ConnectionState>()(() => ({ open: false, lastFrameAt: null }));
+export const useConnection = create<ConnectionState>()(() => ({
+  open: false,
+  connecting: true,
+  lastFrameAt: null,
+}));
 
-export function freshness({ open, lastFrameAt }: ConnectionState, now: number): Freshness {
-  if (!open) return "offline";
+export function freshness({ open, connecting, lastFrameAt }: ConnectionState, now: number): Freshness {
+  if (!open) return connecting ? "connecting" : "offline";
   return lastFrameAt !== null && now - lastFrameAt <= STALE_MS ? "live" : "delayed";
 }
 
@@ -38,12 +44,12 @@ export function connect(onRejected: () => void): () => void {
     socket.onopen = () => {
       opened = true;
       retryMs = RETRY_MIN_MS;
-      useConnection.setState({ open: true, lastFrameAt: Date.now() });
+      useConnection.setState({ open: true, connecting: false, lastFrameAt: Date.now() });
     };
     socket.onmessage = () => useConnection.setState({ lastFrameAt: Date.now() });
     socket.onclose = (event) => {
-      useConnection.setState({ open: false });
-      if (stopped) return;
+      if (stopped) return; // 已停止的旧连接不得改写新连接的状态
+      useConnection.setState({ open: false, connecting: false });
       if (!opened || event.code === POLICY_VIOLATION) onRejected();
       timer = setTimeout(open, retryMs);
       retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);

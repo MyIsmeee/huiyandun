@@ -1,4 +1,4 @@
-import { Hourglass, type LucideIcon, Wifi, WifiOff } from "lucide-react";
+import { Hourglass, LoaderCircle, type LucideIcon, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { type Freshness, freshness, useConnection } from "../../store/connection";
 
@@ -17,6 +17,7 @@ function useNow(intervalMs: number): number {
 
 // 不使用 §3.2 状态色（V-S2）：延迟用"不确定 / 非实时"样式，断线以反色突出（V-U3 顶栏转告警态）
 const STYLE: Record<Freshness, string> = {
+  connecting: "border-line text-fg-3",
   live: "border-line text-fg-2",
   delayed: "border-dashed border-uncertain text-uncertain",
   offline: "border-fg bg-fg text-page",
@@ -26,12 +27,13 @@ const STYLE: Record<Freshness, string> = {
 export function ConnectionStatus() {
   const connection = useConnection();
   const state = freshness(connection, useNow(1000));
-  const [Icon, text]: [LucideIcon, string] =
-    state === "live"
-      ? [Wifi, "实时"]
-      : state === "delayed"
-        ? [Hourglass, `延迟 · 最后更新 ${formatTime(connection.lastFrameAt)}`]
-        : [WifiOff, "断线 · 重连中"];
+  const labels: Record<Freshness, [LucideIcon, string]> = {
+    connecting: [LoaderCircle, "连接中"],
+    live: [Wifi, "实时"],
+    delayed: [Hourglass, `延迟 · 最后更新 ${formatTime(connection.lastFrameAt)}`],
+    offline: [WifiOff, "断线 · 重连中"],
+  };
+  const [Icon, text] = labels[state];
   return (
     <p
       role="status"

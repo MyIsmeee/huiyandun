@@ -24,7 +24,8 @@ const KPIS = [
 export function Shell(props: { site: Site; onLogout: () => Promise<void>; onRejected: () => void }) {
   const { site, onLogout, onRejected } = props;
   const [logout, setLogout] = useState<"idle" | "pending" | "failed">("idle");
-  const { open, lastFrameAt } = useConnection();
+  const { open, connecting, lastFrameAt } = useConnection();
+  const offline = !open && !connecting;
   useEffect(() => connect(onRejected), [onRejected]);
 
   async function handleLogout() {
@@ -35,7 +36,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
 
   return (
     <div
-      data-live={open}
+      data-live={!offline}
       className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[48px_minmax(0,1fr)_104px] gap-2 bg-page p-2 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-rows-[48px_minmax(0,1fr)_120px]"
     >
       <header className="col-span-2 flex items-center gap-3 px-2">
@@ -70,7 +71,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       {/* 断线时场景饱和度降至 50%（V-U3） */}
       <section
         aria-label="场景"
-        className={`relative overflow-hidden rounded-2xl border border-line ${open ? "" : "saturate-50"}`}
+        className={`relative overflow-hidden rounded-2xl border border-line ${offline ? "saturate-50" : ""}`}
       >
         {/* TODO(#33): 由平面图生成场景 */}
         {/* 4 张卡共用一块半透明底板，计为一个浮层（V-L3） */}
@@ -84,7 +85,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
             </li>
           ))}
         </ul>
-        {!open && (
+        {offline && (
           <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-dashed border-uncertain bg-panel/80 px-4 py-1.5 text-sm text-uncertain backdrop-blur">
             <Clock aria-hidden className="size-4" />
             数据非实时 · 最后更新 {formatTime(lastFrameAt)}

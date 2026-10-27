@@ -15,13 +15,14 @@ class FakeSocket {
 const latest = () => FakeSocket.all.at(-1) as FakeSocket;
 
 describe("freshness", () => {
-  it("未连接为断线", () => {
-    expect(freshness({ open: false, lastFrameAt: 0 }, 0)).toBe("offline");
+  it("首次连接尚无结果为连接中，之后未连接为断线", () => {
+    expect(freshness({ open: false, connecting: true, lastFrameAt: null }, 0)).toBe("connecting");
+    expect(freshness({ open: false, connecting: false, lastFrameAt: 0 }, 0)).toBe("offline");
   });
 
   it("距上一帧不超过 2 个心跳周期为实时，超过为延迟", () => {
-    expect(freshness({ open: true, lastFrameAt: 0 }, STALE_MS)).toBe("live");
-    expect(freshness({ open: true, lastFrameAt: 0 }, STALE_MS + 1)).toBe("delayed");
+    expect(freshness({ open: true, connecting: false, lastFrameAt: 0 }, STALE_MS)).toBe("live");
+    expect(freshness({ open: true, connecting: false, lastFrameAt: 0 }, STALE_MS + 1)).toBe("delayed");
   });
 });
 
@@ -46,6 +47,15 @@ describe("connect", () => {
     vi.advanceTimersByTime(3000);
     latest().onmessage?.();
     expect(useConnection.getState().lastFrameAt).toBe(Date.now());
+  });
+
+  it("首次连接失败后不再视为连接中", () => {
+    connect(vi.fn());
+    expect(useConnection.getState().connecting).toBe(true);
+
+    latest().onclose?.({ code: 1006 });
+
+    expect(useConnection.getState().connecting).toBe(false);
   });
 
   it("断开后按 1、2、4 s 退避重连，连上后重置", () => {
@@ -98,6 +108,18 @@ describe("connect", () => {
     vi.advanceTimersByTime(60_000);
 
     expect(FakeSocket.all.length).toBe(1);
-    expect(useConnection.getState()).toEqual({ open: false, lastFrameAt: null });
+    expect(useConnection.getState()).toEqual(useConnection.getInitialState());
+  });
+
+  it("已停止的旧连接晚到的关闭事件不改写新连接的状态", () => {
+    const stop = connect(vi.fn());
+    const old = latest();
+    stop();
+    connect(vi.fn());
+    latest().onopen?.();
+
+    old.onclose?.({ code: 1000 });
+
+    expect(useConnection.getState().open).toBe(true);
   });
 });
