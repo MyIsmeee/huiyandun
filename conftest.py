@@ -41,12 +41,19 @@ async def wait_ready(config: ApiConfig, timeout_s: float = 60) -> None:
 
 
 @pytest.fixture(scope="session")
-def db(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[ApiConfig, ApiConfig]]:
-    """返回（属主配置，应用配置），数据库已迁移至最新版本。"""
+def db_secrets(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    """各数据库账号的口令文件：owner 为属主，app 为 hyd_app，audit 为 hyd_audit。"""
     secrets_dir = tmp_path_factory.mktemp("secrets")
-    owner_pw, app_pw = secrets_dir / "owner", secrets_dir / "app"
-    owner_pw.write_text(secrets.token_urlsafe(16))
-    app_pw.write_text(secrets.token_urlsafe(16))
+    paths = {name: secrets_dir / name for name in ("owner", "app", "audit")}
+    for path in paths.values():
+        path.write_text(secrets.token_urlsafe(16))
+    return paths
+
+
+@pytest.fixture(scope="session")
+def db(db_secrets: dict[str, Path]) -> Iterator[tuple[ApiConfig, ApiConfig]]:
+    """返回（属主配置，应用配置），数据库已迁移至最新版本。"""
+    owner_pw, app_pw = db_secrets["owner"], db_secrets["app"]
     image = yaml.safe_load((DEPLOY / "compose.yaml").read_text(encoding="utf-8"))["services"][
         "postgres"
     ]["image"]
@@ -55,6 +62,7 @@ def db(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[ApiConfig, Ap
         "-e", f"POSTGRES_PASSWORD={owner_pw.read_text()}", "-e", "POSTGRES_DB=hyd",
         "-v", f"{DEPLOY / 'postgres-init'}:/docker-entrypoint-initdb.d:ro",
         "-v", f"{app_pw}:/run/secrets/db_app_password:ro",
+        "-v", f"{db_secrets['audit']}:/run/secrets/db_audit_password:ro",
         image,
     )  # fmt: skip
     try:

@@ -5,6 +5,7 @@ import asyncio
 import logging
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 from pydantic import Field
 from sqlalchemy.exc import DBAPIError
@@ -19,6 +20,11 @@ log = logging.getLogger(__name__)
 
 
 class AuditConfig(DbConfig):
+    # 只有 hyd_audit 可写封存记录（迁移 0003）
+    db_user: str = Field("hyd_audit", description="数据库账号：只读审计日志、只追加封存记录")
+    db_password_file: Path = Field(
+        Path("/run/secrets/db_audit_password"), description="数据库口令文件（G-14）"
+    )
     seal_interval_s: float = Field(
         3600, ge=60, le=86400, description="检查并封存已结束日期的周期，单位秒"
     )
