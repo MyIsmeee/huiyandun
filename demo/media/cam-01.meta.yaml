@@ -1,6 +1,6 @@
-# 演示素材登记（DM-12、R-02）：cam-01.mp4 由 make demo-media 按 segments 顺序剪接，单次播放 ≥ 8 分钟（FR-306）
-source: 公开网络监控视频，网址未记录
-license: 未取得授权：只在本地使用，不入库、不对外分发
+# 开发调试素材登记（DM-12、R-02）：cam-01.mp4 由 make demo-media 按 segments 顺序剪接，单次播放 ≥ 8 分钟（FR-306）
+source: bilibili 公开视频
+license: 开发、调试与测试用，不入库、不对外分发
 anonymization: 去除音轨；界面中人体默认模糊（FR-106）
 # 原始片段放在 src/；首尾片段不同，循环衔接处不重复画面（FR-302）
 segments:
