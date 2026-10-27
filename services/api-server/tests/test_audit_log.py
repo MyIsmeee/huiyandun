@@ -102,3 +102,17 @@ def test_record_rolls_back_with_business_transaction(db: tuple[ApiConfig, ApiCon
     with pytest.raises(RuntimeError):
         in_transaction(db[1], fail_after_record)
     assert count(db[1], request_id) == 0
+
+
+def test_idle_transaction_is_terminated(db: tuple[ApiConfig, ApiConfig]) -> None:
+    """持有事务却空闲超过 db_timeout_s 即被数据库终止，事务不会无限期地跨过零点（审计封存宽限期）。"""
+    config = db[1].model_copy(update={"db_timeout_s": 1})
+
+    async def stall(conn: AsyncConnection) -> None:
+        await conn.execute(text("SELECT 1"))
+        await asyncio.sleep(1.5)
+        await conn.execute(text("SELECT 1"))
+
+    # 服务端终止会话后，客户端报告连接已关闭
+    with pytest.raises(DBAPIError, match="connection is closed"):
+        in_transaction(config, stall)
