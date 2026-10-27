@@ -65,3 +65,34 @@ export async function sceneSettled(page: Page, state: "ready" | "2d" | "error" =
     await expect(scene).toHaveAttribute("data-scene", state, { timeout: 50 });
   }).toPass({ intervals: [50] });
 }
+
+/** 位于站点中部的摄像头，状态由参数给定（设备与人员化身截图共用） */
+export const camera = (state: string, id = "cam-01") => ({
+  id,
+  type: "camera",
+  ip: "172.30.0.11",
+  mode: "host_probe",
+  state,
+  camera: {
+    stream: id,
+    pose: { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90, range_m: 6 },
+    calibration: [],
+    homography: null,
+    reproj_error_m: null,
+  },
+});
+
+/** 以给定设备打开主界面，返回模拟的 WS 服务端一侧 */
+export async function open(page: Page, devices: object[]) {
+  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices } }));
+  const sockets = await mockSocket(page);
+  await page.goto("/");
+  await sceneSettled(page);
+  return sockets;
+}
+
+/** 放大到设备清晰可辨；放大后区域名称移出视口，文字溢出检查须在此之前（V-P3） */
+export async function zoomIn(page: Page) {
+  for (let i = 0; i < 3; i += 1) await page.getByRole("button", { name: "放大" }).click();
+  await page.clock.runFor(600);
+}

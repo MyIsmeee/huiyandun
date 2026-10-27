@@ -5,6 +5,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import type { Site } from "../lib/api";
 import { useTheme } from "../theme/store";
 import { DeviceMarkers } from "./DeviceMarkers";
+import { PersonAvatars } from "./PersonAvatars";
 import type { Camera } from "./devices";
 import { type IsoView, type Vec3, WALL_HEIGHT_M, WALL_THICKNESS_M } from "./layout";
 import { type Lighting, lightingAt, lightStep } from "./lighting";
@@ -35,7 +36,7 @@ function useLighting(): Lighting {
 }
 
 /**
- * 由平面图生成的 3D 场景（§5.1 L0 地面与栅格、L1 墙体与门洞、区域轮廓、L2 设备、L3 视场、光照）。
+ * 由平面图生成的 3D 场景（§5.1 L0 地面与栅格、L1 墙体与门洞、区域轮廓、L2 设备、L3 视场、L4 人员、光照）。
  * 按需渲染（frameloop="demand"）：无常驻动效（V-A3），只有对应真实告警的动效持续请求重绘。
  * flat 关闭色调映射，地面等色值与规范一致；阴影另以阴影材质叠加在地面上，不改变地面色值。
  */
@@ -67,6 +68,7 @@ export default function Scene3D(props: { site: Site; cameras: Camera[]; view: Is
         <Wall key={i} piece={piece} near={isNearSide(piece.wall, site, view.toCamera)} color={colors.wall} />
       ))}
       <DeviceMarkers cameras={cameras} />
+      <PersonAvatars cameras={cameras} />
     </Canvas>
   );
 }
