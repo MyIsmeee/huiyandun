@@ -22,6 +22,22 @@ components:
     purpose: 自研 Python 服务的基础镜像（api-server、audit-service）
     owner: MyIsmeee
     telemetry: 无
+  # 镜像内的 ffmpeg 为 GPL 构建，作为独立进程运行（G-08）
+  - name: go2rtc
+    version: "1.9.15"
+    image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
+    license: MIT
+    purpose: 摄像头统一拉流，分发给检测与 WebRTC 回放（REUSE-03）
+    owner: MyIsmeee
+    telemetry: 无；WebRTC 默认的公网 STUN 已在 go2rtc.yaml 中关闭
+  # 仅 demo profile；镜像内的 ffmpeg 为 GPL 构建，作为独立进程运行（G-08），也用于 make demo-media 剪接素材
+  - name: MediaMTX
+    version: "1.21.3"
+    image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
+    license: MIT
+    purpose: 无真实摄像头时循环推流演示素材为多路 RTSP（REUSE-04）
+    owner: MyIsmeee
+    telemetry: 无
   # 仅在构建阶段复制 uv 二进制，不进入运行镜像
   - name: uv
     version: "0.13.5"

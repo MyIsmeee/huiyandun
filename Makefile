@@ -1,4 +1,4 @@
-.PHONY: lint lint-py lint-web test codegen codegen-check doctor demo-up demo-down demo-health \
+.PHONY: lint lint-py lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
 	verify-models test-rules llm-check demo-run
 
 WEB = pnpm --dir web/console
@@ -47,6 +47,11 @@ $(DB_SECRETS):
 demo-up: $(DB_SECRETS)
 	@chmod 700 $(SECRETS) && chmod 644 $(DB_SECRETS)
 	$(COMPOSE) up -d --build
+
+# 按 demo/media/*.meta.yaml 剪接演示视频（DM-12、FR-306）；原始片段放在 demo/media/src/
+demo-media:
+	uv run python tools/dev/build_media.py demo/media \
+		"$$(docker compose -f deploy/compose/compose.yaml --profile demo config --images mediamtx)"
 
 demo-down:
 	$(COMPOSE) down

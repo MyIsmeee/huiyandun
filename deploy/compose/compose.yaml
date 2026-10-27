@@ -79,8 +79,38 @@ services:
       start_period: 30s
       start_interval: 2s
 
+  # 流接入（REUSE-03）：摄像头只被拉流一次，检测与浏览器都经 go2rtc 取流（C-CV-10）
+  go2rtc:
+    image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
+    profiles: [vision]
+    volumes: ["./go2rtc.yaml:/config/go2rtc.yaml:ro"]
+    networks: [demo-net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:1984/api"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 无真实摄像头时循环推流演示素材（REUSE-04）；素材由 make demo-media 生成
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
+    profiles: [demo]
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ../../demo/media:/media:ro
+    networks: [demo-net]
+    healthcheck:
+      # 全部路径都已有推流才算就绪：素材缺失时 ffmpeg 反复退出，路径保持未就绪
+      test: ["CMD-SHELL", "s=$$(wget -qO- http://127.0.0.1:9997/v3/paths/list) && case $$s in *'\"ready\":false'*) exit 1 ;; *'\"ready\":true'*) exit 0 ;; *) exit 1 ;; esac"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 networks:
   core-net:
+    internal: true
+  # 演示视频源与流接入；不连接宿主机外部网络（DP-04、DP-05）
+  demo-net:
     internal: true
 
 volumes:
