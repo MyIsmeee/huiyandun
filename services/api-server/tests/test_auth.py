@@ -10,12 +10,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from api_server.app import create_app
-from api_server.auth import ROLES, require
+from api_server.auth import ROLES, require, verify_password
 from api_server.config import ApiConfig
 from api_server.db import transaction
 from py_contracts.api import Error, LoginResponse
 
 RID = {"X-Request-ID": "req-auth"}
+# cryptography 47.0.0 以 hash_password 的参数生成；口令 legacy-pass-1 仅用于本测试
+LEGACY_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$optaESX4KEG8UhucRQ1oEw"
+    "$G0IdQX27ZzmJx1ZDiUvF+ZrVDvkvENxU343bXFzyQ0I"
+)
 # HYD-PLAN-007 §3：viewer ⊂ operator ⊂ admin，viewer ⊂ auditor
 ALLOWED = {
     ("viewer", "viewer"), ("viewer", "operator"), ("viewer", "admin"), ("viewer", "auditor"),
@@ -105,3 +110,9 @@ def test_healthz_checks_database_without_login(client: TestClient) -> None:
     client.cookies.clear()
 
     assert client.get("/healthz").status_code == 204
+
+
+def test_verifies_hash_from_earlier_cryptography_release() -> None:
+    """升级 cryptography 后，已有账户的口令哈希仍能校验，账户仍能登录。"""
+    assert verify_password("legacy-pass-1", LEGACY_HASH)
+    assert not verify_password("legacy-pass-2", LEGACY_HASH)
