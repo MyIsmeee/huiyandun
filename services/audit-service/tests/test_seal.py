@@ -158,7 +158,9 @@ def test_seal_once_survives_database_failure_and_catches_up(
 
     with caplog.at_level(logging.INFO, logger="audit_service.cli"):
         asyncio.run(seal_once(audit_config(app, **failure)))
-        assert [r.message for r in caplog.records] == ["audit.seal_failed"]
+        assert [r.message for r in caplog.records if r.name == "audit_service.cli"] == [
+            "audit.seal_failed"
+        ]
         caplog.clear()
 
         asyncio.run(seal_once(audit_config(app)))
