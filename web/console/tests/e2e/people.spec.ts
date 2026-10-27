@@ -92,3 +92,16 @@ test("断线：化身与事件卡保留，场景降饱和并提示数据非实�
   await expect(scene(page).getByRole("status")).toBeVisible();
   await expect(scene(page)).toHaveScreenshot("person-disconnected.png");
 });
+
+test("放大后人员从视口外走入，化身可见（FR-102）", async ({ page }) => {
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  const at = (x: number) => ({ ...BASE, camera_id: "cam-01", track_id: 7, x, y: 12, uncertainty_m: 0.4 });
+  // 首次出现在视口外：three 按首次位置计算实例的包围球，之后若不重算，走入视口也会被剔除
+  ws?.send(JSON.stringify({ channel: "tracks", data: at(4) }));
+  await page.clock.runFor(500);
+  ws?.send(JSON.stringify({ channel: "tracks", data: at(18) }));
+  await page.clock.runFor(500);
+
+  await expect(scene(page)).toHaveScreenshot("person-walk-in.png");
+});

@@ -30,6 +30,8 @@ export function Instanced(props: { geometry: BufferGeometry; items: Instance[]; 
     });
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    // 视锥剔除用整组实例的包围球，three 只在首次绘制时计算：实例移动后须重算，否则走入视口的实例不被绘制
+    mesh.computeBoundingSphere();
     invalidate();
   }, [items, invalidate]);
   if (items.length === 0) return null;
