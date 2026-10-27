@@ -62,3 +62,19 @@ test("平面图没有墙体与区域时显示空场景", async ({ page }) => {
   await expect(scene(page).getByText("平面图中没有墙体与区域")).toBeVisible();
   await expect(scene(page)).toHaveScreenshot("scene-empty.png");
 });
+
+// §5.1 光照：太阳方位与高度角随本地时间变化，夜间为月光；只改变明暗与阴影方向
+for (const [name, time] of [
+  ["noon", "2026-10-28T04:00:00Z"], // 上海 12:00
+  ["dusk", "2026-10-27T09:30:00Z"], // 上海 17:30
+  ["night", "2026-10-27T14:00:00Z"], // 上海 22:00
+] as const) {
+  test(`场景光照随时间变化：${name}`, async ({ page }) => {
+    await page.clock.pauseAt(new Date(time));
+    await signedIn(page);
+    await page.goto("/");
+    await sceneSettled(page);
+
+    await expect(scene(page)).toHaveScreenshot(`scene-${name}.png`);
+  });
+}

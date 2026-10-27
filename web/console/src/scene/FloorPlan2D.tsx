@@ -1,7 +1,8 @@
 import type { Site } from "../lib/api";
 import { type View, WALL_THICKNESS_M } from "./layout";
+import { wallPieces } from "./walls";
 
-/** 无 WebGL2 时的 2D 俯视平面图（C-FE-08），图层与配色同 3D 场景（§5.1） */
+/** 无 WebGL2 时的 2D 俯视平面图（C-FE-08），图层与配色同 3D 场景（§5.1）；门洞处墙体断开 */
 export function FloorPlan2D({ site, view }: { site: Site; view: View }) {
   const [left, top] = view.project([0, 0, 0]);
   const grid: string[] = [];
@@ -20,7 +21,9 @@ export function FloorPlan2D({ site, view }: { site: Site; view: View }) {
             className="fill-fg-2/8 stroke-fg-2"
           />
         ))}
-        {site.walls.map(([x1, y1, x2, y2], i) => (
+        {wallPieces(site.walls, site.doors)
+          .filter((piece) => piece.bottom === 0) // 俯视看不到门楣
+          .map(({ from: [x1, y1], to: [x2, y2] }, i) => (
           <line
             key={i}
             x1={x1}
@@ -28,7 +31,6 @@ export function FloorPlan2D({ site, view }: { site: Site; view: View }) {
             x2={x2}
             y2={y2}
             strokeWidth={WALL_THICKNESS_M}
-            strokeLinecap="square"
             className="stroke-fg-3"
           />
         ))}
