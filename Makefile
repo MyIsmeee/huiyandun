@@ -1,19 +1,31 @@
-.PHONY: lint test codegen codegen-check doctor demo-up demo-down demo-health verify-models \
-	test-rules llm-check demo-run
+.PHONY: lint lint-py lint-web test codegen codegen-check doctor demo-up demo-down demo-health \
+	verify-models test-rules llm-check demo-run
 
-lint:
+WEB = pnpm --dir web/console
+
+lint: lint-py lint-web
+
+lint-py:
 	uv run ruff check .
 	uv run ruff format --check .
+
+lint-web:
+	$(WEB) exec eslint .
+	$(WEB) exec tsc --noEmit
 
 # --all-packages：测试会导入 libs/*、services/* 工作区包
 test:
 	uv run --all-packages pytest
+	$(WEB) exec vitest run
 
+# web/console/src/api 由 openapi-typescript 生成，命令见 web/console/package.json
 codegen:
 	uv run python tools/codegen/codegen.py
+	$(WEB) run codegen
 
 codegen-check:
 	uv run python tools/codegen/codegen.py --check
+	$(WEB) run codegen:check
 
 COMPOSE = docker compose -f deploy/compose/compose.yaml \
 	--profile core --profile vision --profile security --profile demo
