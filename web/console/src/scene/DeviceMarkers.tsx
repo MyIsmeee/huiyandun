@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
   BoxGeometry,
   type BufferGeometry,
@@ -15,7 +15,7 @@ import {
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { useConnection } from "../store/connection";
-import { prefersReducedMotion, useTheme } from "../theme/store";
+import { useTheme } from "../theme/store";
 import { type Camera, deviceLook, type Look, STATUS } from "./devices";
 
 /**
@@ -121,14 +121,26 @@ function Extras({ camera: { pose }, look }: Item) {
   );
 }
 
+const REDUCE = "(prefers-reduced-motion: reduce)";
+const onReduceChange = (notify: () => void) => {
+  const query = matchMedia(REDUCE);
+  query.addEventListener("change", notify);
+  return () => query.removeEventListener("change", notify);
+};
+
+/** 动效是否允许：断线、降低动效开关或系统 prefers-reduced-motion 任一生效即停止，且随其变化（V-U3、V-A4） */
+function useMotion(): boolean {
+  const live = useConnection((s) => s.open || s.connecting);
+  const user = useTheme((s) => s.reducedMotion);
+  const system = useSyncExternalStore(onReduceChange, () => matchMedia(REDUCE).matches);
+  return live && !user && !system;
+}
+
 /** 视场：地面扇形，半径为视距、张角为水平视场角（§5.1 L3） */
 function Cone({ pose, cone }: { pose: Camera["pose"]; cone: NonNullable<Look["cone"]> }) {
   const material = useRef<MeshBasicMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
-  // 断线或降低动效时不呼吸（V-U3、V-A4）
-  const live = useConnection((s) => s.open || s.connecting);
-  useTheme((s) => s.reducedMotion);
-  const breathing = cone.breathe && live && !prefersReducedMotion();
+  const breathing = useMotion() && cone.breathe;
   useEffect(() => {
     if (material.current) material.current.opacity = cone.opacity;
     invalidate();
