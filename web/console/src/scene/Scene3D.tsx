@@ -21,7 +21,7 @@ export default function Scene3D({ site, view, onReady }: { site: Site; view: Iso
   useTheme((s) => s.theme); // 订阅主题：切换时重新渲染并取色
   const colors = themeColors();
   return (
-    <Canvas orthographic flat frameloop="demand" camera={{ near: 1, far: 1000 }}>
+    <Canvas orthographic flat frameloop="demand">
       <IsoCamera view={view} />
       <FirstFrame onReady={onReady} />
       <ambientLight intensity={1.5} />
@@ -49,6 +49,8 @@ function IsoCamera({ view }: { view: IsoView }) {
     const camera = state.camera as OrthographicCamera;
     camera.position.set(...view.position);
     camera.zoom = view.zoom;
+    camera.near = view.near;
+    camera.far = view.far;
     camera.lookAt(...view.target);
     camera.updateProjectionMatrix();
     state.invalidate();

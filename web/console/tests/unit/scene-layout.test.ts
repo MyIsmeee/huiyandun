@@ -48,6 +48,24 @@ describe("isoView", () => {
     expect(south[1]).toBeGreaterThan(origin[1]);
   });
 
+  it("大站点的包围盒也完整落在相机可见深度内", () => {
+    const big = { ...SITE, width_m: 1000, height_m: 800 };
+    const v = isoView(big, SIZE);
+    const back = v.position.map((p, i) => p - (v.target[i] ?? 0));
+    const length = Math.hypot(...back);
+    const depth = ([x, y, z]: number[]) =>
+      ((v.position[0] - (x ?? 0)) * (back[0] ?? 0) +
+        (v.position[1] - (y ?? 0)) * (back[1] ?? 0) +
+        (v.position[2] - (z ?? 0)) * (back[2] ?? 0)) /
+      length;
+    for (const x of [0, 1000])
+      for (const y of [0, WALL_HEIGHT_M])
+        for (const z of [0, 800]) {
+          expect(depth([x, y, z])).toBeGreaterThan(v.near);
+          expect(depth([x, y, z])).toBeLessThan(v.far);
+        }
+  });
+
   it("相机沿等距方向看向目标点", () => {
     const d = view.position.map((p, i) => p - (view.target[i] ?? 0));
     expect(d[0]).toBeCloseTo(d[1] ?? 0);
