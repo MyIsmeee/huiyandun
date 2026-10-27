@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type Route, test } from "@playwright/test";
 import { expectNoOverflow, presetTheme, SITE, UNAUTHORIZED } from "./helpers";
 
 async function signedIn(page: Page) {
@@ -50,4 +50,20 @@ test("退出登录后回到登录页", async ({ page }) => {
   await page.getByRole("button", { name: "退出登录" }).click();
 
   await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+});
+
+test("退出失败时停留在主界面并提示，请求期间按钮不可再点", async ({ page }) => {
+  await signedIn(page);
+  let intercept: (route: Route) => void = () => {};
+  const intercepted = new Promise<Route>((resolve) => (intercept = resolve));
+  await page.route("/api/auth/logout", (route) => intercept(route));
+  await page.goto("/");
+  const button = page.getByRole("button", { name: "退出登录" });
+  await button.click();
+
+  await expect(button).toBeDisabled();
+  await (await intercepted).fulfill({ status: 500, json: { ...UNAUTHORIZED, code: "internal_server_error" } });
+  await expect(page.getByRole("alert")).toHaveText("退出失败，请重试");
+  await expect(button).toBeEnabled();
+  await expect(page.getByText("演示办公区")).toBeVisible();
 });

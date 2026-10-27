@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 
 export default defineConfig(
   // src/api 由 make codegen 生成，不手改
-  { ignores: ["dist", "src/api"] },
+  { ignores: ["dist", "dist-e2e", "src/api"] },
   js.configs.recommended,
   tseslint.configs.strict,
   reactHooks.configs.flat.recommended,
