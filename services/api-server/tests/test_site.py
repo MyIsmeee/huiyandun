@@ -147,3 +147,29 @@ def test_door_on_any_wall_is_accepted(tmp_path: Path) -> None:
     result = site.load(write(tmp_path, edited(lambda d: d.update(doors=[[0, 24, 0, 22]]))))
 
     assert [d.root for d in result.doors] == [[0, 24, 0, 22]]
+
+
+def test_doors_without_value_mean_no_doors(tmp_path: Path) -> None:
+    # YAML 中写成 `doors:` 而未填值时为 null
+    result = site.load(write(tmp_path, edited(lambda d: d.update(doors=None))))
+
+    assert result.doors == []
+
+
+@pytest.mark.parametrize(
+    ("walls", "door", "reason"),
+    [
+        ([], [18, 0, 18, 0], "门洞长度为 0"),
+        ([[5, 5, 5, 5]], [5, 5, 6, 5], "门洞不在任何墙体上"),  # 长度为 0 的墙体不承载门洞
+    ],
+    ids=["zero-length-door", "zero-length-wall"],
+)
+def test_degenerate_door_or_wall_is_rejected(
+    tmp_path: Path, walls: list[list[float]], door: list[float], reason: str
+) -> None:
+    data = edited(lambda d: d.update(walls=d["walls"] + walls, doors=[door]))
+
+    with pytest.raises(site.SiteError) as exc:
+        site.load(write(tmp_path, data))
+
+    assert exc.value.errors == [f"doors.0: {reason}"]

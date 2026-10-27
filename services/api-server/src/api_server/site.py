@@ -44,13 +44,15 @@ def _on_wall(x: float, y: float, wall: list[float]) -> bool:
     return off <= DOOR_TOLERANCE_M and -DOOR_TOLERANCE_M <= along <= length + DOOR_TOLERANCE_M
 
 
-def _misplaced_doors(doors: list[list[float]], walls: list[list[float]]) -> list[str]:
-    """门洞两端须落在同一段墙体上（FR-904）。"""
-    return [
-        f"doors.{i}: 门洞不在任何墙体上"
-        for i, (x1, y1, x2, y2) in enumerate(doors)
-        if not any(_on_wall(x1, y1, w) and _on_wall(x2, y2, w) for w in walls)
-    ]
+def _invalid_doors(doors: list[list[float]], walls: list[list[float]]) -> list[str]:
+    """门洞长度须大于 0，且两端落在同一段墙体上（FR-904）。"""
+    errors = []
+    for i, (x1, y1, x2, y2) in enumerate(doors):
+        if x1 == x2 and y1 == y2:
+            errors.append(f"doors.{i}: 门洞长度为 0")
+        elif not any(_on_wall(x1, y1, w) and _on_wall(x2, y2, w) for w in walls):
+            errors.append(f"doors.{i}: 门洞不在任何墙体上")
+    return errors
 
 
 def _device(camera: dict[str, Any], mode: str) -> dict[str, Any]:
@@ -106,7 +108,7 @@ def load(path: Path) -> Site:
         _duplicates("zones", "id", [z.id for z in config.zones])
         + _duplicates("cameras", "id", [c.id for c in config.cameras])
         + _duplicates("cameras", "ip", [c.ip for c in config.cameras])
-        + _misplaced_doors(doors, data["walls"])
+        + _invalid_doors(doors, data["walls"])
     )
     if errors:
         raise SiteError(path, errors)
