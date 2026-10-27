@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { expectNoOverflow, freezeClock, mockSocket, SITE, sceneSettled } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, open, zoomIn } from "./helpers";
 
 // HYD-UIX-004 §5.2：DeviceMarker 全部 9 种状态的截图基线（V-P2）
 const STATES = [
@@ -14,36 +14,7 @@ const STATES = [
   ["notify_only", "已通知 · 待联动"],
 ] as const;
 
-const camera = (state: string, id = "cam-01") => ({
-  id,
-  type: "camera",
-  ip: "172.30.0.11",
-  mode: "host_probe",
-  state,
-  camera: {
-    stream: id,
-    pose: { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90, range_m: 6 },
-    calibration: [],
-    homography: null,
-    reproj_error_m: null,
-  },
-});
-
 const scene = (page: Page) => page.getByRole("region", { name: "场景" });
-
-async function open(page: Page, devices: object[]) {
-  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices } }));
-  const sockets = await mockSocket(page);
-  await page.goto("/");
-  await sceneSettled(page);
-  return sockets;
-}
-
-/** 放大到设备清晰可辨；放大后区域名称移出视口，文字溢出检查须在此之前（V-P3） */
-async function zoomIn(page: Page) {
-  for (let i = 0; i < 3; i += 1) await page.getByRole("button", { name: "放大" }).click();
-  await page.clock.runFor(600);
-}
 
 test.beforeEach(({ page }) => freezeClock(page));
 
