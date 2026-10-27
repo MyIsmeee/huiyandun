@@ -36,6 +36,10 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     async def forbidden() -> None:
         raise HTTPException(403, "角色不足")
 
+    @app.get("/t/crash")
+    async def crash() -> None:
+        raise RuntimeError("内部缺陷")
+
     with TestClient(app) as c:
         yield c
 
@@ -95,3 +99,20 @@ def test_docs_pages_are_disabled(client: TestClient) -> None:
     """自带文档页从公网 CDN 加载脚本（G-05）。"""
     for path in ["/docs", "/redoc", "/openapi.json"]:
         assert client.get(path).status_code == 404
+
+
+def test_unhandled_error_uses_contract_format_and_is_logged(client: TestClient) -> None:
+    stream = io.StringIO()
+    configure_logging("api-server", "INFO", stream)
+
+    r = client.get("/t/crash", headers={"X-Request-ID": "req-3"})
+
+    assert r.status_code == 500
+    assert r.headers["X-Request-ID"] == "req-3"
+    body = Error.model_validate(r.json())
+    assert (body.code, body.request_id) == ("internal_server_error", "req-3")
+    assert "内部缺陷" not in r.text  # 不向客户端泄露内部细节
+    entries = [json.loads(line) for line in stream.getvalue().splitlines()]
+    entry = next(e for e in entries if e["event"] == "http.unhandled_error")
+    assert entry["request_id"] == "req-3"
+    assert "RuntimeError: 内部缺陷" in entry["exc"]
