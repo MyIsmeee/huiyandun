@@ -13,6 +13,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from api_server import auth
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from py_common.log import bind_request_id
@@ -95,4 +96,6 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.add_exception_handler(HTTPException, on_http_error)
     app.add_exception_handler(RequestValidationError, on_validation_error)
+    app.state.config = config
+    app.include_router(auth.router)
     return app

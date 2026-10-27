@@ -9,12 +9,14 @@ from pathlib import Path
 import pytest
 import yaml
 from alembic import command
-from sqlalchemy import text
+from sqlalchemy import insert, text
 from sqlalchemy.exc import DBAPIError
 
+from api_server.auth import ROLES, hash_password, users
 from api_server.config import ApiConfig
-from api_server.db import alembic_config, create_engine
+from api_server.db import alembic_config, create_engine, transaction
 
+PASSWORD = "correct-horse-1"
 DEPLOY = Path(__file__).resolve().parents[3] / "deploy/compose"
 
 
@@ -68,3 +70,21 @@ def db(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[ApiConfig, Ap
         yield owner, app
     finally:
         docker("rm", "-f", container, check=False)
+
+
+@pytest.fixture(scope="session")
+def password(db: tuple[ApiConfig, ApiConfig]) -> str:
+    """每种角色一个账户，用户名即角色名；返回共用口令。"""
+
+    async def main() -> None:
+        async with transaction(db[1]) as conn:
+            await conn.execute(
+                insert(users),
+                [
+                    {"username": r, "password_hash": hash_password(PASSWORD), "role": r}
+                    for r in ROLES
+                ],
+            )
+
+    asyncio.run(main())
+    return PASSWORD
