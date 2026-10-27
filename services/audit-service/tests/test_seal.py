@@ -1,6 +1,7 @@
 """每日哈希链封存与校验（HYD-ARCH-001 §10.1、G-13）。每个用例使用独立的新数据库。"""
 
 import asyncio
+import logging
 import os
 import subprocess
 from collections.abc import Awaitable, Callable
@@ -13,8 +14,9 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from api_server.audit import audit_log
-from api_server.config import ApiConfig
+from api_server.config import ApiConfig, DbConfig
 from api_server.db import alembic_config, transaction
+from audit_service.cli import AuditConfig, seal_once
 from audit_service.seal import DAY, GRACE, audit_seal, seal_pending, verify
 
 D1, D2, D3 = date(2026, 10, 1), date(2026, 10, 2), date(2026, 10, 3)
@@ -135,3 +137,46 @@ def test_seal_records_are_append_only(
     with pytest.raises(DBAPIError, match="只允许追加|permission denied"):
         run(seeded[account], lambda conn: conn.execute(text(sql)))
     assert run(seeded[1], verify) == []
+
+
+def audit_config(app: ApiConfig, **update: object) -> AuditConfig:
+    config = AuditConfig.model_validate({k: getattr(app, k) for k in DbConfig.model_fields})
+    return config.model_copy(update=update)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [{"db_port": 1, "db_timeout_s": 1}, {"db_name": "missing"}],
+    ids=["connection-refused", "rejected-by-database"],  # OSError；DBAPIError
+)
+def test_seal_once_survives_database_failure_and_catches_up(
+    scratch_db: tuple[ApiConfig, ApiConfig], caplog: pytest.LogCaptureFixture, failure: dict
+) -> None:
+    owner, app = scratch_db
+    command.upgrade(alembic_config(owner), "head")
+    add(owner, at(D1))
+
+    with caplog.at_level(logging.INFO, logger="audit_service.cli"):
+        asyncio.run(seal_once(audit_config(app, **failure)))
+        assert [r.message for r in caplog.records] == ["audit.seal_failed"]
+        caplog.clear()
+
+        asyncio.run(seal_once(audit_config(app)))
+    sealed = [r.day for r in caplog.records if r.message == "audit.sealed"]
+    assert sealed[:3] == [D1.isoformat(), D2.isoformat(), D3.isoformat()]
+    assert run(app, verify) == []
+
+
+def test_seal_once_does_not_swallow_unexpected_errors(
+    scratch_db: tuple[ApiConfig, ApiConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """只有数据库故障可等下个周期重试；程序缺陷须使进程退出、由容器重启暴露。"""
+    owner, app = scratch_db
+    command.upgrade(alembic_config(owner), "head")
+
+    async def broken(*_: object) -> list[date]:
+        raise ValueError("bug")
+
+    monkeypatch.setattr("audit_service.cli.seal_pending", broken)
+    with pytest.raises(ValueError, match="bug"):
+        asyncio.run(seal_once(audit_config(app)))
