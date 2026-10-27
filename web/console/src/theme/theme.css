@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* HYD-UIX-004 §3.1：两套色值分别取值并校验，不是自动反转 */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --hyd-base: #0b0e12;
+  --hyd-panel: #101418;
+  --hyd-raised: #161b21;
+  --hyd-grid: #2c2c2a;
+  --hyd-text: #f0efec;
+  --hyd-text-2: #c3c2b7;
+  --hyd-text-3: #898781;
+  --hyd-border: rgb(255 255 255 / 0.1);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --hyd-base: #f9f9f7;
+  --hyd-panel: #fcfcfb;
+  --hyd-raised: #ffffff;
+  --hyd-grid: #e1e0d9;
+  --hyd-text: #0b0b0b;
+  --hyd-text-2: #52514e;
+  --hyd-text-3: #898781;
+  --hyd-border: rgb(11 11 11 / 0.1);
+}
+
+@theme inline {
+  /* 清空 Tailwind 默认色板：界面只能使用规范定义的颜色（V-S1、V-G2） */
+  --color-*: initial;
+  --color-base: var(--hyd-base);
+  --color-panel: var(--hyd-panel);
+  --color-raised: var(--hyd-raised);
+  --color-grid: var(--hyd-grid);
+  --color-text: var(--hyd-text);
+  --color-text-2: var(--hyd-text-2);
+  --color-text-3: var(--hyd-text-3);
+  --color-line: var(--hyd-border);
+  /* §3.2 状态色：固定语义、不随主题变化，只用于表达状态且必须配图标与文字（V-S2、V-S3） */
+  --color-idle: #6e7a8a;
+  --color-physical: #fab219;
+  --color-cyber: #d03b3b;
+  --color-contained: #0ca30c;
+  --color-uncertain: #898781;
+  /* §3.4：只用系统字体，不加载 Web 字体（C-FE-01） */
+  --font-sans: system-ui, "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-base);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+  }
+}
+
+/* V-A4：用户开关或系统偏好开启后，动效退化为瞬时切换 */
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

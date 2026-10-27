@@ -26,11 +26,22 @@ NAMESPACES = (
     "http://www.w3.org/XML/1998/namespace",
     "http://www.w3.org/2000/xmlns/",
 )
+# 依赖固定写入构建产物的文本，同样不会被请求：React 生产包错误说明的链接前缀、Tailwind 许可证注释。
+# 只在显式指定路径（扫描 dist/）时放行，源码中出现仍报告
+INERT_TEXT = ("https://react.dev/errors/", "https://tailwindcss.com */")
 # 不会解析到公网的保留域名：RFC 2606、RFC 6761、ICANN .internal、mDNS .local
 RESERVED_SUFFIXES = (".localhost", ".local", ".internal", ".test", ".example", ".invalid")
 EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")
-# 运行时不加载的文件：锁文件中的包源、文档链接、托管 Runner 上的 CI 配置、测试数据
-EXCLUDED = ("uv.lock", "pnpm-lock.yaml", "*.md", ".github/*", "tests/*", "*/tests/*")
+# 运行时不加载的文件：锁文件中的包源、文档链接、托管 Runner 上的 CI 配置、测试数据、本扫描器的放行清单
+EXCLUDED = (
+    "uv.lock",
+    "pnpm-lock.yaml",
+    "*.md",
+    ".github/*",
+    "tests/*",
+    "*/tests/*",
+    "tools/lint/no_public_url.py",
+)
 
 
 def is_public(host: str) -> bool:
@@ -57,7 +68,7 @@ def git_files() -> list[Path]:
     return [Path(p) for p in out.split("\0") if p]
 
 
-def scan(path: Path) -> list[str]:
+def scan(path: Path, allowed: tuple[str, ...]) -> list[str]:
     data = path.read_bytes()
     if b"\0" in data[:8192]:  # 二进制文件
         return []
@@ -65,7 +76,7 @@ def scan(path: Path) -> list[str]:
         f"{path.as_posix()}:{lineno}: {m.group(0)}"
         for lineno, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1)
         for m in URL.finditer(line)
-        if is_public(m.group(1)) and not line.startswith(NAMESPACES, m.start())
+        if is_public(m.group(1)) and not line.startswith(allowed, m.start())
     ]
 
 
@@ -79,7 +90,7 @@ def main(args: list[str]) -> int:
         hit
         for path in (paths if args else git_files())
         if path.is_file() and not any(fnmatch(path.as_posix(), e) for e in EXCLUDED)
-        for hit in scan(path)
+        for hit in scan(path, NAMESPACES + INERT_TEXT if args else NAMESPACES)
     ]
     for hit in hits:
         print(hit)

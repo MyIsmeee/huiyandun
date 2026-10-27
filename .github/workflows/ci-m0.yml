@@ -56,7 +56,7 @@ jobs:
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: 0.13.5
-      - run: make lint
+      - run: make lint-py
 
   ci-04:
     name: CI-04 前端 Lint 与类型
@@ -67,14 +67,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.22.1
-      - run: |
-          if [ ! -f web/console/package.json ]; then
-            echo "::notice title=CI-04 跳过::web/console 尚未建立，由 TK-013 接入"
-            exit 0
-          fi
-          pnpm install --frozen-lockfile
-          pnpm --dir web/console exec eslint .
-          pnpm --dir web/console exec tsc --noEmit
+      - run: pnpm install --frozen-lockfile
+      - run: make lint-web
 
   ci-05:
     name: CI-05 单元测试
@@ -90,13 +84,6 @@ jobs:
           node-version: 24.22.1
       - run: pnpm install --frozen-lockfile
       - run: make test
-      - name: vitest
-        run: |
-          if [ ! -f web/console/package.json ]; then
-            echo "::notice title=CI-05::web/console 尚未建立，跳过 vitest（由 TK-013 接入）"
-            exit 0
-          fi
-          pnpm --dir web/console exec vitest run
 
   ci-06:
     name: CI-06 模块依赖边界
@@ -126,10 +113,6 @@ jobs:
         run: python3 tools/lint/no_public_url.py
       - name: 前端构建产物（C-FE-01）
         run: |
-          if [ ! -f web/console/package.json ]; then
-            echo "::notice title=CI-07::web/console 尚未建立，跳过 dist/ 扫描（由 TK-013 接入）"
-            exit 0
-          fi
           pnpm install --frozen-lockfile
           pnpm --dir web/console run build
           python3 tools/lint/no_public_url.py web/console/dist
@@ -144,6 +127,12 @@ jobs:
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: 0.13.5
+      # web/console/src/api 由 openapi-typescript 生成
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+      - run: pnpm install --frozen-lockfile
       - name: 生成代码一致性
         run: |
           if [ ! -d contracts ]; then
