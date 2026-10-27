@@ -18,7 +18,8 @@ codegen-check:
 COMPOSE = docker compose -f deploy/compose/compose.yaml \
 	--profile core --profile vision --profile security --profile demo
 SECRETS = deploy/compose/.secrets
-DB_SECRETS = $(SECRETS)/postgres_password $(SECRETS)/db_app_password
+DB_SECRETS = $(SECRETS)/postgres_password $(SECRETS)/db_app_password \
+	$(SECRETS)/db_audit_password
 
 doctor:
 	tools/dev/doctor.sh

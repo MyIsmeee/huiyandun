@@ -64,3 +64,9 @@ def test_doctor_image_registered() -> None:
 def test_network_internal(name: str) -> None:
     """DP-05：例外（web-console 443、llm-gateway 出站）在对应服务加入时再声明。"""
     assert COMPOSE["networks"][name].get("internal") is True
+
+
+def test_only_audit_service_holds_audit_password() -> None:
+    """G-13：只有 audit-service 可写审计封存记录；postgres 仅在初始化时用它创建账号。"""
+    holders = {n for n, s in SERVICES.items() if "db_audit_password" in s.get("secrets", [])}
+    assert holders == {"audit-service", "postgres"}

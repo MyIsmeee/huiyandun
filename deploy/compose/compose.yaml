@@ -9,8 +9,8 @@ services:
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: hyd
-    # db_app_password 供 postgres-init 创建应用账号 hyd_app
-    secrets: [postgres_password, db_app_password]
+    # 应用账号口令供 postgres-init 创建 hyd_app、hyd_audit
+    secrets: [postgres_password, db_app_password, db_audit_password]
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
@@ -67,7 +67,7 @@ services:
     image: huiyandun/audit-service:local
     build: { context: ../.., dockerfile: services/audit-service/Dockerfile }
     profiles: [core]
-    secrets: [db_app_password]
+    secrets: [db_audit_password]
     depends_on: { migrate: { condition: service_completed_successfully } }
     networks: [core-net]
     healthcheck:
@@ -92,3 +92,5 @@ secrets:
     file: .secrets/postgres_password
   db_app_password:
     file: .secrets/db_app_password
+  db_audit_password:
+    file: .secrets/db_audit_password
