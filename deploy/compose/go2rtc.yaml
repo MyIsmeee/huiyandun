@@ -1,0 +1,13 @@
+# 流接入（REUSE-03、C-CV-10）：每路只拉流一次，分发给检测与浏览器；流名与 site.yaml 的 stream 一致
+# 接入真实摄像头时只改 streams（HYD-DEP-005 §6）
+api:
+  listen: ":1984"
+rtsp:
+  listen: ":8554"
+webrtc:
+  listen: ":8555"
+  ice_servers: []  # 默认使用公网 STUN 服务器，运行时不访问外部地址（G-05）
+
+streams:
+  cam-01: rtsp://mediamtx:8554/cam-01
+  cam-02: rtsp://mediamtx:8554/cam-02

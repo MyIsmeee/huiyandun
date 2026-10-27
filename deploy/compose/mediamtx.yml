@@ -1,0 +1,28 @@
+# 无真实摄像头时的多路 RTSP 源（REUSE-04）：容器内 ffmpeg 循环推流 /media 下的素材
+# 路径名即 site.yaml 的 stream；素材由 make demo-media 生成，单次播放 ≥ 8 分钟（FR-306）
+logLevel: info
+
+# 只开 RTSP；API 只供容器内健康检查
+api: true
+apiAddress: 127.0.0.1:9997
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+rtspTransports: [tcp]
+
+# 只接受容器内的推流，demo-net 内其他容器只能读取
+authInternalUsers:
+  - user: any
+    ips: ["127.0.0.1", "::1"]
+    permissions: [{ action: publish }, { action: api }]
+  - user: any
+    permissions: [{ action: read }]
+
+pathDefaults:
+  runOnInit: ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i /media/$MTX_PATH.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+  runOnInitRestart: true
+
+paths:
+  cam-01:
+  cam-02:
