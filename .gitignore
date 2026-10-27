@@ -7,6 +7,8 @@ __pycache__/
 # Node / pnpm
 node_modules/
 web/console/dist/
+web/console/test-results/
+web/console/playwright-report/
 
 # 密钥不入库（G-14）
 .env

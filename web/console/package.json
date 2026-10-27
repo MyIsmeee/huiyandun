@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "codegen": "openapi-typescript ../../contracts/openapi/api-server.v2.yaml -o src/api/schema.d.ts",
-    "codegen:check": "openapi-typescript ../../contracts/openapi/api-server.v2.yaml -o src/api/schema.d.ts --check"
+    "codegen:check": "openapi-typescript ../../contracts/openapi/api-server.v2.yaml -o src/api/schema.d.ts --check",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "lucide-react": "1.61.0",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/react": "16.3.3",
     "@types/react": "19.3.0",
