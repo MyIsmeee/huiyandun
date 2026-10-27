@@ -13,11 +13,11 @@ export interface Avatar extends Person {
 
 /** 场景中的人员化身：只投放已标定、已登记摄像头的人员（V-U2） */
 export function avatars(people: Record<string, Person>, cameras: Camera[], behaviors: Record<string, Behavior>): Avatar[] {
-  const states = new Map(cameras.map((c) => [c.id, c.state]));
+  const byId = new Map(cameras.map((c) => [c.id, c]));
   return Object.entries(people).flatMap(([key, person]) => {
-    const state = states.get(person.camera_id);
-    if (state === undefined || state === "uncalibrated") return [];
-    const physical = state === "physical_alert" || state === "both";
+    const camera = byId.get(person.camera_id);
+    if (!camera?.calibrated) return [];
+    const physical = camera.state === "physical_alert" || camera.state === "both";
     const alert = physical && behaviors[person.camera_id]?.track_id === person.track_id;
     return [{ ...person, key, alert, uncertain: person.uncertainty_m > HIGH_ERROR_M }];
   });

@@ -4,7 +4,7 @@ import { avatars, HIGH_ERROR_M } from "../../src/scene/people";
 import type { Behavior, Person } from "../../src/store/live";
 
 const pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 10 };
-const cam = (state: DeviceState, id = "cam-01"): Camera => ({ id, state, pose });
+const cam = (state: DeviceState, calibrated = true): Camera => ({ id: "cam-01", state, calibrated, pose });
 const person = (track_id: number, uncertainty_m = 0.4, camera_id = "cam-01"): Person => ({
   camera_id,
   track_id,
@@ -23,10 +23,12 @@ describe("avatars", () => {
     ]);
   });
 
-  it("未标定或未登记的摄像头不投放化身（V-U2）", () => {
-    const list = avatars(people(person(1), person(2, 0.4, "cam-x")), [cam("uncalibrated")], {});
+  it("未登记的摄像头不投放化身", () => {
+    expect(avatars(people(person(1, 0.4, "cam-x")), [cam("normal")], {})).toEqual([]);
+  });
 
-    expect(list).toEqual([]);
+  it("以标定点判断未标定：处于物理告警的未标定摄像头同样不投放（V-U2）", () => {
+    expect(avatars(people(person(1)), [cam("physical_alert", false)], { "cam-01": fall(1) })).toEqual([]);
   });
 
   it("误差超过 1 m 为高误差，恰为 1 m 不算（V-U1）", () => {

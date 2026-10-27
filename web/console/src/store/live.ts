@@ -40,7 +40,12 @@ export function receive(frame: Frame, now: number): void {
   if (frame.channel === "tracks") move(data as Track, now);
   if (frame.channel === "devices") {
     const device = data as Device;
-    useLive.setState((s) => ({ devices: { ...s.devices, [device.id]: device } }));
+    useLive.setState((s) => {
+      // 退出物理告警即清除其行为事件：再次告警时事件卡不显示上一次的行为，也不按旧 track_id 标记人员
+      const physical = device.state === "physical_alert" || device.state === "both";
+      const behaviors = Object.fromEntries(Object.entries(s.behaviors).filter(([id]) => physical || id !== device.id));
+      return { devices: { ...s.devices, [device.id]: device }, behaviors };
+    });
   }
   // alerts 频道同时承载网络告警，只有行为事件含 behavior 字段
   if (frame.channel === "alerts" && "behavior" in (data as object)) {

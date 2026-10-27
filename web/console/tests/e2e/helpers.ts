@@ -76,9 +76,10 @@ export const camera = (state: string, id = "cam-01") => ({
   camera: {
     stream: id,
     pose: { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90, range_m: 6 },
-    calibration: [],
+    // 4 组标定点即为已标定（FR-902），人员化身才会投放；外观状态由 state 给定
+    calibration: [[312, 540, 14, 12], [980, 552, 18, 12], [450, 300, 14, 16], [870, 310, 18, 16]],
     homography: null,
-    reproj_error_m: null,
+    reproj_error_m: 0.3,
   },
 });
 

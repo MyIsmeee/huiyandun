@@ -11,7 +11,13 @@ export const STATUS = {
 } as const;
 
 export type DeviceState = Device["state"];
-export type Camera = { id: string; state: DeviceState; pose: NonNullable<Device["camera"]>["pose"] };
+export type Camera = {
+  id: string;
+  state: DeviceState;
+  /** 标定点不少于 4 组（FR-902）；与 state 无关，处于告警的摄像头同样可能未标定 */
+  calibrated: boolean;
+  pose: NonNullable<Device["camera"]>["pose"];
+};
 
 /** 场景中的摄像头：状态以推送为准，未推送过的取 GET /api/site 的初始值；M0 站点只导入摄像头 */
 export function useCameras(devices: Device[]): Camera[] {
@@ -20,7 +26,7 @@ export function useCameras(devices: Device[]): Camera[] {
     () =>
       devices.flatMap((initial) => {
         const { id, state, camera } = pushed[initial.id] ?? initial;
-        return camera ? [{ id, state, pose: camera.pose }] : [];
+        return camera ? [{ id, state, calibrated: camera.calibration.length >= 4, pose: camera.pose }] : [];
       }),
     [devices, pushed],
   );

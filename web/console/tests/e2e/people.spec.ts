@@ -67,3 +67,28 @@ test("2 s 无位置更新即移除化身（V-U4）", async ({ page }) => {
   expect(await scene(page).screenshot()).not.toEqual(before);
   await expect(scene(page)).toHaveScreenshot("device-zoomed-empty.png");
 });
+
+test("断线：化身与事件卡保留，场景降饱和并提示数据非实时（V-U3、V-U4）", async ({ page }) => {
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  await walk(page, ws, 0.4);
+  ws?.send(JSON.stringify({ channel: "alerts", data: fall }));
+  ws?.send(JSON.stringify({ channel: "devices", data: camera("physical_alert") }));
+  await expect(scene(page).getByRole("status")).toBeVisible();
+
+  // 服务端不可达：之后的重连一律被关闭，连接保持断开
+  await page.routeWebSocket("/ws", (route) => route.close());
+  await ws?.close();
+  const notice = scene(page).getByText(/^数据非实时 · 最后更新 \d{2}:\d{2}:\d{2}$/);
+  await expect(notice).toBeVisible();
+  await page.clock.runFor(100); // 时钟暂停：推进一帧，使 3D 场景绘制告警态
+  const before = await scene(page).screenshot();
+  await page.clock.runFor(2500); // 超过 2 s 无更新：在线时会移除化身
+
+  // 仍断线且画面不变即化身仍在：在线时同样的等待会使化身消失（见上一用例）
+  await expect(notice).toBeVisible();
+  expect((await scene(page).screenshot()).equals(before)).toBe(true);
+  await expect(scene(page)).toHaveClass(/saturate-50/);
+  await expect(scene(page).getByRole("status")).toBeVisible();
+  await expect(scene(page)).toHaveScreenshot("person-disconnected.png");
+});

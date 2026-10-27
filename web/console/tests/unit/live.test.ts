@@ -68,4 +68,15 @@ describe("devices 与 alerts", () => {
 
     expect(useLive.getState().behaviors).toEqual({ "cam-01": fall });
   });
+
+  it("设备退出物理告警即清除其行为事件：再次告警时不显示上一次的事件", () => {
+    const fall = { ...BASE, camera_id: "cam-01", track_id: 1, behavior: "fall" };
+    receive(frame("alerts", fall), 0);
+    receive(frame("devices", { id: "cam-01", state: "both" }), 0);
+    expect(useLive.getState().behaviors).toEqual({ "cam-01": fall });
+
+    receive(frame("devices", { id: "cam-01", state: "normal" }), 0);
+
+    expect(useLive.getState().behaviors).toEqual({});
+  });
 });
