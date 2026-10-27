@@ -24,16 +24,21 @@ class AuditConfig(DbConfig):
     )
 
 
+async def seal_once(config: AuditConfig) -> None:
+    """封存一轮。数据库不可达时记录错误后返回，由下个周期重试；未封存日期会一并补齐。"""
+    try:
+        async with transaction(config) as conn:
+            sealed = await seal_pending(conn, datetime.now(UTC))
+    except (OSError, DBAPIError):
+        log.exception("audit.seal_failed")
+        return
+    for day in sealed:
+        log.info("audit.sealed", extra={"day": day.isoformat()})
+
+
 async def run(config: AuditConfig) -> None:
     while True:
-        try:
-            async with transaction(config) as conn:
-                sealed = await seal_pending(conn, datetime.now(UTC))
-            for day in sealed:
-                log.info("audit.sealed", extra={"day": day.isoformat()})
-        except (OSError, DBAPIError):
-            # 数据库不可达时下个周期重试；未封存日期会一并补齐
-            log.exception("audit.seal_failed")
+        await seal_once(config)
         await asyncio.sleep(config.seal_interval_s)
 
 
