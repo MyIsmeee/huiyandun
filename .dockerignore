@@ -1,0 +1,8 @@
+# 镜像构建上下文为仓库根目录；口令目录不进入构建上下文（G-14）
+.git
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+deploy/compose/.secrets

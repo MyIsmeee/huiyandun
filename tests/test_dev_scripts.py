@@ -59,14 +59,30 @@ def test_doctor_passes_when_all_checks_pass(tmp_path: Path) -> None:
 
 
 def fake_compose(tmp_path: Path, status: str, services: str = "nats\npostgres\n") -> list[str]:
-    """按子命令输出固定内容：config 为应有的服务清单，ps 为各容器健康状态。"""
+    """按子命令输出固定内容：config 为应有的服务清单，ps 为各容器状态。"""
     (tmp_path / "config").write_text(services, encoding="utf-8")
     (tmp_path / "ps").write_text(status, encoding="utf-8")
     return [str(stub(tmp_path, "fake-compose", f'cat "{tmp_path}/$1"'))]
 
 
-def test_wait_healthy_reports_ready(tmp_path: Path) -> None:
-    compose = fake_compose(tmp_path, "nats healthy\npostgres healthy\n")
+def ps(service: str, health: str, state: str = "running", code: int = 0, labels: str = "") -> str:
+    """wait-healthy.sh 请求的 ps 格式：Service|Health|State|ExitCode|Labels。"""
+    return f"{service}|{health}|{state}|{code}|{labels}\n"
+
+
+ONESHOT = "com.docker.compose.project=huiyandun,hyd.oneshot=true"
+
+
+@pytest.mark.parametrize(
+    ("services", "status"),
+    [
+        ("nats\npostgres\n", ps("nats", "healthy") + ps("postgres", "healthy")),
+        ("nats\nmigrate\n", ps("nats", "healthy") + ps("migrate", "", "exited", 0, ONESHOT)),
+    ],
+    ids=["healthy", "oneshot-completed"],
+)
+def test_wait_healthy_reports_ready(tmp_path: Path, services: str, status: str) -> None:
+    compose = fake_compose(tmp_path, status, services)
 
     result = run([str(WAIT_HEALTHY), *compose], tmp_path)
 
@@ -77,16 +93,19 @@ def test_wait_healthy_reports_ready(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("status", "pending"),
     [
-        ("nats healthy\npostgres starting\n", "postgres starting"),
-        ("nats healthy\npostgres unhealthy\n", "postgres unhealthy"),
+        (ps("postgres", "starting"), "postgres starting"),
+        (ps("postgres", "unhealthy"), "postgres unhealthy"),
         # 没有健康检查的服务 Health 为空，不能视为就绪
-        ("nats healthy\npostgres \n", "postgres"),
+        (ps("postgres", ""), "postgres"),
+        # 常驻服务退出码为 0 同样未就绪；只有一次性服务例外
+        (ps("postgres", "", "exited", 0), "postgres"),
+        (ps("postgres", "", "exited", 1, ONESHOT), "postgres exited(1)"),
         # 容器未创建时 ps 中没有该服务，须按应有清单发现
-        ("nats healthy\n", "postgres 未创建"),
+        ("", "postgres 未创建"),
     ],
 )
 def test_wait_healthy_times_out_listing_pending(tmp_path: Path, status: str, pending: str) -> None:
-    compose = fake_compose(tmp_path, status)
+    compose = fake_compose(tmp_path, ps("nats", "healthy") + status)
 
     result = run([str(WAIT_HEALTHY), *compose], tmp_path, HEALTH_TIMEOUT="0")
 

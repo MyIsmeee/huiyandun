@@ -1,4 +1,5 @@
 # 全部服务定义（HYD-DEP-005 §3.1）；镜像与 deploy/third-party.yaml 一致（C-RU-01）
+# 自研服务由仓库根目录构建，基础镜像同样登记；标签 hyd.oneshot 的服务执行完即退出，以退出码 0 视为就绪
 name: huiyandun
 
 services:
@@ -7,9 +8,12 @@ services:
     profiles: [core]
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-    secrets: [postgres_password]
+      POSTGRES_DB: hyd
+    # 应用账号口令供 postgres-init 创建 hyd_app、hyd_audit
+    secrets: [postgres_password, db_app_password, db_audit_password]
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     networks: [core-net]
     healthcheck:
       # 走 TCP：首次初始化期间的临时实例只监听 socket，不应被判为就绪
@@ -32,6 +36,48 @@ services:
       timeout: 3s
       retries: 10
 
+  # 以属主账号执行迁移后退出；常驻服务只持有应用账号口令，无法停用审计表触发器（G-13）
+  migrate:
+    image: huiyandun/api-server:local
+    build: { context: ../.., dockerfile: services/api-server/Dockerfile }
+    profiles: [core]
+    command: ["hyd-api", "migrate"]
+    labels: { hyd.oneshot: "true" }
+    environment:
+      HYD_DB_USER: postgres
+      HYD_DB_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    depends_on: { postgres: { condition: service_healthy } }
+    networks: [core-net]
+
+  api-server:
+    image: huiyandun/api-server:local
+    build: { context: ../.., dockerfile: services/api-server/Dockerfile }
+    profiles: [core]
+    secrets: [db_app_password]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [core-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  audit-service:
+    image: huiyandun/audit-service:local
+    build: { context: ../.., dockerfile: services/audit-service/Dockerfile }
+    profiles: [core]
+    secrets: [db_audit_password]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [core-net]
+    healthcheck:
+      # 校验全部封存记录：审计日志被篡改时转为 unhealthy
+      test: ["CMD", "hyd-audit", "verify"]
+      interval: 60s
+      timeout: 30s
+      start_period: 30s
+      start_interval: 2s
+
 networks:
   core-net:
     internal: true
@@ -44,3 +90,7 @@ volumes:
 secrets:
   postgres_password:
     file: .secrets/postgres_password
+  db_app_password:
+    file: .secrets/db_app_password
+  db_audit_password:
+    file: .secrets/db_audit_password
