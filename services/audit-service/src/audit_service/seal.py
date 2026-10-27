@@ -27,7 +27,8 @@ from api_server.audit import audit_log
 
 GENESIS = bytes(32)
 DAY = timedelta(days=1)
-# 跨零点的事务可能在零点后才提交；等待远超语句超时后再封存前一日
+# 跨零点的事务可能在零点后才提交。连接设有单条语句与事务内空闲超时（db_timeout_s，见
+# api_server.db），事务实际不会拖过 GRACE；超过的记录会被 verify 判为篡改
 GRACE = timedelta(minutes=10)
 
 # 表结构由 api-server 迁移 0003 定义

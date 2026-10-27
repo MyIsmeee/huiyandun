@@ -1,5 +1,6 @@
 """FastAPI 应用：X-Request-ID 透传（C-BE-08）与统一错误格式（契约 Error）。"""
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -17,6 +18,8 @@ from api_server import audit, auth, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from py_common.log import bind_request_id
+
+log = logging.getLogger(__name__)
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -48,13 +51,27 @@ class RequestIdMiddleware:
                 return
         scope.setdefault("state", {})["request_id"] = request_id
 
+        started = False
+
         async def send_with_id(message: Message) -> None:
+            nonlocal started
             if message["type"] == "http.response.start":
+                started = True
                 MutableHeaders(scope=message)["X-Request-ID"] = request_id
             await send(message)
 
         with bind_request_id(request_id):
-            await self.app(scope, receive, send_with_id)
+            try:
+                await self.app(scope, receive, send_with_id)
+            except Exception:
+                # 响应已开始或为 WebSocket 时无法改写响应，交由服务器记录
+                if scope["type"] != "http" or started:
+                    raise
+                # 未捕获的异常同样返回契约 Error 并带请求 ID，以便对照日志排查；不返回内部细节
+                log.exception("http.unhandled_error")
+                await error_response(500, "服务器内部错误", request_id)(
+                    scope, receive, send_with_id
+                )
 
 
 async def on_http_error(request: Request, exc: HTTPException) -> JSONResponse:

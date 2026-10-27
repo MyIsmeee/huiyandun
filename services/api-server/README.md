@@ -14,9 +14,10 @@
 | 账号 | 用途 | 权限 |
 |---|---|---|
 | `postgres`（属主） | 仅 `hyd-api migrate` | 建表、授权 |
-| `hyd_app` | 服务运行 | 按表授予；`audit_log` 只有 SELECT 与 INSERT，不能写 `id`、`ts`；`users` 只能新增 |
+| `hyd_app` | api-server 运行 | 按表授予；`audit_log` 只有 SELECT 与 INSERT，不能写 `id`、`ts`；`users` 只能新增；无权访问 `audit_seal` |
+| `hyd_audit` | audit-service 运行 | 只读 `audit_log`；`audit_seal` 只有 SELECT 与 INSERT |
 
-`hyd_app` 由 `deploy/compose/postgres-init/` 在数据库首次初始化时创建。审计表另有触发器，拒绝任何账号的 UPDATE / DELETE / TRUNCATE；触发器只有属主能停用，因此服务不以属主账号连接。
+`hyd_app`、`hyd_audit` 由 `deploy/compose/postgres-init/` 在数据库首次初始化时创建。审计表另有触发器，拒绝任何账号的 UPDATE / DELETE / TRUNCATE；触发器只有属主能停用，因此服务不以属主账号连接。
 
 ## 配置项
 
