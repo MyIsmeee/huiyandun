@@ -11,6 +11,7 @@ dependencies = [
     "py-common",
     "sqlalchemy[asyncio]>=2.1.6,<2.2",
     "uvicorn>=0.54.0,<0.55",
+    "websockets>=17.3,<18",
 ]
 
 [project.scripts]

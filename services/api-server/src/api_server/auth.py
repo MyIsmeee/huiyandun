@@ -79,6 +79,7 @@ class Principal:
     username: str
     role: str
     token_hash: bytes
+    expires_at: datetime
 
 
 async def lookup_session(engine: AsyncEngine, token: str | None) -> Principal | None:
@@ -86,13 +87,13 @@ async def lookup_session(engine: AsyncEngine, token: str | None) -> Principal | 
         return None
     token_hash = _token_hash(token)
     query = (
-        select(users.c.username, users.c.role)
+        select(users.c.username, users.c.role, sessions.c.expires_at)
         .join(sessions, sessions.c.username == users.c.username)
         .where(sessions.c.token_hash == token_hash, sessions.c.expires_at > datetime.now(UTC))
     )
     async with engine.connect() as conn:
         row = (await conn.execute(query)).first()
-    return Principal(row.username, row.role, token_hash) if row else None
+    return Principal(row.username, row.role, token_hash, row.expires_at) if row else None
 
 
 async def authenticate(request: Request) -> Principal:
@@ -152,4 +153,5 @@ async def logout(
 ) -> None:
     async with request.app.state.engine.begin() as conn:
         await conn.execute(delete(sessions).where(sessions.c.token_hash == principal.token_hash))
+    request.app.state.hub.disconnect_session(principal.token_hash)
     response.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")

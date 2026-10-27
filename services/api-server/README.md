@@ -6,6 +6,7 @@
 
 - 统一错误格式（契约 `Error`）；写操作必须携带 `X-Request-ID`，请求 ID 绑定到日志并回写响应头（C-BE-08）
 - 登录与 RBAC：本地账户，会话令牌只经 `HttpOnly` Cookie `hyd_session` 传递，数据库只存其 SHA-256；角色包含关系 viewer ⊂ operator ⊂ admin、viewer ⊂ auditor，审计日志只有 auditor 可读（C-BE-07、C-FE-06）
+- WebSocket `/ws`：握手时校验会话 Cookie，向已登录客户端推送契约 `WsFrame`；会话到期、登出或客户端消费过慢时断开。数据源调用 `app.state.hub.broadcast()` 接入
 - 审计日志：`api_server.audit.record` 与业务变更在同一事务内写入；表只追加（G-13）
 
 ## 数据库账号
