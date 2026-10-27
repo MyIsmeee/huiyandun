@@ -74,3 +74,32 @@ test("登录成功后离开登录页", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeHidden();
 });
+
+test("会话检测失败且不是 401 时可重试", async ({ page }) => {
+  let status = 500;
+  await page.route("/api/site", (route) =>
+    route.fulfill({ status, json: { code: "internal_server_error", message: "服务器内部错误", request_id: "r" } }),
+  );
+  await page.goto("/");
+
+  await expect(page.getByText("无法连接服务器")).toBeVisible();
+  await expect(page).toHaveScreenshot("unreachable.png");
+
+  status = 401;
+  await page.getByRole("button", { name: "重试" }).click();
+  await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+});
+
+test("不是 HTTPS 访问时直接说明，不发请求", async ({ page }) => {
+  let requested = false;
+  await page.route("/api/**", (route) => {
+    requested = true;
+    return route.abort();
+  });
+  await page.addInitScript(() => Object.defineProperty(window, "isSecureContext", { value: false }));
+  await page.goto("/");
+
+  await expect(page.getByText("请通过 HTTPS 地址访问控制台")).toBeVisible();
+  expect(requested).toBe(false);
+  await expect(page).toHaveScreenshot("insecure.png");
+});
