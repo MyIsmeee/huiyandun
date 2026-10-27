@@ -1,0 +1,29 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { api } from "../../src/lib/api";
+
+function respond(status: number, body: unknown) {
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body, { status }));
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("api", () => {
+  it("每个请求带 X-Request-ID，请求体以 JSON 发送", async () => {
+    const fetch = respond(200, { role: "viewer", expires_at: "2026-10-27T00:00:00Z" });
+
+    await api.login({ username: "u", password: "p" });
+
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(url).toBe("/api/auth/login");
+    expect(new Headers(init?.headers).get("X-Request-ID")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.parse(String(init?.body))).toEqual({ username: "u", password: "p" });
+  });
+
+  it("非 2xx 抛出带状态码与服务端说明的错误", async () => {
+    respond(401, { code: "unauthorized", message: "未登录或会话失效", request_id: "r" });
+
+    await expect(api.getSite()).rejects.toMatchObject({ status: 401, message: "未登录或会话失效" });
+  });
+});

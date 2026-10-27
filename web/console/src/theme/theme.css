@@ -29,13 +29,13 @@
 @theme inline {
   /* 清空 Tailwind 默认色板：界面只能使用规范定义的颜色（V-S1、V-G2） */
   --color-*: initial;
-  --color-base: var(--hyd-base);
+  --color-page: var(--hyd-base);
   --color-panel: var(--hyd-panel);
   --color-raised: var(--hyd-raised);
   --color-grid: var(--hyd-grid);
-  --color-text: var(--hyd-text);
-  --color-text-2: var(--hyd-text-2);
-  --color-text-3: var(--hyd-text-3);
+  --color-fg: var(--hyd-text);
+  --color-fg-2: var(--hyd-text-2);
+  --color-fg-3: var(--hyd-text-3);
   --color-line: var(--hyd-border);
   /* §3.2 状态色：固定语义、不随主题变化，只用于表达状态且必须配图标与文字（V-S2、V-S3） */
   --color-idle: #6e7a8a;
@@ -56,10 +56,28 @@
   }
 
   body {
-    background: var(--color-base);
-    color: var(--color-text);
+    background: var(--color-page);
+    color: var(--color-fg);
     font-family: var(--font-sans);
   }
+}
+
+/* 静态点阵底纹，取栅格色，与场景地面栅格同源（§5.1 L0） */
+@utility bg-dots {
+  background-image: radial-gradient(var(--color-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* 页面进入时一次性淡入上移，不循环（V-A3） */
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@utility animate-enter {
+  animation: enter 240ms ease-out both;
 }
 
 /* V-A4：用户开关或系统偏好开启后，动效退化为瞬时切换 */
