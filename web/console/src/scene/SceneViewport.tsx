@@ -1,8 +1,24 @@
 import { CircleAlert } from "lucide-react";
-import { Component, lazy, type ReactNode, type RefObject, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  lazy,
+  type PointerEvent,
+  type ReactNode,
+  type RefObject,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Site } from "../lib/api";
+import { moveCamera, panned, useCamera } from "./camera";
+import { CameraControls } from "./CameraControls";
 import { FloorPlan2D } from "./FloorPlan2D";
-import { isEmpty, isoView, planView, type Size, type View, zoneAnchor, zoneLabel } from "./layout";
+import { isEmpty, isoView, OVERVIEW, planView, type Size, type View, zoneAnchor, zoneLabel } from "./layout";
+
+// 降级说明须简短：1366 宽下与 KPI 底板同处顶部一行（V-P3）
+const DEGRADED = { text: "2D 视图 · 不支持 WebGL2", title: "浏览器不支持 WebGL2，已降级为 2D 平面视图（C-FE-08）" };
 
 // three 体积较大，单独分包按需加载，不拖慢登录页与首屏（C-FE-04）
 const Scene3D = lazy(() => import("./Scene3D"));
@@ -49,13 +65,16 @@ export function SceneViewport({ site }: { site: Site }) {
   const [webgl2] = useState(supportsWebGL2);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  const iso = useMemo(() => (size && webgl2 ? isoView(site, size) : null), [site, size, webgl2]);
-  const plan = useMemo(() => (size && !webgl2 ? planView(site, size) : null), [site, size, webgl2]);
+  const pose = useCamera((s) => s.pose);
+  const iso = useMemo(() => (size && webgl2 ? isoView(site, size, pose) : null), [site, size, webgl2, pose]);
+  const plan = useMemo(() => (size && !webgl2 ? planView(site, size, pose) : null), [site, size, webgl2, pose]);
   const view = iso ?? plan;
   const state = failed ? "error" : !webgl2 ? "2d" : ready ? "ready" : "loading";
+  const drag = useDragPan(view);
+  useEffect(() => moveCamera(OVERVIEW, false), []); // 每次进入主界面从总览开始
 
   return (
-    <div ref={ref} data-scene={state} className="absolute inset-0">
+    <div ref={ref} data-scene={state} {...drag}>
       {iso && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
@@ -65,10 +84,8 @@ export function SceneViewport({ site }: { site: Site }) {
       )}
       {plan && <FloorPlan2D site={site} view={plan} />}
       {view && (state === "ready" || state === "2d") && <ZoneLabels zones={site.zones} view={view} />}
-      {state === "2d" && (
-        <p className="absolute top-3 right-3 rounded-full border border-line bg-panel/80 px-3 py-1 text-sm text-fg-2 backdrop-blur">
-          2D 平面视图 · 浏览器不支持 WebGL2
-        </p>
+      {(state === "ready" || state === "2d") && (
+        <CameraControls notice={state === "2d" ? DEGRADED : undefined} />
       )}
       {state === "loading" && <Note>场景加载中…</Note>}
       {state === "error" && (
@@ -109,4 +126,27 @@ function Note({ children }: { children: ReactNode }) {
       {children}
     </p>
   );
+}
+
+/** 放大后拖拽平移（V-I1）：总览倍数下不响应；拖拽即时生效，并打断进行中的转场 */
+function useDragPan(view: View | null) {
+  const last = useRef<readonly [number, number] | null>(null);
+  const zoomedIn = useCamera((s) => s.goal.zoom > OVERVIEW.zoom);
+  return {
+    className: zoomedIn ? "absolute inset-0 cursor-grab active:cursor-grabbing" : "absolute inset-0",
+    onPointerDown: (e: PointerEvent) => {
+      if (!zoomedIn || e.button !== 0 || (e.target as Element).closest("button")) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      last.current = [e.clientX, e.clientY];
+    },
+    onPointerMove: (e: PointerEvent) => {
+      if (!last.current || !view) return;
+      const delta = [e.clientX - last.current[0], e.clientY - last.current[1]] as const;
+      last.current = [e.clientX, e.clientY];
+      moveCamera(panned(useCamera.getState().goal, delta, view.zoom, view.panLimit), false);
+    },
+    onPointerUp: () => {
+      last.current = null;
+    },
+  };
 }

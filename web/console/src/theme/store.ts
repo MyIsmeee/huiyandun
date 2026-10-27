@@ -41,6 +41,11 @@ export const useTheme = create<ThemeState>()(
   ),
 );
 
+/** JS 驱动的动效是否退化为瞬时切换：用户开关或系统 prefers-reduced-motion（V-A4） */
+export function prefersReducedMotion(): boolean {
+  return useTheme.getState().reducedMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /** 自动档跨越时段边界时切换主题，每分钟检查一次 */
 export function syncAutoTheme(): void {
   const { mode, theme } = useTheme.getState();
