@@ -9,6 +9,7 @@ export default defineConfig({
     baseURL: "http://localhost:4173",
     viewport: { width: 1440, height: 900 },
     locale: "zh-CN",
+    timezoneId: "Asia/Shanghai",
   },
   webServer: {
     command: "pnpm exec vite build --mode e2e && pnpm exec vite preview --mode e2e --port 4173 --strictPort",

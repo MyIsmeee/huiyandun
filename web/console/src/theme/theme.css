@@ -80,10 +80,13 @@
   animation: enter 240ms ease-out both;
 }
 
-/* V-A4：用户开关或系统偏好开启后，动效退化为瞬时切换 */
+/* V-A4：用户开关或系统偏好开启后，动效退化为瞬时切换；断线期间同样停止（C-FE-05、V-U3） */
 [data-motion="reduced"] *,
 [data-motion="reduced"] *::before,
-[data-motion="reduced"] *::after {
+[data-motion="reduced"] *::after,
+[data-live="false"] *,
+[data-live="false"] *::before,
+[data-live="false"] *::after {
   animation: none !important;
   transition: none !important;
 }

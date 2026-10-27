@@ -1,9 +1,7 @@
-import { expect, type Page, type Route, test } from "@playwright/test";
-import { expectNoOverflow, presetTheme, SITE, UNAUTHORIZED } from "./helpers";
+import { expect, type Route, test } from "@playwright/test";
+import { expectNoOverflow, freezeClock, mockSocket, presetTheme, SITE, signedIn, UNAUTHORIZED } from "./helpers";
 
-async function signedIn(page: Page) {
-  await page.route("/api/site", (route) => route.fulfill({ json: SITE }));
-}
+test.beforeEach(({ page }) => freezeClock(page));
 
 for (const theme of ["dark", "light"] as const) {
   test(`主界面分区与空态（${theme}）`, async ({ page }) => {
@@ -42,6 +40,7 @@ test("退出登录后回到登录页", async ({ page }) => {
   await page.route("/api/site", (route) =>
     signedOut ? route.fulfill({ status: 401, json: UNAUTHORIZED }) : route.fulfill({ json: SITE }),
   );
+  await mockSocket(page);
   await page.route("/api/auth/logout", (route) => {
     signedOut = true;
     return route.fulfill({ status: 204 });
@@ -53,6 +52,7 @@ test("退出登录后回到登录页", async ({ page }) => {
 });
 
 test("退出失败时停留在主界面并提示，请求期间按钮不可再点", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 }); // 顶栏最拥挤的情形
   await signedIn(page);
   let intercept: (route: Route) => void = () => {};
   const intercepted = new Promise<Route>((resolve) => (intercept = resolve));
@@ -66,4 +66,6 @@ test("退出失败时停留在主界面并提示，请求期间按钮不可再�
   await expect(page.getByRole("alert")).toHaveText("退出失败，请重试");
   await expect(button).toBeEnabled();
   await expect(page.getByText("演示办公区")).toBeVisible();
+  await expectNoOverflow(page);
+  await expect(page.locator("header")).toHaveScreenshot("header-logout-failed.png");
 });
