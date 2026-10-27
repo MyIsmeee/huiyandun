@@ -1,10 +1,15 @@
-"""审计日志写入（G-13）。"""
+"""审计日志写入与查询（G-13）。"""
 
-from typing import Any
+from typing import Annotated, Any
 
-from sqlalchemy import BigInteger, Column, DateTime, MetaData, Table, Text, insert
+from fastapi import APIRouter, Depends, Query, Request
+from pydantic import AwareDatetime
+from sqlalchemy import BigInteger, Column, DateTime, MetaData, Table, Text, insert, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from api_server.auth import require
+from py_contracts.api import AuditLog, AuditLogList
 
 # 表结构由迁移 0001 定义，此处只声明读写用到的列
 audit_log = Table(
@@ -41,4 +46,23 @@ async def record(
             after=after,
             request_id=request_id,
         )
+    )
+
+
+router = APIRouter(prefix="/api")
+
+
+@router.get("/audit-logs", dependencies=[Depends(require("auditor"))])
+async def list_audit_logs(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    before: AwareDatetime | None = None,
+) -> AuditLogList:
+    query = select(audit_log).order_by(audit_log.c.ts.desc(), audit_log.c.id.desc()).limit(limit)
+    if before is not None:
+        query = query.where(audit_log.c.ts < before)
+    async with request.app.state.engine.connect() as conn:
+        rows = (await conn.execute(query)).mappings().all()
+    return AuditLogList(
+        items=[AuditLog.model_validate(dict(r) | {"id": str(r["id"])}) for r in rows]
     )

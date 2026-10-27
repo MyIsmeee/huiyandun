@@ -5,7 +5,7 @@
 ## 职责
 
 - 统一错误格式（契约 `Error`）；写操作必须携带 `X-Request-ID`，请求 ID 绑定到日志并回写响应头（C-BE-08）
-- 登录与 RBAC：本地账户，会话令牌只经 `HttpOnly` Cookie `hyd_session` 传递，数据库只存其 SHA-256；角色包含关系 viewer ⊂ operator ⊂ admin、viewer ⊂ auditor（C-BE-07、C-FE-06）
+- 登录与 RBAC：本地账户，会话令牌只经 `HttpOnly` Cookie `hyd_session` 传递，数据库只存其 SHA-256；角色包含关系 viewer ⊂ operator ⊂ admin、viewer ⊂ auditor，审计日志只有 auditor 可读（C-BE-07、C-FE-06）
 - 审计日志：`api_server.audit.record` 与业务变更在同一事务内写入；表只追加（G-13）
 
 ## 数据库账号
@@ -26,7 +26,10 @@
 ```sh
 hyd-api migrate   # HYD_DB_USER=postgres，HYD_DB_PASSWORD_FILE 指向属主口令
 hyd-api serve
+hyd-api create-user <用户名> --role admin   # 交互输入口令，写审计（G-13、G-14）
 ```
+
+M0 不做网页端账号管理；账户只能经命令行创建。
 
 测试以 `compose.yaml` 锁定的 PostgreSQL 镜像启动临时容器：
 
