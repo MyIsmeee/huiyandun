@@ -28,8 +28,9 @@ export async function expectNoOverflow(page: Page): Promise<void> {
   expect(overflowing).toEqual([]);
 }
 
-export async function presetTheme(page: Page, theme: "dark" | "light"): Promise<void> {
-  const state = JSON.stringify({ state: { theme, reducedMotion: false }, version: 0 });
+/** 主题档位；未调用时为 playwright.config.ts 预置的暗色 */
+export async function presetTheme(page: Page, mode: "auto" | "dark" | "light"): Promise<void> {
+  const state = JSON.stringify({ state: { mode, reducedMotion: false }, version: 0 });
   await page.addInitScript((value) => localStorage.setItem("hyd-theme", value), state);
 }
 

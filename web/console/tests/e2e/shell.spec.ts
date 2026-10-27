@@ -79,3 +79,28 @@ test("退出失败时停留在主界面并提示，请求期间按钮不可再�
   await expectNoOverflow(page);
   await expect(page.locator("header")).toHaveScreenshot("header-logout-failed.png");
 });
+
+// HYD-UIX-004 §3.1：主题三档；用例时钟固定在 14:30，自动档为亮色
+for (const mode of ["auto", "dark", "light"] as const) {
+  test(`主题档位：${mode}`, async ({ page }) => {
+    await presetTheme(page, mode);
+    await signedIn(page);
+    await page.goto("/");
+
+    const group = page.getByRole("radiogroup", { name: "主题" });
+    await expect(group.getByRole("radio", { checked: true })).toHaveAttribute("aria-label", new RegExp(mode === "auto" ? "自动" : mode === "dark" ? "暗色" : "亮色"));
+    await expect(group.locator("..")).toHaveScreenshot(`theme-toggle-${mode}.png`);
+  });
+}
+
+test("自动档在 18:00 由亮色切换为暗色，无需刷新", async ({ page }) => {
+  await page.clock.pauseAt(new Date("2026-10-27T09:59:00Z")); // 上海 17:59:00
+  await presetTheme(page, "auto");
+  await signedIn(page);
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.clock.runFor(61_000);
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
