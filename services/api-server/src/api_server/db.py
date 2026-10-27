@@ -20,10 +20,16 @@ def create_engine(config: ApiConfig) -> AsyncEngine:
         port=config.db_port,
         database=config.db_name,
     )
+    # 单条语句与事务内空闲各受 db_timeout_s 约束（PostgreSQL 16 没有整个事务的时长上限）
+    idle_ms = str(int(config.db_timeout_s * 1000))
     return create_async_engine(
         url,
         pool_timeout=config.db_timeout_s,
-        connect_args={"timeout": config.db_timeout_s, "command_timeout": config.db_timeout_s},
+        connect_args={
+            "timeout": config.db_timeout_s,
+            "command_timeout": config.db_timeout_s,
+            "server_settings": {"idle_in_transaction_session_timeout": idle_ms},
+        },
     )
 
 
