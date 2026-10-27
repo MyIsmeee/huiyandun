@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import type { Site } from "../lib/api";
+import { useConnection } from "../store/connection";
 import { moveCamera, panned, useCamera } from "./camera";
 import { CameraControls } from "./CameraControls";
 import { FloorPlan2D } from "./FloorPlan2D";
@@ -72,6 +73,11 @@ export function SceneViewport({ site }: { site: Site }) {
   const state = failed ? "error" : !webgl2 ? "2d" : ready ? "ready" : "loading";
   const drag = useDragPan(view);
   useEffect(() => moveCamera(OVERVIEW, false), []); // 每次进入主界面从总览开始
+  // 断线时所有动效立即停止（V-U3、C-FE-05）：进行中的转场直接到位
+  const offline = useConnection((s) => !s.open && !s.connecting);
+  useEffect(() => {
+    if (offline) moveCamera(useCamera.getState().goal, false);
+  }, [offline]);
 
   return (
     <div ref={ref} data-scene={state} {...drag}>
@@ -132,6 +138,9 @@ function Note({ children }: { children: ReactNode }) {
 function useDragPan(view: View | null) {
   const last = useRef<readonly [number, number] | null>(null);
   const zoomedIn = useCamera((s) => s.goal.zoom > OVERVIEW.zoom);
+  const end = () => {
+    last.current = null;
+  };
   return {
     className: zoomedIn ? "absolute inset-0 cursor-grab active:cursor-grabbing" : "absolute inset-0",
     onPointerDown: (e: PointerEvent) => {
@@ -145,8 +154,9 @@ function useDragPan(view: View | null) {
       last.current = [e.clientX, e.clientY];
       moveCamera(panned(useCamera.getState().goal, delta, view.zoom, view.panLimit), false);
     },
-    onPointerUp: () => {
-      last.current = null;
-    },
+    // 浏览器取消手势（如触屏滚动）时同样结束拖拽，否则松开后指针移动仍会平移
+    onPointerUp: end,
+    onPointerCancel: end,
+    onLostPointerCapture: end,
   };
 }

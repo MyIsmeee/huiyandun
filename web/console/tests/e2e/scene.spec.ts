@@ -158,6 +158,36 @@ test.describe("相机控件", () => {
     await expect.poll(() => labelAt(page)).toEqual(start);
   });
 
+  test("转场中断线：立即到位，不再继续（V-U3）", async ({ page }) => {
+    await button(page, "向右旋转 90°").click();
+    await page.clock.runFor(100);
+    const midway = await labelAt(page);
+
+    await sockets[0]?.close({ code: 1011 });
+    await expect(page.getByRole("status", { name: "连接状态" })).toHaveText("断线 · 重连中");
+    await expect.poll(() => labelAt(page)).not.toEqual(midway);
+    const end = await labelAt(page);
+    await page.clock.runFor(100); // 不足 1 s，不会重连
+
+    expect(await labelAt(page)).toEqual(end);
+  });
+
+  test("浏览器取消手势后结束拖拽", async ({ page }) => {
+    await button(page, "放大").click();
+    await transition(page);
+    const box = await scene(page).boundingBox();
+    const [x, y] = [(box?.x ?? 0) + 300, (box?.y ?? 0) + 400];
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.locator("[data-scene]").dispatchEvent("pointercancel");
+    const before = await labelAt(page);
+
+    await page.mouse.move(x - 40, y - 30);
+
+    expect(await labelAt(page)).toEqual(before);
+    await page.mouse.up();
+  });
+
   test("断线时瞬时切换，不播放转场（C-FE-05）", async ({ page }) => {
     const start = await labelAt(page);
     await sockets[0]?.close({ code: 1011 }); // 时钟暂停，重连不会发生
