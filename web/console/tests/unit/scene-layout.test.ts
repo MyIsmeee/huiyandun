@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Site } from "../../src/lib/api";
-import { isEmpty, isoView, planView, WALL_HEIGHT_M, zoneAnchor, zoneLabel } from "../../src/scene/layout";
+import { isEmpty, isoView, OVERVIEW, planView, WALL_HEIGHT_M, zoneAnchor, zoneLabel } from "../../src/scene/layout";
 
 const SITE: Site = { id: "s", name: "站点", width_m: 40, height_m: 24, walls: [], doors: [], zones: [], devices: [] };
 const SIZE = { width: 1100, height: 700 };
@@ -108,4 +108,86 @@ describe("区域标注", () => {
 it("没有墙体与区域为空场景", () => {
   expect(isEmpty(SITE)).toBe(true);
   expect(isEmpty({ ...SITE, walls: [[0, 0, 1, 0]] })).toBe(false);
+});
+
+// V-I1：绕竖轴旋转 4 档、缩放 1～4 倍、放大后平移
+describe("相机姿态", () => {
+  const QUARTERS = [0, 1, 2, 3].map((k) => (k * Math.PI) / 2);
+  const box = (view: ReturnType<typeof isoView> | ReturnType<typeof planView>, heights: number[]) =>
+    bounds(
+      heights.flatMap((y) =>
+        [
+          [0, 0],
+          [40, 0],
+          [40, 24],
+          [0, 24],
+        ].map(([x = 0, z = 0]) => view.project([x, y, z])),
+      ),
+    );
+  const angle = (view: ReturnType<typeof isoView>, [x, y]: readonly [number, number]) => {
+    const [cx, cy] = view.project([20, 0, 12]);
+    const [px, py] = view.project([x, 0, y]);
+    return Math.atan2(py - cy, px - cx); // 画面 y 向下，角度增大为顺时针
+  };
+
+  it.each(QUARTERS)("方位角 %f：等距视图与 2D 平面图都完整落在可用区域内并居中", (azimuth) => {
+    const pose = { ...OVERVIEW, azimuth };
+    for (const b of [box(isoView(SITE, SIZE, pose), [0, WALL_HEIGHT_M]), box(planView(SITE, SIZE, pose), [0])]) {
+      expect(b.left).toBeGreaterThanOrEqual(AREA.left - 1e-6);
+      expect(b.right).toBeLessThanOrEqual(AREA.right + 1e-6);
+      expect(b.top).toBeGreaterThanOrEqual(AREA.top - 1e-6);
+      expect(b.bottom).toBeLessThanOrEqual(AREA.bottom + 1e-6);
+      expect(b.left - AREA.left).toBeCloseTo(AREA.right - b.right);
+      expect(b.top - AREA.top).toBeCloseTo(AREA.bottom - b.bottom);
+    }
+  });
+
+  it("方位角增大一档，场景在画面上顺时针转 90°", () => {
+    const before = angle(isoView(SITE, SIZE), [30, 12]);
+    const after = angle(isoView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }), [30, 12]);
+    const delta = (after - before + 2 * Math.PI) % (2 * Math.PI);
+    expect(delta).toBeGreaterThan(0);
+    expect(delta).toBeLessThan(Math.PI);
+
+    const [x, y] = planView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }).project([30, 0, 12]);
+    const [cx, cy] = planView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }).project([20, 0, 12]);
+    expect(x).toBeCloseTo(cx); // 东侧的点转到正下方
+    expect(y).toBeGreaterThan(cy);
+  });
+
+  it("相机朝向随方位角转动：默认在东南，转一档到东北", () => {
+    const [a, b] = [isoView(SITE, SIZE).toCamera, isoView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }).toCamera];
+    expect(a[0]).toBeCloseTo(Math.SQRT1_2);
+    expect(a[1]).toBeCloseTo(Math.SQRT1_2);
+    expect(b[0]).toBeCloseTo(Math.SQRT1_2);
+    expect(b[1]).toBeCloseTo(-Math.SQRT1_2);
+  });
+
+  it("放大 2 倍：每米像素数加倍；2D 平面图以可用区域中心为锚点", () => {
+    for (const make of [isoView, planView]) {
+      expect(make(SITE, SIZE, { ...OVERVIEW, zoom: 2 }).zoom).toBeCloseTo(2 * make(SITE, SIZE).zoom);
+    }
+    const center = planView(SITE, SIZE, { ...OVERVIEW, zoom: 2 }).project([20, 0, 12]);
+    expect(center[0]).toBeCloseTo((AREA.left + AREA.right) / 2);
+    expect(center[1]).toBeCloseTo((AREA.top + AREA.bottom) / 2);
+  });
+
+  it("平移 1 米：画面内容反向移动 zoom 个像素", () => {
+    for (const make of [isoView, planView]) {
+      const pose = { ...OVERVIEW, zoom: 2 };
+      const [x0, y0] = make(SITE, SIZE, pose).project([20, 0, 12]);
+      const [x1, y1] = make(SITE, SIZE, { ...pose, pan: [1, 1] }).project([20, 0, 12]);
+      const zoom = make(SITE, SIZE, pose).zoom;
+      expect(x1 - x0).toBeCloseTo(-zoom);
+      expect(y1 - y0).toBeCloseTo(-zoom);
+    }
+  });
+
+  it("平移上限为站点投影尺寸的一半", () => {
+    const view = planView(SITE, SIZE);
+    expect(view.panLimit).toEqual([20, 12]);
+    expect(planView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }).panLimit.map((v) => Math.round(v))).toEqual([
+      12, 20,
+    ]);
+  });
 });

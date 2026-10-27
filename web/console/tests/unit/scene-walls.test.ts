@@ -56,19 +56,25 @@ describe("wallPieces", () => {
 });
 
 describe("isNearSide", () => {
-  // 相机位于 (+x, +z) 方向：40×24 站点的南墙（y = 24）与东墙（x = 40）在近侧
   const center = { width_m: 40, height_m: 24 };
+  const WALLS = { 北: [0, 0, 40, 0], 东: [40, 0, 40, 24], 南: [0, 24, 40, 24], 西: [0, 0, 0, 24] };
+  const r = Math.SQRT1_2;
+
+  // 相机所在方向（四个旋转档位）→ 近侧的两面墙
   it.each([
-    ["南墙", [0, 24, 40, 24], true],
-    ["东墙", [40, 0, 40, 24], true],
-    ["北墙", [0, 0, 40, 0], false],
-    ["西墙", [0, 0, 0, 24], false],
-  ])("%s", (_, wall, near) => {
-    expect(isNearSide(wall, center)).toBe(near);
+    ["东南", [r, r], ["东", "南"]],
+    ["东北", [r, -r], ["北", "东"]],
+    ["西北", [-r, -r], ["北", "西"]],
+    ["西南", [-r, r], ["南", "西"]],
+  ] as const)("相机在%s时", (_, toCamera, near) => {
+    const actual = Object.entries(WALLS)
+      .filter(([, wall]) => isNearSide(wall, center, toCamera))
+      .map(([name]) => name);
+    expect(actual).toEqual(near);
   });
 
   it("被门洞切开的墙段按整段墙体判断", () => {
     const pieces = wallPieces([[0, 24, 40, 24]], [[2, 24, 4, 24]]);
-    expect(pieces.every((p) => isNearSide(p.wall, center))).toBe(true);
+    expect(pieces.every((p) => isNearSide(p.wall, center, [r, r]))).toBe(true);
   });
 });

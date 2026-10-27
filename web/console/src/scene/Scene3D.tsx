@@ -61,7 +61,7 @@ export default function Scene3D({ site, view, onReady }: { site: Site; view: Iso
         <Zone key={zone.id} polygon={zone.polygon} color={colors.zone} />
       ))}
       {pieces.map((piece, i) => (
-        <Wall key={i} piece={piece} near={isNearSide(piece.wall, site)} color={colors.wall} />
+        <Wall key={i} piece={piece} near={isNearSide(piece.wall, site, view.toCamera)} color={colors.wall} />
       ))}
     </Canvas>
   );

@@ -52,11 +52,15 @@ export function wallPieces(walls: number[][], doors: number[][]): WallPiece[] {
 }
 
 /**
- * 是否为遮挡视线的近侧墙体：墙体中点位于站点中心朝相机的一侧（相机在 +x、+z 方向，V-I1）。
+ * 是否为遮挡视线的近侧墙体：墙体中点位于站点中心朝相机的一侧（toCamera 为由站点指向相机的水平方向）。
  * 按整段墙体判断，同一墙体被门洞切开的各段结果一致。近侧墙体半透明，不遮挡室内（§5.1 L1）。
  */
-export function isNearSide([x1 = 0, y1 = 0, x2 = 0, y2 = 0]: number[], site: Pick<Site, "width_m" | "height_m">): boolean {
+export function isNearSide(
+  [x1 = 0, y1 = 0, x2 = 0, y2 = 0]: number[],
+  site: Pick<Site, "width_m" | "height_m">,
+  [tx, ty]: readonly [number, number],
+): boolean {
   const mx = (x1 + x2) / 2 - site.width_m / 2;
   const my = (y1 + y2) / 2 - site.height_m / 2;
-  return mx + my > 0;
+  return mx * tx + my * ty > 0;
 }
