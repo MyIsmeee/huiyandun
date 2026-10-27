@@ -91,6 +91,20 @@ services:
       timeout: 3s
       retries: 10
 
+  # 视觉引擎（HYD-ARCH-001 §8）。暂为一次性启动断言：加载模型并确认推理设备后退出（C-CV-11）；
+  # 常驻检测由 TK-021 检测链路接入。模型权重由 make fetch-models 下载（R-03）
+  vision-engine:
+    image: huiyandun/vision-engine:local
+    build: { context: ../.., dockerfile: services/vision-engine/Dockerfile }
+    profiles: [vision]
+    command: ["hyd-gpu-check"]
+    labels: { hyd.oneshot: "true" }
+    environment:
+      HYD_DEVICE: cpu  # 显式 CPU 模式（DP-06）；compose.gpu.yaml 改为 cuda
+      HYD_MODEL_FILE: /models/rtmo-s_body7-640x640.onnx
+    volumes: ["../../models/weights:/models:ro"]
+    network_mode: none
+
   # 无真实摄像头时循环推流演示素材（REUSE-04）；素材由 make demo-media 生成
   mediamtx:
     image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2

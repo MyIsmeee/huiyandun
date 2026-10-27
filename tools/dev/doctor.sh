@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 环境自检（HYD-DEP-005 §2）：任一失败即终止并打印修复提示
-# vision-engine hyd-gpu-check（C-CV-11）随 vision-engine 由 TK-021 加入
 set -uo pipefail
 
+COMPOSE_DIR="$(dirname "$0")/../../deploy/compose"
 # 须与 deploy/third-party.yaml 登记一致
 CUDA_IMAGE=nvidia/cuda:12.8.0-base-ubuntu24.04@sha256:e778509d37d66475120929671500377524f7278478ba08131b07ef3ffcc0dce0
 
@@ -23,5 +23,8 @@ check "在 WSL 内启动 Docker Engine（sudo service docker start），并确�
   docker info
 check "安装 NVIDIA Container Toolkit，执行 sudo nvidia-ctk runtime configure --runtime=docker 后重启 Docker；断网环境须预先拉取 $CUDA_IMAGE" \
   docker run --rm --gpus all "$CUDA_IMAGE" nvidia-smi
+check "先运行 make fetch-models；仍失败时重新运行上面的命令查看日志：Windows 侧驱动须支持 CUDA 13（580 及以上），onnxruntime-gpu 的 CUDA 主版本须与镜像一致（C-HW-08）" \
+  docker compose -f "$COMPOSE_DIR/compose.yaml" -f "$COMPOSE_DIR/compose.gpu.yaml" \
+  run --rm --build vision-engine hyd-gpu-check
 
 echo "环境自检通过"
