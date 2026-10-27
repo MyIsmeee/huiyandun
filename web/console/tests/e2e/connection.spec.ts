@@ -1,5 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { expectNoOverflow, freezeClock, mockSocket, SITE, signedIn, UNAUTHORIZED } from "./helpers";
+import { expectNoOverflow, freezeClock, mockSocket, SITE, sceneSettled, signedIn, UNAUTHORIZED } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
@@ -47,6 +47,7 @@ test("断线时提示数据非实时，并自动重连", async ({ page }) => {
   const sockets = await signedIn(page);
   await page.goto("/");
   await expect(status(page)).toHaveText("实时");
+  await sceneSettled(page);
 
   await sockets[0]?.close({ code: 1011 });
 

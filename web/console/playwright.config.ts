@@ -10,6 +10,8 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
     locale: "zh-CN",
     timezoneId: "Asia/Shanghai",
+    // 无 GPU 的环境以 SwiftShader 软件渲染 WebGL，场景截图需要
+    launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] },
   },
   webServer: {
     command: "pnpm exec vite build --mode e2e && pnpm exec vite preview --mode e2e --port 4173 --strictPort",

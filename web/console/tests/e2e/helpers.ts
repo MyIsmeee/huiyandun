@@ -1,6 +1,20 @@
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 
-export const SITE = { id: "demo", name: "演示办公区", width_m: 40, height_m: 24, walls: [], zones: [], devices: [] };
+// 与 demo/scenarios/site.yaml 一致
+export const SITE = {
+  id: "demo-office",
+  name: "演示办公区",
+  width_m: 40,
+  height_m: 24,
+  walls: [
+    [0, 0, 40, 0],
+    [40, 0, 40, 24],
+    [40, 24, 0, 24],
+    [0, 24, 0, 0],
+  ],
+  zones: [{ id: "z-01", name: "设备间外墙", polygon: [[30, 0], [40, 0], [40, 6], [30, 6]], no_climb: true }],
+  devices: [],
+};
 export const UNAUTHORIZED = { code: "unauthorized", message: "未登录或会话失效", request_id: "r" };
 
 /** V-P3：截图前检查文字溢出——块级元素的内容宽度不得超出自身 */
@@ -36,4 +50,13 @@ export async function freezeClock(page: Page): Promise<void> {
   const now = new Date("2026-10-27T06:30:00Z");
   await page.clock.install({ time: new Date(now.getTime() - 1000) });
   await page.clock.pauseAt(now);
+}
+
+/** 等待场景到达指定状态；时钟已暂停时逐帧推进，使 3D 场景得以绘制首帧 */
+export async function sceneSettled(page: Page, state: "ready" | "2d" | "error" = "ready"): Promise<void> {
+  const scene = page.locator("[data-scene]");
+  await expect(async () => {
+    await page.clock.runFor(100);
+    await expect(scene).toHaveAttribute("data-scene", state, { timeout: 50 });
+  }).toPass({ intervals: [50] });
 }
