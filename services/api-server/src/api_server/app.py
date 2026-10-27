@@ -1,9 +1,10 @@
 """FastAPI 应用：X-Request-ID 透传（C-BE-08）与统一错误格式（契约 Error）。"""
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from http import HTTPStatus
 
 from fastapi import FastAPI, Request, Response
@@ -87,9 +88,13 @@ def create_app(config: ApiConfig) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.engine = create_engine(config)
+        beat = asyncio.create_task(ws.heartbeat(app.state.hub))
         try:
             yield
         finally:
+            beat.cancel()
+            with suppress(asyncio.CancelledError):
+                await beat
             await app.state.engine.dispose()
 
     # 关闭自带文档页：其页面从公网 CDN 加载脚本（G-05）
