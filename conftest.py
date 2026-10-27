@@ -17,6 +17,7 @@ from api_server.config import ApiConfig
 from api_server.db import alembic_config, create_engine
 
 DEPLOY = Path(__file__).resolve().parent / "deploy/compose"
+SITE = Path(__file__).resolve().parent / "demo/scenarios/site.yaml"
 
 
 def docker(*args: str, check: bool = True) -> str:
@@ -67,7 +68,7 @@ def db(db_secrets: dict[str, Path]) -> Iterator[tuple[ApiConfig, ApiConfig]]:
     )  # fmt: skip
     try:
         host, port = docker("port", container, "5432").splitlines()[0].rsplit(":", 1)
-        base = {"db_host": host, "db_port": int(port), "db_timeout_s": 5}
+        base = {"db_host": host, "db_port": int(port), "db_timeout_s": 5, "site_file": SITE}
         owner = ApiConfig.model_validate(
             base | {"db_user": "postgres", "db_password_file": owner_pw}
         )

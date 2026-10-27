@@ -17,6 +17,8 @@ from api_server.config import ApiConfig
 from py_common.log import configure_logging
 from py_contracts.api import Error
 
+SITE = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
+
 
 class Body(BaseModel):
     n: int
@@ -25,7 +27,7 @@ class Body(BaseModel):
 @pytest.fixture
 def client(tmp_path: Path) -> Iterator[TestClient]:
     (tmp_path / "pw").write_text("unused")
-    app = create_app(ApiConfig(db_password_file=tmp_path / "pw"))
+    app = create_app(ApiConfig(db_password_file=tmp_path / "pw", site_file=SITE))
 
     @app.post("/t/write")
     async def write(body: Body) -> dict:

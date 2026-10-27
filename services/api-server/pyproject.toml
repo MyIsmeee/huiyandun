@@ -9,6 +9,7 @@ dependencies = [
     "cryptography>=50,<51",
     "fastapi>=0.162.0,<0.163",
     "py-common",
+    "pyyaml>=6.0.3,<7",
     "sqlalchemy[asyncio]>=2.1.6,<2.2",
     "uvicorn>=0.54.0,<0.55",
     "websockets>=17.3,<18",
