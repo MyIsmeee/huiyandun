@@ -20,6 +20,12 @@ export function App() {
   );
   // 无论登出请求成败都重新探测：以服务端的实际会话状态决定显示哪一页
   const logout = useCallback(() => api.logout().then(probe, probe), [probe]);
+  // WS 被拒时核对会话：失效回到登录页；服务不可达时留在主界面，由连接状态提示断线（V-U3）
+  const recheck = useCallback(() => {
+    api.getSite().catch((e: unknown) => {
+      if (e instanceof ApiError && e.status === 401) setGate({ kind: "login" });
+    });
+  }, []);
   // 请求 ID（crypto.randomUUID）与 Secure 会话 Cookie 都要求安全上下文：http 访问时直接说明，不发请求
   const secure = window.isSecureContext;
   useEffect(() => {
@@ -29,7 +35,7 @@ export function App() {
   if (!secure) return <Notice text="请通过 HTTPS 地址访问控制台" />;
   if (gate.kind === "login") return <LoginPage onLogin={probe} />;
   if (gate.kind === "unreachable") return <Notice text="无法连接服务器" onRetry={probe} />;
-  if (gate.kind === "ready") return <Shell site={gate.site} onLogout={logout} />;
+  if (gate.kind === "ready") return <Shell site={gate.site} onLogout={logout} onRejected={recheck} />;
   return <main className="h-full bg-page" />;
 }
 
