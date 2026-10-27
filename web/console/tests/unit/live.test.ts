@@ -79,4 +79,20 @@ describe("devices 与 alerts", () => {
 
     expect(useLive.getState().behaviors).toEqual({});
   });
+
+  it("按设备记录处于网络攻击期间的最高告警等级；无设备的告警不计入；退出网络攻击即清除（V-A1）", () => {
+    const alert = (severity: string, device_id: string | null = "cam-02") =>
+      frame("alerts", { ...BASE, rule_id: "HYD-NET-0001", severity, device_id });
+
+    receive(alert("medium"), 0);
+    receive(alert("high"), 0);
+    receive(alert("low"), 0);
+    receive(alert("critical", null), 0);
+    expect(useLive.getState().severities).toEqual({ "cam-02": "high" });
+
+    receive(frame("devices", { id: "cam-02", state: "both" }), 0);
+    expect(useLive.getState().severities).toEqual({ "cam-02": "high" });
+    receive(frame("devices", { id: "cam-02", state: "contained" }), 0);
+    expect(useLive.getState().severities).toEqual({});
+  });
 });

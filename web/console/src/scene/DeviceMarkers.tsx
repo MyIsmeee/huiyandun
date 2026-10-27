@@ -75,7 +75,7 @@ const head = ({ camera: { pose }, look }: Item): Instance => ({
 });
 
 /** 单台设备的轮廓、轮廓环与视场 */
-function Extras({ camera: { pose }, look }: Item) {
+function Extras({ camera: { pose, severe }, look }: Item) {
   const outline = useRef<LineSegments>(null);
   useLayoutEffect(() => {
     outline.current?.computeLineDistances(); // 虚线材质需要逐段距离
@@ -97,7 +97,7 @@ function Extras({ camera: { pose }, look }: Item) {
           <meshBasicMaterial color={look.ring} side={DoubleSide} />
         </mesh>
       )}
-      {look.cone && <Cone pose={pose} cone={look.cone} />}
+      {look.cone && <Cone pose={pose} cone={look.cone} severe={severe} />}
     </>
   );
 }
@@ -118,10 +118,12 @@ function useMotion(): boolean {
 }
 
 /** 视场：地面扇形，半径为视距、张角为水平视场角（§5.1 L3） */
-function Cone({ pose, cone }: { pose: Camera["pose"]; cone: NonNullable<Look["cone"]> }) {
+function Cone(props: { pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; severe: boolean }) {
+  const { pose, cone, severe } = props;
   const material = useRef<MeshBasicMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
-  const breathing = useMotion() && cone.breathe;
+  // 只有 critical / high 告警允许呼吸（V-A1）
+  const breathing = useMotion() && cone.breathe && severe;
   useEffect(() => {
     if (material.current) material.current.opacity = cone.opacity;
     invalidate();
