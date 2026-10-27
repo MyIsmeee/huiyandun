@@ -3,20 +3,18 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } fro
 import {
   BoxGeometry,
   type BufferGeometry,
-  Color,
   CylinderGeometry,
   DoubleSide,
   EdgesGeometry,
-  type InstancedMesh,
   type LineSegments,
   type MeshBasicMaterial,
-  Object3D,
 } from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { useConnection } from "../store/connection";
 import { useTheme } from "../theme/store";
 import { type Camera, deviceLook, type Look, STATUS } from "./devices";
+import { type Instance, Instanced } from "./Instanced";
 
 /**
  * 摄像头机头：圆角机身 + 镜头，朝 +x、略向下俯（§5.1 L2 圆角低多边形，程序化生成）。
@@ -50,11 +48,17 @@ export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
   const placed = cameras.map((camera) => ({ camera, look: deviceLook(camera.state) }));
   const solid = placed.filter(({ look }) => look.fill && look.opacity === 1);
   const faded = placed.filter(({ look }) => look.fill && look.opacity < 1);
+  // 立杆随机身变色会使状态色块面积失真：立杆始终为中性色（V-S1）
+  const poles = cameras.map(({ pose }): Instance => ({
+    position: [pose.x, 0, pose.y],
+    scale: [1, pose.height_m, 1],
+    color: STATUS.neutral,
+  }));
   return (
     <>
-      <Instances geometry={POLE} items={placed} opacity={1} pole />
-      <Instances geometry={HEAD} items={solid} opacity={1} />
-      <Instances geometry={HEAD} items={faded} opacity={0.5} />
+      <Instanced geometry={POLE} items={poles} />
+      <Instanced geometry={HEAD} items={solid.map(head)} />
+      <Instanced geometry={HEAD} items={faded.map(head)} opacity={0.5} />
       {placed.map(({ camera, look }) => (
         <Extras key={camera.id} camera={camera} look={look} />
       ))}
@@ -64,34 +68,11 @@ export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
 
 type Item = { camera: Camera; look: Look };
 
-function Instances({ geometry, items, opacity, pole }: { geometry: BufferGeometry; items: Item[]; opacity: number; pole?: boolean }) {
-  const ref = useRef<InstancedMesh>(null);
-  const invalidate = useThree((s) => s.invalidate);
-  useLayoutEffect(() => {
-    const mesh = ref.current;
-    if (!mesh) return;
-    const o = new Object3D();
-    items.forEach(({ camera: { pose }, look }, i) => {
-      o.position.set(pose.x, pole ? 0 : pose.height_m, pose.y);
-      o.rotation.set(0, turn(pose.yaw_deg), 0);
-      o.scale.set(1, pole ? pose.height_m : 1, 1);
-      o.updateMatrix();
-      mesh.setMatrixAt(i, o.matrix);
-      // 立杆随机身变色会使状态色块面积失真：立杆始终为中性色（V-S1）
-      mesh.setColorAt(i, new Color(pole ? STATUS.neutral : (look.fill ?? STATUS.neutral)));
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    invalidate();
-  }, [items, pole, invalidate]);
-  if (items.length === 0) return null;
-  return (
-    // 实例数变化时重建：InstancedMesh 的容量在创建时确定
-    <instancedMesh key={items.length} ref={ref} args={[geometry, undefined, items.length]} castShadow>
-      <meshLambertMaterial transparent={opacity < 1} opacity={opacity} depthWrite={opacity === 1} />
-    </instancedMesh>
-  );
-}
+const head = ({ camera: { pose }, look }: Item): Instance => ({
+  position: [pose.x, pose.height_m, pose.y],
+  rotationY: turn(pose.yaw_deg),
+  color: look.fill ?? STATUS.neutral,
+});
 
 /** 单台设备的轮廓、轮廓环与视场 */
 function Extras({ camera: { pose }, look }: Item) {
