@@ -15,6 +15,8 @@ import type { Site } from "../lib/api";
 import { useConnection } from "../store/connection";
 import { moveCamera, panned, useCamera } from "./camera";
 import { CameraControls } from "./CameraControls";
+import { DeviceTags } from "./DeviceTags";
+import { useCameras } from "./devices";
 import { FloorPlan2D } from "./FloorPlan2D";
 import { isEmpty, isoView, OVERVIEW, planView, type Size, type View, zoneAnchor, zoneLabel } from "./layout";
 
@@ -67,6 +69,7 @@ export function SceneViewport({ site }: { site: Site }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const pose = useCamera((s) => s.pose);
+  const cameras = useCameras(site.devices);
   const iso = useMemo(() => (size && webgl2 ? isoView(site, size, pose) : null), [site, size, webgl2, pose]);
   const plan = useMemo(() => (size && !webgl2 ? planView(site, size, pose) : null), [site, size, webgl2, pose]);
   const view = iso ?? plan;
@@ -84,12 +87,17 @@ export function SceneViewport({ site }: { site: Site }) {
       {iso && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene3D site={site} view={iso} onReady={() => setReady(true)} />
+            <Scene3D site={site} cameras={cameras} view={iso} onReady={() => setReady(true)} />
           </Suspense>
         </Boundary>
       )}
       {plan && <FloorPlan2D site={site} view={plan} />}
-      {view && (state === "ready" || state === "2d") && <ZoneLabels zones={site.zones} view={view} />}
+      {view && (state === "ready" || state === "2d") && (
+        <>
+          <ZoneLabels zones={site.zones} view={view} />
+          <DeviceTags cameras={cameras} view={view} />
+        </>
+      )}
       {(state === "ready" || state === "2d") && (
         <CameraControls notice={state === "2d" ? DEGRADED : undefined} />
       )}
