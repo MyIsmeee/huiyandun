@@ -1,0 +1,17 @@
+# CV 模型白名单（C-CV-01、C-RU-01）；版本格式 <模型名>@<上游版本>+hyd.<N>（T-07）
+# 权重不入库（R-03）：make fetch-models 下载到 models/weights/，make verify-models 校验
+# 禁止加入人脸检测/识别、ReID、属性识别模型（G-04）
+models:
+  - name: rtmo-s
+    version: rtmo-s@dac2bf74_20231211+hyd.1
+    task: pose  # 单阶段：人体框 + COCO 17 关键点
+    file: rtmo-s_body7-640x640.onnx
+    sha256: d0703d40d19f3921da51ae725402d5fdae4d2478c7442072d3101bd396f370d8
+    # OpenMMLab 官方 ONNX 导出（MMDeploy），即 rtmlib 内置地址
+    source: https://download.openmmlab.com/mmpose/v1/projects/rtmo/onnx_sdk/rtmo-s_8xb32-600e_body7-640x640-dac2bf74_20231211.zip
+    source_sha256: 3da7ad88b209f9da8be87ba5c325610639af04de3b5c8a96649b98cd9e2848a2
+    source_member: end2end.onnx
+    license: Apache-2.0
+    card: cards/rtmo-s.md
+    purpose: vision-engine 人体检测与骨骼估计（REUSE-05）
+    owner: MyIsmeee

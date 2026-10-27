@@ -1,5 +1,5 @@
 .PHONY: lint lint-py lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	verify-models test-rules llm-check demo-run
+	fetch-models verify-models test-rules llm-check demo-run
 
 WEB = pnpm --dir web/console
 
@@ -59,10 +59,16 @@ demo-down:
 demo-health:
 	tools/dev/wait-healthy.sh $(COMPOSE)
 
+# CV 模型权重不入库（R-03）：按 models/registry.yaml 下载并校验哈希（C-RU-06）
+fetch-models:
+	uv run python tools/dev/models.py fetch models
+
+verify-models:
+	uv run python tools/dev/models.py verify models
+
 # 占位目标：对应任务实现前，执行即失败
 todo = @echo "$@：由 $(1) 实现" >&2; exit 1
 
-verify-models: ; $(call todo,TK-021)
 test-rules: ; $(call todo,TK-030)
 llm-check: ; $(call todo,TK-060)
 demo-run: ; $(call todo,TK-100)
