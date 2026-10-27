@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connect, freshness, STALE_MS, useConnection } from "../../src/store/connection";
+import { TRACK_TTL_MS, useLive } from "../../src/store/live";
 
 class FakeSocket {
   static all: FakeSocket[] = [];
   onopen: (() => void) | null = null;
-  onmessage: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
   onclose: ((event: { code: number }) => void) | null = null;
   constructor(readonly url: string) {
     FakeSocket.all.push(this);
@@ -12,6 +13,11 @@ class FakeSocket {
   close() {}
 }
 
+const HEARTBEAT = JSON.stringify({ channel: "system", data: { type: "heartbeat" } });
+const TRACK = JSON.stringify({
+  channel: "tracks",
+  data: { camera_id: "cam-01", track_id: 1, x: 1, y: 2, uncertainty_m: 0.3 },
+});
 const latest = () => FakeSocket.all.at(-1) as FakeSocket;
 
 describe("freshness", () => {
@@ -32,6 +38,7 @@ describe("connect", () => {
     vi.stubGlobal("WebSocket", FakeSocket);
     FakeSocket.all = [];
     useConnection.setState(useConnection.getInitialState());
+    useLive.setState(useLive.getInitialState());
   });
 
   afterEach(() => {
@@ -45,8 +52,24 @@ describe("connect", () => {
     latest().onopen?.();
     expect(useConnection.getState()).toMatchObject({ open: true, lastFrameAt: Date.now() });
     vi.advanceTimersByTime(3000);
-    latest().onmessage?.();
+    latest().onmessage?.({ data: HEARTBEAT });
     expect(useConnection.getState().lastFrameAt).toBe(Date.now());
+  });
+
+  it("收到的推送写入场景数据；化身超时移除，断线期间保留（V-U4）", () => {
+    connect(vi.fn());
+    latest().onopen?.();
+
+    latest().onmessage?.({ data: TRACK });
+    expect(Object.keys(useLive.getState().people)).toEqual(["cam-01/1"]);
+    latest().onclose?.({ code: 1006 });
+    vi.advanceTimersByTime(TRACK_TTL_MS * 2);
+    expect(Object.keys(useLive.getState().people)).toEqual(["cam-01/1"]);
+
+    vi.advanceTimersByTime(1000); // 重连
+    latest().onopen?.();
+    vi.advanceTimersByTime(1000);
+    expect(useLive.getState().people).toEqual({});
   });
 
   it("首次连接失败后不再视为连接中", () => {
@@ -109,6 +132,17 @@ describe("connect", () => {
 
     expect(FakeSocket.all.length).toBe(1);
     expect(useConnection.getState()).toEqual(useConnection.getInitialState());
+  });
+
+  it("停止后清空场景数据：重新登录不沿用上次会话的实体", () => {
+    const stop = connect(vi.fn());
+    latest().onopen?.();
+    latest().onmessage?.({ data: TRACK });
+    expect(useLive.getState().people).not.toEqual({});
+
+    stop();
+
+    expect(useLive.getState()).toEqual(useLive.getInitialState());
   });
 
   it("已停止的旧连接晚到的关闭事件不改写新连接的状态", () => {
