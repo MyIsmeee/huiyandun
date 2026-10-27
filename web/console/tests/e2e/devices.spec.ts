@@ -84,3 +84,21 @@ test("总览：演示站点的两台摄像头（V-P3）", async ({ page }) => {
   await expectNoOverflow(page);
   await expect(scene(page)).toHaveScreenshot("device-overview.png");
 });
+
+test("网络攻击视场呼吸；断线或降低动效时停止（V-A1、V-U3、V-A4）", async ({ page }) => {
+  const sockets = await open(page, [camera("cyber_alert")]);
+  const changes = async () => {
+    const before = await scene(page).screenshot();
+    await page.clock.runFor(250);
+    return !(await scene(page).screenshot()).equals(before);
+  };
+
+  // 切换后回到静止不透明度需要再绘制一帧：轮询直到画面不再变化
+  expect(await changes()).toBe(true);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(changes).toBe(false);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(changes).toBe(true);
+  await sockets[0]?.close();
+  await expect.poll(changes).toBe(false);
+});
