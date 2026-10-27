@@ -1,5 +1,6 @@
-"""site.yaml 导入（FR-901～FR-903）与 GET /api/site。启动时加载一次，只在内存中保存。"""
+"""site.yaml 导入（FR-901～FR-904）与 GET /api/site。启动时加载一次，只在内存中保存。"""
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from py_contracts.api import Site
 from py_contracts.config.site_schema import SiteConfig
 
 MIN_CALIBRATION_POINTS = 4  # 单应矩阵至少需要 4 组对应点（FR-902、C-CV-05）
+DOOR_TOLERANCE_M = 0.01  # 门洞端点到墙体的允许偏差：手写坐标的舍入误差
 
 
 class SiteError(Exception):
@@ -27,6 +29,27 @@ def _duplicates(section: str, field: str, values: list[Any]) -> list[str]:
     """Schema 无法表达对象列表中某字段唯一，在此校验。"""
     return [
         f"{section}.{i}.{field}: {field} {v} 重复" for i, v in enumerate(values) if v in values[:i]
+    ]
+
+
+def _on_wall(x: float, y: float, wall: list[float]) -> bool:
+    """点 (x, y) 是否落在墙体线段上（含端点）。"""
+    x1, y1, x2, y2 = wall
+    dx, dy = x2 - x1, y2 - y1
+    length = math.hypot(dx, dy)
+    if length == 0:
+        return False
+    along = (dx * (x - x1) + dy * (y - y1)) / length
+    off = abs(dx * (y - y1) - dy * (x - x1)) / length
+    return off <= DOOR_TOLERANCE_M and -DOOR_TOLERANCE_M <= along <= length + DOOR_TOLERANCE_M
+
+
+def _misplaced_doors(doors: list[list[float]], walls: list[list[float]]) -> list[str]:
+    """门洞两端须落在同一段墙体上（FR-904）。"""
+    return [
+        f"doors.{i}: 门洞不在任何墙体上"
+        for i, (x1, y1, x2, y2) in enumerate(doors)
+        if not any(_on_wall(x1, y1, w) and _on_wall(x2, y2, w) for w in walls)
     ]
 
 
@@ -76,21 +99,24 @@ def load(path: Path) -> Site:
         raise SiteError(
             path, [f"{_field_path(raw, err)}: {err['msg']}" for err in e.errors()]
         ) from e
+    data = config.model_dump(mode="json")
+    doors = data["doors"] or []  # 写成 `doors:` 而未填值时为 null
     # correlator 按 IP 查设备补全 device_id（FR-203），IP 重复时无法确定是哪台
     errors = (
         _duplicates("zones", "id", [z.id for z in config.zones])
         + _duplicates("cameras", "id", [c.id for c in config.cameras])
         + _duplicates("cameras", "ip", [c.ip for c in config.cameras])
+        + _misplaced_doors(doors, data["walls"])
     )
     if errors:
         raise SiteError(path, errors)
 
-    data = config.model_dump(mode="json")
     mode = data["site"].pop("mode")
     return Site.model_validate(
         data["site"]
         | {
             "walls": data["walls"],
+            "doors": doors,
             "zones": data["zones"],
             "devices": [_device(c, mode) for c in data["cameras"]],
         }

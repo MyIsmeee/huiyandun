@@ -38,6 +38,11 @@ class Wall(RootModel[list[float]]):
     root: list[float] = Field(..., max_length=4, min_length=4)
 
 
+class Door(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[float] = Field(..., max_length=4, min_length=4)
+
+
 class PolygonItem(RootModel[list[float]]):
     model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=2, min_length=2)
@@ -358,6 +363,10 @@ class Site(ContractModel):
     walls: list[Wall]
     """
     线段 [x1, y1, x2, y2]，单位米
+    """
+    doors: list[Door]
+    """
+    门洞线段 [x1, y1, x2, y2]，单位米，位于某段墙体上
     """
     zones: list[Zone]
     devices: list[Device]

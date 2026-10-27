@@ -364,6 +364,8 @@ export interface components {
             height_m: number;
             /** @description 线段 [x1, y1, x2, y2]，单位米 */
             walls: number[][];
+            /** @description 门洞线段 [x1, y1, x2, y2]，单位米，位于某段墙体上 */
+            doors: number[][];
             zones: components["schemas"]["Zone"][];
             devices: components["schemas"]["Device"][];
         };

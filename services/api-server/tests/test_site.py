@@ -1,4 +1,4 @@
-"""site.yaml 导入（FR-901～FR-903）与 GET /api/site。"""
+"""site.yaml 导入（FR-901～FR-904）与 GET /api/site。"""
 
 import copy
 from collections.abc import Iterator
@@ -47,6 +47,8 @@ def test_demo_site_is_valid() -> None:
         (lambda d: d["cameras"][1].update(ip=d["cameras"][0]["ip"]), "cameras.1.ip"),
         (lambda d: d.update(whitelist=["172.30.0.1/28"]), "whitelist.0"),
         (lambda d: d["site"].update(mode="inline"), "site.mode"),
+        (lambda d: d.update(doors=[[0, 0, 1, 1]]), "doors.0"),  # 斜穿墙角，不在墙体上
+        (lambda d: d.update(doors=[[38, 0, 42, 0]]), "doors.0"),  # 超出墙体端点
     ],
     ids=[
         "missing",
@@ -57,6 +59,8 @@ def test_demo_site_is_valid() -> None:
         "dup-ip",
         "bad-cidr",
         "mode",
+        "door-off-wall",
+        "door-past-wall-end",
     ],
 )
 def test_invalid_site_is_rejected_with_field_path(tmp_path: Path, edit: Any, path: str) -> None:
@@ -129,3 +133,17 @@ def test_viewer_gets_site(client: TestClient, password: str) -> None:
     result = Site.model_validate(r.json())
     assert result.id == "demo-office"
     assert [w.root for w in result.walls] == VALID["walls"]
+    assert [d.root for d in result.doors] == VALID["doors"]
+
+
+def test_doors_are_optional(tmp_path: Path) -> None:
+    result = site.load(write(tmp_path, edited(lambda d: d.pop("doors"))))
+
+    assert result.doors == []
+
+
+def test_door_on_any_wall_is_accepted(tmp_path: Path) -> None:
+    # 墙体方向与门洞方向相反、门洞贴着墙体端点，都算在墙体上
+    result = site.load(write(tmp_path, edited(lambda d: d.update(doors=[[0, 24, 0, 22]]))))
+
+    assert [d.root for d in result.doors] == [[0, 24, 0, 22]]

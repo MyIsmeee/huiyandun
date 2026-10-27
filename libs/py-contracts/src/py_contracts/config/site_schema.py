@@ -16,6 +16,11 @@ class Wall(RootModel[list[float]]):
     root: list[float] = Field(..., max_length=4, min_length=4)
 
 
+class Door(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[float] = Field(..., max_length=4, min_length=4)
+
+
 class SiteInfo(ContractModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -85,7 +90,7 @@ class CameraConfig(ContractModel):
 
 class SiteConfig(ContractModel):
     """
-    站点配置 site.yaml：平面图、区域、摄像头、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）
+    站点配置 site.yaml：平面图、门洞、区域、摄像头、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）
     """
 
     model_config = ConfigDict(
@@ -95,6 +100,10 @@ class SiteConfig(ContractModel):
     walls: list[Wall]
     """
     线段 [x1, y1, x2, y2]，单位米
+    """
+    doors: list[Door] | None = Field([], validate_default=True)
+    """
+    门洞线段 [x1, y1, x2, y2]，单位米；须位于某段墙体上（FR-904）
     """
     zones: list[ZoneConfig]
     cameras: list[CameraConfig]

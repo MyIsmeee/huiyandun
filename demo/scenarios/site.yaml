@@ -1,6 +1,7 @@
 # 演示站点（HYD-PLAN-007 §7、FR-901）；格式见 contracts/config/site.schema.json
 site: { id: demo-office, name: 演示办公区, width_m: 40, height_m: 24, mode: host_probe }  # 主剧本以主机探针模式运行
 walls: [[0, 0, 40, 0], [40, 0, 40, 24], [40, 24, 0, 24], [0, 24, 0, 0]]  # 线段 [x1, y1, x2, y2]
+doors: [[18, 0, 20, 0], [0, 10, 0, 12]]            # 门洞线段，须位于某段墙体上（FR-904）
 zones:
   - { id: z-01, name: 设备间外墙, polygon: [[30, 0], [40, 0], [40, 6], [30, 6]], no_climb: true }
 cameras:

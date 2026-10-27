@@ -1,6 +1,6 @@
 {
   "title": "SiteConfig",
-  "description": "站点配置 site.yaml：平面图、区域、摄像头、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）",
+  "description": "站点配置 site.yaml：平面图、门洞、区域、摄像头、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）",
   "type": "object",
   "additionalProperties": false,
   "required": ["site", "walls", "zones", "cameras", "whitelist"],
@@ -9,6 +9,12 @@
     "walls": {
       "type": "array",
       "description": "线段 [x1, y1, x2, y2]，单位米",
+      "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+    },
+    "doors": {
+      "type": "array",
+      "description": "门洞线段 [x1, y1, x2, y2]，单位米；须位于某段墙体上（FR-904）",
+      "default": [],
       "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
     },
     "zones": { "type": "array", "items": { "$ref": "#/$defs/ZoneConfig" } },
