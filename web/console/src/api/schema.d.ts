@@ -524,12 +524,19 @@ export interface components {
         AuditLogList: {
             items: components["schemas"]["AuditLog"][];
         };
-        /** @description WS /ws 推送帧（FR-102、FR-606） */
+        /**
+         * @description WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
+         *     tracks 为 VisionTrack；devices 为状态变化后的完整 Device；
+         *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
+         */
         WsFrame: {
             /** @enum {unknown} */
             channel: "tracks" | "devices" | "alerts" | "incidents" | "system";
             data: Record<string, never>;
         };
+        VisionTrack: components["schemas"]["hyd.vision.track.v1.schema"];
+        VisionBehavior: components["schemas"]["hyd.vision.behavior.v1.schema"];
+        SecurityAlert: components["schemas"]["hyd.security.alert.v1.schema"];
         /**
          * Incident
          * @description 关联事件实体（HYD-PLAN-007 §1），事件与 API 共用
@@ -579,6 +586,71 @@ export interface components {
                 reason: string | null;
             } | null;
         };
+        /**
+         * EventBase
+         * @description 所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
+         */
+        "event_base.schema": {
+            /** @description 语义化版本，主版本与文件名中的 v1 一致 */
+            schema_version: string;
+            /** Format: uuid */
+            event_id: string;
+            /**
+             * Format: date-time
+             * @description UTC，RFC 3339，毫秒精度
+             */
+            ts: string;
+        };
+        /**
+         * VisionTrackV1
+         * @description 人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）
+         */
+        "hyd.vision.track.v1.schema": {
+            camera_id: string;
+            track_id: number;
+            /** @description 平面坐标，单位米 */
+            x: number;
+            /** @description 平面坐标，单位米 */
+            y: number;
+            uncertainty_m: number;
+        } & components["schemas"]["event_base.schema"];
+        /**
+         * VisionBehaviorV1
+         * @description 骨骼行为事件（生产者 vision-engine）
+         */
+        "hyd.vision.behavior.v1.schema": {
+            camera_id: string;
+            track_id: number;
+            /** @enum {unknown} */
+            behavior: "fall" | "climb";
+            confidence_avg: number;
+            duration_s: number;
+            /** Format: date-time */
+            ts_start: string;
+            /** Format: date-time */
+            ts_end: string;
+        } & components["schemas"]["event_base.schema"];
+        /**
+         * SecurityAlertV1
+         * @description 归一化后的 Suricata / Zeek 告警（生产者 correlator）
+         */
+        "hyd.security.alert.v1.schema": {
+            rule_id: string;
+            rule_version: string;
+            /** @description 如 auth_bruteforce */
+            category: string;
+            /**
+             * @description 告警等级（V-S4）
+             * @enum {unknown}
+             */
+            severity: "critical" | "high" | "medium" | "low";
+            src_ip: string;
+            dst_ip: string;
+            /** @description 目标 IP 未登记为设备时为 null，告警仍然产生（FR-203） */
+            device_id: string | null;
+            technique: string;
+            evidence_ref: string;
+        } & components["schemas"]["event_base.schema"];
     };
     responses: {
         /** @description 缺少 X-Request-ID 或参数不合法 */
