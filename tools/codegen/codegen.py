@@ -22,7 +22,7 @@ OPENAPI_ARGS = ["--use-title-as-name", "--allow-remote-refs"]
 TARGETS = [
     (Path("contracts/events"), "jsonschema", Path("src/py_contracts/events"), []),
     (
-        Path("contracts/openapi/api-server.v1.yaml"),
+        Path("contracts/openapi/api-server.v2.yaml"),
         "openapi",
         Path("src/py_contracts/api.py"),
         OPENAPI_ARGS,

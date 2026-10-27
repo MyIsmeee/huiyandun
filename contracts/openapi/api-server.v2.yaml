@@ -1,12 +1,13 @@
 # api-server 对外接口（HYD-PLAN-007 §3、C-BE-01）
-# 主版本编码在文件名中；破坏性变更须新建 api-server.v2.yaml（CI-08）
+# 主版本编码在文件名中；破坏性变更须新建 api-server.v3.yaml（CI-08）
 # x-min-role：最低角色（C-BE-07）；写操作要求 X-Request-ID（C-BE-08）
+# 会话凭证只经 HttpOnly Cookie 传递，浏览器脚本不可读（C-FE-06、DP-12）
 openapi: 3.1.0
 info:
   title: 慧眼盾 api-server
-  version: 1.0.0
+  version: 2.0.0
 security:
-  - bearer: []
+  - session: []
 
 paths:
   /api/auth/login:
@@ -22,9 +23,14 @@ paths:
       responses:
         "200":
           description: 登录成功
+          headers:
+            Set-Cookie:
+              description: hyd_session=<会话令牌>; HttpOnly; Secure; SameSite=Strict; Path=/
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LoginResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /api/auth/logout:
     post:
@@ -32,7 +38,8 @@ paths:
       x-min-role: viewer
       parameters: [{ $ref: "#/components/parameters/RequestId" }]
       responses:
-        "204": { description: token 已失效 }
+        "204": { description: 会话已失效，Cookie 已清除 }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /api/site:
     get:
@@ -77,6 +84,7 @@ paths:
           content:
             application/sdp:
               schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/incidents:
@@ -92,6 +100,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/IncidentList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /api/incidents/{id}:
     get:
@@ -120,6 +129,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Report" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -150,6 +160,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Report" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -167,6 +178,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "../events/playbook_execution.schema.json" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -184,6 +196,7 @@ paths:
           content:
             application/octet-stream:
               schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -217,6 +230,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LlmProvider" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/llm/providers/{id}:
@@ -238,6 +252,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LlmProvider" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -249,6 +264,7 @@ paths:
         - { $ref: "#/components/parameters/RequestId" }
       responses:
         "204": { description: 已删除 }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -266,6 +282,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ProviderTestResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -299,6 +316,7 @@ paths:
             schema: { $ref: "#/components/schemas/ProviderOrder" }
       responses:
         "204": { description: 已生效 }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/llm/settings:
@@ -319,6 +337,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LlmSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/egress/stats:
@@ -345,12 +364,13 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuditLogList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
 components:
   securitySchemes:
-    bearer: { type: http, scheme: bearer }
+    session: { type: apiKey, in: cookie, name: hyd_session }
 
   parameters:
     Id: { name: id, in: path, required: true, schema: { type: string } }
@@ -368,8 +388,11 @@ components:
       schema: { type: string, format: date-time }
 
   responses:
+    BadRequest:
+      description: 缺少 X-Request-ID 或参数不合法
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Unauthorized:
-      description: 未登录或 token 失效
+      description: 未登录或会话失效
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Forbidden:
       description: 角色不足
@@ -395,9 +418,8 @@ components:
         password: { type: string, format: password }
     LoginResponse:
       type: object
-      required: [token, role, expires_at]
+      required: [role, expires_at]
       properties:
-        token: { type: string }
         role: { $ref: "#/components/schemas/Role" }
         expires_at: { type: string, format: date-time }
     Site:
