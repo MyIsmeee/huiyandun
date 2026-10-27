@@ -8,6 +8,7 @@ from py_common.config import ServiceConfig
 
 
 class ApiConfig(ServiceConfig):
+    port: int = Field(8000, ge=1, le=65535, description="HTTP 监听端口")
     db_host: str = Field("postgres", description="PostgreSQL 主机")
     db_port: int = Field(5432, ge=1, le=65535, description="PostgreSQL 端口")
     db_name: str = Field("hyd", description="数据库名")
