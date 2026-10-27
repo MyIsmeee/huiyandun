@@ -15,7 +15,7 @@ const INSET = { top: 112, right: 24, bottom: 56, left: 24 };
 const BACK: Vec3 = [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)];
 const RIGHT: Vec3 = [1 / Math.sqrt(2), 0, -1 / Math.sqrt(2)];
 const UP: Vec3 = [-1 / Math.sqrt(6), 2 / Math.sqrt(6), -1 / Math.sqrt(6)];
-const CAMERA_DISTANCE_M = 200;
+const CAMERA_NEAR_M = 1;
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -31,6 +31,9 @@ export interface View {
 export interface IsoView extends View {
   target: Vec3;
   position: Vec3;
+  /** 相机可见深度范围，单位米 */
+  near: number;
+  far: number;
 }
 
 function usable({ width, height }: Size) {
@@ -54,11 +57,15 @@ export function isoView(site: Site, size: Size): IsoView {
   const r0 = (Math.max(...rs) + Math.min(...rs)) / 2 - (INSET.left - INSET.right) / 2 / zoom;
   const u0 = (Math.max(...us) + Math.min(...us)) / 2 + (INSET.top - INSET.bottom) / 2 / zoom;
   const target = along(along(center, RIGHT, r0), UP, u0);
-  const position = along(target, BACK, CAMERA_DISTANCE_M);
+  // 包围盒各点沿视线方向距中心不超过半条对角线：相机退到一条对角线外，可见深度取其 2 倍
+  const distance = Math.hypot(site.width_m, WALL_HEIGHT_M, site.height_m) + 10;
+  const position = along(target, BACK, distance);
   return {
     zoom,
     target,
     position,
+    near: CAMERA_NEAR_M,
+    far: distance * 2,
     project: (p) => [
       size.width / 2 + zoom * dot(sub(p, target), RIGHT),
       size.height / 2 - zoom * dot(sub(p, target), UP),

@@ -1,5 +1,14 @@
 import { expect, type Route, test } from "@playwright/test";
-import { expectNoOverflow, freezeClock, mockSocket, presetTheme, SITE, signedIn, UNAUTHORIZED } from "./helpers";
+import {
+  expectNoOverflow,
+  freezeClock,
+  mockSocket,
+  presetTheme,
+  SITE,
+  sceneSettled,
+  signedIn,
+  UNAUTHORIZED,
+} from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
@@ -13,6 +22,7 @@ for (const theme of ["dark", "light"] as const) {
     await expect(page.getByRole("list", { name: "关键指标" }).getByText("—")).toHaveCount(4);
     await expect(page.getByText("无活跃攻击链")).toBeVisible();
     await expect(page.getByText("暂无告警")).toBeVisible();
+    await sceneSettled(page);
     await expectNoOverflow(page);
     await expect(page).toHaveScreenshot(`shell-${theme}.png`);
   });

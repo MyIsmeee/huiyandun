@@ -10,9 +10,11 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@react-three/fiber": "9.8.2",
     "lucide-react": "1.61.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "three": "0.186.1",
     "zustand": "5.0.16"
   },
   "devDependencies": {
@@ -22,6 +24,7 @@
     "@testing-library/react": "16.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
     "@vitejs/plugin-react": "6.1.2",
     "eslint": "10.13.0",
     "eslint-plugin-react-hooks": "7.1.1",

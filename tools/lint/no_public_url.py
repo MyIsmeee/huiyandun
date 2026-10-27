@@ -28,7 +28,24 @@ NAMESPACES = (
 )
 # 依赖固定写入构建产物的文本，同样不会被请求：React 生产包错误说明的链接前缀、Tailwind 许可证注释。
 # 只在显式指定路径（扫描 dist/）时放行，源码中出现仍报告
-INERT_TEXT = ("https://react.dev/errors/", "https://tailwindcss.com */")
+INERT_TEXT = (
+    "https://react.dev/errors/",
+    "https://tailwindcss.com */",
+    # three 着色器注释中引用的论文
+    "https://jcgt.org/published/0007/04/01/",
+    # @react-three/fiber 与 react-use-measure 的错误说明
+    "https://docs.pmnd.rs/react-three-fiber/api/",
+    "https://github.com/react-spring/react-use-measure/#",
+    # @react-three/fiber 内联到包中的 package.json 元数据（作者、仓库、赞助页）
+    "https://github.com/drcmda)",
+    "https://github.com/joshuaellis)",
+    "https://github.com/codyjasonbennett)",
+    "https://github.com/krispya)",
+    "https://github.com/pmndrs/react-three-fiber#readme`",
+    "https://github.com/pmndrs/react-three-fiber.git`",
+    "https://github.com/pmndrs/react-three-fiber/issues`",
+    "https://opencollective.com/react-three-fiber`",
+)
 # 不会解析到公网的保留域名：RFC 2606、RFC 6761、ICANN .internal、mDNS .local
 RESERVED_SUFFIXES = (".localhost", ".local", ".internal", ".test", ".example", ".invalid")
 EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")

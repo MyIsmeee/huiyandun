@@ -1,0 +1,64 @@
+import { expect, type Page, test } from "@playwright/test";
+import { expectNoOverflow, freezeClock, mockSocket, SITE, sceneSettled, signedIn } from "./helpers";
+
+test.beforeEach(({ page }) => freezeClock(page));
+
+const scene = (page: Page) => page.getByRole("region", { name: "场景" });
+const SCENE_CHUNK = "**/assets/Scene3D-*.js";
+
+test("由平面图生成 3D 场景：地面、栅格、墙体与区域名称", async ({ page }) => {
+  await signedIn(page);
+  await page.goto("/");
+  await sceneSettled(page);
+
+  await expect(scene(page).getByText("设备间外墙 · 禁止攀爬")).toBeVisible();
+  await expectNoOverflow(page);
+  await expect(scene(page)).toHaveScreenshot("scene-ready.png");
+});
+
+test("场景代码加载期间显示加载中", async ({ page }) => {
+  await page.route(SCENE_CHUNK, () => {}); // 挂起不响应
+  await signedIn(page);
+  await page.goto("/");
+
+  await expect(scene(page).getByText("场景加载中…")).toBeVisible();
+  await expect(scene(page)).toHaveScreenshot("scene-loading.png");
+});
+
+test("场景代码加载失败时提示并可重新加载", async ({ page }) => {
+  await page.route(SCENE_CHUNK, (route) => route.abort());
+  await signedIn(page);
+  await page.goto("/");
+  await sceneSettled(page, "error");
+
+  await expect(scene(page).getByText("场景加载失败")).toBeVisible();
+  await expect(scene(page).getByRole("button", { name: "重新加载" })).toBeVisible();
+  await expect(scene(page)).toHaveScreenshot("scene-error.png");
+});
+
+test("无 WebGL2 时降级为 2D 平面图（C-FE-08）", async ({ page }) => {
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, ...rest: unknown[]) {
+      return id === "webgl2" ? null : getContext.call(this, id, ...(rest as []));
+    } as typeof getContext;
+  });
+  await signedIn(page);
+  await page.goto("/");
+  await sceneSettled(page, "2d");
+
+  await expect(scene(page).getByText("2D 平面视图 · 浏览器不支持 WebGL2")).toBeVisible();
+  await expect(scene(page).getByText("设备间外墙 · 禁止攀爬")).toBeVisible();
+  await expectNoOverflow(page);
+  await expect(scene(page)).toHaveScreenshot("scene-2d.png");
+});
+
+test("平面图没有墙体与区域时显示空场景", async ({ page }) => {
+  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, walls: [], zones: [] } }));
+  await mockSocket(page);
+  await page.goto("/");
+  await sceneSettled(page);
+
+  await expect(scene(page).getByText("平面图中没有墙体与区域")).toBeVisible();
+  await expect(scene(page)).toHaveScreenshot("scene-empty.png");
+});

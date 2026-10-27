@@ -33,6 +33,8 @@ def run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         "https://token@cdn.jsdelivr.net/npm/x",
         "https://react.dev/learn",
         "https://tailwindcss.com/docs",
+        "https://github.com/pmndrs/drei",
+        "https://github.com/pmndrs/react-three-fiber/releases",
     ],
 )
 def test_reports_public_url(tmp_path: Path, url: str) -> None:
@@ -64,6 +66,9 @@ def test_reports_public_url(tmp_path: Path, url: str) -> None:
         "http://www.w3.org/2000/svg",
         "`https://react.dev/errors/`+e",
         "/*! tailwindcss v4.3.3 | MIT License | https://tailwindcss.com */",
+        "author:`Paul Henschel (https://github.com/drcmda)`",
+        "homepage:`https://github.com/pmndrs/react-three-fiber#readme`",
+        "See: https://docs.pmnd.rs/react-three-fiber/api/objects#x",
         "x  //cdn.vendor.io 不在引号或括号后",
     ],
 )

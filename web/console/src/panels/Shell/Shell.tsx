@@ -1,6 +1,7 @@
 import { CircleAlert, Clock, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Site } from "../../lib/api";
+import { SceneViewport } from "../../scene/SceneViewport";
 import { connect, useConnection } from "../../store/connection";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { type KpiData, KpiTile } from "../KpiTile/KpiTile";
@@ -73,7 +74,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         aria-label="场景"
         className={`relative overflow-hidden rounded-2xl border border-line ${offline ? "saturate-50" : ""}`}
       >
-        {/* TODO(#33): 由平面图生成场景 */}
+        <SceneViewport site={site} />
         {/* 4 张卡共用一块半透明底板，计为一个浮层（V-L3） */}
         <ul
           aria-label="关键指标"
