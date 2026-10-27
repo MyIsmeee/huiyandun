@@ -295,11 +295,69 @@ class AuditLogList(ContractModel):
 
 class WsFrame(ContractModel):
     """
-    WS /ws 推送帧（FR-102、FR-606）
+    WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
+    tracks 为 VisionTrack；devices 为状态变化后的完整 Device；
+    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
+
     """
 
     channel: Literal["tracks", "devices", "alerts", "incidents", "system"]
     data: dict[str, Any]
+
+
+class EventBase(ContractModel):
+    """
+    所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
+    """
+
+    schema_version: str = Field(..., pattern="^1[.][0-9]+[.][0-9]+$")
+    """
+    语义化版本，主版本与文件名中的 v1 一致
+    """
+    event_id: UUID
+    ts: AwareDatetime
+    """
+    UTC，RFC 3339，毫秒精度
+    """
+
+
+class VisionBehaviorV1(EventBase):
+    """
+    骨骼行为事件（生产者 vision-engine）
+    """
+
+    camera_id: str
+    track_id: int
+    behavior: Literal["fall", "climb"]
+    confidence_avg: float = Field(..., ge=0.0, le=1.0)
+    duration_s: float = Field(..., ge=0.0)
+    ts_start: AwareDatetime
+    ts_end: AwareDatetime
+
+
+class SecurityAlertV1(EventBase):
+    """
+    归一化后的 Suricata / Zeek 告警（生产者 correlator）
+    """
+
+    rule_id: str
+    rule_version: str
+    category: str
+    """
+    如 auth_bruteforce
+    """
+    severity: Literal["critical", "high", "medium", "low"]
+    """
+    告警等级（V-S4）
+    """
+    src_ip: IPv4Address | IPv6Address
+    dst_ip: IPv4Address | IPv6Address
+    device_id: str | None
+    """
+    目标 IP 未登记为设备时为 null，告警仍然产生（FR-203）
+    """
+    technique: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
+    evidence_ref: str
 
 
 class CameraInfo(ContractModel):
@@ -330,6 +388,34 @@ class EgressStats(ContractModel):
     targets: list[EgressTarget]
 
 
+class VisionTrackV1(EventBase):
+    """
+    人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）
+    """
+
+    camera_id: str
+    track_id: int
+    x: float
+    """
+    平面坐标，单位米
+    """
+    y: float
+    """
+    平面坐标，单位米
+    """
+    uncertainty_m: float = Field(..., ge=0.0)
+
+
+class VisionBehavior(RootModel[VisionBehaviorV1]):
+    model_config = {"allow_inf_nan": False}
+    root: VisionBehaviorV1
+
+
+class SecurityAlert(RootModel[SecurityAlertV1]):
+    model_config = {"allow_inf_nan": False}
+    root: SecurityAlertV1
+
+
 class Device(ContractModel):
     id: str
     type: Literal["camera", "nvr", "switch"]
@@ -353,6 +439,11 @@ class Device(ContractModel):
     """
     type 为 camera 时必有
     """
+
+
+class VisionTrack(RootModel[VisionTrackV1]):
+    model_config = {"allow_inf_nan": False}
+    root: VisionTrackV1
 
 
 class Site(ContractModel):

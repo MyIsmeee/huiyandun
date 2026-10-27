@@ -648,8 +648,14 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/AuditLog" } }
     WsFrame:
       type: object
-      description: WS /ws 推送帧（FR-102、FR-606）
+      description: |
+        WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
+        tracks 为 VisionTrack；devices 为状态变化后的完整 Device；
+        alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
       required: [channel, data]
       properties:
         channel: { enum: [tracks, devices, alerts, incidents, system] }
         data: { type: object }
+    VisionTrack: { $ref: "../events/hyd.vision.track.v1.schema.json" }
+    VisionBehavior: { $ref: "../events/hyd.vision.behavior.v1.schema.json" }
+    SecurityAlert: { $ref: "../events/hyd.security.alert.v1.schema.json" }
