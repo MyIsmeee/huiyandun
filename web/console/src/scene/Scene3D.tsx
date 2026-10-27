@@ -165,14 +165,14 @@ function Zone({ polygon, color }: { polygon: number[][]; color: string }) {
   );
 }
 
-/** 墙段：圆角长方体；近侧墙段半透明且不投射阴影，不遮挡室内（§5.1 L1） */
+/** 墙段：圆角长方体；近侧墙段半透明，不遮挡室内，但照常投射阴影（§5.1 L1） */
 function Wall({ piece, near, color }: { piece: WallPiece; near: boolean; color: string }) {
   const [[x1, y1], [x2, y2]] = [piece.from, piece.to];
   return (
     <mesh
       position={[(x1 + x2) / 2, (piece.bottom + piece.top) / 2, (y1 + y2) / 2]}
       rotation-y={-Math.atan2(y2 - y1, x2 - x1)}
-      castShadow={!near}
+      castShadow
       receiveShadow
     >
       <roundedBoxGeometry

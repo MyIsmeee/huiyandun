@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { expectNoOverflow, freezeClock, mockSocket, SITE, sceneSettled, signedIn } from "./helpers";
+import { expectNoOverflow, freezeClock, mockSocket, presetTheme, SITE, sceneSettled, signedIn } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
@@ -63,14 +63,17 @@ test("平面图没有墙体与区域时显示空场景", async ({ page }) => {
   await expect(scene(page)).toHaveScreenshot("scene-empty.png");
 });
 
-// §5.1 光照：太阳方位与高度角随本地时间变化，夜间为月光；只改变明暗与阴影方向
+// §5.1 光照：太阳方位与高度角随本地时间变化，夜间为月光；只改变明暗与阴影方向。
+// 主题用自动档，与用户在该时刻实际看到的一致：白天亮色、夜间暗色（§3.1）
 for (const [name, time] of [
+  ["morning", "2026-10-28T00:00:00Z"], // 上海 08:00：太阳在东，近侧的东墙阴影落入室内
   ["noon", "2026-10-28T04:00:00Z"], // 上海 12:00
   ["dusk", "2026-10-27T09:30:00Z"], // 上海 17:30
   ["night", "2026-10-27T14:00:00Z"], // 上海 22:00
 ] as const) {
   test(`场景光照随时间变化：${name}`, async ({ page }) => {
     await page.clock.pauseAt(new Date(time));
+    await presetTheme(page, "auto");
     await signedIn(page);
     await page.goto("/");
     await sceneSettled(page);
