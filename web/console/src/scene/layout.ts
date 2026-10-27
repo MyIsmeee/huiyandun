@@ -5,8 +5,8 @@ export type Vec3 = readonly [number, number, number];
 export type Size = { width: number; height: number };
 type Point = readonly [number, number];
 
-/** 墙体为截断高度，避免遮挡室内（§5.1 L1） */
-export const WALL_HEIGHT_M = 1.2;
+/** 墙体实体高度（§5.1 L1）；近侧墙体半透明，不遮挡室内 */
+export const WALL_HEIGHT_M = 2.8;
 export const WALL_THICKNESS_M = 0.2;
 /** 留出左上角 KPI 底板（§4.1 B 区）、底部断线提示（V-U3）与四周边距，单位像素 */
 const INSET = { top: 112, right: 24, bottom: 56, left: 24 };
