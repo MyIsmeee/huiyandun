@@ -16,19 +16,24 @@ export type Camera = {
   state: DeviceState;
   /** 标定点不少于 4 组（FR-902）；与 state 无关，处于告警的摄像头同样可能未标定 */
   calibrated: boolean;
+  /** 处于网络攻击期间收到过 critical / high 告警：只有此时视场呼吸（V-A1） */
+  severe: boolean;
   pose: NonNullable<Device["camera"]>["pose"];
 };
 
 /** 场景中的摄像头：状态以推送为准，未推送过的取 GET /api/site 的初始值；M0 站点只导入摄像头 */
 export function useCameras(devices: Device[]): Camera[] {
   const pushed = useLive((s) => s.devices);
+  const severities = useLive((s) => s.severities);
   return useMemo(
     () =>
       devices.flatMap((initial) => {
         const { id, state, camera } = pushed[initial.id] ?? initial;
-        return camera ? [{ id, state, calibrated: camera.calibration.length >= 4, pose: camera.pose }] : [];
+        if (!camera) return [];
+        const severe = severities[id] === "critical" || severities[id] === "high";
+        return [{ id, state, calibrated: camera.calibration.length >= 4, severe, pose: camera.pose }];
       }),
-    [devices, pushed],
+    [devices, pushed, severities],
   );
 }
 export type TagIcon = "offline" | "uncalibrated" | "physical" | "cyber" | "pending" | "contained" | "notified";
@@ -42,7 +47,7 @@ export interface Look {
   outline: { color: string; dashed: boolean } | null;
   /** 地面轮廓环（both：网络攻击 + 物理告警） */
   ring: string | null;
-  /** 视场：null 为隐藏；breathe 为呼吸动效 */
+  /** 视场：null 为隐藏；breathe 为呼吸动效，另须告警等级为 critical / high（Camera.severe） */
   cone: { color: string; opacity: number; breathe: boolean } | null;
   /** 状态标签：状态色永不单独承载信息，每处同时配图标与文字（V-S3） */
   tags: { icon: TagIcon; text: string; color: string }[];

@@ -4,7 +4,7 @@ import { avatars, HIGH_ERROR_M } from "../../src/scene/people";
 import type { Behavior, Person } from "../../src/store/live";
 
 const pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 10 };
-const cam = (state: DeviceState, calibrated = true): Camera => ({ id: "cam-01", state, calibrated, pose });
+const cam = (state: DeviceState, calibrated = true): Camera => ({ id: "cam-01", state, calibrated, severe: false, pose });
 const person = (track_id: number, uncertainty_m = 0.4, camera_id = "cam-01"): Person => ({
   camera_id,
   track_id,
