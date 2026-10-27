@@ -1,5 +1,6 @@
 """Compose 定义的静态约束：健康检查、digest 锁定、内部网络、复用组件登记。"""
 
+import os
 import re
 from pathlib import Path
 
@@ -70,3 +71,9 @@ def test_only_audit_service_holds_audit_password() -> None:
     """G-13：只有 audit-service 可写审计封存记录；postgres 仅在初始化时用它创建账号。"""
     holders = {n for n, s in SERVICES.items() if "db_audit_password" in s.get("secrets", [])}
     assert holders == {"audit-service", "postgres"}
+
+
+@pytest.mark.parametrize("script", sorted((ROOT / "deploy/compose/postgres-init").glob("*.sh")))
+def test_init_script_executable(script: Path) -> None:
+    """不可执行的 .sh 会被 postgres 镜像 source 进自身启动流程，脚本的 set -eu 随之生效。"""
+    assert os.access(script, os.X_OK)
