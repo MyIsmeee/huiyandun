@@ -4,6 +4,8 @@ import { DoubleSide, type Object3D, type OrthographicCamera, Shape, Vector2 } fr
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Site } from "../lib/api";
 import { useTheme } from "../theme/store";
+import { DeviceMarkers } from "./DeviceMarkers";
+import type { Camera } from "./devices";
 import { type IsoView, type Vec3, WALL_HEIGHT_M, WALL_THICKNESS_M } from "./layout";
 import { type Lighting, lightingAt, lightStep } from "./lighting";
 import { isNearSide, type WallPiece, wallPieces } from "./walls";
@@ -33,11 +35,12 @@ function useLighting(): Lighting {
 }
 
 /**
- * 由平面图生成的 3D 场景（§5.1 L0 地面与栅格、L1 墙体与门洞、区域轮廓、光照）。
- * 场景静态、按需渲染（frameloop="demand"）：无常驻动效（V-A3），断线时无需另行停止。
+ * 由平面图生成的 3D 场景（§5.1 L0 地面与栅格、L1 墙体与门洞、区域轮廓、L2 设备、L3 视场、光照）。
+ * 按需渲染（frameloop="demand"）：无常驻动效（V-A3），只有对应真实告警的动效持续请求重绘。
  * flat 关闭色调映射，地面等色值与规范一致；阴影另以阴影材质叠加在地面上，不改变地面色值。
  */
-export default function Scene3D({ site, view, onReady }: { site: Site; view: IsoView; onReady: () => void }) {
+export default function Scene3D(props: { site: Site; cameras: Camera[]; view: IsoView; onReady: () => void }) {
+  const { site, cameras, view, onReady } = props;
   useTheme((s) => s.theme); // 订阅主题：切换时重新渲染并取色
   const colors = themeColors();
   const lighting = useLighting();
@@ -63,6 +66,7 @@ export default function Scene3D({ site, view, onReady }: { site: Site; view: Iso
       {pieces.map((piece, i) => (
         <Wall key={i} piece={piece} near={isNearSide(piece.wall, site, view.toCamera)} color={colors.wall} />
       ))}
+      <DeviceMarkers cameras={cameras} />
     </Canvas>
   );
 }
