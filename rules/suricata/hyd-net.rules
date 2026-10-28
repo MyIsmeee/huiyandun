@@ -1,0 +1,10 @@
+# 自研网络检测规则（C-SEC-01）：每条规则在 rules/tests/<规则 ID>/ 附正例与反例，make test-rules 校验
+# sid 取本地保留段：HYD-NET-<序号> 为 1000000 + 序号，只设标记、不告警的辅助规则为 1100000 + 序号；规则版本取 rev
+# metadata：hyd_rule_id 规则 ID；hyd_category 告警类别；hyd_mode 新规则以 monitor 起步（C-SEC-04）；
+# mitre_* 与 ET Open 写法一致（C-SEC-09）
+# 只按数据包匹配（no_stream）：流重组后的数据会再检测一次，同一个响应会被计两次
+
+# HYD-NET-0001 RTSP 认证爆破（FR-202）：同一设备对同一来源 60 s 内 5 次拒绝凭据，每个时间窗只告警一次
+# 只计带凭据请求之后的 401：客户端首次请求不带凭据，收到 401 是正常的认证质询（Digest）
+alert tcp any any -> any any (msg:"HYD-NET-0001 RTSP request with credentials"; flow:established,to_server,no_stream; content:" RTSP/1.0|0d 0a|"; content:"|0d 0a|Authorization|3a|"; nocase; flowbits:set,hyd.rtsp.auth; flowbits:noalert; sid:1100001; rev:1;)
+alert tcp any any -> any any (msg:"HYD-NET-0001 RTSP authentication brute force"; flow:established,to_client,no_stream; flowbits:isset,hyd.rtsp.auth; content:"RTSP/1.0 401"; startswith; threshold:type both, track by_both, count 5, seconds 60; classtype:attempted-user; metadata:hyd_rule_id HYD-NET-0001, hyd_category auth_bruteforce, hyd_mode monitor, mitre_tactic_id TA0006, mitre_tactic_name Credential_Access, mitre_technique_id T1110, mitre_technique_name Brute_Force; sid:1000001; rev:1;)

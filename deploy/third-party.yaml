@@ -78,6 +78,25 @@ components:
     purpose: make doctor GPU 自检
     owner: MyIsmeee
     telemetry: 无
+  # GPL 组件，以独立进程运行、不修改源码（C-RU-02、G-08）；OISF 开发者维护的官方镜像
+  - name: Suricata
+    version: "8.0.7"
+    image: jasonish/suricata:8.0.7@sha256:bf4bea5b45d9c10265a3ee6628e2ec8930b9d1fb7caf9d1afb63af413b9cbb26
+    license: GPL-2.0-only
+    purpose: suricata 基础镜像：网络入侵检测，IDS 模式（REUSE-08、C-SEC-08）
+    owner: MyIsmeee
+    telemetry: 无；规则随镜像离线打包，镜像自带的 suricata-update 不启用（不设 ENABLE_CRON）
+
+# 外部检测规则（C-RU-05、R-06）：快照存于 rules/vendor/，随 suricata 镜像打包，运行时不下载（G-05）
+# 上游 rules.emergingthreats.net 每日更新且不保留历史版本：更新时替换快照与本条目，重跑 make test-rules
+rulesets:
+  - name: ET Open（open-nogpl）
+    version: "11320"  # 上游 version.txt
+    file: rules/vendor/et-open/emerging-all.rules.tar.gz
+    sha256: 212bc2f7c27c0f372a66e77eb2f86335ecb4c93c1c46714393cfcf495503286b
+    license: BSD-3-Clause  # 只含 ET 自有规则（sid 2000000～2799999），不含 GPL 规则；许可证文本同目录
+    purpose: Suricata 签名规则：扫描、爆破、常见利用（01 §6.1）
+    owner: MyIsmeee
 
 # Python 包自带的二进制库（wheel 内 *.libs/）：随 wheel 分发、进程内动态链接、未经修改（G-08）
 # 版本取自 wheel 内的 SBOM、库的 soname 与版本接口；所属包升级时须重新核对
