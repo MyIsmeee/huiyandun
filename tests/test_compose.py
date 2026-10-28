@@ -63,10 +63,26 @@ def test_doctor_image_registered() -> None:
     assert image and image[1] in REGISTERED
 
 
-@pytest.mark.parametrize("name", COMPOSE["networks"])
+EDGE = "edge-net"
+EXPOSED = {"web-console"}
+
+
+@pytest.mark.parametrize("name", [n for n in COMPOSE["networks"] if n != EDGE])
 def test_network_internal(name: str) -> None:
-    """DP-05：例外（web-console 443、llm-gateway 出站）在对应服务加入时再声明。"""
+    """DP-05：例外（llm-gateway 出站）在对应服务加入时再声明。"""
     assert COMPOSE["networks"][name].get("internal") is True
+
+
+def test_edge_network_blocks_egress() -> None:
+    """DP-05、G-05：开放端口需要非 internal 网络；关闭 IP 伪装后容器仍无法出站。"""
+    options = COMPOSE["networks"][EDGE]["driver_opts"]
+    assert options["com.docker.network.bridge.enable_ip_masquerade"] == "false"
+
+
+def test_only_exposed_services_publish_ports() -> None:
+    """C-OPS-05：只有 DP-05 列出的服务开放端口，且只有它们接入 edge-net。"""
+    assert {n for n, s in SERVICES.items() if s.get("ports")} == EXPOSED
+    assert {n for n, s in SERVICES.items() if EDGE in s.get("networks", [])} == EXPOSED
 
 
 def test_only_audit_service_holds_audit_password() -> None:

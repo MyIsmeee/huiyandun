@@ -1,0 +1,29 @@
+# 唯一对外入口（C-OPS-05、D-02）：提供前端页面，同源反向代理 /api、/ws 到 api-server
+# 证书由 Caddy 内置本地 CA 签发，根证书由 make console-ca 导出后导入浏览器信任库（HYD-DEP-005 §5）
+{
+	admin off
+	persist_config off
+	skip_install_trust
+	auto_https disable_redirects
+	# 容器内以非 root 运行，监听非特权端口，由 Compose 映射到宿主机 443（C-OPS-04）
+	https_port 8443
+	# 浏览器访问 IP 时不发送 SNI；经端口映射到达时本地地址是容器 IP，须指定默认证书
+	default_sni 127.0.0.1
+}
+
+# 演示在本机浏览器访问（HYD-DEP-005 §5）；只为列出的地址签发，内置 CA 不访问任何外部地址
+localhost, 127.0.0.1 {
+	tls internal
+
+	handle /api/* {
+		reverse_proxy api-server:8000
+	}
+	handle /ws {
+		reverse_proxy api-server:8000
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

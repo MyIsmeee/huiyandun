@@ -1,5 +1,5 @@
 .PHONY: lint lint-py lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	fetch-models verify-models test-rules llm-check demo-run
+	console-ca fetch-models verify-models test-rules llm-check demo-run
 
 WEB = pnpm --dir web/console
 
@@ -61,6 +61,11 @@ demo-down:
 
 demo-health:
 	tools/dev/wait-healthy.sh $(COMPOSE)
+
+# web-console 本地 CA 的根证书（公开内容），导入演示机浏览器信任库后访问 https://127.0.0.1 无警告
+console-ca:
+	$(COMPOSE) exec -T web-console cat /data/caddy/pki/authorities/local/root.crt > hyd-local-ca.crt
+	@echo "已导出 hyd-local-ca.crt"
 
 # CV 模型权重不入库（R-03）：按 models/registry.yaml 下载并校验哈希（C-RU-06）
 fetch-models:
