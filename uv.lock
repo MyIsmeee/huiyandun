@@ -6,6 +6,7 @@ requires-python = "==3.12.*"
 members = [
     "api-server",
     "audit-service",
+    "correlator",
     "huiyandun",
     "py-common",
     "py-contracts",
@@ -268,6 +269,21 @@ dependencies = [
     { name = "numpy" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/83/5a/a55177dd22553a277388e8a1b3220e92de91bacb28356cdc73caa240121d/contourpy-1.4.0.tar.gz", hash = "sha256:20156f5a1ac4f8ce02656e39a61e82164a3d359796dc8026f75b062783d500e1", size = 13323726, upload-time = "2026-09-11T19:05:05.808Z" }
+
+[[package]]
+name = "correlator"
+version = "0.0.0"
+source = { editable = "services/correlator" }
+dependencies = [
+    { name = "py-contracts" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "py-contracts", editable = "libs/py-contracts" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
+]
 
 [[package]]
 name = "cryptography"
