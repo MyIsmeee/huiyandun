@@ -77,7 +77,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 原样转发 SDP 至 go2rtc（FR-106、D-02） */
+        /** @description 原样转发 SDP 至 go2rtc（FR-106、D-02）；媒体流由 go2rtc 8555 直达浏览器（C-OPS-05） */
         post: operations["webrtcSignal"];
         delete?: never;
         options?: never;
@@ -691,6 +691,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description 依赖的内部服务不可用或超时（如 go2rtc） */
+        BadGateway: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         Id: string;
@@ -835,6 +844,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
         };
     };
     listIncidents: {

@@ -103,7 +103,9 @@ services:
     image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
     profiles: [vision]
     volumes: ["./go2rtc.yaml:/config/go2rtc.yaml:ro"]
-    networks: [demo-net]
+    # 只开放 WebRTC 媒体端口，API（1984）只供 core-net 内的 api-server 转发信令（C-OPS-05、D-02）
+    ports: ["8555:8555/tcp", "8555:8555/udp"]
+    networks: [core-net, demo-net, edge-net]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:1984/api"]
       interval: 5s

@@ -68,7 +68,7 @@ paths:
   /api/devices/{id}/webrtc:
     post:
       operationId: webrtcSignal
-      description: 原样转发 SDP 至 go2rtc（FR-106、D-02）
+      description: 原样转发 SDP 至 go2rtc（FR-106、D-02）；媒体流由 go2rtc 8555 直达浏览器（C-OPS-05）
       x-min-role: viewer
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -87,6 +87,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/BadGateway" }
   /api/incidents:
     get:
       operationId: listIncidents
@@ -399,6 +400,9 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
       description: 资源不存在
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    BadGateway:
+      description: 依赖的内部服务不可用或超时（如 go2rtc）
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
