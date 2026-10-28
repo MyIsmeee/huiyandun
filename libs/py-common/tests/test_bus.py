@@ -23,9 +23,14 @@ def track(track_id: int = 1) -> VisionTrackV1:
         ts=datetime.now(UTC),
         camera_id="cam-01",
         track_id=track_id,
+        object_class="person",
         x=1.0,
         y=2.0,
         uncertainty_m=0.1,
+        heading_deg=None,
+        speed_mps=None,
+        bbox=[0.1, 0.2, 0.3, 0.8],
+        keypoints=None,
     )
 
 

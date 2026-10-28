@@ -18,3 +18,15 @@ class VisionIntegrityV1(EventBase):
     camera_id: str
     type: Literal["freeze", "replay", "occlusion", "shift", "stream_lost"]
     duration_s: float = Field(..., ge=0.0)
+    source: Literal["rule", "model"]
+    """
+    freeze、stream_lost 为确定性判定（rule）；replay、shift、occlusion 为视觉模型判定（model）
+    """
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    """
+    可信度；rule 来源为 1.0
+    """
+    detail: str | None
+    """
+    可读说明，如重放匹配到的历史时刻
+    """

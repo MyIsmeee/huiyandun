@@ -561,6 +561,8 @@ export interface components {
             evidence_refs: string[];
             /** @description 规则每一步命中事件的 event_id */
             hit_path: string[];
+            /** @description 命中路径含模型来源事件时为 true：处置须人工确认（FR-407） */
+            requires_confirmation: boolean;
             /** @enum {unknown} */
             status: "open" | "containing" | "contained" | "closed";
             /** Format: date-time */
@@ -604,18 +606,36 @@ export interface components {
             ts: string;
         };
         /**
-         * VisionTrackV1
-         * @description 人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）
+         * Track
+         * @description 检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）
          */
-        "hyd.vision.track.v1.schema": {
+        "track.schema": {
             camera_id: string;
             track_id: number;
+            /**
+             * @description 目标类别；车辆只到类别，不识别车牌（G-04）
+             * @enum {unknown}
+             */
+            object_class: "person" | "bicycle" | "car" | "motorcycle" | "bus" | "truck";
             /** @description 平面坐标，单位米 */
             x: number;
             /** @description 平面坐标，单位米 */
             y: number;
             uncertainty_m: number;
-        } & components["schemas"]["event_base.schema"];
+            /** @description 平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null */
+            heading_deg: number | null;
+            /** @description 平面速度，单位米每秒；起步不足 3 帧时为 null */
+            speed_mps: number | null;
+            /** @description 画面归一化检测框 [x1, y1, x2, y2]，只用于画面叠加（FR-107） */
+            bbox: number[];
+            /** @description COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null（G-04 只允许骨骼关键点） */
+            keypoints: number[][] | null;
+        };
+        /**
+         * VisionTrackV1
+         * @description 检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
+         */
+        "hyd.vision.track.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["track.schema"];
         /**
          * VisionBehaviorV1
          * @description 骨骼行为事件（生产者 vision-engine）
@@ -634,7 +654,7 @@ export interface components {
         } & components["schemas"]["event_base.schema"];
         /**
          * SecurityAlertV1
-         * @description 归一化后的 Suricata / Zeek 告警（生产者 correlator）
+         * @description 网络告警：归一化后的 Suricata 告警或设备行为模型告警（生产者 correlator）
          */
         "hyd.security.alert.v1.schema": {
             rule_id: string;
@@ -652,6 +672,15 @@ export interface components {
             device_id: string | null;
             technique: string;
             evidence_ref: string;
+            /**
+             * @description 置信度来源（C-SEC-09）：签名规则或设备行为模型
+             * @enum {unknown}
+             */
+            source: "rule" | "model";
+            /** @description 可信度；rule 来源为 1.0 */
+            confidence: number;
+            /** @description 可读说明：规则为签名描述，模型为偏离最大的特征及倍数 */
+            summary: string;
         } & components["schemas"]["event_base.schema"];
     };
     responses: {

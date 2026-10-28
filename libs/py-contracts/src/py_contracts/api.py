@@ -121,6 +121,10 @@ class Incident(ContractModel):
     """
     规则每一步命中事件的 event_id
     """
+    requires_confirmation: bool
+    """
+    命中路径含模型来源事件时为 true：处置须人工确认（FR-407）
+    """
     status: Literal["open", "containing", "contained", "closed"]
     created_at: AwareDatetime
 
@@ -321,6 +325,83 @@ class EventBase(ContractModel):
     """
 
 
+class HeadingDeg(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0, lt=360.0)
+    """
+    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    """
+
+
+class SpeedMps(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0)
+    """
+    平面速度，单位米每秒；起步不足 3 帧时为 null
+    """
+
+
+class BboxItem(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0, le=1.0)
+
+
+class KeypointItem(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0, le=1.0)
+
+
+class Keypoint(RootModel[list[KeypointItem]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[KeypointItem] = Field(..., max_length=3, min_length=3)
+
+
+class Keypoints(RootModel[list[Keypoint]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[Keypoint] = Field(..., max_length=17, min_length=17)
+    """
+    COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null（G-04 只允许骨骼关键点）
+    """
+
+
+class Track(ContractModel):
+    """
+    检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）
+    """
+
+    camera_id: str
+    track_id: int
+    object_class: Literal["person", "bicycle", "car", "motorcycle", "bus", "truck"]
+    """
+    目标类别；车辆只到类别，不识别车牌（G-04）
+    """
+    x: float
+    """
+    平面坐标，单位米
+    """
+    y: float
+    """
+    平面坐标，单位米
+    """
+    uncertainty_m: float = Field(..., ge=0.0)
+    heading_deg: HeadingDeg | None
+    """
+    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    """
+    speed_mps: SpeedMps | None
+    """
+    平面速度，单位米每秒；起步不足 3 帧时为 null
+    """
+    bbox: list[BboxItem] = Field(..., max_length=4, min_length=4)
+    """
+    画面归一化检测框 [x1, y1, x2, y2]，只用于画面叠加（FR-107）
+    """
+    keypoints: Keypoints | None
+    """
+    COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null（G-04 只允许骨骼关键点）
+    """
+
+
 class VisionBehaviorV1(EventBase):
     """
     骨骼行为事件（生产者 vision-engine）
@@ -337,7 +418,7 @@ class VisionBehaviorV1(EventBase):
 
 class SecurityAlertV1(EventBase):
     """
-    归一化后的 Suricata / Zeek 告警（生产者 correlator）
+    网络告警：归一化后的 Suricata 告警或设备行为模型告警（生产者 correlator）
     """
 
     rule_id: str
@@ -358,6 +439,18 @@ class SecurityAlertV1(EventBase):
     """
     technique: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
     evidence_ref: str
+    source: Literal["rule", "model"]
+    """
+    置信度来源（C-SEC-09）：签名规则或设备行为模型
+    """
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    """
+    可信度；rule 来源为 1.0
+    """
+    summary: str
+    """
+    可读说明：规则为签名描述，模型为偏离最大的特征及倍数
+    """
 
 
 class CameraInfo(ContractModel):
@@ -388,22 +481,10 @@ class EgressStats(ContractModel):
     targets: list[EgressTarget]
 
 
-class VisionTrackV1(EventBase):
+class VisionTrackV1(EventBase, Track):
     """
-    人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）
+    检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
     """
-
-    camera_id: str
-    track_id: int
-    x: float
-    """
-    平面坐标，单位米
-    """
-    y: float
-    """
-    平面坐标，单位米
-    """
-    uncertainty_m: float = Field(..., ge=0.0)
 
 
 class VisionBehavior(RootModel[VisionBehaviorV1]):

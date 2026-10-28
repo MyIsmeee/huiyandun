@@ -3,10 +3,24 @@
   "description": "画面完整性异常（生产者 vision-engine）",
   "allOf": [{ "$ref": "event_base.schema.json" }],
   "type": "object",
-  "required": ["camera_id", "type", "duration_s"],
+  "required": ["camera_id", "type", "duration_s", "source", "confidence", "detail"],
   "properties": {
     "camera_id": { "type": "string" },
     "type": { "enum": ["freeze", "replay", "occlusion", "shift", "stream_lost"] },
-    "duration_s": { "type": "number", "minimum": 0 }
+    "duration_s": { "type": "number", "minimum": 0 },
+    "source": {
+      "enum": ["rule", "model"],
+      "description": "freeze、stream_lost 为确定性判定（rule）；replay、shift、occlusion 为视觉模型判定（model）"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "可信度；rule 来源为 1.0"
+    },
+    "detail": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "可读说明，如重放匹配到的历史时刻"
+    }
   }
 }

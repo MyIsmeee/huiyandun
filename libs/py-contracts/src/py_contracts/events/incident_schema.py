@@ -48,5 +48,9 @@ class Incident(ContractModel):
     """
     规则每一步命中事件的 event_id
     """
+    requires_confirmation: bool
+    """
+    命中路径含模型来源事件时为 true：处置须人工确认（FR-407）
+    """
     status: Literal["open", "containing", "contained", "closed"]
     created_at: AwareDatetime

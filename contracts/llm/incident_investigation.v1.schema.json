@@ -1,0 +1,42 @@
+{
+  "title": "IncidentInvestigationTurn",
+  "description": "AI 安全值班员每轮输出（HYD-PLAN-007 §6、G-12）：调用一个只读工具，或给出最终判定",
+  "type": "object",
+  "required": ["action", "reason", "tool", "args", "verdict"],
+  "properties": {
+    "action": { "enum": ["tool", "verdict"] },
+    "reason": { "type": "string", "maxLength": 200, "description": "本轮理由，展示给值守人员" },
+    "tool": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "action=tool 时必填；须在工具白名单内"
+    },
+    "args": {
+      "anyOf": [{ "type": "object" }, { "type": "null" }],
+      "description": "action=tool 时必填；按工具参数 Schema 校验"
+    },
+    "verdict": {
+      "anyOf": [{ "$ref": "#/$defs/TurnVerdict" }, { "type": "null" }],
+      "description": "action=verdict 时必填"
+    }
+  },
+  "$defs": {
+    "TurnVerdict": {
+      "type": "object",
+      "required": ["is_attack", "confidence", "techniques", "narrative", "recommendation"],
+      "properties": {
+        "is_attack": { "type": "boolean" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "techniques": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^T[0-9]{4}([.][0-9]{3})?$" }
+        },
+        "narrative": { "type": "string", "maxLength": 600 },
+        "recommendation": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "只作文字建议，不进入任何执行路径（G-03）"
+        }
+      }
+    }
+  }
+}
