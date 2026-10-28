@@ -65,7 +65,8 @@ def test_doctor_gpu_check_resolves_compose_services(tmp_path: Path) -> None:
 
     其余检查以假命令通过；该步取同样的文件与分组参数，对目标服务执行真实的 docker compose config。
     config 须指明服务：不指明时会直接略去未启用分组的服务，发现不了依赖缺失。不用 run --dry-run：
-    Compose 2.38 的 dry-run 仍会真实构建镜像，CI Runner 上要下载 CUDA 基础镜像。
+    Compose 2.38 的 dry-run 仍会真实构建镜像，CI Runner 上要下载 CUDA 基础镜像。代价是 run 自身的
+    选项（--rm --no-deps --build）被跳过，选项拼错不再能发现。
     """
     real = shutil.which("docker")
     assert real

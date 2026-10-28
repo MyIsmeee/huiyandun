@@ -60,7 +60,8 @@ EXCLUDED = (
     "tools/lint/no_public_url.py",
 )
 # 只在开发机访问的下载地址：按文件放行指定键所在行，同一文件的其他行照常扫描。
-# 模型权重地址只由 make fetch-models 读取，registry.yaml 不进入任何镜像（R-03、C-RU-06）
+# 模型权重地址只由 make fetch-models 读取，registry.yaml 不进入任何镜像（R-03、C-RU-06）；
+# 若镜像或交付包改为包含 registry.yaml，须撤销此放行
 DEV_ONLY_KEYS = {"models/registry.yaml": "source:"}
 
 
