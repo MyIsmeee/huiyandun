@@ -99,6 +99,8 @@ def test_go2rtc_api_reachable_only_by_its_clients() -> None:
 
 
 SENSORS = {"suricata", "zeek"}
+TAP = "capture-tap"
+TAP_NET = "tap-net"
 # 抓包所需；suricata 启动阶段另需切换用户、写日志目录，切换后只保留 NET_RAW、NET_ADMIN、SYS_NICE
 SENSOR_CAPS = {
     "NET_RAW",
@@ -112,16 +114,22 @@ SENSOR_CAPS = {
 }
 
 
-def test_only_sensors_use_host_network() -> None:
-    """宿主网络命名空间绕过全部网络隔离，只给必须抓包的探针。"""
-    assert {n for n, s in SERVICES.items() if s.get("network_mode") == "host"} == SENSORS
+def test_only_capture_tap_uses_host_network() -> None:
+    """宿主网络绕过全部网络隔离（DP-05 例外）：只给配置镜像的 capture-tap，它执行一次即退出、
+    只有 NET_ADMIN，不处理流量。"""
+    assert {n for n, s in SERVICES.items() if s.get("network_mode") == "host"} == {TAP}
+    tap = SERVICES[TAP]
+    assert TAP in ONESHOT
+    assert tap["read_only"] is True
+    assert tap["cap_drop"] == ["ALL"] and tap["cap_add"] == ["NET_ADMIN"]
 
 
 @pytest.mark.parametrize("name", sorted(SENSORS))
 def test_sensor_least_privilege(name: str) -> None:
-    """探针解析不可信流量，被攻破时不能成为跳板：只读根文件系统、只保留抓包能力、不持有口令、
-    只挂载自己的日志与缓存卷。"""
+    """探针解析不可信流量，被攻破时不能成为跳板：只接入 tap-net、只读根文件系统、只保留抓包能力、
+    不持有口令、只挂载自己的日志与缓存卷。"""
     sensor = SERVICES[name]
+    assert sensor["networks"] == [TAP_NET]
     assert sensor["read_only"] is True
     assert sensor["cap_drop"] == ["ALL"]
     assert set(sensor["cap_add"]) <= SENSOR_CAPS
@@ -129,20 +137,33 @@ def test_sensor_least_privilege(name: str) -> None:
     assert all(v.split(":")[0] in COMPOSE["volumes"] for v in sensor["volumes"])
 
 
+def test_tap_network_holds_only_sensors() -> None:
+    """C-SEC-08：tap-net 里只有探针，且探针之间不互通。"""
+    members = {n for n, s in SERVICES.items() if TAP_NET in s.get("networks", [])}
+    assert members == SENSORS
+    assert (
+        COMPOSE["networks"][TAP_NET]["driver_opts"]["com.docker.network.bridge.enable_icc"]
+        == "false"
+    )
+
+
 @pytest.mark.parametrize("name", [n for n in COMPOSE["networks"] if n != EDGE])
 def test_network_unreachable_from_host(name: str) -> None:
-    """内部网络不给宿主分配地址：宿主网络中的探针被攻破时，无法访问其中的服务。"""
+    """内部网络不给宿主分配地址：宿主上的进程访问不到其中的服务。"""
     options = COMPOSE["networks"][name]["driver_opts"]
     assert options["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
 
 
-def test_sensors_capture_on_demo_bridge() -> None:
-    """C-SEC-08、G-11：探针默认抓包的网卡是 demo-net 的网桥（零 IP）。"""
-    bridge = COMPOSE["networks"]["demo-net"]["driver_opts"]["com.docker.network.bridge.name"]
-    for name in SENSORS:
-        assert any(
-            arg.endswith(f"{{HYD_CAPTURE_IFACE:-{bridge}}}") for arg in SERVICES[name]["command"]
-        )
+def test_capture_tap_mirrors_demo_bridge_into_tap_net() -> None:
+    """抓包源默认 demo-net 的网桥，镜像目标是 tap-net 的网桥。"""
+    bridge = {
+        n: COMPOSE["networks"][n]["driver_opts"]["com.docker.network.bridge.name"]
+        for n in ("demo-net", TAP_NET)
+    }
+    assert SERVICES[TAP]["command"] == [
+        f"${{HYD_CAPTURE_IFACE:-{bridge['demo-net']}}}",
+        bridge[TAP_NET],
+    ]
 
 
 def test_only_audit_service_holds_audit_password() -> None:

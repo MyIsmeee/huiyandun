@@ -138,20 +138,32 @@ services:
       start_period: 30s
       start_interval: 2s
 
-  # 网络探针（REUSE-08）：IDS 模式只读抓包，不阻断（C-SEC-08）。抓包须进入宿主网络命名空间；
-  # 为防止探针被用作横向移动的跳板（参照 Malcolm、Security Onion）：抓包网卡零 IP（演示为 demo-net 网桥），
-  # 不监听端口、不持有口令、不向任何服务发起连接，结果只写日志卷；只读根文件系统，丢弃抓包以外的能力。
-  # 抓包网卡默认 demo-net 网桥，真实部署以 HYD_CAPTURE_IFACE 指定接镜像端口、未配置 IP 的网卡
+  # 网络探针隔离（C-SEC-08，参照 Malcolm、Security Onion 的加固并进一步隔离）：探针解析不可信流量，
+  # 被攻破时不能成为横向移动的跳板。capture-tap 把抓包源的流量单向镜像进 tap-net，探针只接入 tap-net：
+  # 网络里没有其他服务，到不了被监测的网络与宿主。capture-tap 需要宿主网络与 NET_ADMIN 配置网卡（DP-05 例外），
+  # 执行一次即退出，不处理流量。抓包源默认 demo-net 网桥；真实部署以 HYD_CAPTURE_IFACE 指定
+  # 接交换机镜像端口、未配置 IP 的网卡
+  capture-tap:
+    image: huiyandun/capture-tap:local
+    build: { context: ../.., dockerfile: agents/sensor/capture-tap/Dockerfile }
+    profiles: [security]
+    network_mode: host
+    command: ["${HYD_CAPTURE_IFACE:-hyd-demo}", "hyd-tap"]
+    labels: { hyd.oneshot: "true" }
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+
+  # 网络入侵检测（REUSE-08）：IDS 模式，不阻断；不监听端口、不持有口令，结果只写日志卷
   suricata:
     image: huiyandun/suricata:local
     build: { context: ../.., dockerfile: agents/sensor/suricata/Dockerfile }
     profiles: [security]
-    network_mode: host
     # 不经镜像入口脚本（它会 chown 配置目录）。以 root 打开抓包与日志后切换为 suricata 用户，
-    # 只保留 NET_RAW、NET_ADMIN、SYS_NICE 并清空能力边界集；其余能力只在启动阶段使用
+    # 只保留 NET_RAW、NET_ADMIN、SYS_NICE 并清空能力边界集；NET_ADMIN 只作用于探针自己的网络命名空间
     entrypoint: ["suricata"]
     command: ["--user", "suricata", "--group", "suricata", "--include", "/etc/suricata/hyd.yaml",
-      "-i", "${HYD_CAPTURE_IFACE:-hyd-demo}", "-k", "none"]
+      "-i", "eth0", "-k", "none"]
     read_only: true
     cap_drop: [ALL]
     cap_add: [NET_RAW, NET_ADMIN, SYS_NICE, SETUID, SETGID, SETPCAP, CHOWN, DAC_OVERRIDE]
@@ -160,6 +172,8 @@ services:
     volumes:
       - suricata-logs:/var/log/suricata  # EVE 告警日志
       - suricata-cache:/var/lib/suricata  # 规则编译缓存：重启后数秒内恢复检测，不必重新编译全部规则
+    depends_on: { capture-tap: { condition: service_completed_successfully } }
+    networks: [tap-net]
     healthcheck:
       test: ["CMD", "suricatasc", "-c", "uptime"]
       interval: 10s
@@ -168,18 +182,20 @@ services:
       start_period: 120s  # 首次启动编译全部 ET Open 规则
       start_interval: 5s
 
-  # 以 zeek 用户运行，抓包能力以文件能力授予（见 Dockerfile），因此不设 no-new-privileges
+  # 网络会话元数据（REUSE-08）：JSON 日志。以 zeek 用户运行，抓包能力以文件能力授予（见 Dockerfile），
+  # 因此不设 no-new-privileges
   zeek:
     image: huiyandun/zeek:local
     build: { context: ../.., dockerfile: agents/sensor/zeek/Dockerfile }
     profiles: [security]
-    network_mode: host
-    command: ["-C", "-i", "af_packet::${HYD_CAPTURE_IFACE:-hyd-demo}", "local", "LogAscii::use_json=T"]
+    command: ["-C", "-i", "af_packet::eth0", "local", "LogAscii::use_json=T"]
     read_only: true
     cap_drop: [ALL]
     cap_add: [NET_RAW]
     tmpfs: [/tmp]
     volumes: ["zeek-logs:/zeek/logs"]
+    depends_on: { capture-tap: { condition: service_completed_successfully } }
+    networks: [tap-net]
     healthcheck:
       test: ["CMD", "pgrep", "-x", "zeek"]
       interval: 10s
@@ -202,13 +218,11 @@ services:
       retries: 10
 
 networks:
-  # 内部网络不给宿主分配网关地址（gateway_mode_ipv4: isolated）：宿主进程与宿主网络中的探针
-  # 无法访问数据库与事件总线等内部服务，探针被攻破也不能经此横向移动
+  # 内部网络不给宿主分配网关地址（gateway_mode_ipv4: isolated）：宿主上的进程访问不到其中的服务
   core-net:
     internal: true
     driver_opts: { com.docker.network.bridge.gateway_mode_ipv4: isolated }
-  # 演示视频源与流接入；不连接宿主机外部网络（DP-04、DP-05）
-  # 同时是探针的抓包网卡：固定网桥名，零 IP（C-SEC-08、G-11）
+  # 演示视频源与流接入；不连接宿主机外部网络（DP-04、DP-05）。同时是演示的抓包源：固定网桥名供 capture-tap 使用
   demo-net:
     internal: true
     driver_opts:
@@ -218,6 +232,13 @@ networks:
   video-net:
     internal: true
     driver_opts: { com.docker.network.bridge.gateway_mode_ipv4: isolated }
+  # 探针网络：只有探针，只接收 capture-tap 镜像进来的流量；探针之间也不互通
+  tap-net:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: hyd-tap
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.enable_icc: "false"
   # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
   edge-net:
     driver_opts:
