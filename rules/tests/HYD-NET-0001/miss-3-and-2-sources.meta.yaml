@@ -1,0 +1,6 @@
+# 合成样本（R-02）：python tools/dev/rtsp_pcap.py rules/tests/HYD-NET-0001 生成
+source: 合成
+license: 自研，无第三方内容
+anonymization: 不含真实数据；地址取文档示例网段（RFC 5737）
+description: 两个来源分别 3 次与 2 次凭据被拒绝，按来源与设备分别计数
+alerts: 0

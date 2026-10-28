@@ -74,9 +74,13 @@ fetch-models:
 verify-models:
 	uv run python tools/dev/models.py verify models
 
+# 检测规则测试（CI-19、C-SEC-01）：构建 suricata 镜像，加载全部规则，回放 rules/tests/ 的样本并比对告警数
+test-rules:
+	docker build -q -t huiyandun/suricata:local -f agents/sensor/suricata/Dockerfile . > /dev/null
+	uv run python tools/dev/check_rules.py huiyandun/suricata:local rules
+
 # 占位目标：对应任务实现前，执行即失败
 todo = @echo "$@：由 $(1) 实现" >&2; exit 1
 
-test-rules: ; $(call todo,TK-030)
 llm-check: ; $(call todo,TK-060)
 demo-run: ; $(call todo,TK-100)

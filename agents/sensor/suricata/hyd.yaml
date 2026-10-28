@@ -1,0 +1,7 @@
+%YAML 1.1
+---
+# 以 --include 覆盖镜像自带的 suricata.yaml：只替换规则来源
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - emerging-all.rules  # ET Open 快照（rules/vendor/et-open/）
+  - hyd-net.rules
