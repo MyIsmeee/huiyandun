@@ -59,6 +59,9 @@ EXCLUDED = (
     "*/tests/*",
     "tools/lint/no_public_url.py",
 )
+# 只在开发机访问的下载地址：按文件放行指定键所在行，同一文件的其他行照常扫描。
+# 模型权重地址只由 make fetch-models 读取，registry.yaml 不进入任何镜像（R-03、C-RU-06）
+DEV_ONLY_KEYS = {"models/registry.yaml": "source:"}
 
 
 def is_public(host: str) -> bool:
@@ -89,9 +92,11 @@ def scan(path: Path, allowed: tuple[str, ...]) -> list[str]:
     data = path.read_bytes()
     if b"\0" in data[:8192]:  # 二进制文件
         return []
+    key = DEV_ONLY_KEYS.get(path.as_posix())
     return [
         f"{path.as_posix()}:{lineno}: {m.group(0)}"
         for lineno, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1)
+        if not (key and line.lstrip().startswith(key))
         for m in URL.finditer(line)
         if is_public(m.group(1)) and not line.startswith(allowed, m.start())
     ]

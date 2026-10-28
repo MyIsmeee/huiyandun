@@ -63,8 +63,9 @@ def test_doctor_passes_when_all_checks_pass(tmp_path: Path) -> None:
 def test_doctor_gpu_check_resolves_compose_services(tmp_path: Path) -> None:
     """hyd-gpu-check 一步的 compose 参数须能解析 vision-engine 及其依赖（nats 属 core 分组）。
 
-    其余检查以假命令通过；该步以 --dry-run 交给真实的 docker compose，不创建容器。dry-run 不支持
-    附着运行，故加 -d。docker compose config 会直接略去未启用分组的服务，发现不了依赖缺失。
+    其余检查以假命令通过；该步取同样的文件与分组参数，对目标服务执行真实的 docker compose config。
+    config 须指明服务：不指明时会直接略去未启用分组的服务，发现不了依赖缺失。不用 run --dry-run：
+    Compose 2.38 的 dry-run 仍会真实构建镜像，CI Runner 上要下载 CUDA 基础镜像。
     """
     real = shutil.which("docker")
     assert real
@@ -75,8 +76,10 @@ def test_doctor_gpu_check_resolves_compose_services(tmp_path: Path) -> None:
         f"""[ "$1" = compose ] || exit 0
 shift
 args=""
-for a in "$@"; do [ "$a" = run ] && a="run -d"; args="$args $a"; done
-exec {real} compose --dry-run $args""",
+while [ "$1" != run ]; do args="$args $1"; shift; done
+shift
+while [ "${{1#-}}" != "$1" ]; do shift; done
+exec {real} compose $args config -q $1""",
     )
 
     result = run([str(DOCTOR)], tmp_path)
