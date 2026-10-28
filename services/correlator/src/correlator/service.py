@@ -53,8 +53,12 @@ async def run(tail: EveTail, devices: dict[Ip, str], bus: Bus, config: Correlato
             if event is not None:
                 try:
                     await bus.js_publish(SUBJECT, event)
-                except (nats.errors.Error, TimeoutError):
-                    log.exception("correlator.publish_failed", extra={"rule_id": event.rule_id})
+                except (nats.errors.Error, TimeoutError) as e:
+                    # 断线本身已由 bus.disconnected 记录；每个周期重试一次，不重复输出堆栈
+                    log.warning(
+                        "correlator.publish_failed",
+                        extra={"rule_id": event.rule_id, "error": repr(e)},
+                    )
                     break
                 log.info(
                     "correlator.alert_published",
