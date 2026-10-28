@@ -12,7 +12,7 @@ import onnxruntime as ort
 import pytest
 from onnxruntime.datasets import get_example
 
-from vision_engine.detector import PoseDetector
+from vision_engine.detector import PoseDetector, VehicleDetector
 
 
 class FakeSession:
@@ -104,3 +104,62 @@ def test_pyav_and_matplotlib_not_installed() -> None:
     """REUSE-07：supervision 声明但不需要；PyAV 自带 GPL 的 x264 / x265，不得进程内加载（G-08）。"""
     assert importlib.util.find_spec("av") is None
     assert importlib.util.find_spec("matplotlib") is None
+
+
+class FakeDetrSession:
+    """按 RF-DETR 导出模型的输出格式返回框 (1, Q, 4)（归一化 cx cy w h）与分类 logits (1, Q, 91)。
+
+    queries：每个查询为 (cx, cy, w, h, COCO 类别号, 概率)；logits 第 0 列为背景。
+    """
+
+    def __init__(self, queries: list[tuple[float, float, float, float, int, float]]) -> None:
+        self.boxes = np.array([[q[:4] for q in queries]], np.float32)
+        self.logits = np.full((1, len(queries), 91), -10.0, np.float32)
+        for i, (*_, coco, prob) in enumerate(queries):
+            self.logits[0, i, coco + 1] = np.log(prob / (1 - prob))
+
+    def get_inputs(self) -> list[SimpleNamespace]:
+        return [SimpleNamespace(name="input")]
+
+    def get_outputs(self) -> list[SimpleNamespace]:
+        return [SimpleNamespace(name="dets"), SimpleNamespace(name="labels")]
+
+    def run(self, names: list[str], feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        assert feed["input"].shape == (1, 3, 512, 512)
+        return [self.boxes, self.logits]
+
+
+def vehicles(queries: list[tuple[float, float, float, float, int, float]]) -> VehicleDetector:
+    session = cast(ort.InferenceSession, FakeDetrSession(queries))
+    return VehicleDetector(get_example("sigmoid.onnx"), session)
+
+
+def test_vehicles_mapped_to_full_frame_with_class_and_score() -> None:
+    """裁剪区域 400×200、左上角 (100, 50)：归一化框按区域尺寸放大后平移回整帧。"""
+    detections = vehicles([(0.5, 0.5, 0.5, 0.5, 2, 0.9)])(
+        np.zeros((200, 400, 3), np.uint8), offset=(100, 50)
+    )
+
+    assert detections.xyxy[0].tolist() == pytest.approx([200, 100, 400, 200])
+    assert detections.class_id.tolist() == [2]  # car
+    assert detections.confidence.tolist() == pytest.approx([0.9])
+
+
+def test_only_vehicle_classes_above_threshold_kept() -> None:
+    """人员由 RTMO 检出（含骨骼），RF-DETR 只取车辆；低于 0.3 的框丢弃。"""
+    detections = vehicles(
+        [
+            (0.2, 0.2, 0.1, 0.1, 0, 0.95),  # person
+            (0.5, 0.5, 0.2, 0.2, 5, 0.8),  # bus
+            (0.8, 0.8, 0.1, 0.1, 7, 0.2),  # truck，低分
+            (0.3, 0.7, 0.1, 0.1, 14, 0.9),  # bird
+        ]
+    )(np.zeros((100, 100, 3), np.uint8))
+
+    assert detections.class_id.tolist() == [5]
+
+
+def test_no_vehicles_returns_empty() -> None:
+    detections = vehicles([(0.5, 0.5, 0.2, 0.2, 0, 0.9)])(np.zeros((100, 100, 3), np.uint8))
+
+    assert len(detections) == 0

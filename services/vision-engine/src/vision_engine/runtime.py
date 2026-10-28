@@ -26,6 +26,9 @@ class VisionConfig(ServiceConfig):
         description="推理设备，无默认值、须显式声明；cpu 为 D0-min 的 CPU 模式（C-CV-11、DP-06）"
     )
     model_file: FilePath = Field(description="RTMO ONNX 模型文件的本地路径（C-RU-06、DP-08）")
+    vehicle_model_file: FilePath = Field(
+        description="RF-DETR ONNX 模型文件的本地路径，检出车辆（REUSE-22、C-RU-06）"
+    )
     gpu_mem_limit_mb: int = Field(
         2048, gt=0, description="CUDA EP 显存上限，单位 MiB，与同机其他 GPU 进程共存（C-HW-12）"
     )
@@ -44,7 +47,7 @@ class DeviceError(RuntimeError):
     """声明 cuda 但 CUDAExecutionProvider 未生效（C-CV-11）。"""
 
 
-def create_session(config: VisionConfig) -> ort.InferenceSession:
+def create_session(config: VisionConfig, model_file: Path) -> ort.InferenceSession:
     if config.device == "cuda":
         providers: list[str | tuple[str, dict[str, int]]] = [
             (CUDA, {"gpu_mem_limit": config.gpu_mem_limit_mb * 2**20}),
@@ -52,7 +55,7 @@ def create_session(config: VisionConfig) -> ort.InferenceSession:
         ]
     else:
         providers = [CPU]
-    session = ort.InferenceSession(str(config.model_file), providers=providers)
+    session = ort.InferenceSession(str(model_file), providers=providers)
     active = session.get_providers()
     if config.device == "cuda" and active[0] != CUDA:
         raise DeviceError(f"HYD_DEVICE=cuda，但 ONNX Runtime 回退到 {active}，拒绝以 CPU 运行")
@@ -60,14 +63,17 @@ def create_session(config: VisionConfig) -> ort.InferenceSession:
 
 
 def gpu_check() -> None:
-    """hyd-gpu-check：按配置加载模型并断言推理设备；声明 cuda 而未生效时以 1 退出。"""
+    """hyd-gpu-check：按配置加载全部模型并断言推理设备；声明 cuda 而未生效时以 1 退出。"""
     config = load_config(VisionConfig)
     configure_logging("vision-engine", config.log_level)
     try:
-        session = create_session(config)
+        sessions = [
+            create_session(config, f) for f in (config.model_file, config.vehicle_model_file)
+        ]
     except DeviceError as e:
         log.error("vision.device_unavailable", extra={"error": str(e)})
         sys.exit(1)
     log.info(
-        "vision.device_ready", extra={"device": config.device, "providers": session.get_providers()}
+        "vision.device_ready",
+        extra={"device": config.device, "providers": [s.get_providers() for s in sessions]},
     )

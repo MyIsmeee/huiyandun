@@ -146,6 +146,7 @@ services:
     environment:
       HYD_DEVICE: cpu  # 显式 CPU 模式（DP-06）；compose.gpu.yaml 改为 cuda
       HYD_MODEL_FILE: /models/rtmo-s_body7-640x640.onnx
+      HYD_VEHICLE_MODEL_FILE: /models/rfdetr_s_v142_512x512.onnx
     volumes:
       - ../../models/weights:/models:ro
       - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 摄像头流名与标定点（FR-901）

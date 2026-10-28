@@ -1,8 +1,8 @@
 """CV 模型权重的下载与校验（C-CV-01、C-CV-07、C-RU-01、C-RU-06、G-15）。
 
 用法：python tools/dev/models.py fetch|verify <models 目录>
-权重不入库（R-03）：fetch 按 registry.yaml 的 source 下载压缩包，校验哈希后取出 source_member，
-写到 <models 目录>/weights/<file>；已存在且哈希一致时跳过。verify 检查每个模型的字段、类别、许可证、
+权重不入库（R-03）：fetch 按 registry.yaml 的 source 下载，校验哈希；source 为压缩包时取出
+source_member，上游直接发布权重文件时 source_member 留空、下载内容即权重；写到 <models 目录>/weights/<file>；已存在且哈希一致时跳过。verify 检查每个模型的字段、类别、许可证、
 模型卡与权重哈希。任一不符以 1 退出。
 """
 
@@ -24,14 +24,14 @@ FIELDS = (
     "sha256",
     "source",
     "source_sha256",
-    "source_member",
     "license",
     "card",
     "purpose",
     "owner",
 )
 # 类别白名单：人脸检测/识别、ReID、属性识别不得加入（G-04、C-CV-01）
-TASKS = {"pose"}  # 人体检测与骨骼关键点
+# pose：人体检测与骨骼关键点；detection：人员与车辆检测，只到类别（不识别车牌）
+TASKS = {"pose", "detection"}
 # G-08 白名单中适用于模型权重的许可证（SPDX）
 LICENSES = {"Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0"}
 TIMEOUT_S = 300  # 单个压缩包下载上限
@@ -49,8 +49,11 @@ def fetch(models: Path, model: dict[str, Any]) -> str | None:
         archive = response.read()
     if sha256(archive) != model["source_sha256"]:
         return f"{model['name']}: 压缩包哈希不符，拒绝使用"
-    with zipfile.ZipFile(io.BytesIO(archive)) as z:
-        weights = z.read(model["source_member"])
+    if model.get("source_member"):
+        with zipfile.ZipFile(io.BytesIO(archive)) as z:
+            weights = z.read(model["source_member"])
+    else:
+        weights = archive
     if sha256(weights) != model["sha256"]:
         return f"{model['name']}: 权重哈希不符，拒绝使用"
     target.parent.mkdir(exist_ok=True)

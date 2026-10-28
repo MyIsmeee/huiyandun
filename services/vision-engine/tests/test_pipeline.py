@@ -17,12 +17,13 @@ from py_common.bus import Bus
 from py_common.config import load_config
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
-from vision_engine.detector import PoseDetector
+from vision_engine.detector import PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
 from vision_engine.pipeline import (
     BEHAVIOR_SUBJECT,
     FPS,
     TRACK_SUBJECT,
+    VEHICLE_ID_BASE,
     CameraPipeline,
     FrameReader,
     run_camera,
@@ -91,6 +92,56 @@ def test_tracks_published_with_floor_coordinates() -> None:
     assert sent["bbox"] == pytest.approx([306 / 1280, 200 / 720, 406 / 1280, 600 / 720])
     assert len(sent["keypoints"]) == 17
     assert sent["keypoints"][15] == pytest.approx([356 / 1280, 600 / 720, 0.9])
+
+
+class FakeVehicles:
+    """一辆轿车，每次检测向右移动 20 像素（MAPPING 下即 0.2 m）。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.class_id = 2  # COCO car
+
+    def __call__(self, image: np.ndarray, offset: tuple[int, int] = (0, 0)) -> sv.Detections:
+        x = 200 + 20 * self.calls
+        self.calls += 1
+        return sv.Detections(
+            xyxy=np.array([[x, 300.0, x + 200, 500]]),
+            confidence=np.array([0.9]),
+            class_id=np.array([self.class_id]),
+        )
+
+
+def test_vehicles_tracked_with_heading_and_speed() -> None:
+    """画面中只有车辆（无人员）：车辆轨迹编号与人员分开，无骨骼，朝向与速度由轨迹得出。"""
+    camera = CameraPipeline(
+        "cam-01", MAPPING, cast(PoseDetector, FakeDetector(person=False)),
+        vehicles=cast(VehicleDetector, FakeVehicles()),
+    )  # fmt: skip
+
+    events = [e for i in range(6) for e in camera.process(frame(i), timestamp=i / FPS)]
+
+    assert len(events) == 5  # 新轨迹须连续 2 帧确认
+    assert all(isinstance(e, VisionTrackV1) and e.object_class == "car" for e in events)
+    assert all(e.track_id >= VEHICLE_ID_BASE and e.keypoints is None for e in events)
+    first, last = events[0].model_dump(), events[-1].model_dump()
+    assert (first["heading_deg"], first["speed_mps"]) == (None, None)  # 不足 3 帧
+    # 每 0.2 s 向 +x 移动 0.2 m
+    assert (last["heading_deg"], last["speed_mps"]) == pytest.approx((0, 1.0))
+
+
+def test_vehicle_class_is_majority_over_track() -> None:
+    """同一辆两轮车逐帧在自行车与摩托车之间跳变时，按轨迹内多数类别输出，模型不闪烁。"""
+    fake = FakeVehicles()
+    camera = CameraPipeline(
+        "cam-01", MAPPING, cast(PoseDetector, FakeDetector(person=False)),
+        vehicles=cast(VehicleDetector, fake),
+    )  # fmt: skip
+    classes = []
+    for i, coco in enumerate([1, 1, 1, 3, 1, 3]):  # 1 bicycle，3 motorcycle
+        fake.class_id = coco
+        classes += [e.object_class for e in camera.process(frame(i), timestamp=i / FPS)]
+
+    assert classes == ["bicycle"] * 5
 
 
 def test_fall_detected_on_uncalibrated_camera() -> None:
@@ -165,6 +216,7 @@ def run_for(camera: CameraPipeline, bus: FakeBus, tmp_path: Path, seconds: float
         {
             "HYD_DEVICE": "cpu",
             "HYD_MODEL_FILE": get_example("sigmoid.onnx"),
+            "HYD_VEHICLE_MODEL_FILE": get_example("sigmoid.onnx"),
             "HYD_HEARTBEAT_FILE": str(tmp_path / "alive"),
         },
     )

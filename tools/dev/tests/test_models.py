@@ -133,3 +133,22 @@ def test_verify_requires_fields(models: Path) -> None:
 
     assert result.returncode == 1
     assert "缺少字段 owner" in result.stderr
+
+
+def test_fetch_bare_weights_file(models: Path, tmp_path: Path) -> None:
+    """上游直接发布 .onnx 文件时不填 source_member，下载内容即权重（如 RF-DETR）。"""
+    bare = tmp_path / "rfdetr.onnx"
+    bare.write_bytes(WEIGHTS)
+    update(models, source=bare.as_uri(), source_sha256=sha256(WEIGHTS), source_member="")
+
+    assert run("fetch", models).returncode == 0
+    assert (models / "weights/demo.onnx").read_bytes() == WEIGHTS
+    assert run("verify", models).returncode == 0
+
+
+def test_detection_task_allowed(models: Path) -> None:
+    """人员与车辆检测（只到类别）在白名单内；人脸、ReID、属性识别仍不允许（G-04）。"""
+    run("fetch", models)
+    update(models, task="detection")
+
+    assert run("verify", models).returncode == 0

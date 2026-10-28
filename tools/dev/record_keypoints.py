@@ -1,6 +1,7 @@
 """录制素材片段的骨骼轨迹，作行为判定的测试数据（TK-022）。
 
-用法：HYD_DEVICE=cpu HYD_MODEL_FILE=<RTMO 模型> uv run --package vision-engine \\
+用法：HYD_DEVICE=cpu HYD_MODEL_FILE=<RTMO 模型> HYD_VEHICLE_MODEL_FILE=<RF-DETR 模型> \\
+      uv run --package vision-engine \\
       python tools/dev/record_keypoints.py <视频> <输出.npz>
 
 按固定 5 FPS 抽帧，经与检测链路相同的门控、检测与跟踪，保存每帧已确认轨迹的时刻、轨迹 ID、
@@ -22,7 +23,9 @@ def main() -> None:
     source, output = sys.argv[1], sys.argv[2]
     config = load_config(VisionConfig)
     camera = CameraPipeline(
-        "record", None, PoseDetector(str(config.model_file), create_session(config))
+        "record",
+        None,
+        PoseDetector(str(config.model_file), create_session(config, config.model_file)),
     )
     capture = cv2.VideoCapture(source)
     source_fps = capture.get(cv2.CAP_PROP_FPS)
