@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Site } from "../../../src/lib/api";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
+import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
 import { FloorPlan2D } from "../../../src/scene/FloorPlan2D";
 import { planView } from "../../../src/scene/layout";
 import "../../../src/theme/store";
@@ -32,6 +33,21 @@ const plan = (site: Site) => (
   </div>
 );
 
+/** 代替摄像头的静态画面：画布生成的视频流，截图稳定 */
+function testStream(): MediaStream {
+  const canvas = Object.assign(document.createElement("canvas"), { width: 640, height: 360 });
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.fillStyle = "#3a3f47";
+    ctx.fillRect(0, 0, 640, 360);
+    ctx.fillStyle = "#59606b";
+    ctx.fillRect(0, 240, 640, 120);
+  }
+  return canvas.captureStream(1);
+}
+const STREAM = testStream();
+const video = (node: ReactNode) => <div className="w-72">{node}</div>;
+
 // 组件各状态的展示页：/tests/e2e/gallery/?component=<组件>，每个状态一个 [data-state]
 const GALLERY: Record<string, Record<string, ReactNode>> = {
   KpiTile: {
@@ -43,6 +59,13 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
   FloorPlan2D: {
     normal: plan(SITE),
     empty: plan({ ...SITE, walls: [], zones: [] }),
+  },
+  LiveVideo: {
+    normal: video(<LiveVideoView status={{ kind: "playing", stream: STREAM }} />),
+    empty: video(<LiveVideoView status={{ kind: "none" }} />),
+    loading: video(<LiveVideoView status={{ kind: "connecting" }} />),
+    error: video(<LiveVideoView status={{ kind: "unavailable", reason: "视频服务不可用" }} />),
+    disconnected: video(<LiveVideoView status={{ kind: "interrupted", stream: STREAM }} />),
   },
 };
 
