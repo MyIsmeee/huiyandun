@@ -1,0 +1,8 @@
+# attack-sim 的受控行为定义（DP-09）：攻击方只对自建目标 rtsp-target 发 RTSP 认证重试。
+# scenario-runner（TK-100）据此在主剧本 1:20 启动 attack-sim；compose 的 environment 为默认值，二者一致
+target: rtsp-target          # 只允许的目标，与 compose 的 attack-sim 服务名一致
+port: 8554                   # 目标 RTSP 端口
+path: cam                    # 目标 RTSP 路径
+user: admin                  # 攻击方猜测的用户名
+password: wrong-password     # 攻击方猜测的口令（故意错误，非真实凭据）
+attempts: 6                  # 认证尝试次数；需 ≥5 次/60 s 才触发 HYD-NET-0001（FR-202）

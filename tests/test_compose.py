@@ -1,5 +1,6 @@
 """Compose 定义的静态约束：健康检查、digest 锁定、内部网络、复用组件登记。"""
 
+import ipaddress
 import os
 import re
 from pathlib import Path
@@ -154,16 +155,57 @@ def test_network_unreachable_from_host(name: str) -> None:
     assert options["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
 
 
-def test_capture_tap_mirrors_demo_bridge_into_tap_net() -> None:
-    """抓包源默认 demo-net 的网桥，镜像目标是 tap-net 的网桥。"""
+def test_capture_tap_mirrors_attack_bridge_into_tap_net() -> None:
+    """演示抓包源是攻击网络的网桥（attack-sim→rtsp-target 的 RTSP 爆破在此发生），镜像目标是
+    tap-net 的网桥；真实部署以 HYD_CAPTURE_IFACE 指定接镜像端口、未配置 IP 的网卡。"""
     bridge = {
         n: COMPOSE["networks"][n]["driver_opts"]["com.docker.network.bridge.name"]
-        for n in ("demo-net", TAP_NET)
+        for n in (ATTACK_NET, TAP_NET)
     }
     assert SERVICES[TAP]["command"] == [
-        f"${{HYD_CAPTURE_IFACE:-{bridge['demo-net']}}}",
+        f"${{HYD_CAPTURE_IFACE:-{bridge[ATTACK_NET]}}}",
         bridge[TAP_NET],
     ]
+
+
+ATTACK_NET = "attack-net"
+ATTACK_SIM = "attack-sim"
+RTSP_TARGET = "rtsp-target"
+
+
+def test_attack_sim_reaches_only_rtsp_target() -> None:
+    """DP-09、C-SEC-11：attack-sim 只接入 attack-net，网络里只有它和 rtsp-target；该网络内部隔离、
+    宿主不可达，attack-sim 在网络层碰不到 go2rtc 等其他服务。"""
+    members = {n for n, s in SERVICES.items() if ATTACK_NET in set(s.get("networks", []))}
+    assert members == {ATTACK_SIM, RTSP_TARGET}
+    assert set(SERVICES[ATTACK_SIM]["networks"]) == {ATTACK_NET}
+    net = COMPOSE["networks"][ATTACK_NET]
+    assert net["internal"] is True
+    assert net["driver_opts"]["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
+
+
+def test_attack_sim_carries_no_offensive_tools() -> None:
+    """DP-09：镜像内不含通用扫描或利用工具，只有自研的受控脚本、不安装任何依赖。"""
+    dockerfile = (ROOT / "agents/sim/attack-sim/Dockerfile").read_text(encoding="utf-8")
+    assert "apt-get install" not in dockerfile and "apt install" not in dockerfile
+    assert "pip install" not in dockerfile
+
+
+def test_rtsp_target_impersonates_attacked_camera() -> None:
+    """rtsp-target 取用 site.yaml 中被攻击摄像头 cam-02 的 IP，使网络告警可映射到该设备（FR-203）；
+    attack-sim 的源地址在白名单网段之外，后续处置才能真正封禁它。"""
+    site = yaml.safe_load((ROOT / "demo/scenarios/site.yaml").read_text(encoding="utf-8"))
+    cam = next(c for c in site["cameras"] if c["id"] == "cam-02")
+    assert SERVICES[RTSP_TARGET]["networks"][ATTACK_NET]["ipv4_address"] == cam["ip"]
+    attacker = ipaddress.ip_address(SERVICES[ATTACK_SIM]["networks"][ATTACK_NET]["ipv4_address"])
+    assert not any(attacker in ipaddress.ip_network(w) for w in site["whitelist"])
+
+
+def test_attack_sim_behavior_registered_in_scenarios() -> None:
+    """DP-09：attack-sim 的行为参数登记于 demo/scenarios/，不散落在镜像里。"""
+    params = yaml.safe_load((ROOT / "demo/scenarios/attack-sim.yaml").read_text(encoding="utf-8"))
+    assert params["target"] == RTSP_TARGET
+    assert params["attempts"] >= 5  # 60 s 内 ≥5 次 RTSP 认证失败才触发 HYD-NET-0001
 
 
 def test_only_audit_service_holds_audit_password() -> None:
