@@ -49,8 +49,8 @@ components:
   # CUDA / cuDNN 运行库随 vision-engine 镜像分发：G-08 例外（NVIDIA 许可允许随应用再分发）
   # CUDA 主版本须与 onnxruntime-gpu 一致（C-HW-08）；Windows 侧驱动须支持 CUDA 13（580 及以上）
   - name: NVIDIA CUDA cuDNN runtime
-    version: 13.4.3-cudnn-runtime-ubuntu24.04
-    image: nvidia/cuda:13.4.3-cudnn-runtime-ubuntu24.04@sha256:534ea2e94fd17f053b4422d094f50a43a7e75a03240c4b89cbe9ad42085ec1c3
+    version: 13.0.3-cudnn-runtime-ubuntu24.04
+    image: nvidia/cuda:13.0.3-cudnn-runtime-ubuntu24.04@sha256:14f6d08d1cd4a96effbfe3101d0b56326f552c199d05e4979ee0bd616df5811b
     license: NVIDIA Deep Learning Container License（CUDA、cuDNN 运行库）
     purpose: vision-engine 基础镜像，ONNX Runtime CUDA EP 所需运行库（C-HW-07）
     owner: MyIsmeee
