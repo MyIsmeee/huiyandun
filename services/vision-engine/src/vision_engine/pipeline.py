@@ -35,10 +35,11 @@ from vision_engine.runtime import DeviceError, VisionConfig, create_session
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
-# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 由 TK-040 发布。保留期与 Track 一致
+# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 由 TK-040 发布。
+# 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
 STREAM = "HYD_VISION"
 STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, "hyd.vision.integrity.v1"]
-STREAM_MAX_AGE_S = 7 * 86400
+STREAM_MAX_AGE_S = 180 * 86400
 SCHEMA_VERSION = "1.0.0"
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0

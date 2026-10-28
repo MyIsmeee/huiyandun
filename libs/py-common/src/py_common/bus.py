@@ -15,12 +15,15 @@ from nats import errors
 from nats.aio.client import Client
 from nats.aio.msg import Msg
 from nats.js.api import StorageType, StreamConfig
+from nats.js.errors import BadRequestError
 from pydantic import ValidationError
 
 from py_contracts.events.event_base_schema import EventBase
 
 log = logging.getLogger(__name__)
 # 导致断连的错误：nats-py 先报告错误、随后才切换为重连状态
+# JetStream 错误码：同名流已存在且配置不同
+STREAM_NAME_IN_USE = 10058
 CONNECTION_LOST = (errors.UnexpectedEOF, errors.StaleConnectionError, OSError)
 
 
@@ -81,15 +84,17 @@ class Bus:
         )
 
     async def ensure_stream(self, name: str, subjects: list[str], max_age_s: int) -> None:
-        """创建持久化 js_publish 主题的 JetStream 流（文件存储）；已存在且配置相同时不变。"""
-        await self._js.add_stream(
-            StreamConfig(
-                name=name,
-                subjects=subjects,
-                storage=StorageType.FILE,
-                max_age=max_age_s,
-            )
+        """创建持久化 js_publish 主题的 JetStream 流（文件存储）。已存在且配置相同时不变；
+        配置不同（如调整保留期、增加主题）时按新配置更新，数据卷中的已有消息保留。"""
+        config = StreamConfig(
+            name=name, subjects=subjects, storage=StorageType.FILE, max_age=max_age_s
         )
+        try:
+            await self._js.add_stream(config)
+        except BadRequestError as e:
+            if e.err_code != STREAM_NAME_IN_USE:
+                raise
+            await self._js.update_stream(config)
 
     async def subscribe[T: EventBase](
         self, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]]
