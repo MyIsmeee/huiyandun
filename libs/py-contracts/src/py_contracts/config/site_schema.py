@@ -58,6 +58,11 @@ class CalibrationItem(RootModel[list[float]]):
     root: list[float] = Field(..., max_length=4, min_length=4)
 
 
+class ClimbLine(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[float] = Field(..., max_length=4, min_length=4)
+
+
 class PoseConfig(ContractModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -85,6 +90,10 @@ class CameraConfig(ContractModel):
     calibration: list[CalibrationItem]
     """
     标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时摄像头为 uncalibrated（FR-902）
+    """
+    climb_lines: list[ClimbLine] | None = None
+    """
+    禁止攀爬警戒线 [u1, v1, u2, v2]：沿墙顶或栏杆顶在画面中画的线段，像素坐标；脚踝从线下方越到上方并持续 2 s 即为攀爬（FR-104）。省略视为无
     """
 
 
