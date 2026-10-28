@@ -56,9 +56,10 @@ test("总览：演示站点的两台摄像头（V-P3）", async ({ page }) => {
   await expect(scene(page)).toHaveScreenshot("device-overview.png");
 });
 
-const alert = (severity: string) => ({
-  channel: "alerts",
-  data: { rule_id: "HYD-NET-0001", category: "auth_bruteforce", severity, device_id: "cam-01" },
+/** 告警等级由服务端累计，随设备推送（Device.alert_severity） */
+const severity = (alert_severity: string) => ({
+  channel: "devices",
+  data: { ...camera("cyber_alert"), alert_severity },
 });
 const changes = (page: Page) => async () => {
   const before = await scene(page).screenshot();
@@ -69,16 +70,16 @@ const changes = (page: Page) => async () => {
 test("网络攻击视场只在 critical / high 告警时呼吸（V-A1）", async ({ page }) => {
   const sockets = await open(page, [camera("cyber_alert")]);
 
-  sockets[0]?.send(JSON.stringify(alert("medium")));
+  sockets[0]?.send(JSON.stringify(severity("medium")));
   await page.clock.runFor(100);
   expect(await changes(page)()).toBe(false);
-  sockets[0]?.send(JSON.stringify(alert("high")));
+  sockets[0]?.send(JSON.stringify(severity("high")));
   await expect.poll(changes(page)).toBe(true);
 });
 
 test("网络攻击视场呼吸；断线或降低动效时停止（V-A1、V-U3、V-A4）", async ({ page }) => {
   const sockets = await open(page, [camera("cyber_alert")]);
-  sockets[0]?.send(JSON.stringify(alert("critical")));
+  sockets[0]?.send(JSON.stringify(severity("critical")));
   await page.clock.runFor(100);
 
   // 切换后回到静止不透明度需要再绘制一帧：轮询直到画面不再变化
