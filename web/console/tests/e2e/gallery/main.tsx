@@ -79,7 +79,8 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     disconnected: video(<LiveVideoView status={{ kind: "interrupted", stream: STREAM }} />),
   },
   DetailPanel: {
-    device: <div className="w-80"><DetailPanel device={SWITCH} onClose={() => {}} /></div>,
+    device: <div className="w-80"><DetailPanel device={SWITCH} stale={false} onClose={() => {}} /></div>,
+    disconnected: <div className="w-80"><DetailPanel device={SWITCH} stale onClose={() => {}} /></div>,
   },
 };
 

@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Clock, X } from "lucide-react";
 import { useEffect } from "react";
 import { deviceLook } from "../../scene/devices";
 import type { Device } from "../../store/live";
@@ -8,9 +8,11 @@ const TYPE: Record<Device["type"], string> = { camera: "摄像头", nvr: "录像
 
 /**
  * D 详情面板（HYD-UIX-004 §4.1、§8）：选中设备时展开，Esc 或关闭按钮收起（V-I2）。
+ * stale 为推送连接已断开：状态是断开前的最后值，弱化显示并标注（UP-3、V-U3）。
  * 事实区、AI 分析区、处置操作由后续任务接入。
  */
-export function DetailPanel({ device, onClose }: { device: Device; onClose: () => void }) {
+export function DetailPanel(props: { device: Device; stale: boolean; onClose: () => void }) {
+  const { device, stale, onClose } = props;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -35,7 +37,15 @@ export function DetailPanel({ device, onClose }: { device: Device; onClose: () =
         <dt className="text-fg-3">地址</dt>
         <dd className="tabular-nums">{device.ip}</dd>
         <dt className="text-fg-3">状态</dt>
-        <dd>{tags.length > 0 ? tags.join(" · ") : "正常"}</dd>
+        <dd className={stale ? "text-fg-3" : undefined}>
+          {tags.length > 0 ? tags.join(" · ") : "正常"}
+          {stale && (
+            <span className="ml-2 inline-flex items-center gap-1 text-xs text-uncertain">
+              <Clock aria-hidden className="size-3.5" />
+              数据非实时
+            </span>
+          )}
+        </dd>
       </dl>
       <h3 className="text-sm font-semibold">实时画面</h3>
       {/* key：切换设备时重建连接与状态 */}

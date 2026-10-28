@@ -103,7 +103,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       </section>
 
       <div className="row-span-2 flex min-h-0 flex-col gap-2">
-        {selected && <DetailPanel device={selected} onClose={deselect} />}
+        {selected && <DetailPanel device={selected} stale={offline} onClose={deselect} />}
         <aside aria-label="告警" className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
           <h2 className="border-b border-line px-4 py-3 font-semibold">告警</h2>
           <div className="m-auto text-center text-sm text-fg-3">
