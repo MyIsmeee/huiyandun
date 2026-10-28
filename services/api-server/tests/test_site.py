@@ -54,6 +54,10 @@ def test_demo_site_is_valid() -> None:
             lambda d: d["cameras"][1].update(climb_lines=[[600, 300, 600, 200]]),
             "cameras.1.climb_lines.0",
         ),
+        (
+            lambda d: d["cameras"][1].update(climb_lines=[[600, 300, 600, 300]]),
+            "cameras.1.climb_lines.0",
+        ),
     ],
     ids=[
         "missing",
@@ -67,6 +71,7 @@ def test_demo_site_is_valid() -> None:
         "door-off-wall",
         "door-past-wall-end",
         "vertical-climb-line",
+        "zero-length-climb-line",
     ],
 )
 def test_invalid_site_is_rejected_with_field_path(tmp_path: Path, edit: Any, path: str) -> None:

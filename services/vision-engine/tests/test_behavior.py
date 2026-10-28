@@ -140,6 +140,13 @@ def test_steep_line_sides() -> None:
     assert line.side(400, 600) is None
 
 
+@pytest.mark.parametrize("line", [[600, 300, 600, 200], [600, 300, 600, 300]])
+def test_vertical_or_zero_length_line_rejected(line: list[float]) -> None:
+    """竖直（含长度为 0）的线无法区分线上与线下；在构造时拒绝，而不是在某一帧计算时出错。"""
+    with pytest.raises(ValueError, match="竖直"):
+        BehaviorDetector([line])
+
+
 def test_tracks_are_independent() -> None:
     detector = BehaviorDetector([])
     lying, standing = pose("lying"), pose("stand", x=600)

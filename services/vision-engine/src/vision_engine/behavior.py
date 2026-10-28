@@ -63,8 +63,13 @@ class ClimbLine:
     u2: float
     v2: float
 
+    def __post_init__(self) -> None:
+        # 与 api-server 导入校验一致；vision-engine 独立读取 site.yaml，不依赖 api-server 先拦截
+        if self.u1 == self.u2:
+            raise ValueError(f"警戒线不能是竖直线段：{[self.u1, self.v1, self.u2, self.v2]}")
+
     def side(self, u: float, v: float) -> Literal["below", "above"] | None:
-        """线段范围外（垂足不在线段上）为 None；竖直的线不区分上下，由导入校验拒绝。"""
+        """线段范围外（垂足不在线段上）为 None。"""
         du, dv = self.u2 - self.u1, self.v2 - self.v1
         t = ((u - self.u1) * du + (v - self.v1) * dv) / (du * du + dv * dv)
         if not 0 <= t <= 1:
