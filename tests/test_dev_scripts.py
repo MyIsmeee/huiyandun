@@ -1,6 +1,7 @@
 """tools/dev 下 make doctor 与 make demo-health 调用的脚本（HYD-DEP-005 §2、§5.2）。"""
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -53,6 +54,30 @@ def test_doctor_stops_with_fix_hint(tmp_path: Path, failing: str, hint: str) -> 
 def test_doctor_passes_when_all_checks_pass(tmp_path: Path) -> None:
     for name in ("nvidia-smi", "docker"):
         stub(tmp_path, name, "exit 0")
+
+    result = run([str(DOCTOR)], tmp_path)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_doctor_gpu_check_resolves_compose_services(tmp_path: Path) -> None:
+    """hyd-gpu-check 一步的 compose 参数须能解析 vision-engine 及其依赖（nats 属 core 分组）。
+
+    其余检查以假命令通过；该步以 --dry-run 交给真实的 docker compose，不创建容器。dry-run 不支持
+    附着运行，故加 -d。docker compose config 会直接略去未启用分组的服务，发现不了依赖缺失。
+    """
+    real = shutil.which("docker")
+    assert real
+    stub(tmp_path, "nvidia-smi", "exit 0")
+    stub(
+        tmp_path,
+        "docker",
+        f"""[ "$1" = compose ] || exit 0
+shift
+args=""
+for a in "$@"; do [ "$a" = run ] && a="run -d"; args="$args $a"; done
+exec {real} compose --dry-run $args""",
+    )
 
     result = run([str(DOCTOR)], tmp_path)
 

@@ -25,6 +25,6 @@ check "安装 NVIDIA Container Toolkit，执行 sudo nvidia-ctk runtime configur
   docker run --rm --gpus all "$CUDA_IMAGE" nvidia-smi
 check "先运行 make fetch-models；仍失败时重新运行上面的命令查看日志：Windows 侧驱动须支持 CUDA 13（580 及以上），onnxruntime-gpu 的 CUDA 主版本须与镜像一致（C-HW-08）" \
   docker compose -f "$COMPOSE_DIR/compose.yaml" -f "$COMPOSE_DIR/compose.gpu.yaml" \
-  run --rm --build vision-engine hyd-gpu-check
+  --profile core --profile vision run --rm --no-deps --build vision-engine hyd-gpu-check
 
 echo "环境自检通过"
