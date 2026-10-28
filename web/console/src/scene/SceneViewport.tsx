@@ -15,6 +15,7 @@ import type { Site } from "../lib/api";
 import { useConnection } from "../store/connection";
 import { moveCamera, panned, useCamera } from "./camera";
 import { CameraControls } from "./CameraControls";
+import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
 import { FloorPlan2D } from "./FloorPlan2D";
@@ -96,6 +97,7 @@ export function SceneViewport({ site }: { site: Site }) {
         <>
           <ZoneLabels zones={site.zones} view={view} />
           <DeviceTags cameras={cameras} view={view} />
+          <DevicePicker cameras={cameras} view={view} />
         </>
       )}
       {(state === "ready" || state === "2d") && (

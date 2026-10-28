@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connect, freshness, STALE_MS, useConnection } from "../../src/store/connection";
 import { TRACK_TTL_MS, useLive } from "../../src/store/live";
+import { select, useSelection } from "../../src/store/selection";
 
 class FakeSocket {
   static all: FakeSocket[] = [];
@@ -143,6 +144,15 @@ describe("connect", () => {
     stop();
 
     expect(useLive.getState()).toEqual(useLive.getInitialState());
+  });
+
+  it("停止后清除选中：重新登录时详情面板收起，不自动连接上次的画面", () => {
+    const stop = connect(vi.fn());
+    select("cam-01");
+
+    stop();
+
+    expect(useSelection.getState().deviceId).toBeNull();
   });
 
   it("已停止的旧连接晚到的关闭事件不改写新连接的状态", () => {

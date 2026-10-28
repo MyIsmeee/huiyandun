@@ -5,6 +5,8 @@ const COMPONENTS = {
   KpiTile: ["normal", "empty", "loading", "stale"],
   FloorPlan2D: ["normal", "empty"],
   LiveVideo: ["normal", "empty", "loading", "error", "disconnected"],
+  // 空态即未选中时面板收起；错误态由 LiveVideo 覆盖
+  DetailPanel: ["device", "disconnected"],
 };
 
 for (const [component, states] of Object.entries(COMPONENTS)) {

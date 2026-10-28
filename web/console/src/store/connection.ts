@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { prune, receive, useLive } from "./live";
+import { useSelection } from "./selection";
 
 /** api-server 每 5 s 推送一次心跳：超过 2 个周期无帧即为延迟 */
 export const STALE_MS = 10_000;
@@ -72,8 +73,9 @@ export function connect(onRejected: () => void): () => void {
     clearTimeout(timer);
     clearInterval(pruner);
     socket.close();
-    // 重新登录后不沿用上次会话的最后更新时刻与场景实体
+    // 重新登录后不沿用上次会话的最后更新时刻、场景实体与选中的设备
     useConnection.setState(useConnection.getInitialState());
     useLive.setState(useLive.getInitialState());
+    useSelection.setState(useSelection.getInitialState());
   };
 }
