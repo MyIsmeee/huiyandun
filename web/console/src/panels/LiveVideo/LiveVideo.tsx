@@ -10,7 +10,7 @@ export type VideoStatus =
   | { kind: "unavailable"; reason: string }
   | { kind: "none" };
 
-/** 超过此时长仍未取得画面即判为不可用 */
+/** 取得 answer 后超过此时长仍未取得画面即判为不可用；信令本身的超时由 api 客户端负责 */
 const CONNECT_TIMEOUT_MS = 10_000;
 /** go2rtc 的 HTTP 信令不支持增量候选：等候选收集完再提交 offer，最多等此时长 */
 const GATHER_MS = 2_000;
@@ -37,6 +37,7 @@ function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
     const pc = new RTCPeerConnection({ iceServers: [] });
     let stream: MediaStream | null = null;
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const fail = (reason: string) => {
       clearTimeout(timer);
       pc.close();
@@ -50,16 +51,19 @@ function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
       }
       if (pc.connectionState === "disconnected") setStatus({ kind: "interrupted", stream });
     };
-    const timer = setTimeout(() => fail(NO_MEDIA), CONNECT_TIMEOUT_MS);
     pc.ontrack = (e) => {
       stream = e.streams[0] ?? new MediaStream([e.track]);
       update();
     };
     pc.onconnectionstatechange = () => (pc.connectionState === "failed" ? fail(NO_MEDIA) : update());
     pc.addTransceiver("video", { direction: "recvonly" });
-    negotiate(pc, deviceId, () => active).catch((e: unknown) =>
-      fail(e instanceof ApiError ? e.message : "无法连接 api-server"),
-    );
+    negotiate(pc, deviceId, () => active)
+      .catch(() => "浏览器无法建立 WebRTC 连接")
+      .then((reason) => {
+        if (!active) return;
+        if (reason) fail(reason);
+        else if (pc.connectionState !== "connected") timer = setTimeout(() => fail(NO_MEDIA), CONNECT_TIMEOUT_MS);
+      });
     return () => {
       active = false;
       clearTimeout(timer);
@@ -69,11 +73,24 @@ function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
   return [status, retry];
 }
 
-async function negotiate(pc: RTCPeerConnection, deviceId: string, active: () => boolean) {
+/** 交换 SDP，失败时返回原因；组件已卸载时不再发起信令、不再设置 answer，避免 go2rtc 留下无人使用的会话 */
+async function negotiate(pc: RTCPeerConnection, deviceId: string, active: () => boolean): Promise<string | null> {
   await pc.setLocalDescription(await pc.createOffer());
   await gathered(pc);
-  const answer = await api.webrtc(deviceId, pc.localDescription?.sdp ?? "");
-  if (active()) await pc.setRemoteDescription({ type: "answer", sdp: answer });
+  if (!active()) return null;
+  let answer: string;
+  try {
+    answer = await api.webrtc(deviceId, pc.localDescription?.sdp ?? "");
+  } catch (e) {
+    return e instanceof ApiError ? e.message : "无法连接 api-server";
+  }
+  if (!active()) return null;
+  try {
+    await pc.setRemoteDescription({ type: "answer", sdp: answer });
+  } catch {
+    return "视频服务返回的应答无效";
+  }
+  return null;
 }
 
 function gathered(pc: RTCPeerConnection): Promise<void> {

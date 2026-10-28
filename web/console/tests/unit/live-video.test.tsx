@@ -6,8 +6,12 @@ import { LiveVideo } from "../../src/panels/LiveVideo/LiveVideo";
 /** 只实现 LiveVideo 用到的部分；jsdom 没有 WebRTC */
 class FakePeer {
   static all: FakePeer[] = [];
+  /** 新建连接时的候选收集状态："gathering" 时由用例调用 gathered() 结束 */
+  static gathering: RTCIceGatheringState = "complete";
+  /** 为真时 setRemoteDescription 拒绝 answer */
+  static badAnswer = false;
   connectionState: RTCPeerConnectionState = "new";
-  iceGatheringState: RTCIceGatheringState = "complete";
+  iceGatheringState = FakePeer.gathering;
   localDescription: { sdp: string } | null = null;
   remote: string | null = null;
   closed = false;
@@ -26,7 +30,12 @@ class FakePeer {
     this.localDescription = d;
   }
   async setRemoteDescription(d: { sdp: string }) {
+    if (FakePeer.badAnswer) throw new DOMException("invalid answer");
     this.remote = d.sdp;
+  }
+  gathered() {
+    this.iceGatheringState = "complete";
+    this.onicegatheringstatechange?.();
   }
   close() {
     this.closed = true;
@@ -48,6 +57,8 @@ const flush = () => act(async () => {});
 
 beforeEach(() => {
   FakePeer.all = [];
+  FakePeer.gathering = "complete";
+  FakePeer.badAnswer = false;
   vi.stubGlobal("RTCPeerConnection", FakePeer);
   // jsdom 的 video 不支持 srcObject 与 play
   Object.defineProperty(HTMLMediaElement.prototype, "srcObject", { set() {}, configurable: true });
@@ -124,5 +135,40 @@ describe("LiveVideo", () => {
     await act(async () => resolve("v=0 answer"));
     expect(peer().closed).toBe(true);
     expect(peer().remote).toBeNull();
+  });
+
+  it("取得 answer 后才开始计时：信令慢不算作取不到画面", async () => {
+    vi.useFakeTimers();
+    let resolve: (sdp: string) => void = () => {};
+    vi.spyOn(api, "webrtc").mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<LiveVideo deviceId="cam-01" />);
+    await flush();
+
+    act(() => vi.advanceTimersByTime(15_000));
+    expect(video()).toBe("connecting");
+    await act(async () => resolve("v=0 answer"));
+    act(() => vi.advanceTimersByTime(9_000));
+    expect(video()).toBe("connecting");
+  });
+
+  it("收集候选期间卸载则不发起信令", async () => {
+    FakePeer.gathering = "gathering";
+    const signal = vi.spyOn(api, "webrtc").mockResolvedValue("v=0 answer");
+    const { unmount } = render(<LiveVideo deviceId="cam-01" />);
+    await flush();
+
+    unmount();
+    await act(async () => peer().gathered());
+    expect(signal).not.toHaveBeenCalled();
+  });
+
+  it("answer 无效时说明原因", async () => {
+    FakePeer.badAnswer = true;
+    vi.spyOn(api, "webrtc").mockResolvedValue("garbage");
+    render(<LiveVideo deviceId="cam-01" />);
+    await flush();
+
+    expect(video()).toBe("unavailable");
+    expect(screen.getByText("视频服务返回的应答无效")).toBeTruthy();
   });
 });
