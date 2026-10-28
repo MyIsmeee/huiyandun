@@ -73,6 +73,7 @@ export const camera = (state: string, id = "cam-01") => ({
   ip: "172.30.0.11",
   mode: "host_probe",
   state,
+  alert_severity: null,
   camera: {
     stream: id,
     pose: { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90, range_m: 6 },

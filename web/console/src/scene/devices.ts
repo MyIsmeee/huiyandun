@@ -24,16 +24,15 @@ export type Camera = {
 /** 场景中的摄像头：状态以推送为准，未推送过的取 GET /api/site 的初始值；M0 站点只导入摄像头 */
 export function useCameras(devices: Device[]): Camera[] {
   const pushed = useLive((s) => s.devices);
-  const severities = useLive((s) => s.severities);
   return useMemo(
     () =>
       devices.flatMap((initial) => {
-        const { id, state, camera } = pushed[initial.id] ?? initial;
+        const { id, state, alert_severity, camera } = pushed[initial.id] ?? initial;
         if (!camera) return [];
-        const severe = severities[id] === "critical" || severities[id] === "high";
+        const severe = alert_severity === "critical" || alert_severity === "high";
         return [{ id, state, calibrated: camera.calibration.length >= 4, severe, pose: camera.pose }];
       }),
-    [devices, pushed, severities],
+    [devices, pushed],
   );
 }
 export type TagIcon = "offline" | "uncalibrated" | "physical" | "cyber" | "pending" | "contained" | "notified";

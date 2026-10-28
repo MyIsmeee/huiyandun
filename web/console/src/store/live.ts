@@ -4,9 +4,6 @@ import type { components } from "../api/schema";
 type Schemas = components["schemas"];
 export type Device = Schemas["Device"];
 export type Behavior = Schemas["VisionBehavior"];
-type Alert = Schemas["SecurityAlert"];
-export type Severity = Alert["severity"];
-const RANK: Severity[] = ["low", "medium", "high", "critical"];
 type Track = Schemas["VisionTrack"];
 type Frame = Schemas["WsFrame"];
 
@@ -32,12 +29,10 @@ interface LiveState {
   people: Record<string, Person>;
   /** 每台摄像头最近一次行为事件，供事件卡显示 */
   behaviors: Record<string, Behavior>;
-  /** 每台设备处于网络攻击期间收到的最高告警等级，决定视场是否呼吸（V-A1） */
-  severities: Record<string, Severity>;
 }
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
-export const useLive = create<LiveState>()(() => ({ devices: {}, people: {}, behaviors: {}, severities: {} }));
+export const useLive = create<LiveState>()(() => ({ devices: {}, people: {}, behaviors: {} }));
 
 /** keep 为假时去掉 id 对应的项 */
 const drop = <T,>(map: Record<string, T>, id: string, keep: boolean) =>
@@ -50,26 +45,16 @@ export function receive(frame: Frame, now: number): void {
   if (frame.channel === "devices") {
     const device = data as Device;
     const { id, state } = device;
-    // 退出告警即清除对应记录：再次告警时事件卡不显示上一次的行为、不按旧 track_id 标记人员，告警等级重新累计
+    // 退出物理告警即清除行为事件：再次告警时事件卡不显示上一次的行为、不按旧 track_id 标记人员
     useLive.setState((s) => ({
       devices: { ...s.devices, [id]: device },
       behaviors: drop(s.behaviors, id, state === "physical_alert" || state === "both"),
-      severities: drop(s.severities, id, state === "cyber_alert" || state === "both"),
     }));
   }
-  // alerts 频道同时承载行为事件（含 behavior 字段）与网络告警
+  // alerts 频道同时承载行为事件（含 behavior 字段）与网络告警；场景只用行为事件，告警等级随设备推送
   if (frame.channel === "alerts" && "behavior" in (data as object)) {
     const behavior = data as Behavior;
     useLive.setState((s) => ({ behaviors: { ...s.behaviors, [behavior.camera_id]: behavior } }));
-  } else if (frame.channel === "alerts") {
-    const { device_id, severity } = data as Alert;
-    // 目标未登记为设备的告警不对应任何设备（FR-203）
-    if (device_id === null) return;
-    useLive.setState((s) => {
-      const prev = s.severities[device_id];
-      const max = prev && RANK.indexOf(prev) > RANK.indexOf(severity) ? prev : severity;
-      return { severities: { ...s.severities, [device_id]: max } };
-    });
   }
 }
 
