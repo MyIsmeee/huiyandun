@@ -98,6 +98,53 @@ def test_go2rtc_api_reachable_only_by_its_clients() -> None:
     assert "core-net" not in internal
 
 
+SENSORS = {"suricata", "zeek"}
+# 抓包所需；suricata 启动阶段另需切换用户、写日志目录，切换后只保留 NET_RAW、NET_ADMIN、SYS_NICE
+SENSOR_CAPS = {
+    "NET_RAW",
+    "NET_ADMIN",
+    "SYS_NICE",
+    "SETUID",
+    "SETGID",
+    "SETPCAP",
+    "CHOWN",
+    "DAC_OVERRIDE",
+}
+
+
+def test_only_sensors_use_host_network() -> None:
+    """宿主网络命名空间绕过全部网络隔离，只给必须抓包的探针。"""
+    assert {n for n, s in SERVICES.items() if s.get("network_mode") == "host"} == SENSORS
+
+
+@pytest.mark.parametrize("name", sorted(SENSORS))
+def test_sensor_least_privilege(name: str) -> None:
+    """探针解析不可信流量，被攻破时不能成为跳板：只读根文件系统、只保留抓包能力、不持有口令、
+    只挂载自己的日志与缓存卷。"""
+    sensor = SERVICES[name]
+    assert sensor["read_only"] is True
+    assert sensor["cap_drop"] == ["ALL"]
+    assert set(sensor["cap_add"]) <= SENSOR_CAPS
+    assert "secrets" not in sensor and "ports" not in sensor
+    assert all(v.split(":")[0] in COMPOSE["volumes"] for v in sensor["volumes"])
+
+
+@pytest.mark.parametrize("name", [n for n in COMPOSE["networks"] if n != EDGE])
+def test_network_unreachable_from_host(name: str) -> None:
+    """内部网络不给宿主分配地址：宿主网络中的探针被攻破时，无法访问其中的服务。"""
+    options = COMPOSE["networks"][name]["driver_opts"]
+    assert options["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
+
+
+def test_sensors_capture_on_demo_bridge() -> None:
+    """C-SEC-08、G-11：探针默认抓包的网卡是 demo-net 的网桥（零 IP）。"""
+    bridge = COMPOSE["networks"]["demo-net"]["driver_opts"]["com.docker.network.bridge.name"]
+    for name in SENSORS:
+        assert any(
+            arg.endswith(f"{{HYD_CAPTURE_IFACE:-{bridge}}}") for arg in SERVICES[name]["command"]
+        )
+
+
 def test_only_audit_service_holds_audit_password() -> None:
     """G-13：只有 audit-service 可写审计封存记录；postgres 仅在初始化时用它创建账号。"""
     holders = {n for n, s in SERVICES.items() if "db_audit_password" in s.get("secrets", [])}
