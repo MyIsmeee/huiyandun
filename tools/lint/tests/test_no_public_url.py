@@ -94,6 +94,23 @@ def test_skips_excluded_files(tmp_path: Path, name: str) -> None:
     assert result.returncode == 0, result.stdout
 
 
+@pytest.mark.parametrize(
+    ("name", "line", "code"),
+    [
+        ("models/registry.yaml", "    source: https://download.openmmlab.com/a.zip", 0),
+        ("models/registry.yaml", "    card: https://download.openmmlab.com/a.md", 1),
+        ("models/registry.yaml", "    # https://download.openmmlab.com/a.zip", 1),
+        ("deploy/configs/a.yaml", "    source: https://download.openmmlab.com/a.zip", 1),
+    ],
+)
+def test_allows_only_model_download_source(tmp_path: Path, name: str, line: str, code: int) -> None:
+    path = tmp_path / name
+    path.parent.mkdir(parents=True)
+    path.write_text(f"models:\n  - name: a\n{line}\n")
+
+    assert run(tmp_path, name).returncode == code
+
+
 def test_skips_binary_file(tmp_path: Path) -> None:
     (tmp_path / "logo.png").write_bytes(b"\x89PNG\0\0http://ns.adobe.com/xap/1.0/")
 
