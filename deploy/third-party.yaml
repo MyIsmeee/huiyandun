@@ -88,3 +88,33 @@ bundled:
       - { name: OpenBLAS（scipy-openblas64）, version: 0.3.34, license: BSD-3-Clause }
       - { name: libgfortran, version: 8.5.0, license: GPL-3.0-or-later WITH GCC-exception-3.1 }
       - { name: libquadmath, version: 8.5.0, license: LGPL-2.1-or-later }
+  # supervision 的依赖（REUSE-07）
+  - package: scipy==1.18.1
+    owner: MyIsmeee
+    libraries:
+      - { name: OpenBLAS（scipy-openblas32）, version: 0.3.31.dev, license: BSD-3-Clause }
+      # 两份构建：8.5.0 来自 wheel 的 SBOM；另一份随 OpenBLAS，其构建工具链为 GCC 10.2.1
+      - { name: libgfortran, version: 8.5.0 / 10.2.1, license: GPL-3.0-or-later WITH GCC-exception-3.1 }
+      - { name: libquadmath, version: 8.5.0 / 10.2.1, license: LGPL-2.1-or-later }
+  # supervision 的依赖（REUSE-07），无法去掉。版本取自 wheel 内 SBOM 与 PIL.features
+  # libimagequant（GPL-3.0）虽列于 SBOM，但未编入（features.check_feature("libimagequant") 为 False）；
+  # FriBiDi（LGPL-2.1）不随 wheel 分发，仅在系统已安装时动态加载
+  - package: pillow==13.0.0
+    owner: MyIsmeee
+    libraries:
+      - { name: FreeType, version: 2.14.3, license: FTL }  # FTL 与 GPL-2.0 双许可，选用 FTL
+      - { name: HarfBuzz, version: 14.5.0, license: MIT }
+      - { name: raqm（静态编入）, version: 0.11.0, license: MIT }
+      - { name: libjpeg-turbo, version: 3.2.0, license: IJG AND BSD-3-Clause }
+      - { name: libtiff, version: 4.7.2, license: libtiff }
+      - { name: libpng, version: 1.6.58, license: libpng-2.0 }
+      - { name: libwebp（含 sharpyuv、webpmux、webpdemux）, version: 1.6.0, license: BSD-3-Clause }
+      - { name: libavif, version: 1.4.2, license: BSD-2-Clause }
+      - { name: OpenJPEG, version: 2.5.4, license: BSD-2-Clause }
+      - { name: Little CMS 2, version: 2.19.1, license: MIT }
+      - { name: zlib-ng, version: 2.3.3, license: Zlib }
+      - { name: Brotli, version: 1.2.0, license: MIT }
+      - { name: xz（liblzma）, version: 5.8.4, license: 0BSD }
+      - { name: Zstandard, version: 1.5.7, license: BSD-3-Clause }  # BSD-3-Clause 与 GPL-2.0 双许可，选用 BSD
+      - { name: libxcb, version: 1.17.0, license: X11 }
+      - { name: libXau, version: 1.0.9, license: X11 }
