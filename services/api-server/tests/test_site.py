@@ -49,6 +49,15 @@ def test_demo_site_is_valid() -> None:
         (lambda d: d["site"].update(mode="inline"), "site.mode"),
         (lambda d: d.update(doors=[[0, 0, 1, 1]]), "doors.0"),  # 斜穿墙角，不在墙体上
         (lambda d: d.update(doors=[[38, 0, 42, 0]]), "doors.0"),  # 超出墙体端点
+        # 竖直的警戒线无法区分线上与线下（FR-104）
+        (
+            lambda d: d["cameras"][1].update(climb_lines=[[600, 300, 600, 200]]),
+            "cameras.1.climb_lines.0",
+        ),
+        (
+            lambda d: d["cameras"][1].update(climb_lines=[[600, 300, 600, 300]]),
+            "cameras.1.climb_lines.0",
+        ),
     ],
     ids=[
         "missing",
@@ -61,6 +70,8 @@ def test_demo_site_is_valid() -> None:
         "mode",
         "door-off-wall",
         "door-past-wall-end",
+        "vertical-climb-line",
+        "zero-length-climb-line",
     ],
 )
 def test_invalid_site_is_rejected_with_field_path(tmp_path: Path, edit: Any, path: str) -> None:

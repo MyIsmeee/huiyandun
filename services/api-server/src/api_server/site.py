@@ -55,6 +55,16 @@ def _invalid_doors(doors: list[list[float]], walls: list[list[float]]) -> list[s
     return errors
 
 
+def _vertical_climb_lines(cameras: list[dict[str, Any]]) -> list[str]:
+    """警戒线按位于线的哪一侧区分线下与线上，竖直（含长度为 0）的线无法区分（FR-104）。"""
+    return [
+        f"cameras.{i}.climb_lines.{j}: 警戒线不能是竖直线段"
+        for i, camera in enumerate(cameras)
+        for j, (u1, _, u2, _) in enumerate(camera["climb_lines"] or [])
+        if u1 == u2
+    ]
+
+
 def _device(camera: dict[str, Any], mode: str) -> dict[str, Any]:
     calibrated = len(camera["calibration"]) >= MIN_CALIBRATION_POINTS
     return {
@@ -110,6 +120,7 @@ def load(path: Path) -> Site:
         + _duplicates("cameras", "id", [c.id for c in config.cameras])
         + _duplicates("cameras", "ip", [c.ip for c in config.cameras])
         + _invalid_doors(doors, data["walls"])
+        + _vertical_climb_lines(data["cameras"])
     )
     if errors:
         raise SiteError(path, errors)
