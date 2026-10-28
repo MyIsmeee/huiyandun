@@ -18,6 +18,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from api_server import audit, auth, relay, site, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
+from api_server.devices import Devices
 from py_common.bus import Bus
 from py_common.log import bind_request_id
 
@@ -90,14 +91,18 @@ def create_app(config: ApiConfig) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bus = await Bus.connect(config.nats_url, name="api-server", timeout_s=config.nats_timeout_s)
         app.state.engine = create_engine(config)
-        beat = asyncio.create_task(ws.heartbeat(app.state.hub))
+        tasks = [
+            asyncio.create_task(ws.heartbeat(app.state.hub)),
+            asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
+        ]
         try:
-            await relay.start(bus, app.state.hub)
+            await relay.start(bus, app.state.hub, app.state.devices)
             yield
         finally:
-            beat.cancel()
-            with suppress(asyncio.CancelledError):
-                await beat
+            for task in tasks:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
             await bus.close()
             await app.state.engine.dispose()
 
@@ -109,6 +114,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.config = config
     app.state.site = site.load(config.site_file)
     app.state.hub = ws.Hub()
+    app.state.devices = Devices(app.state.site.devices)
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(site.router)

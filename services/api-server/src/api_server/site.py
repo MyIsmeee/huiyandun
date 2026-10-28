@@ -63,6 +63,7 @@ def _device(camera: dict[str, Any], mode: str) -> dict[str, Any]:
         "ip": camera["ip"],
         "mode": mode,
         "state": "normal" if calibrated else "uncalibrated",
+        "alert_severity": None,
         "camera": {
             "stream": camera["stream"],
             "pose": camera["pose"],

@@ -101,7 +101,13 @@ def site_sample() -> dict:
         "homography": None,
         "reproj_error_m": None,
     }
-    device = {"id": "cam-01", "type": "camera", "ip": "172.30.0.11", "mode": "bypass"}
+    device = {
+        "id": "cam-01",
+        "type": "camera",
+        "ip": "172.30.0.11",
+        "mode": "bypass",
+        "alert_severity": None,
+    }
     zone = {"id": "z-01", "name": "设备间外墙", "polygon": [[30, 0], [40, 0], [40, 6]]}
     return {
         "id": "demo-office",
@@ -166,13 +172,16 @@ def test_site_rejects_non_finite_number_in_nested_array(mutate, value: float) ->
 
 
 @pytest.mark.parametrize(
-    ("field", "value"), [("state", "blocked"), ("ip", "x"), ("mode", "inline")]
+    ("field", "value"),
+    [("state", "blocked"), ("ip", "x"), ("mode", "inline"), ("alert_severity", "urgent")],
 )
 def test_device_rejects_invalid_value(field: str, value: str) -> None:
     device = {"id": "nvr-01", "type": "nvr", "ip": "172.30.0.20", "mode": "bypass"}
 
     with pytest.raises(ValidationError):
-        Device.model_validate(device | {"state": "normal", "camera": None, field: value})
+        Device.model_validate(
+            device | {"state": "normal", "alert_severity": None, "camera": None, field: value}
+        )
 
 
 def test_login_response_role_is_enumerated() -> None:

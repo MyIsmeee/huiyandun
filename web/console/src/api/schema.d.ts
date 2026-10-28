@@ -383,10 +383,12 @@ export interface components {
             /** @enum {unknown} */
             mode: "bypass" | "host_probe";
             /**
-             * @description HYD-UIX-004 §5.2
+             * @description HYD-UIX-004 §5.2，由 api-server 计算
              * @enum {unknown}
              */
             state: "normal" | "offline" | "uncalibrated" | "physical_alert" | "cyber_alert" | "both" | "pending_action" | "contained" | "notify_only";
+            /** @description state 为 cyber_alert 或 both 期间收到的最高告警等级，其余状态为 null（HYD-UIX-004 §5.2、V-A1） */
+            alert_severity: ("critical" | "high" | "medium" | "low") | null;
             /** @description type 为 camera 时必有 */
             camera: components["schemas"]["CameraInfo"] | null;
         };
@@ -526,7 +528,7 @@ export interface components {
         };
         /**
          * @description WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
-         *     tracks 为 VisionTrack；devices 为状态变化后的完整 Device；
+         *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
          *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
          */
         WsFrame: {

@@ -1,11 +1,13 @@
 """WS /ws 推送框架：握手鉴权、广播、登出 / 过期 / 消费过慢时断开（FR-102、C-BE-07）。"""
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
 from api_server import ws as ws_module
@@ -17,6 +19,7 @@ from py_contracts.api import WsFrame
 
 WS_URL = "wss://testserver/ws"  # Secure Cookie 只随加密连接发送
 FRAME = WsFrame(channel="system", data={"llm": "template"})
+type Connect = Callable[[], AbstractContextManager[WebSocketTestSession]]
 
 
 @pytest.fixture(autouse=True)
@@ -57,20 +60,22 @@ def test_rejects_handshake_without_session(client: TestClient) -> None:
     assert exc.value.code == 1008
 
 
-def test_pushes_contract_frames(client: TestClient) -> None:
-    with client.websocket_connect(WS_URL) as ws:
+def test_pushes_contract_frames(client: TestClient, ws_connect: Connect) -> None:
+    with ws_connect() as ws:
         broadcast(client, FRAME)
 
         assert WsFrame.model_validate(ws.receive_json()) == FRAME
 
 
-def test_pushes_heartbeat_when_idle(fast_heartbeat: None, client: TestClient) -> None:
+def test_pushes_heartbeat_when_idle(
+    fast_heartbeat: None, client: TestClient, ws_connect: Connect
+) -> None:
     async def fallback() -> None:
         # receive_json 无超时：心跳失效时以普通帧结束等待，使用例失败而非挂起
         await asyncio.sleep(2)
         client.app.state.hub.broadcast(FRAME)
 
-    with client.websocket_connect(WS_URL) as ws:
+    with ws_connect() as ws:
         pending = client.portal.start_task_soon(fallback)
         try:
             assert WsFrame.model_validate(ws.receive_json()) == HEARTBEAT
@@ -78,8 +83,8 @@ def test_pushes_heartbeat_when_idle(fast_heartbeat: None, client: TestClient) ->
             pending.cancel()
 
 
-def test_logout_closes_connection(client: TestClient) -> None:
-    with client.websocket_connect(WS_URL) as ws:
+def test_logout_closes_connection(client: TestClient, ws_connect: Connect) -> None:
+    with ws_connect() as ws:
         client.post("/api/auth/logout", headers={"X-Request-ID": "r"})
 
         with pytest.raises(WebSocketDisconnect) as exc:
@@ -87,8 +92,8 @@ def test_logout_closes_connection(client: TestClient) -> None:
     assert exc.value.code == 1008
 
 
-def test_slow_consumer_is_disconnected(client: TestClient) -> None:
-    with client.websocket_connect(WS_URL) as ws:
+def test_slow_consumer_is_disconnected(client: TestClient, ws_connect: Connect) -> None:
+    with ws_connect() as ws:
         broadcast(client, FRAME, times=QUEUE_SIZE + 1)
 
         with pytest.raises(WebSocketDisconnect) as exc:
@@ -98,13 +103,13 @@ def test_slow_consumer_is_disconnected(client: TestClient) -> None:
 
 
 def test_session_expiry_closes_connection(
-    client: TestClient, db: tuple[ApiConfig, ApiConfig]
+    ws_connect: Connect, db: tuple[ApiConfig, ApiConfig]
 ) -> None:
     async def expire_soon() -> None:
         async with transaction(db[0]) as conn:
             await conn.execute(text("UPDATE sessions SET expires_at = now() + interval '1 second'"))
 
     asyncio.run(expire_soon())
-    with client.websocket_connect(WS_URL) as ws, pytest.raises(WebSocketDisconnect) as exc:
+    with ws_connect() as ws, pytest.raises(WebSocketDisconnect) as exc:
         ws.receive_json()
     assert exc.value.code == 1008
