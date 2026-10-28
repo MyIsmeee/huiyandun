@@ -27,7 +27,10 @@ codegen-check:
 	uv run python tools/codegen/codegen.py --check
 	$(WEB) run codegen:check
 
+# 默认加载 GPU 覆盖文件；无 GPU 时须显式 GPU=0，vision-engine 以 CPU 模式运行，不依赖回退（DP-06、C-CV-11）
+GPU ?= 1
 COMPOSE = docker compose -f deploy/compose/compose.yaml \
+	$(if $(filter 0,$(GPU)),,-f deploy/compose/compose.gpu.yaml) \
 	--profile core --profile vision --profile security --profile demo
 SECRETS = deploy/compose/.secrets
 DB_SECRETS = $(SECRETS)/postgres_password $(SECRETS)/db_app_password \

@@ -22,12 +22,14 @@ ONESHOT = [n for n, s in SERVICES.items() if s.get("labels", {}).get("hyd.onesho
 
 
 def base_images(name: str) -> list[str]:
-    """服务实际使用的镜像：自研服务取其 Dockerfile 的全部基础镜像。"""
+    """服务实际使用的镜像：自研服务取其 Dockerfile 的全部基础镜像，不含引用前面构建阶段的 FROM。"""
     build = SERVICES[name].get("build")
     if build is None:
         return [SERVICES[name]["image"]]
     dockerfile = ROOT / "deploy/compose" / build["context"] / build["dockerfile"]
-    return re.findall(r"^FROM (\S+)", dockerfile.read_text(encoding="utf-8"), re.MULTILINE)
+    froms = re.findall(r"^FROM (\S+)(?: AS (\S+))?", dockerfile.read_text(encoding="utf-8"), re.M)
+    stages = {stage for _, stage in froms if stage}
+    return [image for image, _ in froms if image not in stages]
 
 
 @pytest.mark.parametrize("name", [n for n in SERVICES if n not in ONESHOT])

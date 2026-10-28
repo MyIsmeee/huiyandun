@@ -35,6 +35,7 @@ def run(cmd: list[str], bin_dir: Path, **env: str) -> subprocess.CompletedProces
         ("nvidia-smi", "NVIDIA 驱动"),
         ("docker info", "Docker Engine"),
         ("docker run", "NVIDIA Container Toolkit"),
+        ("docker compose", "make fetch-models"),
     ],
 )
 def test_doctor_stops_with_fix_hint(tmp_path: Path, failing: str, hint: str) -> None:

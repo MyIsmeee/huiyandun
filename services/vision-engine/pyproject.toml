@@ -5,9 +5,18 @@ description = "视觉引擎：go2rtc 拉流 → rtmlib 人体检测与骨骼 →
 requires-python = "==3.12.*"
 dependencies = [
     "numpy>=2.5.4,<3",
+    # CUDA 13 构建，须与 Dockerfile 基础镜像的 CUDA 主版本一致（C-HW-08）；升级须先通过 hyd-gpu-check
+    "onnxruntime-gpu>=1.31.1,<1.32",
     "opencv-python-headless>=5.0.0.93,<6",
+    "py-common",
 ]
+
+[project.scripts]
+hyd-gpu-check = "vision_engine.runtime:gpu_check"
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+py-common = { workspace = true }
