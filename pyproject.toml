@@ -17,6 +17,17 @@ dev = [
 
 [tool.uv]
 package = false
+# rtmlib 声明的 onnxruntime（CPU 版）与 opencv-python、opencv-contrib-python 会与 vision-engine 的
+# onnxruntime-gpu、opencv-python-headless 写入同一模块目录，后装者覆盖前者；在此去掉，模块由后两者提供
+override-dependencies = [
+    "onnxruntime; sys_platform == 'never'",
+    "opencv-python; sys_platform == 'never'",
+    "opencv-contrib-python; sys_platform == 'never'",
+    # supervision 声明但跟踪不需要：PyAV 自带 GPL 的 x264 / x265，不得进程内加载（G-08）；
+    # matplotlib 仅用于绘图。去掉后跟踪可用由 services/vision-engine/tests 验证（REUSE-07）
+    "av; sys_platform == 'never'",
+    "matplotlib; sys_platform == 'never'",
+]
 
 [tool.uv.workspace]
 members = ["services/*", "libs/*"]

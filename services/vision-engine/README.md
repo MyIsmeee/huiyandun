@@ -10,6 +10,9 @@
   - 脚点或偏移点位于地平线以上时不输出坐标
 - 推理会话（`runtime.py`）：从本地模型文件创建 ONNX Runtime 会话（C-RU-06）
   - `HYD_DEVICE` 无默认值，须显式声明。`cuda` 时设置显存上限 `HYD_GPU_MEM_LIMIT_MB`（C-HW-12），并断言 `CUDAExecutionProvider` 实际生效，回退 CPU 即报错退出（C-CV-11）；`cpu` 为 D0-min 的 CPU 模式（DP-06）
+- 检测（`detector.py`）：rtmlib RTMO 单阶段输出人体框与 COCO 17 关键点（REUSE-05），结果换算回整帧坐标；置信度低于 0.3 的框丢弃
+- 运动门控（`motion.py`，借鉴 Frigate）：缩小灰度图与滑动平均背景做帧差，运动区域并入上一帧的轨迹框，扩展 20% 且不小于 640×640 后送推理；无运动且无轨迹时跳过推理。静止的人（如跌倒后）靠轨迹框保持推理
+- 依赖：supervision 声明的 PyAV（自带 GPL 的 x264 / x265）与 matplotlib 由根 `pyproject.toml` 的 `override-dependencies` 去掉（G-08、REUSE-07）
 
 ## 命令
 
