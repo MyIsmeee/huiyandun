@@ -15,9 +15,10 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api_server import audit, auth, site, ws
+from api_server import audit, auth, relay, site, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
+from py_common.bus import Bus
 from py_common.log import bind_request_id
 
 log = logging.getLogger(__name__)
@@ -87,14 +88,17 @@ async def on_validation_error(request: Request, exc: RequestValidationError) -> 
 def create_app(config: ApiConfig) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        bus = await Bus.connect(config.nats_url, name="api-server", timeout_s=config.nats_timeout_s)
         app.state.engine = create_engine(config)
         beat = asyncio.create_task(ws.heartbeat(app.state.hub))
         try:
+            await relay.start(bus, app.state.hub)
             yield
         finally:
             beat.cancel()
             with suppress(asyncio.CancelledError):
                 await beat
+            await bus.close()
             await app.state.engine.dispose()
 
     # 关闭自带文档页：其页面从公网 CDN 加载脚本（G-05）

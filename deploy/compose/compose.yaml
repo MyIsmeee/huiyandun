@@ -56,7 +56,9 @@ services:
     profiles: [core]
     secrets: [db_app_password]
     volumes: ["../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro"]  # 站点配置（FR-901）
-    depends_on: { migrate: { condition: service_completed_successfully } }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      nats: { condition: service_healthy }  # 订阅事件转发到 WS 各频道
     networks: [core-net]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
