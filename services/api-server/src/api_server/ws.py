@@ -1,7 +1,7 @@
 """WebSocket 推送框架（FR-102、FR-606）：WS /ws 只向已登录客户端推送契约 WsFrame。
 
 握手时以会话 Cookie 鉴权（SameSite=Strict，跨站页面发起的握手不携带 Cookie）；会话到期、
-登出或客户端消费过慢时断开。各频道的数据源由后续任务接入，调用 Hub.broadcast 即可。
+登出或客户端消费过慢时断开。连接建立时先补推设备状态快照，之后推送广播的帧。
 """
 
 import asyncio
@@ -85,6 +85,9 @@ async def push(websocket: WebSocket) -> None:
     await websocket.accept()
     hub: Hub = websocket.app.state.hub
     subscriber = hub.subscribe(principal.token_hash)
+    # 先补推当前设备状态：断线期间错过的变化无从补齐
+    for frame in websocket.app.state.devices.snapshot():
+        subscriber.queue.put_nowait(frame.model_dump_json())
 
     async def send() -> None:
         while True:

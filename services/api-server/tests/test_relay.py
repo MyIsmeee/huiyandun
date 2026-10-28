@@ -1,8 +1,9 @@
-"""NATS 事件按契约 WsFrame 的频道说明转发到 WS /ws（#54）。"""
+"""NATS 事件转发到 WS /ws 各频道，设备状态变化推送与连接补推（#54）。"""
 
 import asyncio
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,11 +11,13 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
+from api_server import devices as devices_module
+from api_server import relay
 from api_server import ws as ws_module
 from api_server.app import create_app
 from api_server.config import ApiConfig
 from py_common.bus import Bus
-from py_contracts.api import WsFrame
+from py_contracts.api import Device, WsFrame
 from py_contracts.events.event_base_schema import EventBase
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
@@ -22,6 +25,8 @@ from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 
 WS_URL = "wss://testserver/ws"
 SENTINEL = WsFrame(channel="system", data={"type": "sentinel"})
+TRACK, BEHAVIOR, ALERT = "hyd.vision.track.v1", "hyd.vision.behavior.v1", "hyd.security.alert.v1"
+type Connect = Callable[[], AbstractContextManager[WebSocketTestSession]]
 
 
 def common() -> dict[str, Any]:
@@ -91,18 +96,77 @@ def next_frame(client: TestClient, ws: WebSocketTestSession) -> WsFrame:
 @pytest.mark.parametrize(
     ("subject", "event", "channel"),
     [
-        ("hyd.vision.track.v1", track(), "tracks"),
-        ("hyd.vision.behavior.v1", behavior(), "alerts"),
-        ("hyd.security.alert.v1", alert(), "alerts"),
+        (TRACK, track(), "tracks"),
+        (BEHAVIOR, behavior(), "alerts"),
+        (ALERT, alert(), "alerts"),
     ],
 )
 def test_forwards_event_to_channel(
-    client: TestClient, nats_url: str, subject: str, event: EventBase, channel: str
+    client: TestClient,
+    ws_connect: Connect,
+    nats_url: str,
+    subject: str,
+    event: EventBase,
+    channel: str,
 ) -> None:
-    with client.websocket_connect(WS_URL) as ws:
+    with ws_connect() as ws:
         publish(nats_url, subject, event)
 
         frame = next_frame(client, ws)
 
     assert frame.channel == channel
     assert type(event).model_validate(frame.data) == event
+
+
+def device_state(frame: WsFrame) -> tuple[str, str, str, str | None]:
+    device = Device.model_validate(frame.data)
+    return frame.channel, device.id, device.state, device.alert_severity
+
+
+def test_behavior_and_alert_push_device_after_event(
+    client: TestClient, ws_connect: Connect, nats_url: str
+) -> None:
+    """先推事件、再推设备：设备变色时事件卡内容已就绪。"""
+    with ws_connect() as ws:
+        publish(nats_url, BEHAVIOR, behavior())
+        assert next_frame(client, ws).channel == "alerts"
+        assert device_state(next_frame(client, ws)) == ("devices", "cam-01", "physical_alert", None)
+
+        publish(nats_url, ALERT, alert())
+        assert next_frame(client, ws).channel == "alerts"
+        assert device_state(next_frame(client, ws)) == ("devices", "cam-02", "cyber_alert", "high")
+
+
+def test_new_connection_receives_current_state_first(
+    client: TestClient, ws_connect: Connect, nats_url: str
+) -> None:
+    event = behavior()
+    with ws_connect() as ws:
+        publish(nats_url, BEHAVIOR, event)
+        next_frame(client, ws)
+        next_frame(client, ws)  # 设备状态已更新
+
+    with client.websocket_connect(WS_URL) as ws:
+        frames = [next_frame(client, ws) for _ in range(3)]
+
+    assert device_state(frames[0]) == ("devices", "cam-01", "physical_alert", None)
+    assert device_state(frames[1]) == ("devices", "cam-02", "normal", None)
+    assert frames[2].channel == "alerts"
+    assert VisionBehaviorV1.model_validate(frames[2].data) == event
+
+
+@pytest.fixture
+def short_hold(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(devices_module, "PHYSICAL_HOLD_S", 0.2)
+    monkeypatch.setattr(relay, "EXPIRE_TICK_S", 0.05)
+
+
+def test_expired_alert_pushes_restored_device(
+    short_hold: None, client: TestClient, ws_connect: Connect, nats_url: str
+) -> None:
+    with ws_connect() as ws:
+        publish(nats_url, BEHAVIOR, behavior())
+        next_frame(client, ws)
+        next_frame(client, ws)
+
+        assert device_state(next_frame(client, ws)) == ("devices", "cam-01", "normal", None)

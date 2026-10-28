@@ -453,7 +453,7 @@ components:
         no_climb: { type: boolean }
     Device:
       type: object
-      required: [id, type, ip, mode, state, camera]
+      required: [id, type, ip, mode, state, alert_severity, camera]
       properties:
         id: { type: string }
         type: { enum: [camera, nvr, switch] }
@@ -461,7 +461,7 @@ components:
           anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
         mode: { enum: [bypass, host_probe] }
         state:
-          description: HYD-UIX-004 §5.2
+          description: HYD-UIX-004 §5.2，由 api-server 计算
           enum:
             - normal
             - offline
@@ -472,6 +472,9 @@ components:
             - pending_action
             - contained
             - notify_only
+        alert_severity:
+          description: state 为 cyber_alert 或 both 期间收到的最高告警等级，其余状态为 null（HYD-UIX-004 §5.2、V-A1）
+          anyOf: [{ enum: [critical, high, medium, low] }, { type: "null" }]
         camera:
           anyOf: [{ $ref: "#/components/schemas/CameraInfo" }, { type: "null" }]
           description: type 为 camera 时必有
@@ -650,7 +653,7 @@ components:
       type: object
       description: |
         WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
-        tracks 为 VisionTrack；devices 为状态变化后的完整 Device；
+        tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
         alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
       required: [channel, data]
       properties:
