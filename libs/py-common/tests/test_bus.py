@@ -86,6 +86,46 @@ def test_js_publish_deduplicates_by_event_id(nats_url: str) -> None:
     assert asyncio.run(main()) == 1
 
 
+def test_ensure_stream_is_idempotent_and_persists(nats_url: str) -> None:
+    async def main() -> tuple[int, float, str]:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        raw = await nats.connect(nats_url)
+        js = raw.jetstream()
+        try:
+            await bus.ensure_stream("ENSURE", ["hyd.test.ensure"], max_age_s=60)
+            await bus.ensure_stream("ENSURE", ["hyd.test.ensure"], max_age_s=60)  # 再次启动
+            await bus.js_publish("hyd.test.ensure", track())
+            info = await js.stream_info("ENSURE")
+            return info.state.messages, info.config.max_age, info.config.storage
+        finally:
+            await js.delete_stream("ENSURE")
+            await raw.close()
+            await bus.close()
+
+    assert asyncio.run(main()) == (1, 60, "file")
+
+
+def test_ensure_stream_updates_changed_config_and_keeps_messages(nats_url: str) -> None:
+    """调整保留期、增加主题后重启：按新配置更新，不因与数据卷中的旧配置不同而无法启动。"""
+
+    async def main() -> tuple[int, float, list[str]]:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        raw = await nats.connect(nats_url)
+        js = raw.jetstream()
+        try:
+            await bus.ensure_stream("CHANGE", ["hyd.test.a"], max_age_s=60)
+            await bus.js_publish("hyd.test.a", track())
+            await bus.ensure_stream("CHANGE", ["hyd.test.a", "hyd.test.b"], max_age_s=120)
+            info = await js.stream_info("CHANGE")
+            return info.state.messages, info.config.max_age, info.config.subjects
+        finally:
+            await js.delete_stream("CHANGE")
+            await raw.close()
+            await bus.close()
+
+    assert asyncio.run(main()) == (1, 120, ["hyd.test.a", "hyd.test.b"])
+
+
 def test_js_publish_without_stream_rejected(nats_url: str) -> None:
     async def main() -> None:
         bus = await Bus.connect(nats_url, name="test", timeout_s=1)

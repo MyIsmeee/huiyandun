@@ -1,7 +1,8 @@
 """带超时的 NATS 客户端（CD-04），消息体为 contracts/events 生成的事件模型。
 
 - publish：核心 NATS，写入发送缓冲即返回，用于不持久化的高频事件（如 track）；
-- js_publish：JetStream，等待服务端确认；以 event_id 去重，重试不会产生重复消息；
+- js_publish：JetStream，等待服务端确认；以 event_id 去重，重试不会产生重复消息；主题所属的流
+  由生产者启动时以 ensure_stream 创建；
 - subscribe：消息按模型校验；非法消息与 handler 异常记录错误后跳过，不中断订阅。
 """
 
@@ -13,12 +14,16 @@ from typing import Self
 from nats import errors
 from nats.aio.client import Client
 from nats.aio.msg import Msg
+from nats.js.api import StorageType, StreamConfig
+from nats.js.errors import BadRequestError
 from pydantic import ValidationError
 
 from py_contracts.events.event_base_schema import EventBase
 
 log = logging.getLogger(__name__)
 # 导致断连的错误：nats-py 先报告错误、随后才切换为重连状态
+# JetStream 错误码：同名流已存在且配置不同
+STREAM_NAME_IN_USE = 10058
 CONNECTION_LOST = (errors.UnexpectedEOF, errors.StaleConnectionError, OSError)
 
 
@@ -77,6 +82,19 @@ class Bus:
             timeout=self._timeout_s,
             headers={"Nats-Msg-Id": str(event.event_id)},
         )
+
+    async def ensure_stream(self, name: str, subjects: list[str], max_age_s: int) -> None:
+        """创建持久化 js_publish 主题的 JetStream 流（文件存储）。已存在且配置相同时不变；
+        配置不同（如调整保留期、增加主题）时按新配置更新，数据卷中的已有消息保留。"""
+        config = StreamConfig(
+            name=name, subjects=subjects, storage=StorageType.FILE, max_age=max_age_s
+        )
+        try:
+            await self._js.add_stream(config)
+        except BadRequestError as e:
+            if e.err_code != STREAM_NAME_IN_USE:
+                raise
+            await self._js.update_stream(config)
 
     async def subscribe[T: EventBase](
         self, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]]

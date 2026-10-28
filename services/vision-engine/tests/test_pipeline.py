@@ -2,10 +2,12 @@
 
 import asyncio
 import importlib.util
+import logging
 from collections import Counter
 from pathlib import Path
 from typing import cast
 
+import nats
 import numpy as np
 import pytest
 import supervision as sv
@@ -13,10 +15,18 @@ from onnxruntime.datasets import get_example
 
 from py_common.bus import Bus
 from py_common.config import load_config
+from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine.detector import PoseDetector
 from vision_engine.geometry import GroundMapping
-from vision_engine.pipeline import FPS, TRACK_SUBJECT, CameraPipeline, FrameReader, run_camera
+from vision_engine.pipeline import (
+    BEHAVIOR_SUBJECT,
+    FPS,
+    TRACK_SUBJECT,
+    CameraPipeline,
+    FrameReader,
+    run_camera,
+)
 from vision_engine.runtime import VisionConfig
 
 # 正视地面：1 像素 = 1 cm
@@ -24,10 +34,14 @@ MAPPING = GroundMapping.fit([[u, v, u / 100, v / 100] for u in (0, 1000) for v i
 
 
 class FakeDetector:
-    """每次调用返回一个人（框随调用次数右移 2 像素）；person=False 时返回空。"""
+    """每次调用返回一个人（框随调用次数右移 2 像素）；person=False 时返回空。
 
-    def __init__(self, person: bool = True) -> None:
+    关键点：直立时肩、髋、膝、踝自上而下排在框的竖直中线上；lying=True 时全部位于框底、水平排开。
+    """
+
+    def __init__(self, person: bool = True, lying: bool = False) -> None:
         self.person = person
+        self.lying = lying
         self.calls = 0
 
     def __call__(self, image: np.ndarray, offset: tuple[int, int] = (0, 0)) -> sv.Detections:
@@ -35,7 +49,14 @@ class FakeDetector:
         self.calls += 1
         if not self.person:
             return sv.Detections.empty()
-        return sv.Detections(xyxy=np.array([[x, 200.0, x + 100, 600]]), confidence=np.array([0.9]))
+        keypoints = np.full((1, 17, 2), [x + 50.0, 400])
+        for idx, (dx, y) in {(5, 6): (90, 260), (11, 12): (55, 400), (15, 16): (0, 600)}.items():
+            keypoints[0, list(idx)] = (x + dx, 590) if self.lying else (x + 50, y)
+        return sv.Detections(
+            xyxy=np.array([[x, 200.0, x + 100, 600]]),
+            confidence=np.array([0.9]),
+            data={"keypoints": keypoints, "keypoint_scores": np.full((1, 17), 0.9)},
+        )
 
 
 def frame(i: int) -> np.ndarray:
@@ -45,9 +66,9 @@ def frame(i: int) -> np.ndarray:
 
 
 def pipeline(
-    mapping: GroundMapping | None, person: bool = True
+    mapping: GroundMapping | None, person: bool = True, lying: bool = False
 ) -> tuple[CameraPipeline, FakeDetector]:
-    fake = FakeDetector(person)
+    fake = FakeDetector(person, lying)
     return CameraPipeline("cam-01", mapping, cast(PoseDetector, fake)), fake
 
 
@@ -64,6 +85,19 @@ def test_tracks_published_with_floor_coordinates() -> None:
     # 第 4 帧框 [306, 200, 406, 600]：脚点 (356, 600) → (3.56 m, 6.0 m)；框高 400 → 偏移 20 像素
     assert (last.x, last.y) == pytest.approx((3.56, 6.0))
     assert last.uncertainty_m == pytest.approx(0.2)
+
+
+def test_fall_detected_on_uncalibrated_camera() -> None:
+    """未标定摄像头不输出坐标，但仍输出设备级行为告警（C-CV-05）。"""
+    camera, _ = pipeline(None, lying=True)
+
+    events = [e for i in range(15) for e in camera.process(frame(i), timestamp=i / FPS)]
+
+    [fall] = events
+    assert isinstance(fall, VisionBehaviorV1)
+    assert (fall.camera_id, fall.behavior, fall.confidence_avg) == ("cam-01", "fall", 0.9)
+    assert fall.duration_s == pytest.approx(2.0)
+    assert (fall.ts_end - fall.ts_start).total_seconds() == pytest.approx(2.0)
 
 
 def test_uncalibrated_camera_publishes_nothing() -> None:
@@ -103,15 +137,23 @@ class FakeReader:
 
 
 class FakeBus:
+    """js_publish 记录后按超时失败：模拟 NATS 不可用。"""
+
     def __init__(self) -> None:
         self.events: list[VisionTrackV1] = []
+        self.behaviors: list[VisionBehaviorV1] = []
 
     async def publish(self, subject: str, event: VisionTrackV1) -> None:
         assert subject == TRACK_SUBJECT
         self.events.append(event)
 
+    async def js_publish(self, subject: str, event: VisionBehaviorV1) -> None:
+        assert subject == BEHAVIOR_SUBJECT
+        self.behaviors.append(event)
+        raise nats.errors.TimeoutError
 
-def test_each_track_published_at_least_2_hz(tmp_path: Path) -> None:
+
+def run_for(camera: CameraPipeline, bus: FakeBus, tmp_path: Path, seconds: float) -> None:
     config = load_config(
         VisionConfig,
         {
@@ -120,13 +162,33 @@ def test_each_track_published_at_least_2_hz(tmp_path: Path) -> None:
             "HYD_HEARTBEAT_FILE": str(tmp_path / "alive"),
         },
     )
+    run = run_camera(camera, cast(FrameReader, FakeReader()), cast(Bus, bus), config)
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(run, seconds))
+
+
+def test_each_track_published_at_least_2_hz(tmp_path: Path) -> None:
     camera, _ = pipeline(MAPPING)
     bus = FakeBus()
 
-    run = run_camera(camera, cast(FrameReader, FakeReader()), cast(Bus, bus), config)
-    with pytest.raises(TimeoutError):
-        asyncio.run(asyncio.wait_for(run, 3))
+    run_for(camera, bus, tmp_path, 3)
 
     per_track = Counter(e.track_id for e in bus.events)
     assert per_track and min(per_track.values()) / 3 >= 2  # FR-102：位置更新间隔 ≤ 500 ms
     assert (tmp_path / "alive").exists()
+
+
+def test_behavior_publish_failure_is_logged_and_detection_continues(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """行为事件经 JetStream 持久化（HYD-PLAN-007 §2）；发布失败记录错误，位置照常发布。"""
+    camera, _ = pipeline(MAPPING, lying=True)
+    bus = FakeBus()
+
+    with caplog.at_level(logging.ERROR):
+        run_for(camera, bus, tmp_path, 3.5)
+
+    assert [b.behavior for b in bus.behaviors] == ["fall"]
+    failed = [r for r in caplog.records if r.getMessage() == "vision.behavior_publish_failed"]
+    assert len(failed) == 1
+    assert bus.events[-1].ts > bus.behaviors[0].ts
