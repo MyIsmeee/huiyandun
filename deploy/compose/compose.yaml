@@ -141,14 +141,14 @@ services:
   # 网络探针隔离（C-SEC-08，参照 Malcolm、Security Onion 的加固并进一步隔离）：探针解析不可信流量，
   # 被攻破时不能成为横向移动的跳板。capture-tap 把抓包源的流量单向镜像进 tap-net，探针只接入 tap-net：
   # 网络里没有其他服务，到不了被监测的网络与宿主。capture-tap 需要宿主网络与 NET_ADMIN 配置网卡（DP-05 例外），
-  # 执行一次即退出，不处理流量。抓包源默认 demo-net 网桥；真实部署以 HYD_CAPTURE_IFACE 指定
-  # 接交换机镜像端口、未配置 IP 的网卡
+  # 执行一次即退出，不处理流量。抓包源默认 attack-net 网桥（演示中 attack-sim→rtsp-target 的 RTSP
+  # 爆破在此发生）；真实部署以 HYD_CAPTURE_IFACE 指定接交换机镜像端口、未配置 IP 的网卡
   capture-tap:
     image: huiyandun/capture-tap:local
     build: { context: ../.., dockerfile: agents/sensor/capture-tap/Dockerfile }
     profiles: [security]
     network_mode: host
-    command: ["${HYD_CAPTURE_IFACE:-hyd-demo}", "hyd-tap"]
+    command: ["${HYD_CAPTURE_IFACE:-hyd-attack}", "hyd-tap"]
     labels: { hyd.oneshot: "true" }
     read_only: true
     cap_drop: [ALL]
@@ -217,6 +217,44 @@ services:
       timeout: 3s
       retries: 10
 
+  # 自建 RTSP 测试目标（DP-09、C-SEC-11）：复用 mediamtx（REUSE-04），读取需鉴权、对每次尝试回 401。
+  # 取用 site.yaml 中被攻击摄像头 cam-02 的 IP，使网络告警可映射到该设备（FR-203）
+  rtsp-target:
+    image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
+    profiles: [demo]
+    volumes: ["./rtsp-target.yml:/mediamtx.yml:ro"]
+    networks:
+      attack-net:
+        ipv4_address: 172.30.0.12
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9997/v3/config/global/get"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 受控攻击模拟（DP-09、C-SEC-11）：只对 rtsp-target 发 RTSP 认证重试，触发 HYD-NET-0001。
+  # 一次性执行后退出（scenario-runner 在主剧本 1:20 再次启动）；只接入 attack-net，网络层只够得到
+  # rtsp-target，碰不到 go2rtc 等。源地址在白名单（172.30.0.0/28）之外，后续处置才能真正封禁它。
+  # 行为参数登记于 demo/scenarios/attack-sim.yaml
+  attack-sim:
+    image: huiyandun/attack-sim:local
+    build: { context: ../.., dockerfile: agents/sim/attack-sim/Dockerfile }
+    profiles: [demo]
+    labels: { hyd.oneshot: "true" }
+    environment:
+      HYD_TARGET: rtsp-target
+      HYD_TARGET_PORT: "8554"
+      HYD_RTSP_PATH: cam
+      HYD_USER: admin
+      HYD_PASSWORD: wrong-password
+      HYD_ATTEMPTS: "6"
+    depends_on: { rtsp-target: { condition: service_healthy } }
+    networks:
+      attack-net:
+        ipv4_address: 172.30.0.100
+    read_only: true
+    cap_drop: [ALL]
+
 networks:
   # 内部网络不给宿主分配网关地址（gateway_mode_ipv4: isolated）：宿主上的进程访问不到其中的服务
   core-net:
@@ -239,6 +277,16 @@ networks:
       com.docker.network.bridge.name: hyd-tap
       com.docker.network.bridge.gateway_mode_ipv4: isolated
       com.docker.network.bridge.enable_icc: "false"
+  # 受控攻击网络（DP-09、C-SEC-11）：只有 attack-sim 与 rtsp-target；attack-sim 在网络层只够得到
+  # rtsp-target，碰不到 go2rtc 等。演示抓包源即此网桥，RTSP 爆破在此被探针观测。固定网桥名供 capture-tap 使用
+  attack-net:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: hyd-attack
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
   # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
   edge-net:
     driver_opts:

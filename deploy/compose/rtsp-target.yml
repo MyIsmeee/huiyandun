@@ -1,0 +1,21 @@
+# 自建 RTSP 测试目标（DP-09、C-SEC-11）：读取需鉴权，但不配置任何可用账号——对每次尝试都回 401，
+# 这正是 HYD-NET-0001 的触发条件。配置中不含任何口令或摘要（G-14）。无真实码流，目标只负责拒绝认证
+logLevel: info
+
+# 只开 RTSP；API 只供容器内健康检查
+api: true
+apiAddress: 127.0.0.1:9997
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+rtspTransports: [tcp]
+
+# 唯一授权项是容器内健康检查访问 API；RTSP 读取无任何账号可用，远端一律 401
+authInternalUsers:
+  - user: any
+    ips: ["127.0.0.1", "::1"]
+    permissions: [{ action: api }]
+
+paths:
+  cam:
