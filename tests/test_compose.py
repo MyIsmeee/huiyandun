@@ -64,7 +64,7 @@ def test_doctor_image_registered() -> None:
 
 
 EDGE = "edge-net"
-EXPOSED = {"web-console"}
+EXPOSED = {"web-console", "go2rtc"}
 
 
 @pytest.mark.parametrize("name", [n for n in COMPOSE["networks"] if n != EDGE])
@@ -83,6 +83,19 @@ def test_only_exposed_services_publish_ports() -> None:
     """C-OPS-05：只有 DP-05 列出的服务开放端口，且只有它们接入 edge-net。"""
     assert {n for n, s in SERVICES.items() if s.get("ports")} == EXPOSED
     assert {n for n, s in SERVICES.items() if EDGE in s.get("networks", [])} == EXPOSED
+
+
+def test_go2rtc_publishes_media_port_only() -> None:
+    """C-OPS-05：go2rtc 只开放 WebRTC 媒体端口，API 不对外。"""
+    assert {p.split(":")[-1] for p in SERVICES["go2rtc"]["ports"]} == {"8555/tcp", "8555/udp"}
+
+
+def test_go2rtc_api_reachable_only_by_its_clients() -> None:
+    """go2rtc 的 API 无鉴权且可新建 exec 源：内部网络上只有信令转发与取流的服务能访问。"""
+    internal = set(SERVICES["go2rtc"]["networks"]) - {EDGE}
+    peers = {n for n, s in SERVICES.items() if internal & set(s.get("networks", []))} - {"go2rtc"}
+    assert peers == {"api-server", "vision-engine", "mediamtx"}
+    assert "core-net" not in internal
 
 
 def test_only_audit_service_holds_audit_password() -> None:

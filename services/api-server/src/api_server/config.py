@@ -33,3 +33,9 @@ class ApiConfig(DbConfig):
     site_file: Path = Field(
         Path("/etc/hyd/site.yaml"), description="站点配置 site.yaml，启动时导入（FR-901）"
     )
+    go2rtc_url: str = Field(
+        "http://go2rtc:1984", description="go2rtc API 地址，转发实时画面的 WebRTC 信令（FR-106）"
+    )
+    go2rtc_timeout_s: float = Field(
+        5.0, gt=0, le=60, description="转发 WebRTC 信令的超时，单位秒（CD-04）"
+    )

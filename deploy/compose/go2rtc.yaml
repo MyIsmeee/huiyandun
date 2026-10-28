@@ -7,6 +7,10 @@ rtsp:
 webrtc:
   listen: ":8555"
   ice_servers: []  # 清空 go2rtc 默认的公网 STUN 服务器，运行时不访问外部地址（G-05），不得删除
+  # 浏览器经宿主机映射的 8555 取媒体流（C-OPS-05）；容器 IP 在宿主机之外不可达，须公布本机地址。
+  # 演示在本机浏览器访问；WSL 只把 Windows 的 127.0.0.1 TCP 转发进来，浏览器实际走 TCP 候选
+  candidates:
+    - 127.0.0.1:8555
 
 streams:
   cam-01: rtsp://mediamtx:8554/cam-01

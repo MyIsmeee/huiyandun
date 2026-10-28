@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from http import HTTPStatus
 
+import httpx2
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -15,7 +16,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api_server import audit, auth, relay, site, ws
+from api_server import audit, auth, relay, site, video, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
@@ -91,6 +92,9 @@ def create_app(config: ApiConfig) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bus = await Bus.connect(config.nats_url, name="api-server", timeout_s=config.nats_timeout_s)
         app.state.engine = create_engine(config)
+        app.state.go2rtc = httpx2.AsyncClient(
+            base_url=config.go2rtc_url, timeout=config.go2rtc_timeout_s
+        )
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
@@ -104,6 +108,7 @@ def create_app(config: ApiConfig) -> FastAPI:
                 with suppress(asyncio.CancelledError):
                     await task
             await bus.close()
+            await app.state.go2rtc.aclose()
             await app.state.engine.dispose()
 
     # 关闭自带文档页：其页面从公网 CDN 加载脚本（G-05）
@@ -119,6 +124,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(audit.router)
     app.include_router(site.router)
     app.include_router(ws.router)
+    app.include_router(video.router)
 
     @app.get("/healthz", status_code=204)
     async def healthz() -> Response:
