@@ -1,0 +1,16 @@
+[project]
+name = "correlator"
+version = "0.0.0"
+description = "关联引擎：归一化 Suricata 告警，跨域关联生成 Incident（HYD-ARCH-001 §6）"
+requires-python = "==3.12.*"
+dependencies = [
+    "py-contracts",
+    "pydantic>=2.14,<3",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+py-contracts = { workspace = true }
