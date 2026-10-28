@@ -1,7 +1,16 @@
 %YAML 1.1
 ---
-# 以 --include 覆盖镜像自带的 suricata.yaml：只替换规则来源
+# 以 --include 覆盖镜像自带的 suricata.yaml：替换规则来源与日志输出
 default-rule-path: /etc/suricata/rules
 rule-files:
   - emerging-all.rules  # ET Open 快照（rules/vendor/et-open/）
   - hyd-net.rules
+# 整个 outputs 列表被替换：只写 EVE 告警，供 correlator 归一化（TK-032）。会话元数据由 zeek 记录，
+# 不再输出流量、协议、统计等日志，日志卷增长只取决于告警数（#98）
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert

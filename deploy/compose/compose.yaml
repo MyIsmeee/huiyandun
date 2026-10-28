@@ -81,6 +81,30 @@ services:
       start_period: 30s
       start_interval: 2s
 
+  # 关联引擎（HYD-ARCH-001 §6）：归一化 suricata 的 EVE 告警，发布 hyd.security.alert.v1（TK-032）。
+  # EVE 来自解析不可信流量的探针，只读挂载、按模型校验；读取位置存于持久卷，重启后续读
+  correlator:
+    image: huiyandun/correlator:local
+    build: { context: ../.., dockerfile: services/correlator/Dockerfile }
+    profiles: [core]
+    volumes:
+      - suricata-logs:/var/log/suricata:ro
+      - correlator-state:/var/lib/correlator
+      - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 设备登记表（FR-203）
+    depends_on: { nats: { condition: service_healthy } }
+    networks: [core-net]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      # 主循环每 0.5 s 更新心跳文件；10 s 未更新视为卡死
+      test: ["CMD", "python3", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/hyd-correlator-alive') > 10)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
   # 唯一对外入口（C-OPS-05）：前端页面与 /api、/ws 同源反向代理，配置见 Caddyfile
   web-console:
     image: huiyandun/web-console:local
@@ -298,6 +322,7 @@ volumes:
   caddydata:
   suricata-logs:
   suricata-cache:
+  correlator-state:
   zeek-logs:
 
 # 口令由 make demo-up 首次运行时生成，不入库（G-14）
