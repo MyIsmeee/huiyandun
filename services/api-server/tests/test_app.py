@@ -25,9 +25,9 @@ class Body(BaseModel):
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> Iterator[TestClient]:
+def client(tmp_path: Path, nats_url: str) -> Iterator[TestClient]:
     (tmp_path / "pw").write_text("unused")
-    app = create_app(ApiConfig(db_password_file=tmp_path / "pw", site_file=SITE))
+    app = create_app(ApiConfig(db_password_file=tmp_path / "pw", site_file=SITE, nats_url=nats_url))
 
     @app.post("/t/write")
     async def write(body: Body) -> dict:
