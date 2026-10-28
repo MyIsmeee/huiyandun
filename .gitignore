@@ -18,6 +18,8 @@ web/console/playwright-report/
 *.pem
 *.key
 deploy/compose/.secrets/
+# make console-ca 导出的本机 CA 根证书：每台演示机各自生成
+hyd-local-ca.crt
 
 # 演示视频只存于本机（R-01、DM-12）：原始片段与剪接成品均不入库，来源登记于同名 .meta.yaml
 demo/media/src/

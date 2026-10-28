@@ -81,6 +81,23 @@ services:
       start_period: 30s
       start_interval: 2s
 
+  # 唯一对外入口（C-OPS-05）：前端页面与 /api、/ws 同源反向代理，配置见 Caddyfile
+  web-console:
+    image: huiyandun/web-console:local
+    build: { context: ../.., dockerfile: web/console/Dockerfile }
+    profiles: [core]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data  # 本地 CA：重建容器后浏览器已导入的根证书仍有效
+    ports: ["443:8443"]
+    depends_on: { api-server: { condition: service_healthy } }
+    networks: [core-net, edge-net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "-O", "/dev/null", "https://127.0.0.1:8443/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # 流接入（REUSE-03）：摄像头只被拉流一次，检测与浏览器都经 go2rtc 取流（C-CV-10）
   go2rtc:
     image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
@@ -139,10 +156,15 @@ networks:
   # 演示视频源与流接入；不连接宿主机外部网络（DP-04、DP-05）
   demo-net:
     internal: true
+  # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
+  edge-net:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
 
 volumes:
   pgdata:
   natsdata:
+  caddydata:
 
 # 口令由 make demo-up 首次运行时生成，不入库（G-14）
 secrets:

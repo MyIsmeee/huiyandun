@@ -30,6 +30,21 @@ components:
     purpose: 摄像头统一拉流，分发给检测与 WebRTC 回放（REUSE-03）
     owner: MyIsmeee
     telemetry: 无；WebRTC 默认的公网 STUN 已在 go2rtc.yaml 中关闭
+  - name: Caddy
+    version: "2.11.7"
+    image: caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
+    license: Apache-2.0
+    purpose: web-console 基础镜像：前端静态文件、同源反向代理、本地 CA 签发 HTTPS 证书（C-OPS-05）
+    owner: MyIsmeee
+    telemetry: 无；Caddyfile 关闭管理接口与系统信任库安装，证书由内置 CA 签发、不访问 ACME
+  # 仅在构建阶段打包前端，不进入运行镜像
+  - name: Node.js
+    version: "24.22.1"
+    image: node:24.22.1-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c
+    license: MIT
+    purpose: 构建 web-console 前端静态文件
+    owner: MyIsmeee
+    telemetry: 无
   # 仅 demo profile；镜像内的 ffmpeg 为 GPL 构建，作为独立进程运行（G-08），也用于 make demo-media 剪接素材
   - name: MediaMTX
     version: "1.21.3"
