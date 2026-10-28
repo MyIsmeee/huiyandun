@@ -12,11 +12,17 @@
   - `HYD_DEVICE` 无默认值，须显式声明。`cuda` 时设置显存上限 `HYD_GPU_MEM_LIMIT_MB`（C-HW-12），并断言 `CUDAExecutionProvider` 实际生效，回退 CPU 即报错退出（C-CV-11）；`cpu` 为 D0-min 的 CPU 模式（DP-06）
 - 检测（`detector.py`）：rtmlib RTMO 单阶段输出人体框与 COCO 17 关键点（REUSE-05），结果换算回整帧坐标；置信度低于 0.3 的框丢弃
 - 运动门控（`motion.py`，借鉴 Frigate）：缩小灰度图与滑动平均背景做帧差，运动区域并入上一帧的轨迹框，扩展 20% 且不小于 640×640 后送推理；无运动且无轨迹时跳过推理。静止的人（如跌倒后）靠轨迹框保持推理
+- 检测链路（`pipeline.py`）：每路摄像头一个读帧线程，经 go2rtc 的 RTSP 取流（C-CV-10），持续解码、只保留最新帧；检测固定 5 FPS 取用最新帧，处理慢时丢帧而不积压延迟（FR-101、C-CV-08）
+  - 跟踪：Roboflow trackers 的 ByteTrack，只用框的运动，不用外观特征（G-04、REUSE-07）；新轨迹须连续 2 帧、置信度 ≥ 0.5
+  - 已标定摄像头的每条已确认轨迹每帧发布一条 `hyd.vision.track.v1`（核心 NATS，不持久化），脚点取人体框底边中点；未标定摄像头照常检测跟踪，但不发布坐标（FR-902）
+  - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`（`stream_lost` 事件由 TK-040 发布）
+  - 健康检查：检测循环每个周期更新 `HYD_HEARTBEAT_FILE`，10 s 未更新视为卡死
 - 依赖：supervision 声明的 PyAV（自带 GPL 的 x264 / x265）与 matplotlib 由根 `pyproject.toml` 的 `override-dependencies` 去掉（G-08、REUSE-07）
 
 ## 命令
 
 ```sh
+hyd-vision      # 常驻检测（镜像默认命令）；启动时同样断言推理设备
 hyd-gpu-check   # 按 HYD_DEVICE 加载模型并断言推理设备；cuda 未生效时以 1 退出
 ```
 
