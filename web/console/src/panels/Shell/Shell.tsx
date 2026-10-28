@@ -3,12 +3,16 @@ import { useEffect, useState } from "react";
 import type { Site } from "../../lib/api";
 import { SceneViewport } from "../../scene/SceneViewport";
 import { connect, useConnection } from "../../store/connection";
+import { useLive } from "../../store/live";
+import { select, useSelection } from "../../store/selection";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
+import { DetailPanel } from "../DetailPanel/DetailPanel";
 import { type KpiData, KpiTile } from "../KpiTile/KpiTile";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
 // 指标尚无数据来源，由后续任务接入
 const NO_DATA: KpiData = { status: "ready", value: null, delta: null };
+const deselect = () => select(null);
 const KPIS = [
   { label: "在线设备", unit: "台" },
   { label: "活跃告警", unit: "条" },
@@ -28,6 +32,10 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   const { open, connecting, lastFrameAt } = useConnection();
   const offline = !open && !connecting;
   useEffect(() => connect(onRejected), [onRejected]);
+  // 设备状态以推送为准，未推送过的取 GET /api/site 的初始值
+  const selectedId = useSelection((s) => s.deviceId);
+  const pushed = useLive((s) => (selectedId ? s.devices[selectedId] : undefined));
+  const selected = pushed ?? site.devices.find((d) => d.id === selectedId);
 
   async function handleLogout() {
     setLogout("pending");
@@ -94,13 +102,16 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         )}
       </section>
 
-      <aside aria-label="告警" className="row-span-2 flex flex-col rounded-2xl border border-line bg-panel">
-        <h2 className="border-b border-line px-4 py-3 font-semibold">告警</h2>
-        <div className="m-auto text-center text-sm text-fg-3">
-          <p>暂无告警</p>
-          <p className="mt-1">最后更新 {formatTime(lastFrameAt)}</p>
-        </div>
-      </aside>
+      <div className="row-span-2 flex min-h-0 flex-col gap-2">
+        {selected && <DetailPanel device={selected} onClose={deselect} />}
+        <aside aria-label="告警" className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
+          <h2 className="border-b border-line px-4 py-3 font-semibold">告警</h2>
+          <div className="m-auto text-center text-sm text-fg-3">
+            <p>暂无告警</p>
+            <p className="mt-1">最后更新 {formatTime(lastFrameAt)}</p>
+          </div>
+        </aside>
+      </div>
 
       <section aria-label="攻击链" className="flex flex-col rounded-2xl border border-line bg-panel px-4 py-3">
         <h2 className="font-semibold">攻击链</h2>

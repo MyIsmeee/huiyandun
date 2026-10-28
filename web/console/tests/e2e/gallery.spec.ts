@@ -5,6 +5,7 @@ const COMPONENTS = {
   KpiTile: ["normal", "empty", "loading", "stale"],
   FloorPlan2D: ["normal", "empty"],
   LiveVideo: ["normal", "empty", "loading", "error", "disconnected"],
+  DetailPanel: ["device"],
 };
 
 for (const [component, states] of Object.entries(COMPONENTS)) {

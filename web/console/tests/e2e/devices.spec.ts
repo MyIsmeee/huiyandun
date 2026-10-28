@@ -31,6 +31,26 @@ for (const [state, label] of STATES) {
   });
 }
 
+test("单击设备展开详情并连接实时画面，Esc 收起（V-I2、FR-106）", async ({ page }) => {
+  const signals: string[] = [];
+  await page.route("/api/devices/cam-01/webrtc", (route) => {
+    signals.push(route.request().postData() ?? "");
+    return route.fulfill({ status: 502, json: { code: "bad_gateway", message: "视频服务不可用", request_id: "r" } });
+  });
+  await open(page, [camera("uncalibrated")]);
+
+  await page.getByRole("button", { name: "查看 cam-01 详情" }).click();
+  const panel = page.getByRole("region", { name: "详情" });
+  await expect(panel).toContainText("172.30.0.11");
+  await expect(panel.locator('[data-video="unavailable"]')).toContainText("视频服务不可用");
+  expect(signals[0]).toMatch(/^v=0/);
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("device-detail.png");
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
+
 test("设备状态以推送为准", async ({ page }) => {
   const sockets = await open(page, [camera("normal")]);
 

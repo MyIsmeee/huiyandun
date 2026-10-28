@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Site } from "../../../src/lib/api";
+import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
 import { FloorPlan2D } from "../../../src/scene/FloorPlan2D";
@@ -47,6 +48,16 @@ function testStream(): MediaStream {
 }
 const STREAM = testStream();
 const video = (node: ReactNode) => <div className="w-72">{node}</div>;
+/** 没有视频流的设备：详情面板截图不依赖 WebRTC 连接 */
+const SWITCH = {
+  id: "sw-01",
+  type: "switch",
+  ip: "10.0.0.2",
+  mode: "bypass",
+  state: "normal",
+  alert_severity: null,
+  camera: null,
+} as const;
 
 // 组件各状态的展示页：/tests/e2e/gallery/?component=<组件>，每个状态一个 [data-state]
 const GALLERY: Record<string, Record<string, ReactNode>> = {
@@ -66,6 +77,9 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     loading: video(<LiveVideoView status={{ kind: "connecting" }} />),
     error: video(<LiveVideoView status={{ kind: "unavailable", reason: "视频服务不可用" }} />),
     disconnected: video(<LiveVideoView status={{ kind: "interrupted", stream: STREAM }} />),
+  },
+  DetailPanel: {
+    device: <div className="w-80"><DetailPanel device={SWITCH} onClose={() => {}} /></div>,
   },
 };
 
