@@ -26,4 +26,4 @@ COPY --from=build /app/.venv /app/.venv
 ENV PATH=/app/.venv/bin:$PATH ORT_DISABLE_TELEMETRY=1
 # C-OPS-04：非 root 运行
 USER hyd
-CMD ["hyd-gpu-check"]
+CMD ["hyd-vision"]

@@ -9,13 +9,17 @@ dependencies = [
     "onnxruntime-gpu>=1.31.1,<1.32",
     "opencv-python-headless>=5.0.0.93,<6",
     "py-common",
+    "py-contracts",
+    "pyyaml>=6.0.3,<7",
     # 替换其内部 session 以设置显存上限（detector.py），升级须核对 BaseTool
     "rtmlib>=0.0.16,<0.0.17",
     "supervision>=0.31.2,<0.32",
+    "trackers>=2.6.1,<3",
 ]
 
 [project.scripts]
 hyd-gpu-check = "vision_engine.runtime:gpu_check"
+hyd-vision = "vision_engine.pipeline:main"
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14"]
@@ -23,3 +27,4 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 py-common = { workspace = true }
+py-contracts = { workspace = true }

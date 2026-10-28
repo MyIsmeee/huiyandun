@@ -50,6 +50,19 @@ def test_maps_to_full_frame() -> None:
     assert result.data["keypoint_scores"][0, 0] == np.float32(0.8)
 
 
+def test_keypoints_follow_their_box_when_low_score_comes_first() -> None:
+    # NMS 返回的 keep 须为原始数组下标；低分框排在前面时，关键点不得配给别人
+    session = FakeSession([[400, 100, 450, 200, 0.1], [100, 100, 200, 300, 0.9]])
+    session.keypoints[0, 0, :, 0] = 10  # 低分者
+    session.keypoints[0, 1, :, 0] = 150  # 高分者
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8))
+
+    assert result.xyxy[0].tolist() == [200, 200, 400, 600]
+    assert result.data["keypoints"][0, 0, 0] == 300
+
+
 def test_no_person() -> None:
     result = detector([[100, 100, 200, 300, 0.1]])(np.zeros((720, 1280, 3), np.uint8))
 

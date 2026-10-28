@@ -6,6 +6,7 @@ ONNX Runtime 在 CUDA 不可用时只记录警告并回退到 CPU；声明 cuda 
 
 import logging
 import sys
+from pathlib import Path
 from typing import Literal
 
 import onnxruntime as ort
@@ -27,6 +28,15 @@ class VisionConfig(ServiceConfig):
     model_file: FilePath = Field(description="RTMO ONNX 模型文件的本地路径（C-RU-06、DP-08）")
     gpu_mem_limit_mb: int = Field(
         2048, gt=0, description="CUDA EP 显存上限，单位 MiB，与同机其他 GPU 进程共存（C-HW-12）"
+    )
+    site_file: Path = Field(
+        Path("/etc/hyd/site.yaml"), description="站点配置 site.yaml：摄像头流名与标定点（FR-901）"
+    )
+    go2rtc_rtsp: str = Field(
+        "rtsp://go2rtc:8554", description="go2rtc 的 RTSP 地址，流名取自 site.yaml（C-CV-10）"
+    )
+    heartbeat_file: Path = Field(
+        Path("/tmp/hyd-vision-alive"), description="检测循环每个周期更新其修改时间，供健康检查判断"
     )
 
 
