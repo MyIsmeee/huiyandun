@@ -19,7 +19,7 @@ components:
     version: "3.12.15"
     image: python:3.12.15-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
     license: PSF-2.0
-    purpose: 自研 Python 服务的基础镜像（api-server、audit-service）
+    purpose: 自研 Python 服务的基础镜像（api-server、audit-service）；capture-tap 基础镜像，构建时安装 iproute2、ethtool（GPL-2.0，独立进程）
     owner: MyIsmeee
     telemetry: 无
   # 镜像内的 ffmpeg 为 GPL 构建，作为独立进程运行（G-08）
@@ -86,6 +86,14 @@ components:
     purpose: suricata 基础镜像：网络入侵检测，IDS 模式（REUSE-08、C-SEC-08）
     owner: MyIsmeee
     telemetry: 无；规则随镜像离线打包，镜像自带的 suricata-update 不启用（不设 ENABLE_CRON）
+  # 构建时安装 libcap2-bin（BSD-3-Clause）为 zeek 设置文件能力，随后卸载
+  - name: Zeek
+    version: "8.0.11"  # LTS
+    image: zeek/zeek:8.0.11@sha256:3882d4b46fa82993ecb50b8881389fe4e40e8e2ba77547402f72b65a5a89591b
+    license: BSD-3-Clause
+    purpose: zeek 基础镜像：网络会话元数据（REUSE-08）
+    owner: MyIsmeee
+    telemetry: 无；telemetry.log 只写本地日志卷，单机运行不开放指标端口
 
 # 外部检测规则（C-RU-05、R-06）：快照存于 rules/vendor/，随 suricata 镜像打包，运行时不下载（G-05）
 # 上游 rules.emergingthreats.net 每日更新且不保留历史版本：更新时替换快照与本条目，重跑 make test-rules

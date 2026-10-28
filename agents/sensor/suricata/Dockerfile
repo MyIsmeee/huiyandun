@@ -5,3 +5,6 @@ FROM jasonish/suricata:8.0.7@sha256:bf4bea5b45d9c10265a3ee6628e2ec8930b9d1fb7caf
 ADD rules/vendor/et-open/emerging-all.rules.tar.gz /etc/suricata/rules/
 COPY rules/suricata/ /etc/suricata/rules/
 COPY agents/sensor/suricata/hyd.yaml /etc/suricata/hyd.yaml
+
+# 只读根文件系统下不经入口脚本 chown：配置对启动时的 root（无 DAC_OVERRIDE）可读
+RUN chmod -R a+rX /etc/suricata
