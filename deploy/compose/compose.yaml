@@ -59,7 +59,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       nats: { condition: service_healthy }  # 订阅事件转发到 WS 各频道
-    networks: [core-net]
+    networks: [core-net, video-net]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 5s
@@ -103,9 +103,10 @@ services:
     image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
     profiles: [vision]
     volumes: ["./go2rtc.yaml:/config/go2rtc.yaml:ro"]
-    # 只开放 WebRTC 媒体端口，API（1984）只供 core-net 内的 api-server 转发信令（C-OPS-05、D-02）
+    # 只开放 WebRTC 媒体端口（C-OPS-05、D-02）。API（1984）无鉴权且可新建 exec 源：
+    # 不接入 core-net，只经 video-net 供 api-server 转发信令、经 demo-net 供 vision-engine 取流
     ports: ["8555:8555/tcp", "8555:8555/udp"]
-    networks: [core-net, demo-net, edge-net]
+    networks: [video-net, demo-net, edge-net]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:1984/api"]
       interval: 5s
@@ -157,6 +158,9 @@ networks:
     internal: true
   # 演示视频源与流接入；不连接宿主机外部网络（DP-04、DP-05）
   demo-net:
+    internal: true
+  # api-server 经此转发 WebRTC 信令到 go2rtc；go2rtc 不接入 core-net，碰不到数据库与事件总线
+  video-net:
     internal: true
   # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
   edge-net:
