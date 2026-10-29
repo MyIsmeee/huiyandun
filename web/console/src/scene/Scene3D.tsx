@@ -1,28 +1,19 @@
-import { Canvas, extend, type ThreeElement, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { DoubleSide, type Object3D, type OrthographicCamera, Shape, Vector2 } from "three";
-import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import type { Object3D, OrthographicCamera } from "three";
 import type { Site } from "../lib/api";
 import { useTheme } from "../theme/store";
 import { DeviceMarkers } from "./DeviceMarkers";
 import { TargetModels } from "./TargetModels";
 import type { Camera } from "./devices";
-import { type IsoView, type Vec3, WALL_HEIGHT_M, WALL_THICKNESS_M } from "./layout";
+import { GROUND_M, type IsoView, type Vec3, WALL_HEIGHT_M } from "./layout";
 import { type Lighting, lightingAt, lightStep } from "./lighting";
-import { isNearSide, type WallPiece, wallPieces } from "./walls";
-
-extend({ RoundedBoxGeometry });
-declare module "@react-three/fiber" {
-  interface ThreeElements {
-    roundedBoxGeometry: ThreeElement<typeof RoundedBoxGeometry>;
-  }
-}
 
 /** 取当前主题的色值（theme.css），场景与界面同源（§3.1、§5.1） */
 function themeColors() {
   const style = getComputedStyle(document.documentElement);
   const read = (name: string) => style.getPropertyValue(name).trim();
-  return { ground: read("--hyd-raised"), grid: read("--hyd-grid"), wall: read("--hyd-text-3"), zone: read("--hyd-text-2") };
+  return { ground: read("--hyd-ground"), grid: read("--hyd-grid") };
 }
 
 /** 光照按 10 分钟步进更新（V-A6）：每分钟检查一次，步进未变时不重新渲染 */
@@ -36,7 +27,7 @@ function useLighting(): Lighting {
 }
 
 /**
- * 由平面图生成的 3D 场景（§5.1 L0 地面与栅格、L1 墙体与门洞、区域轮廓、L2 设备、L3 视场、L4 检出目标、光照）。
+ * 3D 场景（§5.1 L0 地面与栅格、L2 设备、L3 视场、L4 检出目标、光照）；平面图只用于定位，不显示（UP-1）。
  * 按需渲染（frameloop="demand"）：无常驻动效（V-A3），只有对应真实告警的动效持续请求重绘。
  * flat 关闭色调映射，地面等色值与规范一致；阴影另以阴影材质叠加在地面上，不改变地面色值。
  */
@@ -45,28 +36,21 @@ export default function Scene3D(props: { site: Site; cameras: Camera[]; view: Is
   useTheme((s) => s.theme); // 订阅主题：切换时重新渲染并取色
   const colors = themeColors();
   const lighting = useLighting();
-  const pieces = useMemo(() => wallPieces(site.walls, site.doors), [site.walls, site.doors]);
-  const ground = { position: [site.width_m / 2, 0, site.height_m / 2] as const, size: [site.width_m, site.height_m] as const };
+  const center: Vec3 = [site.width_m / 2, 0, site.height_m / 2];
   return (
     <Canvas orthographic flat shadows="percentage" frameloop="demand">
       <IsoCamera view={view} />
       <FirstFrame onReady={onReady} />
       <Lights site={site} lighting={lighting} />
-      <mesh rotation-x={-Math.PI / 2} position={ground.position}>
-        <planeGeometry args={ground.size} />
+      <mesh rotation-x={-Math.PI / 2} position={center}>
+        <planeGeometry args={[GROUND_M, GROUND_M]} />
         <meshBasicMaterial color={colors.ground} />
       </mesh>
-      <mesh rotation-x={-Math.PI / 2} position={ground.position} position-y={0.002} receiveShadow>
-        <planeGeometry args={ground.size} />
+      <mesh rotation-x={-Math.PI / 2} position={center} position-y={0.002} receiveShadow>
+        <planeGeometry args={[GROUND_M, GROUND_M]} />
         <shadowMaterial opacity={lighting.shadowOpacity} />
       </mesh>
-      <Grid width={site.width_m} height={site.height_m} color={colors.grid} />
-      {site.zones.map((zone) => (
-        <Zone key={zone.id} polygon={zone.polygon} color={colors.zone} />
-      ))}
-      {pieces.map((piece, i) => (
-        <Wall key={i} piece={piece} near={isNearSide(piece.wall, site, view.toCamera)} color={colors.wall} />
-      ))}
+      <Grid center={center} color={colors.grid} />
       <DeviceMarkers cameras={cameras} />
       <TargetModels cameras={cameras} />
     </Canvas>
@@ -132,14 +116,17 @@ function FirstFrame({ onReady }: { onReady: () => void }) {
   return null;
 }
 
-/** 1 m 比例尺栅格 */
-function Grid({ width, height, color }: { width: number; height: number; color: string }) {
+/** 1 m 比例尺栅格，与地面同样无限延伸（§5.1 L0） */
+function Grid({ center: [cx, , cz], color }: { center: Vec3; color: string }) {
   const positions = useMemo(() => {
     const p: number[] = [];
-    for (let x = 0; x <= width; x += 1) p.push(x, 0.005, 0, x, 0.005, height);
-    for (let z = 0; z <= height; z += 1) p.push(0, 0.005, z, width, 0.005, z);
+    const [x0, z0] = [Math.round(cx - GROUND_M / 2), Math.round(cz - GROUND_M / 2)];
+    for (let k = 0; k <= GROUND_M; k += 1) {
+      p.push(x0 + k, 0.005, z0, x0 + k, 0.005, z0 + GROUND_M);
+      p.push(x0, 0.005, z0 + k, x0 + GROUND_M, 0.005, z0 + k);
+    }
     return new Float32Array(p);
-  }, [width, height]);
+  }, [cx, cz]);
   return (
     <lineSegments>
       <bufferGeometry>
@@ -147,51 +134,5 @@ function Grid({ width, height, color }: { width: number; height: number; color: 
       </bufferGeometry>
       <lineBasicMaterial color={color} />
     </lineSegments>
-  );
-}
-
-/** 区域：淡填充 + 轮廓，中性色，不使用状态色（V-S2） */
-function Zone({ polygon, color }: { polygon: number[][]; color: string }) {
-  const shape = useMemo(() => new Shape(polygon.map(([x = 0, y = 0]) => new Vector2(x, y))), [polygon]);
-  const outline = useMemo(() => new Float32Array(polygon.flatMap(([x = 0, y = 0]) => [x, 0.02, y])), [polygon]);
-  return (
-    <>
-      {/* 绕 x 轴转 90°：平面 (x, y) 落到地面 (x, 0, y) */}
-      <mesh rotation-x={Math.PI / 2} position-y={0.01}>
-        <shapeGeometry args={[shape]} />
-        <meshBasicMaterial color={color} transparent opacity={0.08} depthWrite={false} side={DoubleSide} />
-      </mesh>
-      <lineLoop>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[outline, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial color={color} />
-      </lineLoop>
-    </>
-  );
-}
-
-/** 墙段：圆角长方体；近侧墙段半透明，不遮挡室内，但照常投射阴影（§5.1 L1） */
-function Wall({ piece, near, color }: { piece: WallPiece; near: boolean; color: string }) {
-  const [[x1, y1], [x2, y2]] = [piece.from, piece.to];
-  return (
-    <mesh
-      position={[(x1 + x2) / 2, (piece.bottom + piece.top) / 2, (y1 + y2) / 2]}
-      rotation-y={-Math.atan2(y2 - y1, x2 - x1)}
-      castShadow
-      receiveShadow
-    >
-      <roundedBoxGeometry
-        args={[Math.hypot(x2 - x1, y2 - y1), piece.top - piece.bottom, WALL_THICKNESS_M, 2, 0.04]}
-      />
-      {/* 切换透明需重新编译着色器：以 key 在旋转后近侧变化时重建材质 */}
-      <meshLambertMaterial
-        key={near ? "near" : "far"}
-        color={color}
-        transparent={near}
-        opacity={near ? 0.22 : 1}
-        depthWrite={!near}
-      />
-    </mesh>
   );
 }

@@ -23,8 +23,8 @@ describe("主题", () => {
     expect(themeAt(at(hhmm))).toBe(theme);
   });
 
-  it("默认自动档、不降低动效", () => {
-    expect(useTheme.getState()).toMatchObject({ mode: "auto", reducedMotion: false });
+  it("默认亮色档、不降低动效", () => {
+    expect(useTheme.getInitialState()).toMatchObject({ mode: "light", theme: "light", reducedMotion: false });
   });
 
   it("手动选择后立即作用于页面根元素", () => {

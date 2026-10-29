@@ -12,6 +12,8 @@
   --hyd-text-2: #c3c2b7;
   --hyd-text-3: #898781;
   --hyd-border: rgb(255 255 255 / 0.1);
+  /* §5.1 L0 场景地面 */
+  --hyd-ground: #161b21;
 }
 
 [data-theme="light"] {
@@ -24,6 +26,7 @@
   --hyd-text-2: #52514e;
   --hyd-text-3: #898781;
   --hyd-border: rgb(11 11 11 / 0.1);
+  --hyd-ground: #f1f1ee;
 }
 
 @theme inline {
@@ -37,6 +40,7 @@
   --color-fg-2: var(--hyd-text-2);
   --color-fg-3: var(--hyd-text-3);
   --color-line: var(--hyd-border);
+  --color-ground: var(--hyd-ground);
   /* §3.2 状态色：固定语义、不随主题变化，只用于表达状态且必须配图标与文字（V-S2、V-S3） */
   --color-idle: #6e7a8a;
   --color-physical: #fab219;

@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 // 组件全部状态的截图基线（V-G3、V-P2）；新增组件时在 gallery/main.tsx 登记并在此列出状态
 const COMPONENTS = {
   KpiTile: ["normal", "empty", "loading", "stale"],
-  FloorPlan2D: ["normal", "empty"],
+  Scene2D: ["empty"],
   LiveVideo: ["normal", "empty", "loading", "error", "disconnected"],
   // 空态即未选中时面板收起；错误态由 LiveVideo 覆盖
   DetailPanel: ["device", "disconnected"],

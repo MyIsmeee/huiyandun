@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Site } from "../../src/lib/api";
-import { isEmpty, isoView, OVERVIEW, planView, WALL_HEIGHT_M, zoneAnchor, zoneLabel } from "../../src/scene/layout";
+import { isoView, OVERVIEW, planView, WALL_HEIGHT_M } from "../../src/scene/layout";
 
 const SITE: Site = { id: "s", name: "站点", width_m: 40, height_m: 24, walls: [], doors: [], zones: [], devices: [] };
 const SIZE = { width: 1100, height: 700 };
@@ -86,30 +86,6 @@ describe("planView", () => {
   });
 });
 
-describe("区域标注", () => {
-  it("位于顶点均值处", () => {
-    expect(
-      zoneAnchor([
-        [30, 0],
-        [40, 0],
-        [40, 6],
-        [30, 6],
-      ]),
-    ).toEqual([35, 0, 3]);
-  });
-
-  it("禁止攀爬区在名称后注明", () => {
-    const zone = { id: "z", name: "外墙", polygon: [], no_climb: true };
-    expect(zoneLabel(zone)).toBe("外墙 · 禁止攀爬");
-    expect(zoneLabel({ ...zone, no_climb: false })).toBe("外墙");
-  });
-});
-
-it("没有墙体与区域为空场景", () => {
-  expect(isEmpty(SITE)).toBe(true);
-  expect(isEmpty({ ...SITE, walls: [[0, 0, 1, 0]] })).toBe(false);
-});
-
 // V-I1：绕竖轴旋转 4 档、缩放 1～4 倍、放大后平移
 describe("相机姿态", () => {
   const QUARTERS = [0, 1, 2, 3].map((k) => (k * Math.PI) / 2);
@@ -153,14 +129,6 @@ describe("相机姿态", () => {
     const [cx, cy] = planView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }).project([20, 0, 12]);
     expect(x).toBeCloseTo(cx); // 东侧的点转到正下方
     expect(y).toBeGreaterThan(cy);
-  });
-
-  it("相机朝向随方位角转动：默认在东南，转一档到东北", () => {
-    const [a, b] = [isoView(SITE, SIZE).toCamera, isoView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }).toCamera];
-    expect(a[0]).toBeCloseTo(Math.SQRT1_2);
-    expect(a[1]).toBeCloseTo(Math.SQRT1_2);
-    expect(b[0]).toBeCloseTo(Math.SQRT1_2);
-    expect(b[1]).toBeCloseTo(-Math.SQRT1_2);
   });
 
   it("放大 2 倍：每米像素数加倍；2D 平面图以可用区域中心为锚点", () => {
