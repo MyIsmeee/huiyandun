@@ -74,7 +74,8 @@ function Stale() {
 function Frame(props: { title: string; onClose: () => void; children: ReactNode }) {
   const { title, onClose, children } = props;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // 跟随视角下的 Esc 先由场景用于回到总览（已 preventDefault），详情保留（D-048）
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);

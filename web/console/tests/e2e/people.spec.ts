@@ -281,3 +281,46 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   await expect(panel).toHaveCount(0);
   await expect(scene(page).locator("[data-target]")).toHaveCount(0);
 });
+
+// V-I1、V-I2、D-048、D-058：双击飞入跟随视角；Esc 先回总览、再收起详情；跟随的目标离开画面即飞回总览
+test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再按一次收起详情", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  await walk(page, ws, 0.4);
+  const toolbar = page.getByRole("toolbar", { name: "视角" });
+  const panel = page.getByRole("region", { name: "详情" });
+
+  await scene(page).dblclick({ position: { x: 564, y: 330 } }); // 人员所在位置（与 person-normal 截图一致）
+  await page.clock.runFor(100);
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("人员 #7");
+  for (const name of ["缩小", "放大", "向左旋转 90°", "向右旋转 90°"]) await expect(toolbar.getByRole("button", { name })).toBeDisabled();
+  await expect(toolbar.getByRole("button", { name: "返回总览" })).toBeEnabled();
+  await expect(scene(page)).toHaveScreenshot("follow-person.png");
+
+  await page.keyboard.press("Escape");
+  await page.clock.runFor(100);
+  await expect(toolbar.getByRole("button", { name: "放大" })).toBeEnabled();
+  await expect(panel).toHaveCount(1); // 详情保留
+  await expect(scene(page)).toHaveScreenshot("follow-person-back.png");
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
+
+test("跟随的车辆离开画面：详情收起，镜头飞回总览", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  const car = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, y: 8, uncertainty_m: 0.4, heading_deg: 0 };
+  for (let i = 0; i < 5; i += 1) {
+    ws?.send(JSON.stringify({ channel: "tracks", data: { ...car, x: 10 + i * 1.5 } }));
+    await page.clock.runFor(500);
+  }
+  await zoomIn(page);
+  await scene(page).dblclick({ position: { x: 547, y: 235 } }); // 轿车所在位置（与 target-selected 截图一致）
+  await page.clock.runFor(100);
+  await expect(scene(page)).toHaveScreenshot("follow-car.png");
+
+  await page.clock.runFor(2500); // 2 s 无更新即移除（V-U4）
+  await expect(page.getByRole("region", { name: "详情" })).toHaveCount(0);
+  await expect(page.getByRole("toolbar", { name: "视角" }).getByRole("button", { name: "放大" })).toBeEnabled();
+});

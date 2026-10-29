@@ -36,6 +36,18 @@ describe("DetailPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it("跟随视角下的 Esc 已由场景用于回到总览：详情保留（D-048）", () => {
+    const onClose = vi.fn();
+    render(<DetailPanel device={DEVICE} stale={false} onClose={onClose} />);
+    const consume = (e: KeyboardEvent) => e.preventDefault();
+    window.addEventListener("keydown", consume, true);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    window.removeEventListener("keydown", consume, true);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("推送断开时状态标注数据非实时（UP-3、V-U3）", () => {
     render(<DetailPanel device={DEVICE} stale onClose={vi.fn()} />);
 
