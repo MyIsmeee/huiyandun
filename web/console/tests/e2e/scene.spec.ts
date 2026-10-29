@@ -1,17 +1,17 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { expectNoOverflow, freezeClock, mockSocket, presetTheme, SITE, sceneSettled, signedIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, open, presetTheme, sceneSettled, signedIn } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
 const scene = (page: Page) => page.getByRole("region", { name: "场景" });
 const SCENE_CHUNK = "**/assets/Scene3D-*.js";
 
-test("由平面图生成 3D 场景：地面、栅格、墙体与区域名称", async ({ page }) => {
+test("3D 场景只有无限延伸的地面与栅格，不显示平面图的墙体与区域（UP-1）", async ({ page }) => {
   await signedIn(page);
   await page.goto("/");
   await sceneSettled(page);
 
-  await expect(scene(page).getByText("设备间外墙 · 禁止攀爬")).toBeVisible();
+  await expect(scene(page).getByText("设备间外墙")).toHaveCount(0);
   await expectNoOverflow(page);
   await expect(scene(page)).toHaveScreenshot("scene-ready.png");
 });
@@ -36,7 +36,7 @@ test("场景代码加载失败时提示并可重新加载", async ({ page }) => 
   await expect(scene(page)).toHaveScreenshot("scene-error.png");
 });
 
-test("无 WebGL2 时降级为 2D 平面图（C-FE-08）", async ({ page }) => {
+test("无 WebGL2 时降级为 2D 俯视视图（C-FE-08）", async ({ page }) => {
   await page.addInitScript(() => {
     const getContext = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, ...rest: unknown[]) {
@@ -56,25 +56,15 @@ test("无 WebGL2 时降级为 2D 平面图（C-FE-08）", async ({ page }) => {
   ]);
   expect((kpi?.x ?? 0) + (kpi?.width ?? 0)).toBeLessThan(toolbar?.x ?? 0);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(scene(page).getByText("设备间外墙 · 禁止攀爬")).toBeVisible();
+  await expect(scene(page).getByText("设备间外墙")).toHaveCount(0);
   await expectNoOverflow(page);
   await expect(scene(page)).toHaveScreenshot("scene-2d.png");
-});
-
-test("平面图没有墙体与区域时显示空场景", async ({ page }) => {
-  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, walls: [], zones: [] } }));
-  await mockSocket(page);
-  await page.goto("/");
-  await sceneSettled(page);
-
-  await expect(scene(page).getByText("平面图中没有墙体与区域")).toBeVisible();
-  await expect(scene(page)).toHaveScreenshot("scene-empty.png");
 });
 
 // §5.1 光照：太阳方位与高度角随本地时间变化，夜间为月光；只改变明暗与阴影方向。
 // 主题用自动档，与用户在该时刻实际看到的一致：白天亮色、夜间暗色（§3.1）
 for (const [name, time] of [
-  ["morning", "2026-10-28T00:00:00Z"], // 上海 08:00：太阳在东，近侧的东墙阴影落入室内
+  ["morning", "2026-10-28T00:00:00Z"], // 上海 08:00：太阳在东
   ["noon", "2026-10-28T04:00:00Z"], // 上海 12:00
   ["dusk", "2026-10-27T09:30:00Z"], // 上海 17:30
   ["night", "2026-10-27T14:00:00Z"], // 上海 22:00
@@ -90,9 +80,9 @@ for (const [name, time] of [
   });
 }
 
-// V-I1、V-I5、V-A2、V-A4：相机控件
+// V-I1、V-I5、V-A2、V-A4：相机控件；以未标定摄像头的状态标签为参照点
 test.describe("相机控件", () => {
-  const LABEL = "设备间外墙 · 禁止攀爬";
+  const LABEL = "未标定";
   const button = (page: Page, name: string) => page.getByRole("toolbar", { name: "视角" }).getByRole("button", { name });
   const labelAt = async (page: Page) => {
     const box = await scene(page).getByText(LABEL).boundingBox();
@@ -103,9 +93,7 @@ test.describe("相机控件", () => {
   let sockets: WebSocketRoute[] = [];
 
   test.beforeEach(async ({ page }) => {
-    sockets = await signedIn(page);
-    await page.goto("/");
-    await sceneSettled(page);
+    sockets = await open(page, [camera("uncalibrated")]);
   });
 
   test("四个旋转档位，返回总览回到默认机位", async ({ page }) => {
@@ -118,7 +106,7 @@ test.describe("相机控件", () => {
     await button(page, "返回总览").click();
     await transition(page);
 
-    await expect(scene(page)).toHaveScreenshot("scene-ready.png");
+    await expect(scene(page)).toHaveScreenshot("scene-overview.png");
   });
 
   test("缩放限定为总览的 1～4 倍", async ({ page }) => {

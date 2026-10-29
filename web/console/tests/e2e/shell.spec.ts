@@ -93,6 +93,18 @@ for (const mode of ["auto", "dark", "light"] as const) {
   });
 }
 
+test.describe("未选择过主题", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("默认亮色，夜间也不切换（D-044）", async ({ page }) => {
+    await page.clock.pauseAt(new Date("2026-10-27T14:00:00Z")); // 上海 22:00
+    await signedIn(page);
+    await page.goto("/");
+
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+});
+
 test("自动档在 18:00 由亮色切换为暗色，无需刷新", async ({ page }) => {
   await page.clock.pauseAt(new Date("2026-10-27T09:59:00Z")); // 上海 17:59:00
   await presetTheme(page, "auto");

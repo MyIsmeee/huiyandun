@@ -18,11 +18,11 @@ import { CameraControls } from "./CameraControls";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
-import { FloorPlan2D } from "./FloorPlan2D";
-import { isEmpty, isoView, OVERVIEW, planView, type Size, type View, zoneAnchor, zoneLabel } from "./layout";
+import { isoView, OVERVIEW, planView, type Size, type View } from "./layout";
+import { Scene2D } from "./Scene2D";
 
 // 降级说明须简短：1366 宽下与 KPI 底板同处顶部一行（V-P3）
-const DEGRADED = { text: "2D 视图 · 不支持 WebGL2", title: "浏览器不支持 WebGL2，已降级为 2D 平面视图（C-FE-08）" };
+const DEGRADED = { text: "2D 视图 · 不支持 WebGL2", title: "浏览器不支持 WebGL2，已降级为 2D 俯视视图（C-FE-08）" };
 
 // three 体积较大，单独分包按需加载，不拖慢登录页与首屏（C-FE-04）
 const Scene3D = lazy(() => import("./Scene3D"));
@@ -92,10 +92,9 @@ export function SceneViewport({ site }: { site: Site }) {
           </Suspense>
         </Boundary>
       )}
-      {plan && <FloorPlan2D site={site} view={plan} />}
+      {plan && <Scene2D site={site} view={plan} />}
       {view && (state === "ready" || state === "2d") && (
         <>
-          <ZoneLabels zones={site.zones} view={view} />
           <DeviceTags cameras={cameras} view={view} />
           <DevicePicker cameras={cameras} view={view} />
         </>
@@ -116,24 +115,8 @@ export function SceneViewport({ site }: { site: Site }) {
           </button>
         </Note>
       )}
-      {state !== "loading" && state !== "error" && isEmpty(site) && <Note>平面图中没有墙体与区域</Note>}
     </div>
   );
-}
-
-function ZoneLabels({ zones, view }: { zones: Site["zones"]; view: View }) {
-  return zones.map((zone) => {
-    const [left, top] = view.project(zoneAnchor(zone.polygon));
-    return (
-      <span
-        key={zone.id}
-        style={{ left, top }}
-        className="pointer-events-none absolute -translate-1/2 rounded-full border border-line bg-panel/80 px-2 py-0.5 text-xs whitespace-nowrap text-fg-2"
-      >
-        {zoneLabel(zone)}
-      </span>
-    );
-  });
 }
 
 function Note({ children }: { children: ReactNode }) {

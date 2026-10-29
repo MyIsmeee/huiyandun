@@ -4,8 +4,8 @@ import type { Site } from "../../../src/lib/api";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
-import { FloorPlan2D } from "../../../src/scene/FloorPlan2D";
 import { planView } from "../../../src/scene/layout";
+import { Scene2D } from "../../../src/scene/Scene2D";
 import "../../../src/theme/store";
 import "../../../src/theme/theme.css";
 
@@ -30,7 +30,7 @@ const SITE: Site = {
 const PLAN_SIZE = { width: 640, height: 400 };
 const plan = (site: Site) => (
   <div className="relative" style={PLAN_SIZE}>
-    <FloorPlan2D site={site} view={planView(site, PLAN_SIZE)} />
+    <Scene2D site={site} view={planView(site, PLAN_SIZE)} />
   </div>
 );
 
@@ -67,9 +67,8 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     loading: <KpiTile label="活跃告警" unit="条" data={{ status: "loading" }} />,
     stale: <KpiTile label="活跃告警" unit="条" data={{ status: "stale", value: 3, delta: -1 }} />,
   },
-  FloorPlan2D: {
-    normal: plan(SITE),
-    empty: plan({ ...SITE, walls: [], zones: [] }),
+  Scene2D: {
+    empty: plan(SITE),
   },
   LiveVideo: {
     normal: video(<LiveVideoView status={{ kind: "playing", stream: STREAM }} />),

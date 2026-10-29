@@ -13,7 +13,7 @@ export function themeAt(date: Date): Theme {
 const resolve = (mode: ThemeMode): Theme => (mode === "auto" ? themeAt(new Date()) : mode);
 
 interface ThemeState {
-  /** 用户选择的档位，默认自动；手动选择后记住 */
+  /** 用户选择的档位，默认亮色；选择后记住 */
   mode: ThemeMode;
   /** 当前生效的主题 */
   theme: Theme;
@@ -26,8 +26,8 @@ interface ThemeState {
 export const useTheme = create<ThemeState>()(
   persist(
     (set) => ({
-      mode: "auto",
-      theme: resolve("auto"),
+      mode: "light",
+      theme: "light",
       reducedMotion: false,
       setMode: (mode) => set({ mode, theme: resolve(mode) }),
       setReducedMotion: (reducedMotion) => set({ reducedMotion }),

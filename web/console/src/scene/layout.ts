@@ -5,9 +5,10 @@ export type Vec3 = readonly [number, number, number];
 export type Size = { width: number; height: number };
 type Point = readonly [number, number];
 
-/** 墙体实体高度（§5.1 L1）；近侧墙体半透明，不遮挡室内 */
+/** 总览取景计入的高度：墙体默认高度（设计 §3.2），站点边缘的立面不被裁出画面 */
 export const WALL_HEIGHT_M = 2.8;
-export const WALL_THICKNESS_M = 0.2;
+/** 地面与栅格的边长，以站点中心为中心：远超任何机位的可见范围，看不到边缘，即无限延伸的底面（§5.1 L0） */
+export const GROUND_M = 1000;
 /** 留出左上角 KPI 底板（§4.1 B 区）、底部断线提示（V-U3）与四周边距，单位像素 */
 const INSET = { top: 112, right: 24, bottom: 56, left: 24 };
 
@@ -54,15 +55,13 @@ export interface View {
 export interface IsoView extends View {
   target: Vec3;
   position: Vec3;
-  /** 由站点指向相机的水平单位方向（平面图坐标 x, y），用于判断近侧墙体 */
-  toCamera: Point;
   /** 相机可见深度范围，单位米 */
   near: number;
   far: number;
 }
 
 export interface PlanView extends View {
-  /** SVG 变换：平面图坐标 → 视口内像素坐标，与 project 一致 */
+  /** SVG 变换：平面坐标 → 视口内像素坐标，与 project 一致 */
   transform: string;
 }
 
@@ -89,12 +88,10 @@ export function isoView(site: Site, size: Size, pose: Pose = OVERVIEW): IsoView 
   // 包围盒各点沿视线方向距中心不超过半条对角线：相机退到一条对角线外，可见深度取其 2 倍
   const distance = Math.hypot(site.width_m, WALL_HEIGHT_M, site.height_m) + 10;
   const position = along(target, back, distance);
-  const horizontal = Math.hypot(back[0], back[2]);
   return {
     zoom,
     target,
     position,
-    toCamera: [back[0] / horizontal, back[2] / horizontal],
     near: CAMERA_NEAR_M,
     far: distance * 2,
     panLimit: [spanR / 2, spanU / 2],
@@ -105,7 +102,7 @@ export function isoView(site: Site, size: Size, pose: Pose = OVERVIEW): IsoView 
   };
 }
 
-/** 2D 俯视平面图（C-FE-08 降级）：总览时 x 向右、y 向下，等比缩放、完整落在可用区域内并居中 */
+/** 2D 俯视视图（C-FE-08 降级）：总览时 x 向右、y 向下，等比缩放、完整落在可用区域内并居中 */
 export function planView(site: Site, size: Size, pose: Pose = OVERVIEW): PlanView {
   const [c, s] = [Math.cos(pose.azimuth), Math.sin(pose.azimuth)];
   const [w, h] = [site.width_m, site.height_m];
@@ -125,19 +122,4 @@ export function planView(site: Site, size: Size, pose: Pose = OVERVIEW): PlanVie
     },
     transform: `translate(${cx} ${cy}) rotate(${(pose.azimuth * 180) / Math.PI}) scale(${zoom}) translate(${-w / 2} ${-h / 2})`,
   };
-}
-
-/** 区域名称标注位置：多边形顶点均值 */
-export function zoneAnchor(polygon: number[][]): Vec3 {
-  let [x, y] = [0, 0];
-  for (const [px = 0, py = 0] of polygon) [x, y] = [x + px, y + py];
-  return [x / polygon.length, 0, y / polygon.length];
-}
-
-export function zoneLabel(zone: Site["zones"][number]): string {
-  return zone.no_climb ? `${zone.name} · 禁止攀爬` : zone.name;
-}
-
-export function isEmpty(site: Site): boolean {
-  return site.walls.length === 0 && site.zones.length === 0;
 }
