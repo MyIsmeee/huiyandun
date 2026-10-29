@@ -82,7 +82,15 @@ def test_allows_internal_and_example_url(tmp_path: Path, url: str) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["uv.lock", "pnpm-lock.yaml", "README.md", ".github/workflows/ci.yml", "svc/tests/test_a.py"],
+    [
+        "uv.lock",
+        "pnpm-lock.yaml",
+        "README.md",
+        ".github/workflows/ci.yml",
+        "svc/tests/test_a.py",
+        "tools/dev/export_efficientvit_seg.py",
+        "tools/dev/export_efficientvit_seg.py.lock",
+    ],
 )
 def test_skips_excluded_files(tmp_path: Path, name: str) -> None:
     path = tmp_path / name

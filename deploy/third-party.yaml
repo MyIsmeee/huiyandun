@@ -160,3 +160,22 @@ bundled:
       - { name: Zstandard, version: 1.5.7, license: BSD-3-Clause }  # BSD-3-Clause 与 GPL-2.0 双许可，选用 BSD
       - { name: libxcb, version: 1.17.0, license: X11 }
       - { name: libXau, version: 1.0.9, license: X11 }
+
+# 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
+# 依赖由 tools/dev/export_efficientvit_seg.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
+build_tools:
+  - name: PyTorch（CPU）
+    version: 2.8.0+cpu
+    license: BSD-3-Clause
+    purpose: EfficientViT-Seg 权重转为 ONNX（REUSE-25）
+    owner: MyIsmeee
+  - name: ONNX
+    version: 1.23.2
+    license: Apache-2.0
+    purpose: PyTorch 导出 ONNX 所需
+    owner: MyIsmeee
+  - name: EfficientViT 模型代码
+    version: de7d7733cc0329f391b33f1f459271562ec27bd5  # git 提交，导出时校验
+    license: Apache-2.0
+    purpose: 构建 EfficientViT-Seg 网络结构以加载权重；导出时拉取，不入库
+    owner: MyIsmeee

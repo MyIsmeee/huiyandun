@@ -27,3 +27,17 @@ models:
     card: cards/rfdetr-s.md
     purpose: vision-engine 车辆检测，供实时感知大屏（REUSE-22）
     owner: MyIsmeee
+  - name: efficientvit-seg-l1
+    version: efficientvit-seg-l1-ade20k@cf3ccaf9+hyd.1
+    task: segmentation  # ADE20K 150 类；vision-engine 只取地面、立面、物体与植被
+    file: efficientvit_seg_l1_ade20k_512.onnx
+    # 本仓库转换所得：导出可复现（固定上游代码、PyTorch 与依赖锁定，两次导出哈希一致）
+    sha256: 4c2d9b214f3c04a39af89cacc6a503eb282db6c16f54dd00b6e0daccecfaf050
+    # 上游原始 PyTorch 权重（Hugging Face，固定到提交），为校验依据；构建期由 convert 转为 ONNX
+    source: https://huggingface.co/han-cai/efficientvit-seg/resolve/cf3ccaf9cbaf670a2cb283612773546824ca0aa1/efficientvit_seg_l1_ade20k.pt
+    source_sha256: ec317c8b59682755642f0ceba3d0557047aa4b2d8377d607f0bfe1eb657ac330
+    convert: tools/dev/export_efficientvit_seg.py
+    license: Apache-2.0
+    card: cards/efficientvit-seg-l1.md
+    purpose: vision-engine 场景语义分割，供实时感知大屏重建环境（REUSE-25）
+    owner: MyIsmeee
