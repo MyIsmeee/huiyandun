@@ -4,7 +4,7 @@
       uv run --package vision-engine python tools/dev/record_scene.py <视频> <秒> <输出.npz>
 
 取视频中指定时刻的一帧，经与检测链路相同的分割与类别归并，保存 64×64 的渲染类别编号、类别名与
-画面尺寸。只含类别编号，不含图像；人员与车辆不在渲染类别中，记为未识别（G-04）。
+画面尺寸，以及录制时的 ADE20K 映射表。只含类别编号，不含图像；人员与车辆不在渲染类别中，记为未识别（G-04）。
 映射表或阈值变化后须重新录制。
 """
 
@@ -16,7 +16,7 @@ import numpy as np
 
 from py_common.config import load_config
 from vision_engine.runtime import VisionConfig, create_session
-from vision_engine.scene import CLASSES, Segmenter
+from vision_engine.scene import CLASSES, LUT, Segmenter
 
 
 def main() -> None:
@@ -30,7 +30,11 @@ def main() -> None:
     assert ok, f"{source} 在 {second} s 处无帧"
     labels = segmenter(frame)
     np.savez_compressed(
-        output, labels=labels, classes=np.array(CLASSES), shape=np.array(frame.shape[:2])
+        output,
+        labels=labels,
+        classes=np.array(CLASSES),
+        lut=LUT,
+        shape=np.array(frame.shape[:2]),
     )
     names = ["未识别", *CLASSES]
     counts = Counter(labels.ravel().tolist()).most_common()

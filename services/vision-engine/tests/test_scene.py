@@ -17,6 +17,7 @@ from vision_engine.geometry import GroundMapping
 from vision_engine.scene import (
     CLASSES,
     GRID,
+    LUT,
     MAX_POLYGONS,
     ScenePerception,
     Segmenter,
@@ -56,7 +57,9 @@ def blank(value: int = 100) -> np.ndarray:
 
 def snapshot(name: str) -> tuple[np.ndarray, tuple[int, int]]:
     data = np.load(SCENES / f"{name}.npz")
+    # 类别名或 ADE20K 编号映射任一变化，录制结果即失效
     assert data["classes"].tolist() == CLASSES, "映射表已变化，须重新录制"
+    assert (data["lut"] == LUT).all(), "映射表已变化，须重新录制"
     return data["labels"], tuple(data["shape"].tolist())
 
 
