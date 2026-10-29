@@ -63,6 +63,14 @@ export const PALETTE: Record<Theme, Palette> = {
   },
 };
 
+/**
+ * 渐变中一层的不透明度，k 为渐变进度 0～1：当前层由 0 淡入到 target；
+ * 被取代的层从被取代时的不透明度 from 淡出到 0，连续到达多帧时正在淡入的层不先跳到不透明再淡出
+ */
+export function layerOpacity(target: number, k: number, from: number | null): number {
+  return from === null ? target * k : from * (1 - k);
+}
+
 export function isStale(frame: SceneFrame, now: number): boolean {
   return Date.parse(frame.ts) < now - STALE_MS;
 }
