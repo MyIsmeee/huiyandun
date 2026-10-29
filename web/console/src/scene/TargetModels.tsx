@@ -2,8 +2,9 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import {
   BackSide,
-  BufferAttribute,
-  BufferGeometry,
+  Box3,
+  type BufferGeometry,
+  type Camera as ViewCamera,
   CircleGeometry,
   Color,
   CylinderGeometry,
@@ -13,11 +14,13 @@ import {
   SphereGeometry,
   Vector3,
 } from "three";
-import { TRAIL_MS, type TargetClass, useLive } from "../store/live";
+import { type TargetClass, useLive } from "../store/live";
+import { useSelection } from "../store/selection";
 import { useMotion } from "./DeviceMarkers";
 import { type Camera, STATUS } from "./devices";
 import { facing, type Figure, figure, HEAD_R } from "./pose";
-import { LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, visibleTargets } from "./targets";
+import { marker } from "./TargetMarker";
+import { ACCENT, LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, visibleTargets } from "./targets";
 import { useVehicleModels, type Vehicle } from "./vehicles";
 
 /** 每个图层的实例上限：C-FE-04 的 200 个目标，固定容量免得目标数变化时重建网格 */
@@ -31,8 +34,12 @@ const OUTLINE_M = 0.02;
 const UP = new Vector3(0, 1, 0);
 /** 转向角速度上限（弧度每秒）：车辆掉头约 1 s 完成，不瞬间翻转 */
 const TURN_RATE = 3;
-/** 轨迹顶点容量：每个目标近 10 s、每秒 5 次实测（FR-101）的连线，每段 2 个顶点 */
-const TRAIL_VERTICES = CAPACITY * 2 * (TRAIL_MS / 1000) * 5;
+/** 轨迹虚线点（§5.1 L5）：沿近 10 s 的实测轨迹每 0.4 m 一点，贴地；容量按每个目标 40 点 */
+const DOT_SPACING_M = 0.4;
+const DOT_CAPACITY = CAPACITY * 40;
+const DOT = new CircleGeometry(0.07, 12).rotateX(-Math.PI / 2);
+/** 括框在模型投影范围外留出的像素 */
+const MARKER_PAD_PX = 6;
 /** 轨迹重建的最短间隔：200 个目标每秒约 1000 次推送，轨迹只需跟上实测频率（SC-10） */
 const TRAIL_REBUILD_MS = 200;
 
@@ -87,23 +94,18 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
   const rings = useRef<InstancedMesh>(null);
   const headings = useRef(new Map<string, number>());
   const last = useRef(0);
-  // 轨迹写入预分配的缓冲区：推送频繁时不重建几何体，也不触发 React 重渲染
-  const trails = useMemo(() => {
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", new BufferAttribute(new Float32Array(TRAIL_VERTICES * 3), 3));
-    geometry.setAttribute("color", new BufferAttribute(new Float32Array(TRAIL_VERTICES * 3), 3));
-    geometry.setDrawRange(0, 0);
-    return geometry;
-  }, []);
+  // 轨迹点写入预分配的实例：推送频繁时不重建几何体，也不触发 React 重渲染
+  const dots = useRef<InstancedMesh>(null);
   const trailSource = useRef<readonly [object, object] | null>(null);
   const trailBuilt = useRef(0);
   const motion = useMotion();
   const invalidate = useThree((s) => s.invalidate);
   // 新推送到达时请求一帧；逐帧插值由 useFrame 自行续帧
   useEffect(() => useLive.subscribe(() => invalidate()), [invalidate]);
+  useEffect(() => useSelection.subscribe(() => invalidate()), [invalidate]);
   useEffect(() => invalidate(), [motion, cameras, invalidate]);
 
-  useFrame(() => {
+  useFrame(({ camera, size }) => {
     // 只在仍有运动时续帧（见 pending）：静止时不占用 GPU，也不构成常驻动画（V-A3）
     const now = Date.now();
     // 停绘一段时间后恢复时，上一帧时刻已久：限制步长，转向不跳变
@@ -115,7 +117,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     const source = trailSource.current;
     const stale = source?.[0] !== targets || source?.[1] !== behaviors;
     if (stale && (!motion || now - trailBuilt.current >= TRAIL_REBUILD_MS)) {
-      writeTrails(trails, list);
+      writeDots(dots.current, list);
       trailSource.current = [targets, behaviors];
       trailBuilt.current = now;
     }
@@ -161,6 +163,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       if (head) sphere(new Vector3(x + head[0], head[1], y + head[2]), HEAD_R, kind, color);
     };
     const poses = new Map(cameras.map((c) => [c.id, c.pose]));
+    const selected = useSelection.getState().targetKey;
+    let bounds: Box3 | null = null;
     let discCount = 0;
     let ringCount = 0;
     const seen = new Set<string>();
@@ -183,6 +187,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       if (object_class === "person") {
         const f = pose && figure(target.keypoints, target.bbox, facing(pose, x, y));
         if (f) drawFigure(f, x, y, kind, base);
+        if (f && target.key === selected) bounds = figureBounds(f, x, y);
       } else {
         o.position.set(x, 0, y);
         o.rotation.set(0, angle, 0);
@@ -190,6 +195,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         o.updateMatrix();
         put(`${object_class}/${kind}`, base);
         if (kind === "solid") put(`${object_class}/outline`);
+        if (target.key === selected) bounds = vehicles[object_class].geometry.boundingBox?.clone().applyMatrix4(o.matrix) ?? null;
       }
       o.position.set(x, 0, y);
       o.rotation.set(0, 0, 0);
@@ -209,6 +215,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     for (const { key } of layers) finish(meshes.current[key], counts[key] ?? 0);
     finish(discs.current, discCount);
     finish(rings.current, ringCount);
+    placeMarker(bounds, camera, size);
     if (motion && pending) invalidate();
   });
 
@@ -237,10 +244,9 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       <instancedMesh ref={rings} args={[RING, undefined, CAPACITY]} frustumCulled={false}>
         <meshBasicMaterial color={STATUS.neutral} transparent opacity={0.6} depthWrite={false} />
       </instancedMesh>
-      {/* 轨迹：近 10 s 的实测位置连线（V-A5），合并为一组线段，绘制次数与目标数无关（V-P1） */}
-      <lineSegments geometry={trails} frustumCulled={false}>
-        <lineBasicMaterial vertexColors />
-      </lineSegments>
+      <instancedMesh ref={dots} args={[DOT, undefined, DOT_CAPACITY]} frustumCulled={false}>
+        <meshBasicMaterial color={ACCENT} depthWrite={false} />
+      </instancedMesh>
     </>
   );
 }
@@ -266,27 +272,57 @@ function finish(mesh: InstancedMesh | null | undefined, written: number) {
   }
 }
 
-/** 把各目标近 10 s 的实测位置连线写入预分配缓冲区，只上传写入的部分；超出容量的部分不画 */
-function writeTrails(geometry: BufferGeometry, list: Visible[]) {
-  const position = geometry.getAttribute("position") as BufferAttribute;
-  const color = geometry.getAttribute("color") as BufferAttribute;
-  let v = 0;
-  for (const target of list) {
-    const { r, g, b } = new Color(target.alert ? STATUS.physical : STATUS.neutral);
-    for (let i = 1; i < target.trail.length && v + 2 <= TRAIL_VERTICES; i += 1) {
-      const prev = target.trail[i - 1];
-      const cur = target.trail[i];
-      if (!prev || !cur) continue;
-      position.setXYZ(v, prev[0], 0.03, prev[1]);
-      color.setXYZ(v++, r, g, b);
-      position.setXYZ(v, cur[0], 0.03, cur[1]);
-      color.setXYZ(v++, r, g, b);
+/** 把各目标近 10 s 的实测轨迹按 0.4 m 间隔写成虚线点（V-A5），合并为一次绘制、与目标数无关（V-P1）；超出容量的不画 */
+function writeDots(mesh: InstancedMesh | null, list: Visible[]) {
+  if (!mesh) return;
+  const o = new Object3D();
+  let n = 0;
+  for (const { trail } of list) {
+    let d = 0; // 下一个点距当前段起点的距离，跨段延续，点距均匀
+    for (let i = 1; i < trail.length; i += 1) {
+      const [a, b] = [trail[i - 1], trail[i]];
+      if (!a || !b) continue;
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      for (; d < length; d += DOT_SPACING_M) {
+        if (n >= DOT_CAPACITY) continue;
+        const k = d / length;
+        o.position.set(a[0] + (b[0] - a[0]) * k, 0.06, a[1] + (b[1] - a[1]) * k);
+        o.updateMatrix();
+        mesh.setMatrixAt(n++, o.matrix);
+      }
+      d -= length;
     }
   }
-  geometry.setDrawRange(0, v);
-  for (const attribute of [position, color]) {
-    attribute.clearUpdateRanges();
-    attribute.addUpdateRange(0, v * 3);
-    attribute.needsUpdate = true;
+  finish(mesh, n);
+}
+
+/** 人形的包围盒：骨段两端与头顶 */
+function figureBounds({ bones, head }: Figure, x: number, y: number): Box3 {
+  const box = new Box3();
+  for (const { from, to } of bones) {
+    box.expandByPoint(new Vector3(x + from[0], from[1], y + from[2]));
+    box.expandByPoint(new Vector3(x + to[0], to[1], y + to[2]));
   }
+  if (head) box.expandByPoint(new Vector3(x + head[0], head[1] + HEAD_R, y + head[2]));
+  return box;
+}
+
+/** 选中目标的包围盒投影到屏幕，写入括框的位置与尺寸；选中目标不在场景中时隐藏（§5.1 L5） */
+function placeMarker(box: Box3 | null, camera: ViewCamera, size: { width: number; height: number }) {
+  const el = marker.el;
+  if (!el) return;
+  el.hidden = box === null || box.isEmpty();
+  if (el.hidden || !box) return;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const v = new Vector3();
+  for (let i = 0; i < 8; i += 1) {
+    v.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(camera);
+    xs.push(((v.x + 1) / 2) * size.width);
+    ys.push(((1 - v.y) / 2) * size.height);
+  }
+  const [left, top] = [Math.min(...xs) - MARKER_PAD_PX, Math.min(...ys) - MARKER_PAD_PX];
+  el.style.transform = `translate(${left}px, ${top}px)`;
+  el.style.setProperty("--w", `${Math.max(...xs) + MARKER_PAD_PX - left}px`);
+  el.style.setProperty("--h", `${Math.max(...ys) + MARKER_PAD_PX - top}px`);
 }
