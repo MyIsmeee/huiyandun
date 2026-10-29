@@ -33,8 +33,8 @@ export async function expectNoOverflow(page: Page): Promise<void> {
 }
 
 /** 主题档位；未调用时为 playwright.config.ts 预置的暗色 */
-export async function presetTheme(page: Page, mode: "auto" | "dark" | "light"): Promise<void> {
-  const state = JSON.stringify({ state: { mode, reducedMotion: false }, version: 0 });
+export async function presetTheme(page: Page, mode: "auto" | "dark" | "light", reducedMotion = false): Promise<void> {
+  const state = JSON.stringify({ state: { mode, reducedMotion }, version: 0 });
   await page.addInitScript((value) => localStorage.setItem("hyd-theme", value), state);
 }
 
@@ -66,7 +66,7 @@ export async function sceneSettled(page: Page, state: "ready" | "2d" | "error" =
   }).toPass({ intervals: [50] });
 }
 
-/** 位于站点中部的摄像头，状态由参数给定（设备与人员化身截图共用） */
+/** 位于站点中部的摄像头，状态由参数给定（设备与目标模型截图共用） */
 export const camera = (state: string, id = "cam-01") => ({
   id,
   type: "camera",
@@ -77,7 +77,7 @@ export const camera = (state: string, id = "cam-01") => ({
   camera: {
     stream: id,
     pose: { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90, range_m: 6 },
-    // 4 组标定点即为已标定（FR-902），人员化身才会投放；外观状态由 state 给定
+    // 4 组标定点即为已标定（FR-902），目标模型才会投放；外观状态由 state 给定
     calibration: [[312, 540, 14, 12], [980, 552, 18, 12], [450, 300, 14, 16], [870, 310, 18, 16]],
     homography: null,
     reproj_error_m: 0.3,

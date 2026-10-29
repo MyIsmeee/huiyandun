@@ -6,17 +6,17 @@ type Frame = components["schemas"]["WsFrame"];
 const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", ts: "2026-10-27T06:30:00Z" };
 const frame = (channel: Frame["channel"], data: object) => ({ channel, data }) as unknown as Frame;
 const track = (x: number, track_id = 1) =>
-  frame("tracks", { ...BASE, camera_id: "cam-01", track_id, x, y: 5, uncertainty_m: 0.4 });
-const person = (track_id = 1) => useLive.getState().people[`cam-01/${track_id}`];
+  frame("tracks", { ...BASE, camera_id: "cam-01", track_id, object_class: "car", x, y: 5, uncertainty_m: 0.4, heading_deg: 90 });
+const person = (track_id = 1) => useLive.getState().targets[`cam-01/${track_id}`];
 
 beforeEach(() => useLive.setState(useLive.getInitialState()));
 
 describe("tracks", () => {
-  it("收到位置即投放化身，后续位置更新坐标并追加轨迹", () => {
+  it("收到位置即投放目标（含类别与朝向），后续位置更新坐标并追加轨迹", () => {
     receive(track(1), 0);
     receive(track(2), 500);
 
-    expect(person()).toMatchObject({ camera_id: "cam-01", track_id: 1, x: 2, y: 5, uncertainty_m: 0.4 });
+    expect(person()).toMatchObject({ camera_id: "cam-01", track_id: 1, object_class: "car", x: 2, y: 5, uncertainty_m: 0.4, heading_deg: 90 });
     expect(person()?.trail).toEqual([
       [1, 5, 0],
       [2, 5, 500],

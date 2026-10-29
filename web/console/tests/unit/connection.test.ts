@@ -62,15 +62,15 @@ describe("connect", () => {
     latest().onopen?.();
 
     latest().onmessage?.({ data: TRACK });
-    expect(Object.keys(useLive.getState().people)).toEqual(["cam-01/1"]);
+    expect(Object.keys(useLive.getState().targets)).toEqual(["cam-01/1"]);
     latest().onclose?.({ code: 1006 });
     vi.advanceTimersByTime(TRACK_TTL_MS * 2);
-    expect(Object.keys(useLive.getState().people)).toEqual(["cam-01/1"]);
+    expect(Object.keys(useLive.getState().targets)).toEqual(["cam-01/1"]);
 
     vi.advanceTimersByTime(1000); // 重连
     latest().onopen?.();
     vi.advanceTimersByTime(1000);
-    expect(useLive.getState().people).toEqual({});
+    expect(useLive.getState().targets).toEqual({});
   });
 
   it("首次连接失败后不再视为连接中", () => {
@@ -139,7 +139,7 @@ describe("connect", () => {
     const stop = connect(vi.fn());
     latest().onopen?.();
     latest().onmessage?.({ data: TRACK });
-    expect(useLive.getState().people).not.toEqual({});
+    expect(useLive.getState().targets).not.toEqual({});
 
     stop();
 

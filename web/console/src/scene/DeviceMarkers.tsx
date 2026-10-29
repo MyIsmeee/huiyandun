@@ -12,9 +12,12 @@ import {
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { useConnection } from "../store/connection";
+import { useShallow } from "zustand/react/shallow";
+import { useLive } from "../store/live";
 import { useTheme } from "../theme/store";
 import { type Camera, deviceLook, type Look, STATUS } from "./devices";
 import { type Instance, Instanced } from "./Instanced";
+import { coneOpacity, detectingByCamera } from "./targets";
 
 /**
  * 摄像头机头：圆角机身 + 镜头，朝 +x、略向下俯（§5.1 L2 圆角低多边形，程序化生成）。
@@ -46,6 +49,8 @@ const turn = (yawDeg: number) => (-yawDeg * Math.PI) / 180;
  */
 export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
   const placed = cameras.map((camera) => ({ camera, look: deviceLook(camera.state) }));
+  // 每次推送只统计一次；计数不变时不重渲染
+  const detecting = useLive(useShallow((s) => detectingByCamera(s.targets)));
   const solid = placed.filter(({ look }) => look.fill && look.opacity === 1);
   const faded = placed.filter(({ look }) => look.fill && look.opacity < 1);
   // 立杆随机身变色会使状态色块面积失真：立杆始终为中性色（V-S1）
@@ -60,7 +65,7 @@ export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
       <Instanced geometry={HEAD} items={solid.map(head)} />
       <Instanced geometry={HEAD} items={faded.map(head)} opacity={0.5} />
       {placed.map(({ camera, look }) => (
-        <Extras key={camera.id} camera={camera} look={look} />
+        <Extras key={camera.id} camera={camera} look={look} detecting={detecting[camera.id] ?? 0} />
       ))}
     </>
   );
@@ -75,7 +80,7 @@ const head = ({ camera: { pose }, look }: Item): Instance => ({
 });
 
 /** 单台设备的轮廓、轮廓环与视场 */
-function Extras({ camera: { pose, severe }, look }: Item) {
+function Extras({ camera: { pose, severe }, look, detecting }: Item & { detecting: number }) {
   const outline = useRef<LineSegments>(null);
   useLayoutEffect(() => {
     outline.current?.computeLineDistances(); // 虚线材质需要逐段距离
@@ -97,7 +102,7 @@ function Extras({ camera: { pose, severe }, look }: Item) {
           <meshBasicMaterial color={look.ring} side={DoubleSide} />
         </mesh>
       )}
-      {look.cone && <Cone pose={pose} cone={look.cone} severe={severe} />}
+      {look.cone && <Cone detecting={detecting} pose={pose} cone={look.cone} severe={severe} />}
     </>
   );
 }
@@ -110,28 +115,29 @@ const onReduceChange = (notify: () => void) => {
 };
 
 /** 动效是否允许：断线、降低动效开关或系统 prefers-reduced-motion 任一生效即停止，且随其变化（V-U3、V-A4） */
-function useMotion(): boolean {
+export function useMotion(): boolean {
   const live = useConnection((s) => s.open || s.connecting);
   const user = useTheme((s) => s.reducedMotion);
   const system = useSyncExternalStore(onReduceChange, () => matchMedia(REDUCE).matches);
   return live && !user && !system;
 }
 
-/** 视场：地面扇形，半径为视距、张角为水平视场角（§5.1 L3） */
-function Cone(props: { pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; severe: boolean }) {
-  const { pose, cone, severe } = props;
+/** 视场：地面扇形，半径为视距、张角为水平视场角；常态视场在该摄像头有检出目标时提亮（§5.1 L3） */
+function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; severe: boolean }) {
+  const { detecting, pose, cone, severe } = props;
   const material = useRef<MeshBasicMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
+  const opacity = cone.color === STATUS.neutral ? coneOpacity(cone.opacity, detecting) : cone.opacity;
   // 只有 critical / high 告警允许呼吸（V-A1）
   const breathing = useMotion() && cone.breathe && severe;
   useEffect(() => {
-    if (material.current) material.current.opacity = cone.opacity;
+    if (material.current) material.current.opacity = opacity;
     invalidate();
-  }, [breathing, cone.opacity, invalidate]);
+  }, [breathing, opacity, invalidate]);
   useFrame(({ clock }) => {
     if (!breathing || !material.current) return;
     // 1 Hz 呼吸，不超过 2 Hz（V-A1）
-    material.current.opacity = cone.opacity * (0.7 + 0.3 * Math.sin(2 * Math.PI * clock.elapsedTime));
+    material.current.opacity = opacity * (0.7 + 0.3 * Math.sin(2 * Math.PI * clock.elapsedTime));
     invalidate();
   });
   const hfov = (pose.hfov_deg * Math.PI) / 180;
@@ -141,7 +147,7 @@ function Cone(props: { pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; se
     // 绕 x 轴转 90°：平面 (x, y) 落到地面 (x, 0, y)，扇形角度与 yaw 同向
     <mesh rotation-x={Math.PI / 2} position={[pose.x, 0.015, pose.y]}>
       <circleGeometry args={sector} />
-      <meshBasicMaterial ref={material} color={cone.color} transparent opacity={cone.opacity} depthWrite={false} side={DoubleSide} />
+      <meshBasicMaterial ref={material} color={cone.color} transparent opacity={opacity} depthWrite={false} side={DoubleSide} />
     </mesh>
   );
 }

@@ -1,14 +1,16 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, open, zoomIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, open, presetTheme, zoomIn } from "./helpers";
 
-// HYD-UIX-004 §8 PersonAvatar：正常 / 告警 / 高误差；V-U4 事件卡
+// HYD-UIX-004 §8 TargetModels：人员 / 各类车辆 / 告警 / 高误差；V-U4 事件卡
 const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", ts: "2026-10-27T06:30:00Z" };
+/** track 1.1 的新增字段；人员默认无朝向（静止或起步） */
+const TARGET = { object_class: "person", heading_deg: null, speed_mps: null, bbox: [0.4, 0.3, 0.5, 0.8], keypoints: null };
 const scene = (page: Page) => page.getByRole("region", { name: "场景" });
 
 /** 推送一个人员 2 s 内的 5 个位置（每 500 ms 一次，FR-102），留下一段轨迹 */
 async function walk(page: Page, ws: WebSocketRoute | undefined, uncertainty_m: number) {
   for (let i = 0; i < 5; i += 1) {
-    const track = { ...BASE, camera_id: "cam-01", track_id: 7, x: 17 + i * 0.6, y: 12 - i * 0.3, uncertainty_m };
+    const track = { ...BASE, ...TARGET, camera_id: "cam-01", track_id: 7, x: 17 + i * 0.6, y: 12 - i * 0.3, uncertainty_m };
     ws?.send(JSON.stringify({ channel: "tracks", data: track }));
     await page.clock.runFor(500);
   }
@@ -27,11 +29,18 @@ const fall = {
 
 test.beforeEach(({ page }) => freezeClock(page));
 
+/**
+ * 截图用例一律开启降低动效：目标直接停在最新实测位置（V-A4）。暂停的时钟下每次推进会连续绘制全部插值帧，
+ * 软件渲染（SwiftShader）并行运行时来不及完成截图；两次实测之间的插值与转向由单元测试 scene-targets 覆盖
+ */
+const still = (page: Page) => presetTheme(page, "dark", true);
+
 for (const [name, uncertainty_m] of [
   ["normal", 0.4],
   ["uncertain", 1.5],
 ] as const) {
   test(`人员化身：${name}`, async ({ page }) => {
+    await still(page);
     const [ws] = await open(page, [camera("normal")]);
     await zoomIn(page);
     await walk(page, ws, uncertainty_m);
@@ -41,6 +50,7 @@ for (const [name, uncertainty_m] of [
 }
 
 test("跌倒：化身转物理告警，摄像头旁弹出事件卡（V-U4）", async ({ page }) => {
+  await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await walk(page, ws, 0.4);
   ws?.send(JSON.stringify({ channel: "alerts", data: fall }));
@@ -57,6 +67,7 @@ test("跌倒：化身转物理告警，摄像头旁弹出事件卡（V-U4）", a
 });
 
 test("2 s 无位置更新即移除化身（V-U4）", async ({ page }) => {
+  await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await zoomIn(page);
   await walk(page, ws, 0.4);
@@ -69,6 +80,7 @@ test("2 s 无位置更新即移除化身（V-U4）", async ({ page }) => {
 });
 
 test("断线：化身与事件卡保留，场景降饱和并提示数据非实时（V-U3、V-U4）", async ({ page }) => {
+  await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await zoomIn(page);
   await walk(page, ws, 0.4);
@@ -94,9 +106,10 @@ test("断线：化身与事件卡保留，场景降饱和并提示数据非实�
 });
 
 test("放大后人员从视口外走入，化身可见（FR-102）", async ({ page }) => {
+  await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await zoomIn(page);
-  const at = (x: number) => ({ ...BASE, camera_id: "cam-01", track_id: 7, x, y: 12, uncertainty_m: 0.4 });
+  const at = (x: number) => ({ ...BASE, ...TARGET, camera_id: "cam-01", track_id: 7, x, y: 12, uncertainty_m: 0.4 });
   // 首次出现在视口外：three 按首次位置计算实例的包围球，之后若不重算，走入视口也会被剔除
   ws?.send(JSON.stringify({ channel: "tracks", data: at(4) }));
   await page.clock.runFor(500);
@@ -104,4 +117,26 @@ test("放大后人员从视口外走入，化身可见（FR-102）", async ({ pa
   await page.clock.runFor(500);
 
   await expect(scene(page)).toHaveScreenshot("person-walk-in.png");
+});
+
+test("人员与车辆：按类别显示模型，沿运动方向朝向（FR-102）", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  // 每 200 ms 一次实测（5 FPS）：轿车向 +x、公交向 +y、摩托车向 -x、人员斜向行走
+  const movers = [
+    { track_id: 1000001, object_class: "car", x: 12, y: 8, dx: 1, dy: 0, heading_deg: 0 },
+    { track_id: 1000002, object_class: "bus", x: 22, y: 6, dx: 0, dy: 0.8, heading_deg: 90 },
+    { track_id: 1000003, object_class: "motorcycle", x: 24, y: 15, dx: -1.2, dy: 0, heading_deg: 180 },
+    { track_id: 7, object_class: "person", x: 16, y: 14, dx: 0.25, dy: -0.15, heading_deg: 329 },
+  ];
+  for (let i = 0; i < 6; i += 1) {
+    for (const { dx, dy, x, y, ...m } of movers) {
+      const data = { ...BASE, ...TARGET, ...m, camera_id: "cam-01", x: x + dx * i, y: y + dy * i, uncertainty_m: 0.4 };
+      ws?.send(JSON.stringify({ channel: "tracks", data }));
+    }
+    await page.clock.runFor(200);
+  }
+
+  await expect(scene(page)).toHaveScreenshot("targets-mixed.png");
 });
