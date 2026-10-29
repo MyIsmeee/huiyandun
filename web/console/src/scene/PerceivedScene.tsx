@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MeshBasicMaterial, MeshLambertMaterial } from "three";
 import type { SceneFrame } from "../store/live";
 import { useTheme } from "../theme/store";
@@ -65,7 +65,8 @@ function FadingLayer(props: Omit<Layer, "id"> & { opacity: number; fade: boolean
   /** 最近一帧绘制的不透明度；被取代时由此开始淡出 */
   const shown = useRef(0);
   const from = useRef<number | null>(null);
-  useEffect(() => {
+  // 在下一帧绘制前更新起点：否则被取代的层可能先按旧起点画出一帧而直接消失
+  useLayoutEffect(() => {
     start.current = null;
     from.current = retired ? shown.current : null;
     invalidate();
