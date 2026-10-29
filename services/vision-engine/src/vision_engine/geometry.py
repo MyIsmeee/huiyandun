@@ -57,6 +57,12 @@ class GroundMapping:
         offset = float(np.linalg.norm(projected[1:] - projected[0], axis=1).max())
         return float(projected[0, 0]), float(projected[0, 1]), self.reproj_error_m + offset
 
+    def to_plane(self, pixels: np.ndarray) -> np.ndarray:
+        """像素 (N, 2) → 平面 (N, 2)；位于地平线以上（w ≤ 0）的点为 NaN。"""
+        mapped = _homogeneous(pixels) @ self.homography.T
+        w = mapped[:, 2:]
+        return np.where(w > 0, mapped[:, :2] / np.where(w > 0, w, 1), np.nan)
+
 
 def _project(homography: np.ndarray, pixels: np.ndarray) -> np.ndarray | None:
     """像素 → 平面；任一点位于地平线以上（w ≤ 0）时返回 None。"""
