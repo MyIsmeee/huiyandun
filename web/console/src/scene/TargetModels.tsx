@@ -19,7 +19,7 @@ import { useSelection } from "../store/selection";
 import { useMotion } from "./DeviceMarkers";
 import { type Camera, STATUS } from "./devices";
 import { facing, type Figure, figure, HEAD_R } from "./pose";
-import { marker } from "./TargetMarker";
+import { hoverMarker, marker } from "./TargetMarker";
 import { ACCENT, LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, visibleTargets } from "./targets";
 import { useVehicleModels, type Vehicle } from "./vehicles";
 
@@ -166,8 +166,9 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       sphere(at, HEAD_R, uncertain || head.inferred ? "ghost" : "solid", color);
     };
     const poses = new Map(cameras.map((c) => [c.id, c.pose]));
-    const selected = useSelection.getState().targetKey;
+    const { targetKey: selected, hoveredKey } = useSelection.getState();
     let bounds: Box3 | null = null;
+    let hoverBounds: Box3 | null = null;
     let discCount = 0;
     let ringCount = 0;
     const seen = new Set<string>();
@@ -191,6 +192,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         const f = pose && figure(target.keypoints, target.bbox, facing(pose, x, y));
         if (f) drawFigure(f, x, y, target.uncertain, base);
         if (f && target.key === selected) bounds = figureBounds(f, x, y);
+        if (f && target.key === hoveredKey) hoverBounds = figureBounds(f, x, y);
       } else {
         o.position.set(x, 0, y);
         o.rotation.set(0, angle, 0);
@@ -198,7 +200,9 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         o.updateMatrix();
         put(`${object_class}/${kind}`, base);
         if (kind === "solid") put(`${object_class}/outline`);
-        if (target.key === selected) bounds = vehicles[object_class].geometry.boundingBox?.clone().applyMatrix4(o.matrix) ?? null;
+        const box = () => vehicles[object_class].geometry.boundingBox?.clone().applyMatrix4(o.matrix) ?? null;
+        if (target.key === selected) bounds = box();
+        if (target.key === hoveredKey) hoverBounds = box();
       }
       o.position.set(x, 0, y);
       o.rotation.set(0, 0, 0);
@@ -218,7 +222,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     for (const { key } of layers) finish(meshes.current[key], counts[key] ?? 0);
     finish(discs.current, discCount);
     finish(rings.current, ringCount);
-    placeMarker(bounds, camera, size);
+    placeMarker(marker.el, bounds, camera, size);
+    placeMarker(hoverMarker.el, hoverBounds, camera, size);
     if (motion && pending) invalidate();
   });
 
@@ -310,9 +315,8 @@ function figureBounds({ bones, head }: Figure, x: number, y: number): Box3 {
   return box;
 }
 
-/** 选中目标的包围盒投影到屏幕，写入括框的位置与尺寸；选中目标不在场景中时隐藏（§5.1 L5） */
-function placeMarker(box: Box3 | null, camera: ViewCamera, size: { width: number; height: number }) {
-  const el = marker.el;
+/** 选中（或悬停）目标的包围盒投影到屏幕，写入括框的位置与尺寸；目标不在场景中时隐藏（§5.1 L5） */
+function placeMarker(el: HTMLDivElement | null, box: Box3 | null, camera: ViewCamera, size: { width: number; height: number }) {
   if (!el) return;
   el.hidden = box === null || box.isEmpty();
   if (el.hidden || !box) return;

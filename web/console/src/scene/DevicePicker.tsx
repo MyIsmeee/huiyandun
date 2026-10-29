@@ -10,7 +10,7 @@ const HEAD_M = 1;
 
 /**
  * 单击设备选中并展开详情（V-I2）：机头位置放一个透明按钮，命中区域不小于机头视觉尺寸（V-I4），
- * 键盘同样可选。双击飞入摄像头视角（onFocus，仅 3D 场景，V-I1）；悬停高亮与列表联动由 #60 接入。
+ * 键盘同样可选；悬停显示与选中同款的浅色圆环。双击飞入摄像头视角（onFocus，仅 3D 场景，V-I1）；列表联动由 #60 接入。
  */
 export function DevicePicker(props: { cameras: Camera[]; view: View; onFocus?: (id: string) => void }) {
   const { cameras, view, onFocus } = props;
@@ -30,7 +30,7 @@ export function DevicePicker(props: { cameras: Camera[]; view: View; onFocus?: (
         onClick={() => select(id)}
         onDoubleClick={() => onFocus?.(id)}
         style={{ left, top, width: size, height: size }}
-        className="absolute -translate-1/2 rounded-full outline-offset-2 focus-visible:outline-2 focus-visible:outline-fg aria-pressed:ring-2 aria-pressed:ring-fg/40"
+        className="absolute -translate-1/2 rounded-full outline-offset-2 hover:ring-2 hover:ring-fg/40 focus-visible:outline-2 focus-visible:outline-fg aria-pressed:ring-2 aria-pressed:ring-fg/40"
       />
     );
   });

@@ -15,7 +15,7 @@ import {
 import type { Site } from "../lib/api";
 import { useConnection } from "../store/connection";
 import { useLive } from "../store/live";
-import { selectTarget } from "../store/selection";
+import { select, selectTarget, useSelection } from "../store/selection";
 import { focusOn, moveCamera, panned, useCamera, useFocusShot } from "./camera";
 import { CameraControls, useAnimate } from "./CameraControls";
 import { DevicePicker } from "./DevicePicker";
@@ -23,7 +23,7 @@ import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
 import { OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
 import { Scene2D } from "./Scene2D";
-import { TargetMarker } from "./TargetMarker";
+import { HoverMarker, TargetMarker } from "./TargetMarker";
 import { pickTarget, RENDER_DELAY_MS, visibleTargets } from "./targets";
 
 // 降级说明须简短：1366 宽下与 KPI 底板同处顶部一行（V-P3）
@@ -115,26 +115,42 @@ export function SceneViewport({ site }: { site: Site }) {
 
   /** 指针下的人员或车辆：按渲染中的位置命中。2D 降级视图不绘制目标 */
   const hit = (e: MouseEvent<HTMLDivElement>) => {
-    if (!view3d || dragged.current || (e.target as Element).closest("button")) return null;
+    if (!view3d || (e.target as Element).closest("button")) return null;
     const { targets, behaviors } = useLive.getState();
     const box = e.currentTarget.getBoundingClientRect();
     const point = [e.clientX - box.left, e.clientY - box.top] as const;
     return pickTarget(visibleTargets(targets, cameras, behaviors), view3d, point, Date.now() - RENDER_DELAY_MS);
   };
-  // 单击：选中并展开详情，镜头不动（V-I2、D-054）；双击：飞入跟随视角（V-I1）
+  // 单击：选中并展开详情，镜头不动（V-I2、D-054）；单击空白处取消选中并收起详情（D-058）。双击：飞入跟随视角（V-I1）
   const pick = (e: MouseEvent<HTMLDivElement>) => {
+    if (dragged.current || (e.target as Element).closest("button, [role=toolbar]")) return;
     const key = hit(e);
     if (key) selectTarget(key);
+    else select(null);
+  };
+  // 悬停：人员与车辆显示中性灰四角括框、指针变为手形（V-I4）
+  const hovering = useSelection((s) => s.hoveredKey !== null);
+  const hover = (key: string | null) => {
+    if (key !== useSelection.getState().hoveredKey) useSelection.setState({ hoveredKey: key });
   };
   const follow = (e: MouseEvent<HTMLDivElement>) => {
-    const key = hit(e);
+    const key = dragged.current ? null : hit(e);
     if (!key) return;
     selectTarget(key);
     focusOn({ kind: "target", key }, animate());
   };
 
   return (
-    <div ref={ref} data-scene={state} {...drag} onClick={pick} onDoubleClick={follow}>
+    <div
+      ref={ref}
+      data-scene={state}
+      {...drag}
+      style={hovering ? { cursor: "pointer" } : undefined}
+      onClick={pick}
+      onDoubleClick={follow}
+      onMouseMove={(e) => hover(e.buttons === 0 ? hit(e) : null)}
+      onMouseLeave={() => hover(null)}
+    >
       {view3d && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
@@ -152,6 +168,7 @@ export function SceneViewport({ site }: { site: Site }) {
             onFocus={view3d ? (id) => focusOn({ kind: "camera", id }, animate()) : undefined}
           />
           {view3d && <TargetMarker />}
+          {view3d && <HoverMarker />}
         </>
       )}
       {(state === "ready" || state === "2d") && (

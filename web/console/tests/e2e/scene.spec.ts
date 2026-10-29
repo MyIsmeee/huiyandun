@@ -197,6 +197,18 @@ test.describe("相机控件", () => {
     await transition(page);
     expect(await labelAt(page)).toEqual(moved); // 已在终点，没有后续转场
   });
+
+  test("飞入摄像头视角途中断线：立即到位，不再继续（V-U3）", async ({ page }) => {
+    await scene(page).getByRole("button", { name: "查看 cam-01 详情" }).dblclick();
+    await page.clock.runFor(100);
+    const label = scene(page).getByText(LABEL);
+    await expect(label).toBeVisible(); // 飞行途中，视点尚未到机头，机头上方的状态标签仍在画面中
+
+    await sockets[0]?.close({ code: 1011 });
+    await expect(page.getByRole("status", { name: "连接状态" })).toHaveText("断线 · 重连中");
+    await expect(label).toHaveCount(0); // 已在机头处，标签在视点身后
+    await expect(button(page, "放大")).toBeDisabled();
+  });
 });
 
 // §5.1 L1、§8 PerceivedScene：街道 / 室内 / 未标定 / 陈旧 / 断线。
