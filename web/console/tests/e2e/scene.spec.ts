@@ -106,7 +106,7 @@ test.describe("相机控件", () => {
     await button(page, "返回总览").click();
     await transition(page);
 
-    await expect(scene(page)).toHaveScreenshot("scene-ready.png");
+    await expect(scene(page)).toHaveScreenshot("scene-overview.png");
   });
 
   test("缩放限定为总览的 1～4 倍", async ({ page }) => {
