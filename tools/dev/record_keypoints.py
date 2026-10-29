@@ -22,7 +22,9 @@ def main() -> None:
     source, output = sys.argv[1], sys.argv[2]
     config = load_config(VisionConfig)
     camera = CameraPipeline(
-        "record", None, PoseDetector(str(config.model_file), create_session(config))
+        "record",
+        None,
+        PoseDetector(str(config.model_file), create_session(config, config.model_file)),
     )
     capture = cv2.VideoCapture(source)
     source_fps = capture.get(cv2.CAP_PROP_FPS)

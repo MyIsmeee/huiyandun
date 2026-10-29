@@ -15,3 +15,15 @@ models:
     card: cards/rtmo-s.md
     purpose: vision-engine 人体检测与骨骼估计（REUSE-05）
     owner: MyIsmeee
+  - name: rfdetr-s
+    version: rfdetr-s@1.4.2+hyd.1
+    task: detection  # COCO 多类别；vision-engine 只取车辆，人员由 rtmo-s 检出
+    file: rfdetr_s_v142_512x512.onnx
+    sha256: fcd3c3c4e0d3d5533ee9c3a174deb7f02dfe4b042b6fdd3d29040f3c6da7845e
+    # rtmlib 内置 RFDETR 引用的 ONNX 导出（Hugging Face，固定到提交）；上游直接发布 .onnx，无压缩包
+    source: https://huggingface.co/saifkhichi96/opendetect/resolve/e9a01bb3e8f03e7b1fa9d59a5613c5ae66819d82/rfdetr/rfdetr_s_v142_512x512.onnx
+    source_sha256: fcd3c3c4e0d3d5533ee9c3a174deb7f02dfe4b042b6fdd3d29040f3c6da7845e
+    license: Apache-2.0
+    card: cards/rfdetr-s.md
+    purpose: vision-engine 车辆检测，供实时感知大屏（REUSE-22）
+    owner: MyIsmeee

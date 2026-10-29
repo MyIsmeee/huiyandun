@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 import cv2
@@ -27,10 +28,11 @@ from py_contracts.config.site_schema import SiteConfig
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine.behavior import BehaviorDetector
-from vision_engine.detector import PoseDetector
+from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
+from vision_engine.kinematics import Motion
 from vision_engine.motion import MotionGate
-from vision_engine.runtime import DeviceError, VisionConfig, create_session
+from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
 
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
@@ -46,6 +48,8 @@ TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0
 # 新轨迹须连续 2 帧、置信度 ≥ 0.5；RTMO 对远处行人的置信度多在 0.5～0.6（模型卡）
 TRACK_ACTIVATION = 0.5
+# 车辆与人员分别跟踪（骑车人与自行车框重叠，混合跟踪会互换编号）；车辆轨迹编号加此偏移，同一路内不重复
+VEHICLE_ID_BASE = 1_000_000
 
 log = logging.getLogger(__name__)
 
@@ -103,36 +107,60 @@ class CameraPipeline:
         mapping: GroundMapping | None,
         detector: PoseDetector,
         climb_lines: list[list[float]] | None = None,
+        vehicles: VehicleDetector | None = None,
     ) -> None:
         self._camera_id = camera_id
         self._mapping = mapping
         self._detector = detector
+        self._vehicles = vehicles  # None 时只检测人员（如关键点录制工具）
         self._behaviors = BehaviorDetector(climb_lines or [])
         self._gate = MotionGate()
-        self._tracker = ByteTrackTracker(
-            frame_rate=FPS,
-            track_activation_threshold=TRACK_ACTIVATION,
-            high_conf_det_threshold=TRACK_ACTIVATION,
+        self._tracker, self._vehicle_tracker = (
+            ByteTrackTracker(
+                frame_rate=FPS,
+                track_activation_threshold=TRACK_ACTIVATION,
+                high_conf_det_threshold=TRACK_ACTIVATION,
+            )
+            for _ in range(2)
         )
+        self._motion = Motion()
+        self._votes: dict[int, Counter[int]] = {}  # 车辆轨迹 → 各帧检出类别的计数
         self._boxes = np.empty((0, 4))
 
-    def track(self, frame: np.ndarray, timestamp: float) -> sv.Detections:
-        """门控、检测与跟踪，返回已确认的轨迹（含关键点）；无运动且无轨迹时为空。"""
+    def track(self, frame: np.ndarray, timestamp: float) -> tuple[sv.Detections, sv.Detections]:
+        """门控、检测与跟踪，返回已确认的人员轨迹（含关键点）与车辆轨迹；无运动且无轨迹时为空。"""
         region = self._gate.region(frame, self._boxes)
         if region is None:
-            return sv.Detections.empty()
+            return sv.Detections.empty(), sv.Detections.empty()
         x1, y1, x2, y2 = region
-        detections = self._detector(frame[y1:y2, x1:x2], offset=(x1, y1))
-        tracked = self._tracker.update(detections, timestamp=timestamp)
-        tracked = tracked[tracked.tracker_id >= 0]  # -1 为尚未确认的轨迹
-        self._boxes = tracked.xyxy
-        return tracked
+        crop = frame[y1:y2, x1:x2]
+        people = self._confirmed(self._tracker, self._detector(crop, offset=(x1, y1)), timestamp)
+        vehicles = (
+            self._confirmed(self._vehicle_tracker, self._vehicles(crop, offset=(x1, y1)), timestamp)
+            if self._vehicles is not None
+            else sv.Detections.empty()
+        )
+        self._boxes = np.concatenate([people.xyxy, vehicles.xyxy])
+        return people, vehicles
+
+    def _vote(self, track_id: int, class_id: int) -> int:
+        """轨迹内多数类别：两轮车常在自行车与摩托车之间逐帧跳变，按多数输出，大屏模型不闪烁。"""
+        votes = self._votes.setdefault(int(track_id), Counter())
+        votes[int(class_id)] += 1
+        return votes.most_common(1)[0][0]
+
+    @staticmethod
+    def _confirmed(
+        tracker: ByteTrackTracker, detections: sv.Detections, timestamp: float
+    ) -> sv.Detections:
+        tracked = tracker.update(detections, timestamp=timestamp)
+        return tracked[tracked.tracker_id >= 0]  # -1 为尚未确认的轨迹
 
     def process(
         self, frame: np.ndarray, timestamp: float
     ) -> list[VisionTrackV1 | VisionBehaviorV1]:
-        tracked = self.track(frame, timestamp)
-        if not len(tracked):
+        tracked, vehicles = self.track(frame, timestamp)
+        if not len(tracked) and not len(vehicles):
             return []
         now = datetime.now(UTC)
         # 未标定摄像头同样判定行为：只输出设备级告警（C-CV-05）
@@ -149,46 +177,68 @@ class CameraPipeline:
                 ts_start=now - timedelta(seconds=b.end - b.start),
                 ts_end=now,
             )
-            for b in self._behaviors.update(
-                tracked.tracker_id,
-                tracked.data["keypoints"],
-                tracked.data["keypoint_scores"],
-                timestamp,
+            for b in (
+                self._behaviors.update(
+                    tracked.tracker_id,
+                    tracked.data["keypoints"],
+                    tracked.data["keypoint_scores"],
+                    timestamp,
+                )
+                if len(tracked)  # 空结果不含关键点数据
+                else []
             )
         ]
         if self._mapping is None:
             return events  # 未标定不输出坐标（FR-902）
         height, width = frame.shape[:2]
         scale = np.array([width, height], dtype=np.float32)
-        for (bx1, by1, bx2, by2), track_id, keypoints, scores in zip(
-            tracked.xyxy,
-            tracked.tracker_id,
-            tracked.data["keypoints"],
-            tracked.data["keypoint_scores"],
-            strict=True,
-        ):
-            # 脚点取人体框底边中点
+        targets = [
+            (int(i), "person", box, np.column_stack([points / scale, scores]))
+            for box, i, points, scores in (
+                zip(
+                    tracked.xyxy,
+                    tracked.tracker_id,
+                    tracked.data["keypoints"],
+                    tracked.data["keypoint_scores"],
+                    strict=True,
+                )
+                if len(tracked)
+                else []
+            )
+        ] + [
+            (VEHICLE_ID_BASE + i, VEHICLES[self._vote(i, c)], box, None)
+            for box, i, c in (
+                zip(vehicles.xyxy, vehicles.tracker_id, vehicles.class_id, strict=True)
+                if len(vehicles)
+                else []
+            )
+        ]
+        current = set(vehicles.tracker_id.tolist()) if len(vehicles) else set()
+        self._votes = {i: v for i, v in self._votes.items() if i in current}
+        for track_id, object_class, (bx1, by1, bx2, by2), keypoints in targets:
+            # 脚点（车辆为接地点）取框底边中点
             located = self._mapping.locate((bx1 + bx2) / 2, by2, by2 - by1)
             if located is None:
                 continue
             x, y, uncertainty = located
+            heading, speed = self._motion.update(track_id, timestamp, x, y)
             events.append(
                 VisionTrackV1(
                     schema_version=TRACK_SCHEMA_VERSION,
                     event_id=uuid.uuid4(),
                     ts=now,
                     camera_id=self._camera_id,
-                    track_id=int(track_id),
-                    object_class="person",
+                    track_id=track_id,
+                    object_class=object_class,
                     x=x,
                     y=y,
                     uncertainty_m=uncertainty,
-                    heading_deg=None,  # 由 TK-111 按轨迹计算
-                    speed_mps=None,
+                    heading_deg=heading,
+                    speed_mps=speed,
                     bbox=np.clip(
                         [bx1 / width, by1 / height, bx2 / width, by2 / height], 0, 1
                     ).tolist(),
-                    keypoints=np.clip(np.column_stack([keypoints / scale, scores]), 0, 1).tolist(),
+                    keypoints=None if keypoints is None else np.clip(keypoints, 0, 1).tolist(),
                 )
             )
         return events
@@ -222,7 +272,18 @@ async def run_camera(
 
 
 async def serve(config: VisionConfig) -> None:
-    detector = PoseDetector(str(config.model_file), create_session(config))
+    models = len(model_files(config))  # 显存上限由加载的模型平分（C-HW-12）
+    detector = PoseDetector(
+        str(config.model_file), create_session(config, config.model_file, models)
+    )
+    vehicles = (
+        VehicleDetector(
+            str(config.vehicle_model_file),
+            create_session(config, config.vehicle_model_file, models),
+        )
+        if config.vehicle_model_file
+        else None
+    )
     site = SiteConfig.model_validate(yaml.safe_load(config.site_file.read_text(encoding="utf-8")))
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
@@ -235,7 +296,7 @@ async def serve(config: VisionConfig) -> None:
         reader.start()
         runs.append(
             run_camera(
-                CameraPipeline(camera["id"], mapping, detector, camera["climb_lines"]),
+                CameraPipeline(camera["id"], mapping, detector, camera["climb_lines"], vehicles),
                 reader,
                 bus,
                 config,
