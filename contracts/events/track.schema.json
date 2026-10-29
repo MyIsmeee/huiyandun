@@ -1,0 +1,60 @@
+{
+  "title": "Track",
+  "description": "检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）",
+  "type": "object",
+  "required": [
+    "camera_id",
+    "track_id",
+    "object_class",
+    "x",
+    "y",
+    "uncertainty_m",
+    "heading_deg",
+    "speed_mps",
+    "bbox",
+    "keypoints"
+  ],
+  "properties": {
+    "camera_id": { "type": "string" },
+    "track_id": { "type": "integer" },
+    "object_class": {
+      "enum": ["person", "bicycle", "car", "motorcycle", "bus", "truck"],
+      "description": "目标类别；车辆只到类别，不识别车牌（G-04）"
+    },
+    "x": { "type": "number", "description": "平面坐标，单位米" },
+    "y": { "type": "number", "description": "平面坐标，单位米" },
+    "uncertainty_m": { "type": "number", "minimum": 0 },
+    "heading_deg": {
+      "anyOf": [{ "type": "number", "minimum": 0, "exclusiveMaximum": 360 }, { "type": "null" }],
+      "description": "平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null"
+    },
+    "speed_mps": {
+      "anyOf": [{ "type": "number", "minimum": 0 }, { "type": "null" }],
+      "description": "平面速度，单位米每秒；起步不足 3 帧时为 null"
+    },
+    "bbox": {
+      "type": "array",
+      "items": { "type": "number", "minimum": 0, "maximum": 1 },
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "画面归一化检测框 [x1, y1, x2, y2]，只用于画面叠加（FR-107）"
+    },
+    "keypoints": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "minItems": 17,
+          "maxItems": 17
+        },
+        { "type": "null" }
+      ],
+      "description": "COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null（G-04 只允许骨骼关键点）"
+    }
+  }
+}

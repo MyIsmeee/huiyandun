@@ -11,6 +11,7 @@ from py_contracts.api import (
     Device,
     EgressStats,
     IncidentList,
+    Investigation,
     LlmProvider,
     LlmProviderCreate,
     LlmProviderUpdate,
@@ -35,6 +36,8 @@ ENDPOINTS = [
     ("post", "/api/devices/{id}/webrtc", "viewer"),
     ("get", "/api/incidents", "viewer"),
     ("get", "/api/incidents/{id}", "viewer"),
+    ("post", "/api/incidents/{id}/confirm-containment", "operator"),
+    ("get", "/api/incidents/{id}/investigation", "viewer"),
     ("post", "/api/incidents/{id}/reports", "operator"),
     ("get", "/api/reports/{id}", "viewer"),
     ("post", "/api/reports/{id}/review", "operator"),
@@ -259,3 +262,55 @@ def test_provider_create_allows_missing_api_key_and_defaults_timeout() -> None:
 def test_rejects_invalid_admin_payload(model, data: dict) -> None:
     with pytest.raises(ValidationError):
         model.model_validate(data | ({"before": None, "after": None} if model is AuditLog else {}))
+
+
+INVESTIGATION = {
+    "incident_id": "inc-0001",
+    "steps": [
+        {
+            "tool": "query_sessions",
+            "args_summary": "ip=172.30.0.100, 10 分钟",
+            "result_summary": "37 次会话，失败 36 次",
+            "reason": "确认攻击方的认证失败次数",
+        }
+    ],
+    "verdict": None,
+    "error": None,
+    "provider": None,
+    "started_at": "2026-10-29T06:30:00Z",
+    "finished_at": None,
+}
+
+
+def test_investigation_in_progress_and_finished() -> None:
+    """调查进行中 verdict 为 null；结束后带判定与供应商（HYD-PLAN-007 §1 AiInvestigation）。"""
+    Investigation.model_validate(INVESTIGATION)
+    verdict = {
+        "is_attack": True,
+        "confidence": 0.92,
+        "techniques": ["T1110"],
+        "narrative": "认证爆破后画面被替换",
+        "recommendation": "隔离 172.30.0.100",
+        "unverified": [],
+    }
+    Investigation.model_validate(
+        INVESTIGATION
+        | {
+            "verdict": verdict,
+            "provider": {"name": "DeepSeek", "location": "public"},
+            "finished_at": "2026-10-29T06:30:40Z",
+        }
+    )
+
+
+def test_investigation_rejects_out_of_range_confidence() -> None:
+    verdict = {
+        "is_attack": True,
+        "confidence": 1.5,
+        "techniques": [],
+        "narrative": "",
+        "recommendation": "",
+        "unverified": [],
+    }
+    with pytest.raises(ValidationError):
+        Investigation.model_validate(INVESTIGATION | {"verdict": verdict})

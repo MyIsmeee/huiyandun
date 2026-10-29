@@ -41,6 +41,7 @@ STREAM = "HYD_VISION"
 STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, "hyd.vision.integrity.v1"]
 STREAM_MAX_AGE_S = 180 * 86400
 SCHEMA_VERSION = "1.0.0"
+TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（HYD-PLAN-007 v1.9）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0
 # 新轨迹须连续 2 帧、置信度 ≥ 0.5；RTMO 对远处行人的置信度多在 0.5～0.6（模型卡）
@@ -157,7 +158,15 @@ class CameraPipeline:
         ]
         if self._mapping is None:
             return events  # 未标定不输出坐标（FR-902）
-        for (bx1, by1, bx2, by2), track_id in zip(tracked.xyxy, tracked.tracker_id, strict=True):
+        height, width = frame.shape[:2]
+        scale = np.array([width, height], dtype=np.float32)
+        for (bx1, by1, bx2, by2), track_id, keypoints, scores in zip(
+            tracked.xyxy,
+            tracked.tracker_id,
+            tracked.data["keypoints"],
+            tracked.data["keypoint_scores"],
+            strict=True,
+        ):
             # 脚点取人体框底边中点
             located = self._mapping.locate((bx1 + bx2) / 2, by2, by2 - by1)
             if located is None:
@@ -165,14 +174,21 @@ class CameraPipeline:
             x, y, uncertainty = located
             events.append(
                 VisionTrackV1(
-                    schema_version=SCHEMA_VERSION,
+                    schema_version=TRACK_SCHEMA_VERSION,
                     event_id=uuid.uuid4(),
                     ts=now,
                     camera_id=self._camera_id,
                     track_id=int(track_id),
+                    object_class="person",
                     x=x,
                     y=y,
                     uncertainty_m=uncertainty,
+                    heading_deg=None,  # 由 TK-111 按轨迹计算
+                    speed_mps=None,
+                    bbox=np.clip(
+                        [bx1 / width, by1 / height, bx2 / width, by2 / height], 0, 1
+                    ).tolist(),
+                    keypoints=np.clip(np.column_stack([keypoints / scale, scores]), 0, 1).tolist(),
                 )
             )
         return events

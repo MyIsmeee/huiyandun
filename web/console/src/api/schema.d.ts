@@ -117,6 +117,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/incidents/{id}/confirm-containment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description 确认处置（FR-407）：只对 requires_confirmation 为 true 的关联事件有效，否则返回 400。
+         *     发布 hyd.correlator.confirmation.v1 并写审计日志；处置参数仍只取关联事件的结构化字段（G-03）
+         */
+        post: operations["confirmContainment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/incidents/{id}/investigation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description AI 安全值班员的调查记录（FR-1102）；尚未开始调查时返回 404 */
+        get: operations["getInvestigation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/incidents/{id}/reports": {
         parameters: {
             query?: never;
@@ -529,12 +566,26 @@ export interface components {
         /**
          * @description WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
          *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-         *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
+         *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
+         *     FR-1102）；system 为系统消息（如心跳）
          */
         WsFrame: {
             /** @enum {unknown} */
-            channel: "tracks" | "devices" | "alerts" | "incidents" | "system";
+            channel: "tracks" | "devices" | "alerts" | "incidents" | "ai" | "system";
             data: Record<string, never>;
+        };
+        AiInvestigation: components["schemas"]["hyd.ai.investigation.v1.schema"];
+        /** @description AI 安全值班员调查记录（HYD-PLAN-007 §1 AiInvestigation）；verdict 为 null 表示进行中或失败 */
+        Investigation: {
+            incident_id: string;
+            steps: components["schemas"]["InvestigationStep"][];
+            verdict: components["schemas"]["InvestigationVerdict"] | null;
+            /** @description 失败原因，如"无可用供应商" */
+            error: string | null;
+            provider: components["schemas"]["InvestigationProvider"] | null;
+            /** Format: date-time */
+            started_at: string;
+            finished_at: string | null;
         };
         VisionTrack: components["schemas"]["hyd.vision.track.v1.schema"];
         VisionBehavior: components["schemas"]["hyd.vision.behavior.v1.schema"];
@@ -561,10 +612,39 @@ export interface components {
             evidence_refs: string[];
             /** @description 规则每一步命中事件的 event_id */
             hit_path: string[];
+            /** @description 命中路径含模型来源事件时为 true：处置须人工确认（FR-407） */
+            requires_confirmation: boolean;
             /** @enum {unknown} */
             status: "open" | "containing" | "contained" | "closed";
             /** Format: date-time */
             created_at: string;
+        };
+        InvestigationStep: {
+            /** @description 只读工具名 */
+            tool: string;
+            args_summary: string;
+            /** @description 工具结果摘要（本地数据，未脱敏） */
+            result_summary: string;
+            /** @description 模型给出的本步理由 */
+            reason: string;
+        };
+        InvestigationVerdict: {
+            is_attack: boolean;
+            confidence: number;
+            techniques: string[];
+            narrative: string;
+            /** @description 只作文字建议，不进入任何执行路径（G-03） */
+            recommendation: string;
+            /** @description 无法在工具结果中溯源的实体（C-LLM-06） */
+            unverified: string[];
+        };
+        InvestigationProvider: {
+            name: string;
+            /**
+             * @description 网络位置（C-LLM-13）；public 表示发送内容已脱敏
+             * @enum {unknown}
+             */
+            location: "internal" | "public";
         };
         /**
          * PlaybookExecution
@@ -604,18 +684,89 @@ export interface components {
             ts: string;
         };
         /**
-         * VisionTrackV1
-         * @description 人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）
+         * InvestigationFrame
+         * @description AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（HYD-REQ-006 US-11）
          */
-        "hyd.vision.track.v1.schema": {
+        "investigation_frame.schema": {
+            incident_id: string;
+            /** @description 同一关联事件内从 0 递增 */
+            seq: number;
+            /** @enum {unknown} */
+            kind: "step" | "verdict" | "failed";
+            /** @description kind=step 时有值 */
+            step: components["schemas"]["InvestigationStep"] | null;
+            /** @description kind=verdict 时有值 */
+            verdict: components["schemas"]["InvestigationVerdict"] | null;
+            /** @description kind=failed 时的原因，如"无可用供应商" */
+            error: string | null;
+            /** @description 本次调查使用的供应商；无可用供应商时为 null */
+            provider: components["schemas"]["InvestigationProvider"] | null;
+            $defs: {
+                InvestigationStep: {
+                    /** @description 只读工具名 */
+                    tool: string;
+                    args_summary: string;
+                    /** @description 工具结果摘要（本地数据，未脱敏） */
+                    result_summary: string;
+                    /** @description 模型给出的本步理由 */
+                    reason: string;
+                };
+                InvestigationVerdict: {
+                    is_attack: boolean;
+                    confidence: number;
+                    techniques: string[];
+                    narrative: string;
+                    /** @description 只作文字建议，不进入任何执行路径（G-03） */
+                    recommendation: string;
+                    /** @description 无法在工具结果中溯源的实体（C-LLM-06） */
+                    unverified: string[];
+                };
+                InvestigationProvider: {
+                    name: string;
+                    /**
+                     * @description 网络位置（C-LLM-13）；public 表示发送内容已脱敏
+                     * @enum {unknown}
+                     */
+                    location: "internal" | "public";
+                };
+            };
+        };
+        /**
+         * AiInvestigationV1
+         * @description AI 安全值班员调查流，字段即 InvestigationFrame（生产者 llm-gateway）
+         */
+        "hyd.ai.investigation.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["investigation_frame.schema"];
+        /**
+         * Track
+         * @description 检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）
+         */
+        "track.schema": {
             camera_id: string;
             track_id: number;
+            /**
+             * @description 目标类别；车辆只到类别，不识别车牌（G-04）
+             * @enum {unknown}
+             */
+            object_class: "person" | "bicycle" | "car" | "motorcycle" | "bus" | "truck";
             /** @description 平面坐标，单位米 */
             x: number;
             /** @description 平面坐标，单位米 */
             y: number;
             uncertainty_m: number;
-        } & components["schemas"]["event_base.schema"];
+            /** @description 平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null */
+            heading_deg: number | null;
+            /** @description 平面速度，单位米每秒；起步不足 3 帧时为 null */
+            speed_mps: number | null;
+            /** @description 画面归一化检测框 [x1, y1, x2, y2]，只用于画面叠加（FR-107） */
+            bbox: number[];
+            /** @description COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null（G-04 只允许骨骼关键点） */
+            keypoints: number[][] | null;
+        };
+        /**
+         * VisionTrackV1
+         * @description 检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
+         */
+        "hyd.vision.track.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["track.schema"];
         /**
          * VisionBehaviorV1
          * @description 骨骼行为事件（生产者 vision-engine）
@@ -634,7 +785,7 @@ export interface components {
         } & components["schemas"]["event_base.schema"];
         /**
          * SecurityAlertV1
-         * @description 归一化后的 Suricata / Zeek 告警（生产者 correlator）
+         * @description 网络告警：归一化后的 Suricata 告警或设备行为模型告警（生产者 correlator）
          */
         "hyd.security.alert.v1.schema": {
             rule_id: string;
@@ -652,6 +803,15 @@ export interface components {
             device_id: string | null;
             technique: string;
             evidence_ref: string;
+            /**
+             * @description 置信度来源（C-SEC-09）：签名规则或设备行为模型
+             * @enum {unknown}
+             */
+            source: "rule" | "model";
+            /** @description 可信度；rule 来源为 1.0 */
+            confidence: number;
+            /** @description 可读说明：规则为签名描述，模型为偏离最大的特征及倍数 */
+            summary: string;
         } & components["schemas"]["event_base.schema"];
     };
     responses: {
@@ -891,6 +1051,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["incident.schema"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    confirmContainment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已受理，执行器收到确认后执行 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getInvestigation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 调查记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Investigation"];
                 };
             };
             401: components["responses"]["Unauthorized"];

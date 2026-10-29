@@ -85,6 +85,12 @@ def test_tracks_published_with_floor_coordinates() -> None:
     # 第 4 帧框 [306, 200, 406, 600]：脚点 (356, 600) → (3.56 m, 6.0 m)；框高 400 → 偏移 20 像素
     assert (last.x, last.y) == pytest.approx((3.56, 6.0))
     assert last.uncertainty_m == pytest.approx(0.2)
+    # 画面叠加用的归一化框与骨骼（FR-107）：1280×720 画面
+    sent = last.model_dump(mode="json")
+    assert sent["object_class"] == "person"
+    assert sent["bbox"] == pytest.approx([306 / 1280, 200 / 720, 406 / 1280, 600 / 720])
+    assert len(sent["keypoints"]) == 17
+    assert sent["keypoints"][15] == pytest.approx([356 / 1280, 600 / 720, 0.9])
 
 
 def test_fall_detected_on_uncalibrated_camera() -> None:

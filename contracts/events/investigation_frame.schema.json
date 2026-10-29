@@ -1,0 +1,72 @@
+{
+  "title": "InvestigationFrame",
+  "description": "AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（HYD-REQ-006 US-11）",
+  "type": "object",
+  "required": ["incident_id", "seq", "kind", "step", "verdict", "error", "provider"],
+  "properties": {
+    "incident_id": { "type": "string" },
+    "seq": { "type": "integer", "minimum": 0, "description": "同一关联事件内从 0 递增" },
+    "kind": { "enum": ["step", "verdict", "failed"] },
+    "step": {
+      "anyOf": [{ "$ref": "#/$defs/InvestigationStep" }, { "type": "null" }],
+      "description": "kind=step 时有值"
+    },
+    "verdict": {
+      "anyOf": [{ "$ref": "#/$defs/InvestigationVerdict" }, { "type": "null" }],
+      "description": "kind=verdict 时有值"
+    },
+    "error": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "kind=failed 时的原因，如\"无可用供应商\""
+    },
+    "provider": {
+      "anyOf": [{ "$ref": "#/$defs/InvestigationProvider" }, { "type": "null" }],
+      "description": "本次调查使用的供应商；无可用供应商时为 null"
+    }
+  },
+  "$defs": {
+    "InvestigationStep": {
+      "type": "object",
+      "required": ["tool", "args_summary", "result_summary", "reason"],
+      "properties": {
+        "tool": { "type": "string", "description": "只读工具名" },
+        "args_summary": { "type": "string" },
+        "result_summary": { "type": "string", "description": "工具结果摘要（本地数据，未脱敏）" },
+        "reason": { "type": "string", "description": "模型给出的本步理由" }
+      }
+    },
+    "InvestigationVerdict": {
+      "type": "object",
+      "required": ["is_attack", "confidence", "techniques", "narrative", "recommendation", "unverified"],
+      "properties": {
+        "is_attack": { "type": "boolean" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "techniques": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^T[0-9]{4}([.][0-9]{3})?$" }
+        },
+        "narrative": { "type": "string" },
+        "recommendation": {
+          "type": "string",
+          "description": "只作文字建议，不进入任何执行路径（G-03）"
+        },
+        "unverified": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "无法在工具结果中溯源的实体（C-LLM-06）"
+        }
+      }
+    },
+    "InvestigationProvider": {
+      "type": "object",
+      "required": ["name", "location"],
+      "properties": {
+        "name": { "type": "string" },
+        "location": {
+          "enum": ["internal", "public"],
+          "description": "网络位置（C-LLM-13）；public 表示发送内容已脱敏"
+        }
+      }
+    }
+  }
+}

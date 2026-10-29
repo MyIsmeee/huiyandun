@@ -1,0 +1,12 @@
+{
+  "title": "CorrelatorConfirmationV1",
+  "description": "操作员确认处置（生产者 api-server，消费者 playbook-executor，HYD-REQ-006 FR-407）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["incident_id", "actor", "request_id"],
+  "properties": {
+    "incident_id": { "type": "string" },
+    "actor": { "type": "string", "description": "确认人账户" },
+    "request_id": { "type": "string", "description": "C-BE-08" }
+  }
+}

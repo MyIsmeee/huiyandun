@@ -35,8 +35,10 @@ def common() -> dict[str, Any]:
 
 def track() -> VisionTrackV1:
     return VisionTrackV1(
-        **common(), camera_id="cam-01", track_id=1, x=4.0, y=6.0, uncertainty_m=0.2
-    )
+        **common(), camera_id="cam-01", track_id=1, object_class="person", x=4.0, y=6.0,
+        uncertainty_m=0.2, heading_deg=None, speed_mps=None, bbox=[0.1, 0.2, 0.3, 0.8],
+        keypoints=None,
+    )  # fmt: skip
 
 
 def behavior() -> VisionBehaviorV1:
@@ -51,7 +53,8 @@ def alert() -> SecurityAlertV1:
     return SecurityAlertV1(
         **common(), rule_id="HYD-NET-0001", rule_version="1.0.0", category="auth_bruteforce",
         severity="high", src_ip="172.30.1.20", dst_ip="172.30.0.12", device_id="cam-02",
-        technique="T1110", evidence_ref="eve:1",
+        technique="T1110", evidence_ref="eve:1", source="rule", confidence=1.0,
+        summary="HYD-NET-0001 RTSP authentication brute force",
     )  # fmt: skip
 
 

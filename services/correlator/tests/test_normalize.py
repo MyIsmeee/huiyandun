@@ -42,7 +42,7 @@ def test_bruteforce_alert_fields() -> None:
     alert = normalize(json.dumps(record()), DEVICES)
     assert alert is not None
     assert alert.model_dump(mode="json", exclude={"event_id"}) == {
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "ts": "2026-10-28T16:29:01.987571Z",
         "rule_id": "HYD-NET-0001",
         "rule_version": "2",
@@ -53,6 +53,9 @@ def test_bruteforce_alert_fields() -> None:
         "device_id": "cam-02",
         "technique": "T1110",
         "evidence_ref": "suricata:flow/971699494095076",
+        "source": "rule",
+        "confidence": 1.0,
+        "summary": "HYD-NET-0001 RTSP authentication brute force",
     }
 
 

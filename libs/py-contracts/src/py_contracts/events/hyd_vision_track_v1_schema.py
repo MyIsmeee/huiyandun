@@ -3,24 +3,11 @@
 
 from __future__ import annotations
 
-from pydantic import Field
-
 from .event_base_schema import EventBase
+from .track_schema import Track
 
 
-class VisionTrackV1(EventBase):
+class VisionTrackV1(EventBase, Track):
     """
-    人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）
+    检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
     """
-
-    camera_id: str
-    track_id: int
-    x: float
-    """
-    平面坐标，单位米
-    """
-    y: float
-    """
-    平面坐标，单位米
-    """
-    uncertainty_m: float = Field(..., ge=0.0)

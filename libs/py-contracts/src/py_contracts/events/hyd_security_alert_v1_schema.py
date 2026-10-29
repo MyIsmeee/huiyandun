@@ -13,7 +13,7 @@ from .event_base_schema import EventBase
 
 class SecurityAlertV1(EventBase):
     """
-    归一化后的 Suricata / Zeek 告警（生产者 correlator）
+    网络告警：归一化后的 Suricata 告警或设备行为模型告警（生产者 correlator）
     """
 
     rule_id: str
@@ -34,3 +34,15 @@ class SecurityAlertV1(EventBase):
     """
     technique: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
     evidence_ref: str
+    source: Literal["rule", "model"]
+    """
+    置信度来源（C-SEC-09）：签名规则或设备行为模型
+    """
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    """
+    可信度；rule 来源为 1.0
+    """
+    summary: str
+    """
+    可读说明：规则为签名描述，模型为偏离最大的特征及倍数
+    """

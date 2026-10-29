@@ -121,6 +121,10 @@ class Incident(ContractModel):
     """
     规则每一步命中事件的 event_id
     """
+    requires_confirmation: bool
+    """
+    命中路径含模型来源事件时为 true：处置须人工确认（FR-407）
+    """
     status: Literal["open", "containing", "contained", "closed"]
     created_at: AwareDatetime
 
@@ -297,11 +301,12 @@ class WsFrame(ContractModel):
     """
     WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
+    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
+    FR-1102）；system 为系统消息（如心跳）
 
     """
 
-    channel: Literal["tracks", "devices", "alerts", "incidents", "system"]
+    channel: Literal["tracks", "devices", "alerts", "incidents", "ai", "system"]
     data: dict[str, Any]
 
 
@@ -321,6 +326,139 @@ class EventBase(ContractModel):
     """
 
 
+class InvestigationProvider(ContractModel):
+    name: str
+    location: Literal["internal", "public"]
+    """
+    网络位置（C-LLM-13）；public 表示发送内容已脱敏
+    """
+
+
+class InvestigationStep(ContractModel):
+    tool: str
+    """
+    只读工具名
+    """
+    args_summary: str
+    result_summary: str
+    """
+    工具结果摘要（本地数据，未脱敏）
+    """
+    reason: str
+    """
+    模型给出的本步理由
+    """
+
+
+class InvestigationVerdict(ContractModel):
+    is_attack: bool
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    techniques: list[Technique]
+    narrative: str
+    recommendation: str
+    """
+    只作文字建议，不进入任何执行路径（G-03）
+    """
+    unverified: list[str]
+    """
+    无法在工具结果中溯源的实体（C-LLM-06）
+    """
+
+
+class Investigation(ContractModel):
+    """
+    AI 安全值班员调查记录（HYD-PLAN-007 §1 AiInvestigation）；verdict 为 null 表示进行中或失败
+    """
+
+    incident_id: str
+    steps: list[InvestigationStep]
+    verdict: InvestigationVerdict | None
+    error: str | None
+    """
+    失败原因，如"无可用供应商"
+    """
+    provider: InvestigationProvider | None
+    started_at: AwareDatetime
+    finished_at: AwareDatetime | None
+
+
+class HeadingDeg(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0, lt=360.0)
+    """
+    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    """
+
+
+class SpeedMps(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0)
+    """
+    平面速度，单位米每秒；起步不足 3 帧时为 null
+    """
+
+
+class BboxItem(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0, le=1.0)
+
+
+class KeypointItem(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0, le=1.0)
+
+
+class Keypoint(RootModel[list[KeypointItem]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[KeypointItem] = Field(..., max_length=3, min_length=3)
+
+
+class Keypoints(RootModel[list[Keypoint]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[Keypoint] = Field(..., max_length=17, min_length=17)
+    """
+    COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null（G-04 只允许骨骼关键点）
+    """
+
+
+class Track(ContractModel):
+    """
+    检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）
+    """
+
+    camera_id: str
+    track_id: int
+    object_class: Literal["person", "bicycle", "car", "motorcycle", "bus", "truck"]
+    """
+    目标类别；车辆只到类别，不识别车牌（G-04）
+    """
+    x: float
+    """
+    平面坐标，单位米
+    """
+    y: float
+    """
+    平面坐标，单位米
+    """
+    uncertainty_m: float = Field(..., ge=0.0)
+    heading_deg: HeadingDeg | None
+    """
+    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    """
+    speed_mps: SpeedMps | None
+    """
+    平面速度，单位米每秒；起步不足 3 帧时为 null
+    """
+    bbox: list[BboxItem] = Field(..., max_length=4, min_length=4)
+    """
+    画面归一化检测框 [x1, y1, x2, y2]，只用于画面叠加（FR-107）
+    """
+    keypoints: Keypoints | None
+    """
+    COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null（G-04 只允许骨骼关键点）
+    """
+
+
 class VisionBehaviorV1(EventBase):
     """
     骨骼行为事件（生产者 vision-engine）
@@ -337,7 +475,7 @@ class VisionBehaviorV1(EventBase):
 
 class SecurityAlertV1(EventBase):
     """
-    归一化后的 Suricata / Zeek 告警（生产者 correlator）
+    网络告警：归一化后的 Suricata 告警或设备行为模型告警（生产者 correlator）
     """
 
     rule_id: str
@@ -358,6 +496,18 @@ class SecurityAlertV1(EventBase):
     """
     technique: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
     evidence_ref: str
+    source: Literal["rule", "model"]
+    """
+    置信度来源（C-SEC-09）：签名规则或设备行为模型
+    """
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    """
+    可信度；rule 来源为 1.0
+    """
+    summary: str
+    """
+    可读说明：规则为签名描述，模型为偏离最大的特征及倍数
+    """
 
 
 class CameraInfo(ContractModel):
@@ -388,22 +538,39 @@ class EgressStats(ContractModel):
     targets: list[EgressTarget]
 
 
-class VisionTrackV1(EventBase):
+class InvestigationFrame(ContractModel):
     """
-    人员平面坐标，会话内有效，不跨摄像头关联（生产者 vision-engine）
+    AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（HYD-REQ-006 US-11）
     """
 
-    camera_id: str
-    track_id: int
-    x: float
+    incident_id: str
+    seq: int = Field(..., ge=0)
     """
-    平面坐标，单位米
+    同一关联事件内从 0 递增
     """
-    y: float
+    kind: Literal["step", "verdict", "failed"]
+    step: InvestigationStep | None
     """
-    平面坐标，单位米
+    kind=step 时有值
     """
-    uncertainty_m: float = Field(..., ge=0.0)
+    verdict: InvestigationVerdict | None
+    """
+    kind=verdict 时有值
+    """
+    error: str | None
+    """
+    kind=failed 时的原因，如"无可用供应商"
+    """
+    provider: InvestigationProvider | None
+    """
+    本次调查使用的供应商；无可用供应商时为 null
+    """
+
+
+class VisionTrackV1(EventBase, Track):
+    """
+    检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
+    """
 
 
 class VisionBehavior(RootModel[VisionBehaviorV1]):
@@ -445,6 +612,12 @@ class Device(ContractModel):
     """
 
 
+class AiInvestigationV1(EventBase, InvestigationFrame):
+    """
+    AI 安全值班员调查流，字段即 InvestigationFrame（生产者 llm-gateway）
+    """
+
+
 class VisionTrack(RootModel[VisionTrackV1]):
     model_config = {"allow_inf_nan": False}
     root: VisionTrackV1
@@ -465,3 +638,8 @@ class Site(ContractModel):
     """
     zones: list[Zone]
     devices: list[Device]
+
+
+class AiInvestigation(RootModel[AiInvestigationV1]):
+    model_config = {"allow_inf_nan": False}
+    root: AiInvestigationV1

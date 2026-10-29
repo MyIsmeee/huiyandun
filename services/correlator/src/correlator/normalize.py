@@ -13,7 +13,7 @@ from pydantic import AwareDatetime, BaseModel, ValidationError
 from py_contracts.config.site_schema import SiteConfig
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"  # 1.1：来源、可信度、说明（C-SEC-09）
 # event_id 由 EVE 原文派生：重启后重读未确认的一行时 ID 不变，由 JetStream 去重
 EVENT_NAMESPACE = uuid.UUID("5d0f6a52-4b0e-4f0c-9a51-3c7f3e0c7a10")
 # Suricata 优先级 1 最高；critical 留给跨域关联事件（HYD-PLAN-007 §4）
@@ -31,6 +31,7 @@ class _Endpoint(BaseModel):
 class _Alert(BaseModel):
     signature_id: int
     rev: int
+    signature: str
     category: str
     severity: int
     # 规则以 target 关键字标明受害方时才有；否则按报文方向，源即攻击方
@@ -83,6 +84,9 @@ def normalize(line: str, devices: dict[Ip, str]) -> SecurityAlertV1 | None:
             device_id=devices.get(dst),
             technique=technique,
             evidence_ref=f"suricata:flow/{eve.flow_id}",
+            source="rule",
+            confidence=1.0,
+            summary=alert.signature,
         )
     except ValidationError as e:
         log.warning("correlator.alert_invalid", extra={"sid": alert.signature_id, "error": str(e)})

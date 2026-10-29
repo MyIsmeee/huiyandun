@@ -6,6 +6,8 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from py_contracts.events.hyd_ai_investigation_v1_schema import AiInvestigationV1
+from py_contracts.events.hyd_correlator_confirmation_v1_schema import CorrelatorConfirmationV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
@@ -23,7 +25,18 @@ HIT = "1f0e2d3c-4b5a-4968-8776-655443322110"
 SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "hyd.vision.track.v1": (
         VisionTrackV1,
-        {"camera_id": "cam-01", "track_id": 3, "x": 4.0, "y": 6.0, "uncertainty_m": 0.5},
+        {
+            "camera_id": "cam-01",
+            "track_id": 3,
+            "object_class": "person",
+            "x": 4.0,
+            "y": 6.0,
+            "uncertainty_m": 0.5,
+            "heading_deg": 90.0,
+            "speed_mps": 1.2,
+            "bbox": [0.1, 0.2, 0.3, 0.8],
+            "keypoints": [[0.2, 0.3, 0.9]] * 17,
+        },
     ),
     "hyd.vision.behavior.v1": (
         VisionBehaviorV1,
@@ -39,7 +52,14 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     ),
     "hyd.vision.integrity.v1": (
         VisionIntegrityV1,
-        {"camera_id": "cam-02", "type": "freeze", "duration_s": 12.0},
+        {
+            "camera_id": "cam-02",
+            "type": "replay",
+            "duration_s": 12.0,
+            "source": "model",
+            "confidence": 0.97,
+            "detail": "与 01:12:40 的片段相同",
+        },
     ),
     "hyd.security.alert.v1": (
         SecurityAlertV1,
@@ -53,6 +73,9 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "device_id": "cam-02",
             "technique": "T1110",
             "evidence_ref": "suricata:eve:1024",
+            "source": "rule",
+            "confidence": 1.0,
+            "summary": "60 s 内 5 次 RTSP 认证失败",
         },
     ),
     "hyd.correlator.incident.v1": (
@@ -69,6 +92,7 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "tactics": ["Credential Access"],
             "evidence_refs": ["suricata:eve:1024"],
             "hit_path": [HIT],
+            "requires_confirmation": True,
             "status": "open",
             "created_at": TS,
         },
@@ -86,6 +110,29 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "expires_at": TS,
             "verify_result": {"passed": True, "reason": None},
         },
+    ),
+    "hyd.ai.investigation.v1": (
+        AiInvestigationV1,
+        {
+            "incident_id": "inc-0001",
+            "seq": 3,
+            "kind": "verdict",
+            "step": None,
+            "verdict": {
+                "is_attack": True,
+                "confidence": 0.92,
+                "techniques": ["T1110", "T0832"],
+                "narrative": "172.30.0.66 在 60 s 内 37 次认证失败后，cam-02 画面被替换为循环片段。",
+                "recommendation": "隔离 172.30.0.66",
+                "unverified": [],
+            },
+            "error": None,
+            "provider": {"name": "DeepSeek", "location": "public"},
+        },
+    ),
+    "hyd.correlator.confirmation.v1": (
+        CorrelatorConfirmationV1,
+        {"incident_id": "inc-0001", "actor": "operator1", "request_id": "req-1"},
     ),
 }
 
@@ -178,6 +225,19 @@ def test_ignores_unknown_field_from_newer_minor() -> None:
         ("hyd.playbook.execution.v1", "state", "blocked"),
         ("hyd.playbook.execution.v1", "ttl_s", 0),
         ("hyd.playbook.execution.v1", "ttl_s", 86401),
+        ("hyd.vision.track.v1", "object_class", "dog"),
+        ("hyd.vision.track.v1", "heading_deg", 360.0),
+        ("hyd.vision.track.v1", "speed_mps", -1.0),
+        ("hyd.vision.track.v1", "bbox", [0.1, 0.2, 1.3, 0.8]),
+        ("hyd.vision.track.v1", "bbox", [0.1, 0.2, 0.3]),
+        ("hyd.vision.track.v1", "keypoints", [[0.2, 0.3, 0.9]] * 16),
+        ("hyd.vision.integrity.v1", "source", "llm"),
+        ("hyd.vision.integrity.v1", "confidence", 1.2),
+        ("hyd.security.alert.v1", "source", "llm"),
+        ("hyd.security.alert.v1", "confidence", -0.1),
+        ("hyd.ai.investigation.v1", "kind", "thinking"),
+        ("hyd.ai.investigation.v1", "seq", -1),
+        ("hyd.ai.investigation.v1", "provider", {"name": "x", "location": "cloud"}),
     ],
 )
 def test_rejects_invalid_value(subject: str, field: str, value: Any) -> None:
@@ -192,6 +252,14 @@ def test_rejects_invalid_value(subject: str, field: str, value: Any) -> None:
         ("hyd.correlator.incident.v1", "source_ip"),
         ("hyd.playbook.execution.v1", "expires_at"),
         ("hyd.playbook.execution.v1", "verify_result"),
+        ("hyd.vision.track.v1", "heading_deg"),
+        ("hyd.vision.track.v1", "speed_mps"),
+        ("hyd.vision.track.v1", "keypoints"),
+        ("hyd.vision.integrity.v1", "detail"),
+        ("hyd.ai.investigation.v1", "step"),
+        ("hyd.ai.investigation.v1", "verdict"),
+        ("hyd.ai.investigation.v1", "error"),
+        ("hyd.ai.investigation.v1", "provider"),
     ],
 )
 def test_nullable_field_is_required_but_accepts_null(subject: str, field: str) -> None:
