@@ -1,6 +1,6 @@
 # vision-engine
 
-视觉引擎（HYD-ARCH-001 §8）：经 go2rtc 拉流，检测人体与骨骼并跟踪，输出 `contracts/events/hyd.vision.*` 结构化事件；不输出人员裁剪图（C-CV-02）。
+视觉引擎（HYD-ARCH-001 §8）：经 go2rtc 拉流，检测人体与骨骼并跟踪、识别环境，输出 `contracts/events/hyd.vision.*` 结构化事件；不输出人员裁剪图（C-CV-02）。
 
 ## 职责
 
@@ -9,7 +9,7 @@
   - `uncertainty_m` = 标定点重投影误差的均方根 + 脚点上下偏移人体框高度 5% 在地面上的较大偏移（C-CV-06）。恰好 4 组标定点时前者为 0
   - 脚点或偏移点位于地平线以上时不输出坐标
 - 推理会话（`runtime.py`）：从本地模型文件创建 ONNX Runtime 会话（C-RU-06）
-  - `HYD_DEVICE` 无默认值，须显式声明。`cuda` 时设置显存上限：`HYD_GPU_MEM_LIMIT_MB` 是整个服务的上限，由加载的模型平分（RTMO 与 RF-DETR 各一半），总占用不超过该值（C-HW-12），并断言 `CUDAExecutionProvider` 实际生效，回退 CPU 即报错退出（C-CV-11）；`cpu` 为 D0-min 的 CPU 模式（DP-06）
+  - `HYD_DEVICE` 无默认值，须显式声明。`cuda` 时设置显存上限：`HYD_GPU_MEM_LIMIT_MB` 是整个服务的上限，由加载的模型平分（RTMO、RF-DETR、EfficientViT-Seg 各三分之一），总占用不超过该值（C-HW-12），并断言 `CUDAExecutionProvider` 实际生效，回退 CPU 即报错退出（C-CV-11）；`cpu` 为 D0-min 的 CPU 模式（DP-06）
 - 检测（`detector.py`）：rtmlib RTMO 单阶段输出人体框与 COCO 17 关键点（REUSE-05），结果换算回整帧坐标；置信度低于 0.3 的框丢弃
 - 车辆检测（`detector.py` 的 `VehicleDetector`）：RF-DETR-S（REUSE-22）经 rtmlib 推理（`HYD_VEHICLE_MODEL_FILE` 未配置时只检测人员），只取自行车、轿车、摩托车、公交、货车，置信度低于 0.3 的框丢弃；后处理自行完成，以保留 ByteTrack 需要的置信度
 - 运动估计（`kinematics.py`）：由最近 1 s 的实测平面坐标计算朝向与速度；起步不足 3 帧为 null，低于 0.3 m/s 视为静止、不输出朝向；不预测未来位置（FR-102）
@@ -20,13 +20,19 @@
   - 已标定摄像头的每条已确认轨迹每帧发布一条 `hyd.vision.track.v1`（核心 NATS，不持久化），含类别、朝向、速度、画面归一化框与骨骼（车辆无骨骼）；脚点取框底边中点；未标定摄像头照常检测跟踪，但不发布坐标（FR-902）
   - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`（`stream_lost` 事件由 TK-040 发布）
   - 健康检查：检测循环每个周期更新 `HYD_HEARTBEAT_FILE`，10 s 未更新视为卡死
+- 场景感知（`scene.py`，FR-108）：已标定摄像头每秒 1 次取最新帧，EfficientViT-Seg L1 ADE20K（REUSE-25，`HYD_SCENE_MODEL_FILE` 未配置时不输出场景）输出 64×64 格，150 类按随代码版本化的映射表归并为渲染类别（地面 road / sidewalk / floor / grass / earth，立面 wall / building / fence / railing，物体 furniture / street_furniture，植被 tree / plant）；人员与车辆不在场景中
+  - 不输出：最大类别概率低于 0.5 的格，灰度均值低于 40 或高于 250 的格（暗光、过曝、画面黑边）
+  - 平滑：每格取近 3 次的多数类别，连续 2 次识别即翻转
+  - 投影（与 track 同一套单应映射）：地面取外轮廓（人与车辆遮挡处不留孔洞）；立面取每列最低一格的底边为墙脚线，遇跳变断开，高度按类别取 2.8 / 6 / 1.2 / 1.0 m；物体取底边并向远离摄像头一侧补出 0.6 m（家具）或 0.4 m（街道设施）深的底面，高 0.8 m；树取底部中心，高 5 m（盆栽 1 m）；地平线以上与超出 `pose.range_m` 的部分丢弃；按 0.2 m 简化
+  - 路面标线：路面外轮廓内亮度 ≥ 190、饱和度 ≤ 50 的细长条纹（长宽比 ≥ 3、宽 ≤ 1 m）；至少 3 条平行并排、间距 3 m 内的为斑马线，其余为车道线
+  - 地面、物体与标线合计保留面积最大的 64 个多边形；每帧发布一条 `hyd.vision.scene.v1`（核心 NATS，不持久化），无任何有效识别或断流时不发布，大屏保留上一帧
 - 依赖：supervision 声明的 PyAV（自带 GPL 的 x264 / x265）与 matplotlib 由根 `pyproject.toml` 的 `override-dependencies` 去掉（G-08、REUSE-07）
 
 ## 命令
 
 ```sh
 hyd-vision      # 常驻检测（镜像默认命令）；启动时同样断言推理设备
-hyd-gpu-check   # 按 HYD_DEVICE 加载全部模型（RTMO、RF-DETR）并断言推理设备；cuda 未生效时以 1 退出
+hyd-gpu-check   # 按 HYD_DEVICE 加载全部模型（RTMO、RF-DETR、EfficientViT-Seg）并断言推理设备；cuda 未生效时以 1 退出
 ```
 
 `make doctor` 以 `compose.gpu.yaml`（`HYD_DEVICE=cuda`）运行 `hyd-gpu-check`。`make demo-up` 默认加载 `compose.gpu.yaml`，无 GPU 时须显式 `GPU=0`。
