@@ -1,5 +1,6 @@
 import { BellRing, Crosshair, LoaderCircle, Lock, type LucideIcon, ShieldAlert, TriangleAlert, WifiOff } from "lucide-react";
 import { type Behavior, useLive } from "../store/live";
+import { useViewpointCamera } from "./camera";
 import { type Camera, deviceLook, STATUS, type TagIcon } from "./devices";
 import type { View } from "./layout";
 
@@ -22,9 +23,10 @@ const ABOVE_M = 0.5;
  */
 export function DeviceTags({ cameras, view }: { cameras: Camera[]; view: View }) {
   const behaviors = useLive((s) => s.behaviors);
+  const viewing = useViewpointCamera(); // 视点一侧的摄像头模型不画，标签随之不画，免得悬空
   return cameras.map(({ id, state, pose }) => {
     const { tags } = deviceLook(state);
-    if (tags.length === 0) return null;
+    if (tags.length === 0 || id === viewing) return null;
     const at = view.project([pose.x, pose.height_m + ABOVE_M, pose.y]);
     if (!at) return null;
     const [left, top] = at;

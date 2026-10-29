@@ -111,7 +111,7 @@ export function SceneViewport({ site }: { site: Site }) {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  });
+  }, [animate]);
 
   /** 指针下的人员或车辆：按渲染中的位置命中。2D 降级视图不绘制目标 */
   const hit = (e: MouseEvent<HTMLDivElement>) => {
@@ -129,7 +129,9 @@ export function SceneViewport({ site }: { site: Site }) {
     else select(null);
   };
   // 悬停：人员与车辆显示中性灰四角括框、指针变为手形（V-I4）
-  const hovering = useSelection((s) => s.hoveredKey !== null);
+  // 悬停的目标离开画面即恢复指针，不必等鼠标再动
+  const hoveredKey = useSelection((s) => s.hoveredKey);
+  const hovering = useLive((s) => hoveredKey !== null && hoveredKey in s.targets);
   const hover = (key: string | null) => {
     if (key !== useSelection.getState().hoveredKey) useSelection.setState({ hoveredKey: key });
   };

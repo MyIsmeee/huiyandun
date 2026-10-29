@@ -352,4 +352,11 @@ test("悬停人员显示中性灰括框；单击空白处收起详情", async ({
   await expect(panel).toHaveCount(1);
   await scene(page).click({ position: { x: 200, y: 600 } });
   await expect(panel).toHaveCount(0);
+
+  // 悬停的人员离开画面（2 s 无更新即移除，V-U4）：括框消失，指针恢复，不必等鼠标再动
+  await at(564, 330);
+  await expect(page.locator("[data-scene]")).toHaveCSS("cursor", "pointer");
+  await page.clock.runFor(2500);
+  await expect(scene(page).locator("[data-hover]")).toHaveCount(0);
+  await expect(page.locator("[data-scene]")).not.toHaveCSS("cursor", "pointer");
 });

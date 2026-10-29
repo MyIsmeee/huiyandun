@@ -5,10 +5,16 @@ import { prefersReducedMotion } from "../theme/store";
 import { focusOn, moveCamera, overview, rotated, useCamera, zoomed } from "./camera";
 import { type Pose, ZOOM_MAX, ZOOM_MIN } from "./layout";
 
-/** 转场是否播放：降低动效或断线时瞬时切换（V-A4、C-FE-05） */
+/** 转场是否播放：降低动效或断线时瞬时切换（V-A4、C-FE-05）；取调用时的状态 */
+function canAnimate(): boolean {
+  const { open, connecting } = useConnection.getState();
+  return (open || connecting) && !prefersReducedMotion();
+}
+
+/** 订阅连接状态：断线与恢复时调用方重新渲染；返回的判断函数引用不变，可放进副作用的依赖 */
 export function useAnimate(): () => boolean {
-  const live = useConnection((s) => s.open || s.connecting);
-  return () => live && !prefersReducedMotion();
+  useConnection((s) => s.open || s.connecting);
+  return canAnimate;
 }
 
 /**
