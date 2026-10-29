@@ -118,7 +118,10 @@ function FirstFrame({ onReady }: { onReady: () => void }) {
   return null;
 }
 
-/** 1 m 比例尺栅格，与地面同样无限延伸（§5.1 L0） */
+/**
+ * 1 m 比例尺栅格，与地面同样无限延伸（§5.1 L0）。
+ * 不写深度：贴地的阴影、视场与地面色块只与地面比深度，不被栅格线切开，地面色块直接盖住栅格
+ */
 function Grid({ center: [cx, , cz], color }: { center: Vec3; color: string }) {
   const positions = useMemo(() => {
     const p: number[] = [];
@@ -134,7 +137,7 @@ function Grid({ center: [cx, , cz], color }: { center: Vec3; color: string }) {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
-      <lineBasicMaterial color={color} />
+      <lineBasicMaterial color={color} depthWrite={false} />
     </lineSegments>
   );
 }

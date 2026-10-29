@@ -1,7 +1,7 @@
 import { Box3, type BufferAttribute, type BufferGeometry, Color } from "three";
 import { describe, expect, it } from "vitest";
 import type { Camera } from "../../src/scene/devices";
-import { area, isStale, largestFirst, PALETTE, sceneGeometry, visibleScenes } from "../../src/scene/perceived";
+import { area, isStale, largestFirst, layerOpacity, PALETTE, sceneGeometry, visibleScenes } from "../../src/scene/perceived";
 import type { SceneFrame } from "../../src/store/live";
 
 const NOW = Date.parse("2026-10-27T06:30:00Z");
@@ -33,6 +33,16 @@ const bounds = (geometry: BufferGeometry | null) => {
   expect(geometry).not.toBeNull();
   return new Box3().setFromBufferAttribute(geometry?.getAttribute("position") as BufferAttribute);
 };
+
+describe("渐变替换（§5.1 L1）", () => {
+  it("当前层由 0 淡入到目标不透明度", () => {
+    expect([0, 0.5, 1].map((k) => layerOpacity(0.5, k, null))).toEqual([0, 0.25, 0.5]);
+  });
+
+  it("淡入途中被取代：从当前不透明度淡出，不先跳到不透明", () => {
+    expect([0, 0.5, 1].map((k) => layerOpacity(1, k, 0.4))).toEqual([0.4, 0.2, 0]);
+  });
+});
 
 describe("陈旧（设计 §3.7）", () => {
   it("场景帧自带的 ts 早于 10 s 前即为陈旧", () => {

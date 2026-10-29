@@ -5,7 +5,16 @@ import type { SceneFrame } from "../store/live";
 import { useTheme } from "../theme/store";
 import { useMotion } from "./DeviceMarkers";
 import type { Camera } from "./devices";
-import { FADE_MS, PALETTE, type Palette, type SceneGeometry, STALE_OPACITY, sceneGeometry, useScenes } from "./perceived";
+import {
+  FADE_MS,
+  layerOpacity,
+  PALETTE,
+  type Palette,
+  type SceneGeometry,
+  STALE_OPACITY,
+  sceneGeometry,
+  useScenes,
+} from "./perceived";
 
 /** 各摄像头实时识别并投影的环境（§5.1 L1）；无识别结果即空白（UP-1） */
 export function PerceivedScene({ cameras }: { cameras: Camera[] }) {
@@ -53,8 +62,12 @@ function FadingLayer(props: Omit<Layer, "id"> & { opacity: number; fade: boolean
   const invalidate = useThree((s) => s.invalidate);
   /** 渐变起点（秒，渲染时钟）：首次绘制或被取代后的首帧记录 */
   const start = useRef<number | null>(null);
+  /** 最近一帧绘制的不透明度；被取代时由此开始淡出 */
+  const shown = useRef(0);
+  const from = useRef<number | null>(null);
   useEffect(() => {
     start.current = null;
+    from.current = retired ? shown.current : null;
     invalidate();
   }, [retired, opacity, fade, invalidate]);
   useEffect(() => () => {
@@ -64,7 +77,8 @@ function FadingLayer(props: Omit<Layer, "id"> & { opacity: number; fade: boolean
   useFrame(({ clock }) => {
     start.current ??= clock.elapsedTime;
     const k = fade ? Math.min(1, ((clock.elapsedTime - start.current) * 1000) / FADE_MS) : 1;
-    const value = opacity * (retired ? 1 - k : k);
+    const value = layerOpacity(opacity, k, from.current);
+    shown.current = value;
     for (const material of [flat.current, solid.current]) if (material) material.opacity = value;
     if (k < 1) invalidate();
     else if (retired) onGone(geometry);
