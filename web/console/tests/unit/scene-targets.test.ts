@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { Camera, DeviceState } from "../../src/scene/devices";
-import { coneOpacity, detectingByCamera, HIGH_ERROR_M, positionAt, turnToward, visibleTargets } from "../../src/scene/targets";
+import type { View } from "../../src/scene/layout";
+import {
+  coneOpacity,
+  detectingByCamera,
+  HIGH_ERROR_M,
+  pickTarget,
+  positionAt,
+  targetLabel,
+  turnToward,
+  visibleTargets,
+} from "../../src/scene/targets";
 import type { Behavior, Target, TargetClass } from "../../src/store/live";
 
 const pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 10 };
@@ -109,5 +119,31 @@ describe("detectingByCamera", () => {
     const counts = detectingByCamera(targets(target(1), target(2), target(3, 0.4, "cam-02")));
 
     expect(counts).toEqual({ "cam-01": 2, "cam-02": 1 });
+  });
+});
+
+describe("targetLabel", () => {
+  it("类别 · 跟踪号 · 速度（km/h 取整）；尚无速度时不显示（D-054）", () => {
+    expect(targetLabel({ ...target(7), speed_mps: 1.25 })).toBe("人员 · #7 · 5 km/h");
+    expect(targetLabel({ ...target(1000001, 0.4, "cam-01", "bus"), speed_mps: null })).toBe("公交 · #1000001");
+  });
+});
+
+describe("pickTarget", () => {
+  // 俯视：每米 10 像素，场景 (x, *, y) 投影到 (10x, 10y)
+  const view: View = { zoom: 10, project: ([x, , z]) => [x * 10, z * 10], panLimit: [0, 0] };
+  const list = visibleTargets(
+    targets({ ...target(1), x: 1, y: 2, trail: [[1, 2, 0]] }, { ...target(2, 0.4, "cam-01", "bus"), trail: [[10, 2, 0]] }),
+    [cam("normal")],
+    {},
+  );
+
+  it("命中半径内取最近的目标；人员半径不足 20 像素时按 20 像素", () => {
+    expect(pickTarget(list, view, [10 + 19, 20], 0)).toBe("cam-01/1");
+    expect(pickTarget(list, view, [10 + 21, 20], 0)).toBeNull();
+  });
+
+  it("车辆按模型半长命中", () => {
+    expect(pickTarget(list, view, [100 + 39, 20], 0)).toBe("cam-01/2");
   });
 });

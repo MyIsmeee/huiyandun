@@ -1,5 +1,6 @@
-import type { Behavior, Target } from "../store/live";
+import type { Behavior, Target, TargetClass } from "../store/live";
 import type { Camera } from "./devices";
+import type { View } from "./layout";
 
 /** 不确定半径超过此值时目标模型改为半透明（V-U1） */
 export const HIGH_ERROR_M = 1;
@@ -61,4 +62,42 @@ export function detectingByCamera(targets: Record<string, Target>): Record<strin
   const counts: Record<string, number> = {};
   for (const { camera_id } of Object.values(targets)) counts[camera_id] = (counts[camera_id] ?? 0) + 1;
   return counts;
+}
+
+/** 点缀蓝（V-S5）：只用于选中括框、胶囊标签与轨迹，不表达任何状态 */
+export const ACCENT = "#2F6FE4";
+
+export const CLASS_LABEL: Record<TargetClass, string> = {
+  person: "人员",
+  bicycle: "自行车",
+  motorcycle: "摩托车",
+  car: "轿车",
+  bus: "公交",
+  truck: "货车",
+};
+
+/** 速度换算为 km/h 取整；尚无速度（起步不足 3 帧）为 null（D-054） */
+export const kmh = (speed_mps: number | null) => (speed_mps === null ? null : Math.round(speed_mps * 3.6));
+
+/** 胶囊标签：类别 · 跟踪号 · 速度，尚无速度时不显示速度（§5.1 L5） */
+export function targetLabel({ object_class, track_id, speed_mps }: Target): string {
+  const speed = kmh(speed_mps);
+  return [CLASS_LABEL[object_class], `#${track_id}`, ...(speed === null ? [] : [`${speed} km/h`])].join(" · ");
+}
+
+/** 点选命中的最小半径（像素）与各类目标的命中半径（米，约为模型半长）：命中区域不小于视觉尺寸（V-I4） */
+const MIN_HIT_PX = 20;
+const HIT_M: Record<TargetClass, number> = { person: 0.9, bicycle: 0.9, motorcycle: 1.1, car: 2.3, bus: 4, truck: 3.3 };
+
+/** 单击命中的目标：在渲染时刻 t 的位置（模型中部）投影到视口，取命中半径内最近的一个；没有命中为 null */
+export function pickTarget(list: Visible[], view: View, [px, py]: readonly [number, number], t: number): string | null {
+  let best: { key: string; distance: number } | null = null;
+  for (const target of list) {
+    const [x, y] = positionAt(target.trail, t);
+    const [sx, sy] = view.project([x, 0.9, y]);
+    const distance = Math.hypot(sx - px, sy - py);
+    const radius = Math.max(MIN_HIT_PX, HIT_M[target.object_class] * view.zoom);
+    if (distance <= radius && (!best || distance < best.distance)) best = { key: target.key, distance };
+  }
+  return best?.key ?? null;
 }

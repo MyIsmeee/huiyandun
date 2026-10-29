@@ -194,3 +194,59 @@ test("姿态人形：站立、抬手、跌倒与画面姿态一致（FR-109）",
 
   await expect(scene(page)).toHaveScreenshot("person-poses.png");
 });
+
+test("单击人员：四角括框与胶囊标签，详情播放所属摄像头画面；离开画面即收起（D-054）", async ({ page }) => {
+  await presetTheme(page, "light", true);
+  await page.route("/api/devices/cam-01/webrtc", (route) =>
+    route.fulfill({ status: 502, json: { code: "bad_gateway", message: "视频服务不可用", request_id: "r" } }),
+  );
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  // 人员斜向走过 2 s、轿车向 +x 驶过，留下蓝色虚线点轨迹
+  for (let i = 0; i < 5; i += 1) {
+    const person = { ...BASE, ...TARGET, camera_id: "cam-01", track_id: 7, x: 17 + i * 0.6, y: 12 - i * 0.3, uncertainty_m: 0.4, speed_mps: 1.3 };
+    const car = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, x: 10 + i * 1.5, y: 8, uncertainty_m: 0.4, heading_deg: 0, speed_mps: 7.5 };
+    for (const data of [person, car]) ws?.send(JSON.stringify({ channel: "tracks", data }));
+    await page.clock.runFor(500);
+  }
+
+  await scene(page).click({ position: { x: 570, y: 375 } }); // 人员所在位置（与 person-normal 截图一致）
+  await page.clock.runFor(100); // 时钟暂停：推进一帧，括框按投影就位
+  const panel = page.getByRole("region", { name: "详情" });
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("人员 #7");
+  await expect(panel).toContainText("5 km/h");
+  await expect(panel.locator('[data-video="unavailable"]')).toContainText("视频服务不可用");
+  await expect(scene(page).locator("[data-target]")).toContainText("人员 · #7 · 5 km/h");
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("target-selected.png");
+
+  await scene(page).click({ position: { x: 555, y: 310 } }); // 轿车：括框按车身投影范围
+  await page.clock.runFor(100);
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("轿车 #1000001");
+  await expect(scene(page)).toHaveScreenshot("target-selected-car.png");
+
+  // 放大后在轿车上按下拖拽平移：画面随指针移动，松开时轿车仍在指针下，但拖拽不算单击、不选中
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  const box = await scene(page).boundingBox();
+  await page.mouse.move((box?.x ?? 0) + 555, (box?.y ?? 0) + 310);
+  await page.mouse.down();
+  await page.mouse.move((box?.x ?? 0) + 585, (box?.y ?? 0) + 330, { steps: 3 });
+  await page.mouse.up();
+  await page.clock.runFor(100);
+  await expect(panel).toHaveCount(0);
+
+  // 选中轿车后停止推送：2 s 无更新即移除（V-U4），详情与括框随之收起（D-054）
+  await scene(page).click({ position: { x: 585, y: 330 } }); // 平移后轿车所在位置
+  await page.clock.runFor(100);
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("轿车 #1000001");
+  await page.clock.runFor(2500);
+  await expect(panel).toHaveCount(0);
+  await expect(scene(page).locator("[data-target]")).toHaveCount(0);
+  // 收起即取消选中：同一跟踪号再次出现时不会自动重新选中
+  const back = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, x: 16, y: 8, uncertainty_m: 0.4 };
+  ws?.send(JSON.stringify({ channel: "tracks", data: back }));
+  await page.clock.runFor(100);
+  await expect(panel).toHaveCount(0);
+  await expect(scene(page).locator("[data-target]")).toHaveCount(0);
+});

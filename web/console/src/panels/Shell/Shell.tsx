@@ -6,7 +6,7 @@ import { connect, useConnection } from "../../store/connection";
 import { useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
-import { DetailPanel } from "../DetailPanel/DetailPanel";
+import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
 import { type KpiData, KpiTile } from "../KpiTile/KpiTile";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
@@ -36,6 +36,12 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   const selectedId = useSelection((s) => s.deviceId);
   const pushed = useLive((s) => (selectedId ? s.devices[selectedId] : undefined));
   const selected = pushed ?? site.devices.find((d) => d.id === selectedId);
+  const targetKey = useSelection((s) => s.targetKey);
+  const target = useLive((s) => (targetKey ? s.targets[targetKey] : undefined));
+  // 选中的目标离开画面（2 s 无更新被移除，V-U4）即取消选中、收起详情（D-054）
+  useEffect(() => {
+    if (targetKey && !target) deselect();
+  }, [targetKey, target]);
 
   async function handleLogout() {
     setLogout("pending");
@@ -104,6 +110,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
 
       <div className="row-span-2 flex min-h-0 flex-col gap-2">
         {selected && <DetailPanel device={selected} stale={offline} onClose={deselect} />}
+        {target && <TargetPanel target={target} stale={offline} onClose={deselect} />}
         <aside aria-label="告警" className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
           <h2 className="border-b border-line px-4 py-3 font-semibold">告警</h2>
           <div className="m-auto text-center text-sm text-fg-3">
