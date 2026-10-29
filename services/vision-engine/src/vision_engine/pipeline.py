@@ -32,7 +32,7 @@ from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
 from vision_engine.kinematics import Motion
 from vision_engine.motion import MotionGate
-from vision_engine.runtime import DeviceError, VisionConfig, create_session
+from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
 
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
@@ -272,9 +272,17 @@ async def run_camera(
 
 
 async def serve(config: VisionConfig) -> None:
-    detector = PoseDetector(str(config.model_file), create_session(config, config.model_file))
-    vehicles = VehicleDetector(
-        str(config.vehicle_model_file), create_session(config, config.vehicle_model_file)
+    models = len(model_files(config))  # 显存上限由加载的模型平分（C-HW-12）
+    detector = PoseDetector(
+        str(config.model_file), create_session(config, config.model_file, models)
+    )
+    vehicles = (
+        VehicleDetector(
+            str(config.vehicle_model_file),
+            create_session(config, config.vehicle_model_file, models),
+        )
+        if config.vehicle_model_file
+        else None
     )
     site = SiteConfig.model_validate(yaml.safe_load(config.site_file.read_text(encoding="utf-8")))
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)

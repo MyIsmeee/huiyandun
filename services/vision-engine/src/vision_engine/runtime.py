@@ -26,11 +26,16 @@ class VisionConfig(ServiceConfig):
         description="推理设备，无默认值、须显式声明；cpu 为 D0-min 的 CPU 模式（C-CV-11、DP-06）"
     )
     model_file: FilePath = Field(description="RTMO ONNX 模型文件的本地路径（C-RU-06、DP-08）")
-    vehicle_model_file: FilePath = Field(
-        description="RF-DETR ONNX 模型文件的本地路径，检出车辆（REUSE-22、C-RU-06）"
+    vehicle_model_file: FilePath | None = Field(
+        None,
+        description="RF-DETR ONNX 模型文件的本地路径，检出车辆（REUSE-22、C-RU-06）；"
+        "未配置时只检测人员（如关键点录制工具）",
     )
     gpu_mem_limit_mb: int = Field(
-        2048, gt=0, description="CUDA EP 显存上限，单位 MiB，与同机其他 GPU 进程共存（C-HW-12）"
+        2048,
+        gt=0,
+        description="整个识别服务的 CUDA 显存上限，单位 MiB，由加载的模型平分；"
+        "与同机其他 GPU 进程共存（C-HW-12）",
     )
     site_file: Path = Field(
         Path("/etc/hyd/site.yaml"), description="站点配置 site.yaml：摄像头流名与标定点（FR-901）"
@@ -47,10 +52,16 @@ class DeviceError(RuntimeError):
     """声明 cuda 但 CUDAExecutionProvider 未生效（C-CV-11）。"""
 
 
-def create_session(config: VisionConfig, model_file: Path) -> ort.InferenceSession:
+def model_files(config: VisionConfig) -> list[Path]:
+    """服务加载的全部模型：RTMO，以及配置了的 RF-DETR。"""
+    return [config.model_file] + ([config.vehicle_model_file] if config.vehicle_model_file else [])
+
+
+def create_session(config: VisionConfig, model_file: Path, models: int = 1) -> ort.InferenceSession:
+    """models 为服务共加载的模型数：每个会话的显存上限取总上限的 1/models（C-HW-12）。"""
     if config.device == "cuda":
         providers: list[str | tuple[str, dict[str, int]]] = [
-            (CUDA, {"gpu_mem_limit": config.gpu_mem_limit_mb * 2**20}),
+            (CUDA, {"gpu_mem_limit": config.gpu_mem_limit_mb * 2**20 // models}),
             CPU,
         ]
     else:
@@ -67,9 +78,8 @@ def gpu_check() -> None:
     config = load_config(VisionConfig)
     configure_logging("vision-engine", config.log_level)
     try:
-        sessions = [
-            create_session(config, f) for f in (config.model_file, config.vehicle_model_file)
-        ]
+        files = model_files(config)
+        sessions = [create_session(config, f, models=len(files)) for f in files]
     except DeviceError as e:
         log.error("vision.device_unavailable", extra={"error": str(e)})
         sys.exit(1)
