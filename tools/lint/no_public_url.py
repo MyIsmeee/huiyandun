@@ -49,7 +49,8 @@ INERT_TEXT = (
 # 不会解析到公网的保留域名：RFC 2606、RFC 6761、ICANN .internal、mDNS .local
 RESERVED_SUFFIXES = (".localhost", ".local", ".internal", ".test", ".example", ".invalid")
 EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")
-# 运行时不加载的文件：锁文件中的包源、文档链接、托管 Runner 上的 CI 配置、测试数据、本扫描器的放行清单
+# 运行时不加载的文件：锁文件中的包源、文档链接、托管 Runner 上的 CI 配置、测试数据、本扫描器的放行清单、
+# 构建期转换脚本
 EXCLUDED = (
     "uv.lock",
     "pnpm-lock.yaml",
@@ -58,6 +59,9 @@ EXCLUDED = (
     "tests/*",
     "*/tests/*",
     "tools/lint/no_public_url.py",
+    # 构建期模型转换（make fetch-models）：拉取上游代码与 PyTorch，不进入任何镜像（REUSE-25）
+    "tools/dev/export_efficientvit_seg.py",
+    "tools/dev/export_efficientvit_seg.py.lock",
 )
 # 只在开发机访问的下载地址：按文件放行指定键所在行，同一文件的其他行照常扫描。
 # 模型权重地址只由 make fetch-models 读取，registry.yaml 不进入任何镜像（R-03、C-RU-06）；
