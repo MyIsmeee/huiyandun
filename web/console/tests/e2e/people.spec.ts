@@ -236,7 +236,17 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   await page.clock.runFor(100);
   await expect(panel).toHaveCount(0);
 
-  await page.clock.runFor(2500); // 2 s 无更新：目标移除（V-U4）
+  // 选中轿车后停止推送：2 s 无更新即移除（V-U4），详情与括框随之收起（D-054）
+  await scene(page).click({ position: { x: 585, y: 330 } }); // 平移后轿车所在位置
+  await page.clock.runFor(100);
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("轿车 #1000001");
+  await page.clock.runFor(2500);
+  await expect(panel).toHaveCount(0);
+  await expect(scene(page).locator("[data-target]")).toHaveCount(0);
+  // 收起即取消选中：同一跟踪号再次出现时不会自动重新选中
+  const back = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, x: 16, y: 8, uncertainty_m: 0.4 };
+  ws?.send(JSON.stringify({ channel: "tracks", data: back }));
+  await page.clock.runFor(100);
   await expect(panel).toHaveCount(0);
   await expect(scene(page).locator("[data-target]")).toHaveCount(0);
 });
