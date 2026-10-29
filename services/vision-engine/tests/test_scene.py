@@ -4,6 +4,7 @@ scenes/*.npz 由 tools/dev/record_scene.py 从 demo/media/src/ 的素材帧录�
 映射表或阈值变化后须重新录制。投影以已知单应矩阵检验平面坐标；分割以假会话代替模型。
 """
 
+import asyncio
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,10 @@ import cv2
 import numpy as np
 import pytest
 
+from py_common.bus import Bus
+from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from vision_engine.geometry import GroundMapping
+from vision_engine.pipeline import SCENE_SUBJECT, FrameReader, run_scene
 from vision_engine.scene import (
     CLASSES,
     GRID,
@@ -295,3 +299,37 @@ def test_nothing_recognized_is_not_published() -> None:
     camera = perception(segmenter=SequenceSegmenter(np.zeros((GRID, GRID), np.uint8)))
 
     assert camera.process(blank()) is None
+
+
+class Reader:
+    """new=True 时每次取用都是新帧；否则一直是同一帧（如断流）。"""
+
+    def __init__(self, new: bool) -> None:
+        self.new = new
+        self.seq = 1
+
+    def latest(self) -> tuple[int, np.ndarray]:
+        self.seq += self.new
+        return self.seq, blank()
+
+
+class SceneBus:
+    def __init__(self) -> None:
+        self.events: list[VisionSceneV1] = []
+
+    async def publish(self, subject: str, event: VisionSceneV1) -> None:
+        assert subject == SCENE_SUBJECT
+        self.events.append(event)
+
+
+@pytest.mark.parametrize(("new", "published"), [(True, 2), (False, 1)])
+def test_scene_published_once_per_second_for_new_frames(new: bool, published: int) -> None:
+    road = grid(road=[(slice(10, 30), slice(10, 30))])
+    camera = perception(segmenter=SequenceSegmenter(*[road] * 5))
+    bus = SceneBus()
+
+    run = run_scene(camera, cast(FrameReader, Reader(new)), cast(Bus, bus))
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(run, 2.5))
+
+    assert len(bus.events) == published

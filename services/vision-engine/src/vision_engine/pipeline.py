@@ -1,5 +1,5 @@
-"""检测链路（TK-021、TK-022）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
-hyd.vision.track.v1 与 hyd.vision.behavior.v1。
+"""检测链路（TK-021、TK-022、TK-118）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
+hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 分割环境 → hyd.vision.scene.v1。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
@@ -33,10 +33,13 @@ from vision_engine.geometry import GroundMapping
 from vision_engine.kinematics import Motion
 from vision_engine.motion import MotionGate
 from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
+from vision_engine.scene import ScenePerception, Segmenter
 
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
+SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
+SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
 # 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 由 TK-040 发布。
 # 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
 STREAM = "HYD_VISION"
@@ -271,6 +274,21 @@ async def run_camera(
                 )
 
 
+async def run_scene(perception: ScenePerception, reader: FrameReader, bus: Bus) -> None:
+    loop = asyncio.get_running_loop()
+    next_tick, last_seq = loop.time(), 0
+    while True:
+        next_tick = max(next_tick + 1 / SCENE_FPS, loop.time())
+        await asyncio.sleep(next_tick - loop.time())
+        latest = reader.latest()
+        if latest is None or latest[0] == last_seq:
+            continue  # 断流时不发布：大屏保留最后一帧（设计 §3.7）
+        last_seq, frame = latest
+        event = await asyncio.to_thread(perception.process, frame)
+        if event is not None:
+            await bus.publish(SCENE_SUBJECT, event)
+
+
 async def serve(config: VisionConfig) -> None:
     models = len(model_files(config))  # 显存上限由加载的模型平分（C-HW-12）
     detector = PoseDetector(
@@ -284,6 +302,15 @@ async def serve(config: VisionConfig) -> None:
         if config.vehicle_model_file
         else None
     )
+    segmenter = (
+        Segmenter(create_session(config, config.scene_model_file, models))
+        if config.scene_model_file
+        else None
+    )
+    if vehicles is None:
+        log.warning("vision.vehicles_disabled")  # 未配置 HYD_VEHICLE_MODEL_FILE
+    if segmenter is None:
+        log.warning("vision.scene_disabled")  # 未配置 HYD_SCENE_MODEL_FILE
     site = SiteConfig.model_validate(yaml.safe_load(config.site_file.read_text(encoding="utf-8")))
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
@@ -294,6 +321,12 @@ async def serve(config: VisionConfig) -> None:
             log.warning("vision.uncalibrated", extra={"camera_id": camera["id"]})
         reader = FrameReader(camera["id"], f"{config.go2rtc_rtsp}/{camera['stream']}")
         reader.start()
+        if mapping is not None and segmenter is not None:
+            runs.append(
+                run_scene(
+                    ScenePerception(camera["id"], mapping, camera["pose"], segmenter), reader, bus
+                )
+            )
         runs.append(
             run_camera(
                 CameraPipeline(camera["id"], mapping, detector, camera["climb_lines"], vehicles),
@@ -302,7 +335,7 @@ async def serve(config: VisionConfig) -> None:
                 config,
             )
         )
-    log.info("vision.started", extra={"device": config.device, "cameras": len(runs)})
+    log.info("vision.started", extra={"device": config.device, "cameras": len(site.cameras)})
     await asyncio.gather(*runs)
 
 

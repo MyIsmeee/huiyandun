@@ -137,7 +137,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # 视觉引擎（HYD-ARCH-001 §8）：经 go2rtc 拉流检测，向 NATS 发布 track 事件。启动时断言推理设备（C-CV-11）
+  # 视觉引擎（HYD-ARCH-001 §8）：经 go2rtc 拉流检测，向 NATS 发布 track 与 scene 事件。启动时断言推理设备（C-CV-11）
   # 模型权重由 make fetch-models 下载（R-03）。只接入内部网络：onnxruntime 遥测已关闭，网络再隔一层（G-05）
   vision-engine:
     image: huiyandun/vision-engine:local
@@ -147,6 +147,7 @@ services:
       HYD_DEVICE: cpu  # 显式 CPU 模式（DP-06）；compose.gpu.yaml 改为 cuda
       HYD_MODEL_FILE: /models/rtmo-s_body7-640x640.onnx
       HYD_VEHICLE_MODEL_FILE: /models/rfdetr_s_v142_512x512.onnx
+      HYD_SCENE_MODEL_FILE: /models/efficientvit_seg_l1_ade20k_512.onnx
     volumes:
       - ../../models/weights:/models:ro
       - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 摄像头流名与标定点（FR-901）
