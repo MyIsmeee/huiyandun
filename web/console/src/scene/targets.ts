@@ -55,3 +55,10 @@ export function turnToward(current: number, target: number, maxStep: number): nu
 export function coneOpacity(base: number, detecting: number): number {
   return detecting === 0 ? base : Math.min(0.28, 0.2 + 0.02 * (detecting - 1));
 }
+
+/** 各摄像头当前检出的目标数：每次推送统一算一次，各视场直接取用（§5.1 L3） */
+export function detectingByCamera(targets: Record<string, Target>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const { camera_id } of Object.values(targets)) counts[camera_id] = (counts[camera_id] ?? 0) + 1;
+  return counts;
+}

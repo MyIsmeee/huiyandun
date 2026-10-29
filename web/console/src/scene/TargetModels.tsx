@@ -1,13 +1,13 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
-  type BufferGeometry,
+  BufferAttribute,
+  BufferGeometry,
   CapsuleGeometry,
   CircleGeometry,
   Color,
   CylinderGeometry,
   type InstancedMesh,
-  type LineSegments,
   Object3D,
   RingGeometry,
   SphereGeometry,
@@ -15,7 +15,7 @@ import {
 } from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { type TargetClass, useLive } from "../store/live";
+import { TRAIL_MS, type TargetClass, useLive } from "../store/live";
 import { useMotion } from "./DeviceMarkers";
 import { type Camera, STATUS } from "./devices";
 import { LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, visibleTargets } from "./targets";
@@ -24,6 +24,10 @@ import { LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, vi
 const CAPACITY = 256;
 /** 转向角速度上限（弧度每秒）：车辆掉头约 1 s 完成，不瞬间翻转 */
 const TURN_RATE = 3;
+/** 轨迹顶点容量：每个目标近 10 s、每秒 5 次实测（FR-101）的连线，每段 2 个顶点 */
+const TRAIL_VERTICES = CAPACITY * 2 * (TRAIL_MS / 1000) * 5;
+/** 轨迹重建的最短间隔：200 个目标每秒约 1000 次推送，轨迹只需跟上实测频率（SC-10） */
+const TRAIL_REBUILD_MS = 200;
 
 /** 模型部件：几何体 + 明度系数（车身 1、车窗 0.55、轮胎 0.3），单色按明度区分部件，不引入新色相（UP-2） */
 type Part = { geometry: BufferGeometry; shade: number };
@@ -91,6 +95,16 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
   const rings = useRef<InstancedMesh>(null);
   const headings = useRef(new Map<string, number>());
   const last = useRef(0);
+  // 轨迹写入预分配的缓冲区：推送频繁时不重建几何体，也不触发 React 重渲染
+  const trails = useMemo(() => {
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(new Float32Array(TRAIL_VERTICES * 3), 3));
+    geometry.setAttribute("color", new BufferAttribute(new Float32Array(TRAIL_VERTICES * 3), 3));
+    geometry.setDrawRange(0, 0);
+    return geometry;
+  }, []);
+  const trailSource = useRef<readonly [object, object] | null>(null);
+  const trailBuilt = useRef(0);
   const motion = useMotion();
   const invalidate = useThree((s) => s.invalidate);
   // 新推送到达时请求一帧；逐帧插值由 useFrame 自行续帧
@@ -106,13 +120,21 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     const { targets, behaviors } = useLive.getState();
     const list = visibleTargets(targets, cameras, behaviors);
     const t = motion ? now - RENDER_DELAY_MS : Number.POSITIVE_INFINITY;
+    const source = trailSource.current;
+    const stale = source?.[0] !== targets || source?.[1] !== behaviors;
+    if (stale && (!motion || now - trailBuilt.current >= TRAIL_REBUILD_MS)) {
+      writeTrails(trails, list);
+      trailSource.current = [targets, behaviors];
+      trailBuilt.current = now;
+    }
     const o = new Object3D();
     const counts: Record<string, number> = {};
     let discCount = 0;
     let ringCount = 0;
     const seen = new Set<string>();
     // 仍有目标在两次实测之间移动、在转向或锁定环未结束时继续逐帧绘制；全部到位后停绘，等下一次推送
-    let pending = false;
+    // 轨迹尚未跟上最新推送时同样续帧
+    let pending = trailSource.current?.[0] !== targets || trailSource.current?.[1] !== behaviors;
     for (const target of list) {
       seen.add(target.key);
       const [x, y] = positionAt(target.trail, t);
@@ -139,7 +161,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       });
       o.scale.set(target.uncertainty_m, 1, target.uncertainty_m);
       o.updateMatrix();
-      discs.current?.setMatrixAt(discCount++, o.matrix);
+      if (discCount < CAPACITY) discs.current?.setMatrixAt(discCount++, o.matrix);
       const age = t - (target.trail[0]?.[2] ?? t);
       pending ||= age < LOCK_RING_MS;
       if (motion && age >= 0 && age < LOCK_RING_MS && ringCount < CAPACITY) {
@@ -195,7 +217,10 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       <instancedMesh ref={rings} args={[RING, undefined, CAPACITY]} frustumCulled={false}>
         <meshBasicMaterial color={STATUS.neutral} transparent opacity={0.6} depthWrite={false} />
       </instancedMesh>
-      <Trails cameras={cameras} />
+      {/* 轨迹：近 10 s 的实测位置连线（V-A5），合并为一组线段，绘制次数与目标数无关（V-P1） */}
+      <lineSegments geometry={trails} frustumCulled={false}>
+        <lineBasicMaterial vertexColors />
+      </lineSegments>
     </>
   );
 }
@@ -204,8 +229,9 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
  * 本帧写入了 count 个实例：只绘制并上传这些实例（实例移动、增减都在此生效；不做视锥剔除）。
  * 没有目标的图层隐藏，不参与绘制与阴影；只上传用到的部分，免得每帧上传全部容量
  */
-function finish(mesh: InstancedMesh | null | undefined, count: number) {
+function finish(mesh: InstancedMesh | null | undefined, written: number) {
   if (!mesh) return;
+  const count = Math.min(written, CAPACITY); // 超出容量的目标不绘制，不能让整层消失
   mesh.count = count;
   mesh.visible = count > 0;
   if (count === 0) return;
@@ -220,36 +246,27 @@ function finish(mesh: InstancedMesh | null | undefined, count: number) {
   }
 }
 
-/** 轨迹：近 10 s 的实测位置连线（V-A5），合并为一组线段，绘制次数与目标数无关（V-P1） */
-function Trails({ cameras }: { cameras: Camera[] }) {
-  const targets = useLive((s) => s.targets);
-  const behaviors = useLive((s) => s.behaviors);
-  const list = useMemo(() => visibleTargets(targets, cameras, behaviors), [targets, cameras, behaviors]);
-  const ref = useRef<LineSegments>(null);
-  const [positions, colors] = useMemo(() => {
-    const p: number[] = [];
-    const c: number[] = [];
-    for (const target of list) {
-      const { r, g, b } = new Color(colorOf(target));
-      target.trail.forEach(([x, y], i) => {
-        const prev = target.trail[i - 1];
-        if (!prev) return;
-        p.push(prev[0], 0.03, prev[1], x, 0.03, y);
-        c.push(r, g, b, r, g, b);
-      });
+/** 把各目标近 10 s 的实测位置连线写入预分配缓冲区，只上传写入的部分；超出容量的部分不画 */
+function writeTrails(geometry: BufferGeometry, list: Visible[]) {
+  const position = geometry.getAttribute("position") as BufferAttribute;
+  const color = geometry.getAttribute("color") as BufferAttribute;
+  let v = 0;
+  for (const target of list) {
+    const { r, g, b } = new Color(colorOf(target));
+    for (let i = 1; i < target.trail.length && v + 2 <= TRAIL_VERTICES; i += 1) {
+      const prev = target.trail[i - 1];
+      const cur = target.trail[i];
+      if (!prev || !cur) continue;
+      position.setXYZ(v, prev[0], 0.03, prev[1]);
+      color.setXYZ(v++, r, g, b);
+      position.setXYZ(v, cur[0], 0.03, cur[1]);
+      color.setXYZ(v++, r, g, b);
     }
-    return [new Float32Array(p), new Float32Array(c)];
-  }, [list]);
-  useLayoutEffect(() => ref.current?.geometry.computeBoundingSphere(), [positions]);
-  if (positions.length === 0) return null;
-  return (
-    // 顶点数变化时重建几何体；随目标移动，不做视锥剔除
-    <lineSegments ref={ref} key={positions.length} frustumCulled={false}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-        <bufferAttribute attach="attributes-color" args={[colors, 3]} />
-      </bufferGeometry>
-      <lineBasicMaterial vertexColors />
-    </lineSegments>
-  );
+  }
+  geometry.setDrawRange(0, v);
+  for (const attribute of [position, color]) {
+    attribute.clearUpdateRanges();
+    attribute.addUpdateRange(0, v * 3);
+    attribute.needsUpdate = true;
+  }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Camera, DeviceState } from "../../src/scene/devices";
-import { coneOpacity, HIGH_ERROR_M, positionAt, turnToward, visibleTargets } from "../../src/scene/targets";
+import { coneOpacity, detectingByCamera, HIGH_ERROR_M, positionAt, turnToward, visibleTargets } from "../../src/scene/targets";
 import type { Behavior, Target, TargetClass } from "../../src/store/live";
 
 const pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 10 };
@@ -98,5 +98,13 @@ describe("coneOpacity", () => {
     [20, 0.28],
   ])("检出 %i 个目标时不透明度为 %f", (detecting, opacity) => {
     expect(coneOpacity(0.12, detecting)).toBeCloseTo(opacity);
+  });
+});
+
+describe("detectingByCamera", () => {
+  it("按摄像头统计当前目标数", () => {
+    const counts = detectingByCamera(targets(target(1), target(2), target(3, 0.4, "cam-02")));
+
+    expect(counts).toEqual({ "cam-01": 2, "cam-02": 1 });
   });
 });
