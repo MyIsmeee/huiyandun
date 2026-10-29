@@ -13,6 +13,7 @@ from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecuti
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from py_contracts.events.incident_schema import Incident
 from py_contracts.events.playbook_execution_schema import PlaybookExecution
@@ -36,6 +37,23 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "speed_mps": 1.2,
             "bbox": [0.1, 0.2, 0.3, 0.8],
             "keypoints": [[0.2, 0.3, 0.9]] * 17,
+        },
+    ),
+    "hyd.vision.scene.v1": (
+        VisionSceneV1,
+        {
+            "camera_id": "cam-01",
+            "surfaces": [{"class": "road", "polygon": [[0.0, 0.0], [4.0, 0.0], [4.0, 9.0]]}],
+            "walls": [{"class": "building", "line": [[5.0, 0.0], [5.0, 9.0]], "height_m": 6.0}],
+            "objects": [
+                {
+                    "class": "street_furniture",
+                    "polygon": [[1.0, 1.0], [1.5, 1.0], [1.5, 1.4]],
+                    "height_m": 0.8,
+                }
+            ],
+            "trees": [{"x": 6.0, "y": 3.0, "height_m": 5.0}],
+            "markings": [{"class": "lane", "polygon": [[2.0, 1.0], [2.1, 1.0], [2.1, 4.0]]}],
         },
     ),
     "hyd.vision.behavior.v1": (
@@ -238,6 +256,19 @@ def test_ignores_unknown_field_from_newer_minor() -> None:
         ("hyd.ai.investigation.v1", "kind", "thinking"),
         ("hyd.ai.investigation.v1", "seq", -1),
         ("hyd.ai.investigation.v1", "provider", {"name": "x", "location": "cloud"}),
+        (
+            "hyd.vision.scene.v1",
+            "surfaces",
+            [{"class": "sky", "polygon": [[0, 0], [1, 0], [1, 1]]}],
+        ),
+        ("hyd.vision.scene.v1", "surfaces", [{"class": "road", "polygon": [[0, 0], [1, 0]]}]),
+        ("hyd.vision.scene.v1", "walls", [{"class": "wall", "line": [[0, 0, 1]], "height_m": 2.8}]),
+        (
+            "hyd.vision.scene.v1",
+            "walls",
+            [{"class": "wall", "line": [[0, 0], [1, 0]], "height_m": 0}],
+        ),
+        ("hyd.vision.scene.v1", "trees", [{"x": 1.0, "y": 2.0}]),
     ],
 )
 def test_rejects_invalid_value(subject: str, field: str, value: Any) -> None:

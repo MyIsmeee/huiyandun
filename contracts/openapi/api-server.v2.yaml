@@ -689,10 +689,11 @@ components:
         WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
         alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
-        FR-1102）；system 为系统消息（如心跳）
+        FR-1102）；scene 为 VisionScene（各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；
+        system 为系统消息（如心跳）
       required: [channel, data]
       properties:
-        channel: { enum: [tracks, devices, alerts, incidents, ai, system] }
+        channel: { enum: [tracks, devices, alerts, incidents, ai, scene, system] }
         data: { type: object }
     AiInvestigation: { $ref: "../events/hyd.ai.investigation.v1.schema.json" }
     Investigation:
@@ -716,5 +717,6 @@ components:
         started_at: { type: string, format: date-time }
         finished_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     VisionTrack: { $ref: "../events/hyd.vision.track.v1.schema.json" }
+    VisionScene: { $ref: "../events/hyd.vision.scene.v1.schema.json" }
     VisionBehavior: { $ref: "../events/hyd.vision.behavior.v1.schema.json" }
     SecurityAlert: { $ref: "../events/hyd.security.alert.v1.schema.json" }
