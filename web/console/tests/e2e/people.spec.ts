@@ -324,3 +324,39 @@ test("跟随的车辆离开画面：详情收起，镜头飞回总览", async ({
   await expect(page.getByRole("region", { name: "详情" })).toHaveCount(0);
   await expect(page.getByRole("toolbar", { name: "视角" }).getByRole("button", { name: "放大" })).toBeEnabled();
 });
+
+// V-I4、D-058：悬停显示中性灰四角括框、指针变手形；单击空白处取消选中并收起详情，镜头不动
+test("悬停人员显示中性灰括框；单击空白处收起详情", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  await walk(page, ws, 0.4);
+  const box = await scene(page).boundingBox();
+  const at = (x: number, y: number) => page.mouse.move((box?.x ?? 0) + x, (box?.y ?? 0) + y);
+
+  await at(564, 330); // 人员所在位置（与 person-normal 截图一致）
+  await page.clock.runFor(100);
+  await expect(page.locator("[data-scene]")).toHaveCSS("cursor", "pointer");
+  await expect(scene(page).locator("[data-hover] > span")).toBeVisible(); // 外层只作定位锚点、自身无尺寸
+  await expect(scene(page)).toHaveScreenshot("person-hover.png");
+  await at(200, 600);
+  await expect(page.locator("[data-scene]")).not.toHaveCSS("cursor", "pointer");
+  await expect(scene(page).locator("[data-hover]")).toHaveCount(0);
+
+  await scene(page).click({ position: { x: 564, y: 330 } });
+  const panel = page.getByRole("region", { name: "详情" });
+  await expect(panel).toHaveCount(1);
+  await scene(page).click({ position: { x: 200, y: 600 } });
+  await expect(panel).toHaveCount(0);
+  await page.getByRole("button", { name: "查看 cam-01 详情" }).click();
+  await expect(panel).toHaveCount(1);
+  await scene(page).click({ position: { x: 200, y: 600 } });
+  await expect(panel).toHaveCount(0);
+
+  // 悬停的人员离开画面（2 s 无更新即移除，V-U4）：括框消失，指针恢复，不必等鼠标再动
+  await at(564, 330);
+  await expect(page.locator("[data-scene]")).toHaveCSS("cursor", "pointer");
+  await page.clock.runFor(2500);
+  await expect(scene(page).locator("[data-hover]")).toHaveCount(0);
+  await expect(page.locator("[data-scene]")).not.toHaveCSS("cursor", "pointer");
+});

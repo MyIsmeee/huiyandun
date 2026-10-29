@@ -41,8 +41,9 @@ export default function Scene3D(props: { site: Site; cameras: Camera[]; view: Sc
   useTheme((s) => s.theme); // 订阅主题：切换时重新渲染并取色
   const colors = themeColors();
   const lighting = useLighting();
-  // 1 m 栅格是总览的比例尺；跟随与摄像头视角贴近地面，栅格在透视下挤成密集条纹，不画（车机 SR 同样没有栅格）
-  const focused = useCamera((s) => s.focus !== null);
+  // 1 m 栅格是总览的比例尺；跟随与摄像头视角贴近地面，栅格在透视下挤成密集条纹，不画（车机 SR 同样没有栅格）。
+  // 飞入、飞回途中同样不画，回到总览后再出现
+  const hideGrid = useCamera((s) => s.focus !== null || s.shot !== null);
   const center: Vec3 = [site.width_m / 2, 0, site.height_m / 2];
   // 远处渐隐为地面色（透视下远处 1 m 栅格挤成密集条纹）：站点在取景中心周围时始终不受影响，跟随视角下地平线柔和过渡
   const fogNear = Math.hypot(...view.shot.eye.map((v, i) => v - (view.shot.look[i] ?? 0))) + Math.hypot(site.width_m, site.height_m) / 2;
@@ -61,7 +62,7 @@ export default function Scene3D(props: { site: Site; cameras: Camera[]; view: Sc
         <planeGeometry args={[GROUND_M, GROUND_M]} />
         <shadowMaterial opacity={lighting.shadowOpacity} />
       </mesh>
-      {!focused && <Grid center={center} color={colors.grid} />}
+      {!hideGrid && <Grid center={center} color={colors.grid} />}
       <PerceivedScene cameras={cameras} />
       <DeviceMarkers cameras={cameras} />
       <TargetModels cameras={cameras} />

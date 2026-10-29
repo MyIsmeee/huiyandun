@@ -276,6 +276,25 @@ test.describe("感知场景", () => {
     await expect(page.getByRole("toolbar", { name: "视角" }).getByRole("button", { name: "放大" })).toBeEnabled();
   });
 
+  test("飞入摄像头视角途中断线：立即到位，不再继续（V-U3）", async ({ page }) => {
+    await presetTheme(page, "light");
+    const [ws] = await open(page, [cam01("cyber_alert")]);
+    await shown(page, ws, SCENES.street);
+    await expect(scene(page).getByText("网络攻击")).toBeVisible();
+
+    await scene(page).getByRole("button", { name: "查看 cam-01 详情" }).dblclick();
+    await expect(scene(page).getByText("网络攻击")).toHaveCount(0); // 视点一侧的摄像头不画，状态标签随之不画，不悬空
+    await page.clock.runFor(100); // 飞行途中
+    await ws?.close({ code: 1011 });
+    await expect(page.getByRole("status", { name: "连接状态" })).toHaveText("断线 · 重连中");
+    await page.clock.runFor(16);
+
+    await expect(scene(page)).toHaveScreenshot("scene-camera-view-offline.png"); // 已在机头处，与 scene-camera-view 取景一致
+    const end = await scene(page).screenshot();
+    await page.clock.runFor(600);
+    expect(await scene(page).screenshot()).toEqual(end); // 没有后续飞行
+  });
+
   test("未标定摄像头不重建环境，只显示设备与未标定提示（V-U2）", async ({ page }) => {
     await presetTheme(page, "light", true);
     const [ws] = await open(page, [cam01("uncalibrated", false)]);
