@@ -8,6 +8,7 @@ import { TargetModels } from "./TargetModels";
 import type { Camera } from "./devices";
 import { GROUND_M, type IsoView, type Vec3, WALL_HEIGHT_M } from "./layout";
 import { type Lighting, lightingAt, lightStep } from "./lighting";
+import { PerceivedScene } from "./PerceivedScene";
 
 /** 取当前主题的色值（theme.css），场景与界面同源（§3.1、§5.1） */
 function themeColors() {
@@ -27,9 +28,9 @@ function useLighting(): Lighting {
 }
 
 /**
- * 3D 场景（§5.1 L0 地面与栅格、L2 设备、L3 视场、L4 检出目标、光照）；平面图只用于定位，不显示（UP-1）。
+ * 3D 场景（§5.1 L0 地面与栅格、L1 感知场景、L2 设备、L3 视场、L4 检出目标、光照）；平面图只用于定位，不显示（UP-1）。
  * 按需渲染（frameloop="demand"）：无常驻动效（V-A3），只有对应真实告警的动效持续请求重绘。
- * flat 关闭色调映射，地面等色值与规范一致；阴影另以阴影材质叠加在地面上，不改变地面色值。
+ * flat 关闭色调映射，地面等色值与规范一致；阴影另以阴影材质叠加在地面与地面色块之上（地面色块先绘制），不改变其色值。
  */
 export default function Scene3D(props: { site: Site; cameras: Camera[]; view: IsoView; onReady: () => void }) {
   const { site, cameras, view, onReady } = props;
@@ -51,6 +52,7 @@ export default function Scene3D(props: { site: Site; cameras: Camera[]; view: Is
         <shadowMaterial opacity={lighting.shadowOpacity} />
       </mesh>
       <Grid center={center} color={colors.grid} />
+      <PerceivedScene cameras={cameras} />
       <DeviceMarkers cameras={cameras} />
       <TargetModels cameras={cameras} />
     </Canvas>

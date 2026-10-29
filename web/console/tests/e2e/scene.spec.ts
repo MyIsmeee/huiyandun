@@ -1,5 +1,6 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
 import { camera, expectNoOverflow, freezeClock, open, presetTheme, sceneSettled, signedIn } from "./helpers";
+import { SCENES } from "./scenes";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
@@ -187,5 +188,118 @@ test.describe("相机控件", () => {
     const moved = await labelAt(page);
     await transition(page);
     expect(await labelAt(page)).toEqual(moved); // 已在终点，没有后续转场
+  });
+});
+
+// §5.1 L1、§8 PerceivedScene：街道 / 室内 / 未标定 / 陈旧 / 断线。
+// SCENES 由 TK-118 的演示帧分割快照（services/vision-engine/tests/scenes/street-1、indoor-1）
+// 按演示站点 cam-01 的标定投影得到；快照不含图像，因而没有路面标线，标线与树另以 ELEMENTS 构造
+test.describe("感知场景", () => {
+  const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", camera_id: "cam-01" };
+  const EMPTY = { surfaces: [], walls: [], objects: [], trees: [], markings: [] };
+  const ELEMENTS = {
+    ...EMPTY,
+    surfaces: [
+      { class: "road", polygon: [[3, 3], [14, 3], [14, 9], [3, 9]] },
+      { class: "sidewalk", polygon: [[3, 9], [14, 9], [14, 11], [3, 11]] },
+      { class: "grass", polygon: [[3, 11], [14, 11], [14, 15], [3, 15]] },
+    ],
+    markings: [
+      ...[4, 5, 6, 7].map((y) => ({ class: "crosswalk", polygon: [[5, y], [7, y], [7, y + 0.5], [5, y + 0.5]] })),
+      { class: "lane", polygon: [[9, 5.9], [13, 5.9], [13, 6.1], [9, 6.1]] },
+    ],
+    walls: [{ class: "railing", line: [[3, 11], [14, 11]], height_m: 1 }],
+    objects: [{ class: "street_furniture", polygon: [[8, 9.5], [9.5, 9.5], [9.5, 9.9], [8, 9.9]], height_m: 0.8 }],
+    trees: [{ x: 5, y: 13, height_m: 5 }, { x: 10, y: 13.5, height_m: 5 }, { x: 12.5, y: 12.5, height_m: 1 }],
+  };
+  // 演示站点的 cam-01：位于西北角，朝东南
+  const cam01 = (state = "normal", calibrated = true) => {
+    const device = camera(state);
+    const pose = { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
+    return { ...device, camera: { ...device.camera, pose, calibration: calibrated ? device.camera.calibration : [] } };
+  };
+  const push = (ws: WebSocketRoute | undefined, frame: object, ts = "2026-10-27T06:30:00Z") =>
+    ws?.send(JSON.stringify({ channel: "scene", data: { ...BASE, ts, ...frame } }));
+  /** 推送后推进一帧，使 3D 场景绘制新识别结果 */
+  const shown = async (page: Page, ws: WebSocketRoute | undefined, frame: object, ts?: string) => {
+    push(ws, frame, ts);
+    await page.clock.runFor(100);
+  };
+
+  for (const [name, frame, theme] of [
+    ["street", "street", "light"],
+    ["street-dark", "street", "dark"],
+    ["indoor", "indoor", "light"],
+  ] as const) {
+    test(`${name}`, async ({ page }) => {
+      await presetTheme(page, theme, true);
+      const [ws] = await open(page, [cam01()]);
+      await shown(page, ws, SCENES[frame]);
+
+      await expectNoOverflow(page);
+      await expect(scene(page)).toHaveScreenshot(`scene-${name}.png`);
+    });
+  }
+
+  test("地面色块、斑马线与车道线、栏杆、长椅与树", async ({ page }) => {
+    await presetTheme(page, "light", true);
+    const [ws] = await open(page, [cam01()]);
+    await shown(page, ws, ELEMENTS);
+
+    await expect(scene(page)).toHaveScreenshot("scene-elements.png");
+  });
+
+  test("未标定摄像头不重建环境，只显示设备与未标定提示（V-U2）", async ({ page }) => {
+    await presetTheme(page, "light", true);
+    const [ws] = await open(page, [cam01("uncalibrated", false)]);
+    const before = await scene(page).screenshot();
+    await shown(page, ws, ELEMENTS);
+
+    await expect(scene(page).getByText("未标定")).toBeVisible();
+    expect((await scene(page).screenshot()).equals(before)).toBe(true);
+  });
+
+  test("场景帧的 ts 早于 10 s 前即弱化显示：补推的旧帧立即弱化，新帧超过 10 s 未更新同样弱化", async ({ page }) => {
+    await presetTheme(page, "light", true);
+    const [ws] = await open(page, [cam01()]);
+    await shown(page, ws, ELEMENTS, "2026-10-27T06:29:40Z");
+    await expect(scene(page)).toHaveScreenshot("scene-stale.png");
+
+    await shown(page, ws, ELEMENTS);
+    const fresh = await scene(page).screenshot();
+    await page.clock.runFor(9_000);
+    expect((await scene(page).screenshot()).equals(fresh)).toBe(true);
+    await page.clock.runFor(2_000);
+    await expect(scene(page)).toHaveScreenshot("scene-stale.png");
+  });
+
+  test("新识别帧渐变替换；开启降低动效后瞬时替换（§5.1 L1、V-A4）", async ({ page }) => {
+    await presetTheme(page, "light");
+    const [ws] = await open(page, [cam01()]);
+    await shown(page, ws, ELEMENTS);
+    const before = await scene(page).screenshot();
+
+    await shown(page, ws, SCENES.street);
+    const midway = await scene(page).screenshot();
+    await page.clock.runFor(400);
+    const after = await scene(page).screenshot();
+
+    expect(midway.equals(before) || midway.equals(after)).toBe(false);
+    await page.getByRole("button", { name: "降低动效" }).click();
+    await shown(page, ws, ELEMENTS);
+    expect((await scene(page).screenshot()).equals(before)).toBe(true);
+  });
+
+  test("断线：保留最后一帧场景并降饱和（V-U3）", async ({ page }) => {
+    await presetTheme(page, "light", true);
+    const [ws] = await open(page, [cam01()]);
+    await shown(page, ws, ELEMENTS);
+
+    await page.routeWebSocket("/ws", (route) => route.close());
+    await ws?.close();
+    await expect(scene(page).getByText(/^数据非实时/)).toBeVisible();
+    await page.clock.runFor(100);
+    await expect(scene(page)).toHaveClass(/saturate-50/);
+    await expect(scene(page)).toHaveScreenshot("scene-disconnected.png");
   });
 });
