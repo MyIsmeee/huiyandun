@@ -92,7 +92,7 @@ export function SceneViewport({ site }: { site: Site }) {
           </Suspense>
         </Boundary>
       )}
-      {plan && <Scene2D site={site} view={plan} />}
+      {plan && <Scene2D site={site} cameras={cameras} view={plan} />}
       {view && (state === "ready" || state === "2d") && (
         <>
           <DeviceTags cameras={cameras} view={view} />
