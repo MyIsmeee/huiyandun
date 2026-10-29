@@ -567,11 +567,12 @@ export interface components {
          * @description WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
          *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
          *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
-         *     FR-1102）；system 为系统消息（如心跳）
+         *     FR-1102）；scene 为 VisionScene（各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；
+         *     system 为系统消息（如心跳）
          */
         WsFrame: {
             /** @enum {unknown} */
-            channel: "tracks" | "devices" | "alerts" | "incidents" | "ai" | "system";
+            channel: "tracks" | "devices" | "alerts" | "incidents" | "ai" | "scene" | "system";
             data: Record<string, never>;
         };
         AiInvestigation: components["schemas"]["hyd.ai.investigation.v1.schema"];
@@ -588,6 +589,7 @@ export interface components {
             finished_at: string | null;
         };
         VisionTrack: components["schemas"]["hyd.vision.track.v1.schema"];
+        VisionScene: components["schemas"]["hyd.vision.scene.v1.schema"];
         VisionBehavior: components["schemas"]["hyd.vision.behavior.v1.schema"];
         SecurityAlert: components["schemas"]["hyd.security.alert.v1.schema"];
         /**
@@ -767,6 +769,60 @@ export interface components {
          * @description 检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
          */
         "hyd.vision.track.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["track.schema"];
+        /** @description 平面坐标 [x, y]，单位米 */
+        Point: number[];
+        Polygon: components["schemas"]["Point"][];
+        Line: components["schemas"]["Point"][];
+        /**
+         * SceneFrame
+         * @description 摄像头实时识别的环境，已投影到平面（HYD-REQ-006 FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（HYD-PLAN-007 §1）。地面、物体与标线的多边形合计不超过 64 个
+         */
+        "scene_frame.schema": {
+            camera_id: string;
+            /** @description 地面色块 */
+            surfaces: {
+                /** @enum {unknown} */
+                class: "road" | "sidewalk" | "floor" | "grass" | "earth";
+                polygon: components["schemas"]["Polygon"];
+            }[];
+            /** @description 立面：沿墙脚线挤出，高度按类别取默认值 */
+            walls: {
+                /** @enum {unknown} */
+                class: "wall" | "building" | "fence" | "railing";
+                line: components["schemas"]["Line"];
+                height_m: number;
+            }[];
+            /** @description 物体：底面轮廓挤出的低矮立体块 */
+            objects: {
+                /** @enum {unknown} */
+                class: "furniture" | "street_furniture";
+                polygon: components["schemas"]["Polygon"];
+                height_m: number;
+            }[];
+            /** @description 植被：树干底部中心 */
+            trees: {
+                x: number;
+                y: number;
+                height_m: number;
+            }[];
+            /** @description 路面区域内的白色标线 */
+            markings: {
+                /** @enum {unknown} */
+                class: "crosswalk" | "lane";
+                polygon: components["schemas"]["Polygon"];
+            }[];
+            $defs: {
+                /** @description 平面坐标 [x, y]，单位米 */
+                Point: number[];
+                Polygon: components["schemas"]["Point"][];
+                Line: components["schemas"]["Point"][];
+            };
+        };
+        /**
+         * VisionSceneV1
+         * @description 摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
+         */
+        "hyd.vision.scene.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["scene_frame.schema"];
         /**
          * VisionBehaviorV1
          * @description 骨骼行为事件（生产者 vision-engine）

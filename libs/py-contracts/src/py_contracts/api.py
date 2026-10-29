@@ -302,11 +302,12 @@ class WsFrame(ContractModel):
     WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
-    FR-1102）；system 为系统消息（如心跳）
+    FR-1102）；scene 为 VisionScene（各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；
+    system 为系统消息（如心跳）
 
     """
 
-    channel: Literal["tracks", "devices", "alerts", "incidents", "ai", "system"]
+    channel: Literal["tracks", "devices", "alerts", "incidents", "ai", "scene", "system"]
     data: dict[str, Any]
 
 
@@ -459,6 +460,24 @@ class Track(ContractModel):
     """
 
 
+class Tree(ContractModel):
+    x: float
+    y: float
+    height_m: float = Field(..., gt=0.0)
+
+
+class Point(RootModel[list[float]]):
+    """
+    平面坐标 [x, y]，单位米
+    """
+
+    model_config = {"allow_inf_nan": False}
+    root: list[float] = Field(..., max_length=2, min_length=2)
+    """
+    平面坐标 [x, y]，单位米
+    """
+
+
 class VisionBehaviorV1(EventBase):
     """
     骨骼行为事件（生产者 vision-engine）
@@ -573,6 +592,16 @@ class VisionTrackV1(EventBase, Track):
     """
 
 
+class Line(RootModel[list[Point]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[Point] = Field(..., min_length=2)
+
+
+class Polygon(RootModel[list[Point]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[Point] = Field(..., min_length=3)
+
+
 class VisionBehavior(RootModel[VisionBehaviorV1]):
     model_config = {"allow_inf_nan": False}
     root: VisionBehaviorV1
@@ -623,6 +652,56 @@ class VisionTrack(RootModel[VisionTrackV1]):
     root: VisionTrackV1
 
 
+class Surface(ContractModel):
+    class_: Literal["road", "sidewalk", "floor", "grass", "earth"] = Field(..., alias="class")
+    polygon: Polygon
+
+
+class Wall1(ContractModel):
+    class_: Literal["wall", "building", "fence", "railing"] = Field(..., alias="class")
+    line: Line
+    height_m: float = Field(..., gt=0.0)
+
+
+class Object(ContractModel):
+    class_: Literal["furniture", "street_furniture"] = Field(..., alias="class")
+    polygon: Polygon
+    height_m: float = Field(..., gt=0.0)
+
+
+class Marking(ContractModel):
+    class_: Literal["crosswalk", "lane"] = Field(..., alias="class")
+    polygon: Polygon
+
+
+class SceneFrame(ContractModel):
+    """
+    摄像头实时识别的环境，已投影到平面（HYD-REQ-006 FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（HYD-PLAN-007 §1）。地面、物体与标线的多边形合计不超过 64 个
+    """
+
+    camera_id: str
+    surfaces: list[Surface]
+    """
+    地面色块
+    """
+    walls: list[Wall1]
+    """
+    立面：沿墙脚线挤出，高度按类别取默认值
+    """
+    objects: list[Object]
+    """
+    物体：底面轮廓挤出的低矮立体块
+    """
+    trees: list[Tree]
+    """
+    植被：树干底部中心
+    """
+    markings: list[Marking]
+    """
+    路面区域内的白色标线
+    """
+
+
 class Site(ContractModel):
     id: str
     name: str
@@ -643,3 +722,14 @@ class Site(ContractModel):
 class AiInvestigation(RootModel[AiInvestigationV1]):
     model_config = {"allow_inf_nan": False}
     root: AiInvestigationV1
+
+
+class VisionSceneV1(EventBase, SceneFrame):
+    """
+    摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
+    """
+
+
+class VisionScene(RootModel[VisionSceneV1]):
+    model_config = {"allow_inf_nan": False}
+    root: VisionSceneV1
