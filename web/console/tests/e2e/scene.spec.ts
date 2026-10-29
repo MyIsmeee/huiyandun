@@ -1,11 +1,19 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, open, presetTheme, sceneSettled, signedIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, mockSocket, open, presetTheme, SITE, sceneSettled, signedIn } from "./helpers";
 import { SCENES } from "./scenes";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
 const scene = (page: Page) => page.getByRole("region", { name: "场景" });
 const SCENE_CHUNK = "**/assets/Scene3D-*.js";
+/** 模拟浏览器不支持 WebGL2：场景降级为 2D 俯视视图（C-FE-08） */
+const withoutWebGL2 = (page: Page) =>
+  page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, ...rest: unknown[]) {
+      return id === "webgl2" ? null : getContext.call(this, id, ...(rest as []));
+    } as typeof getContext;
+  });
 
 test("3D 场景只有无限延伸的地面与栅格，不显示平面图的墙体与区域（UP-1）", async ({ page }) => {
   await signedIn(page);
@@ -38,12 +46,7 @@ test("场景代码加载失败时提示并可重新加载", async ({ page }) => 
 });
 
 test("无 WebGL2 时降级为 2D 俯视视图（C-FE-08）", async ({ page }) => {
-  await page.addInitScript(() => {
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, ...rest: unknown[]) {
-      return id === "webgl2" ? null : getContext.call(this, id, ...(rest as []));
-    } as typeof getContext;
-  });
+  await withoutWebGL2(page);
   await signedIn(page);
   await page.goto("/");
   await sceneSettled(page, "2d");
@@ -301,5 +304,17 @@ test.describe("感知场景", () => {
     await page.clock.runFor(100);
     await expect(scene(page)).toHaveClass(/saturate-50/);
     await expect(scene(page)).toHaveScreenshot("scene-disconnected.png");
+  });
+
+  test("无 WebGL2 时 2D 俯视视图同样绘制感知场景（C-FE-08）", async ({ page }) => {
+    await withoutWebGL2(page);
+    await presetTheme(page, "light", true);
+    await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices: [cam01()] } }));
+    const sockets = await mockSocket(page); // 页面连上后才有服务端一侧
+    await page.goto("/");
+    await sceneSettled(page, "2d");
+    await shown(page, sockets[0], ELEMENTS);
+
+    await expect(scene(page)).toHaveScreenshot("scene-2d-elements.png");
   });
 });
