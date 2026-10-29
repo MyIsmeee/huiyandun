@@ -80,3 +80,14 @@ describe("devices 与 alerts", () => {
     expect(useLive.getState().behaviors).toEqual({});
   });
 });
+
+it("scene：每台摄像头只保留最新一帧（FR-108）", () => {
+  const scene = (camera_id: string, ts: string) => ({ ...BASE, ts, camera_id, surfaces: [], walls: [], objects: [], trees: [], markings: [] });
+
+  receive(frame("scene", scene("cam-01", "2026-10-27T06:29:59Z")), 0);
+  receive(frame("scene", scene("cam-02", "2026-10-27T06:29:59Z")), 0);
+  receive(frame("scene", scene("cam-01", "2026-10-27T06:30:00Z")), 0);
+
+  expect(Object.keys(useLive.getState().scenes)).toEqual(["cam-01", "cam-02"]);
+  expect(useLive.getState().scenes["cam-01"]?.ts).toBe("2026-10-27T06:30:00Z");
+});

@@ -5,6 +5,7 @@ type Schemas = components["schemas"];
 export type Device = Schemas["Device"];
 export type Behavior = Schemas["VisionBehavior"];
 type Track = Schemas["VisionTrack"];
+export type SceneFrame = Schemas["VisionScene"];
 type Frame = Schemas["WsFrame"];
 
 /** 轨迹拖尾的固定时间窗（V-A5） */
@@ -35,10 +36,12 @@ interface LiveState {
   targets: Record<string, Target>;
   /** 每台摄像头最近一次行为事件，供事件卡显示 */
   behaviors: Record<string, Behavior>;
+  /** 每台摄像头最新一帧识别的环境（FR-108） */
+  scenes: Record<string, SceneFrame>;
 }
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
-export const useLive = create<LiveState>()(() => ({ devices: {}, targets: {}, behaviors: {} }));
+export const useLive = create<LiveState>()(() => ({ devices: {}, targets: {}, behaviors: {}, scenes: {} }));
 
 /** keep 为假时去掉 id 对应的项 */
 const drop = <T,>(map: Record<string, T>, id: string, keep: boolean) =>
@@ -56,6 +59,10 @@ export function receive(frame: Frame, now: number): void {
       devices: { ...s.devices, [id]: device },
       behaviors: drop(s.behaviors, id, state === "physical_alert" || state === "both"),
     }));
+  }
+  if (frame.channel === "scene") {
+    const scene = data as SceneFrame;
+    useLive.setState((s) => ({ scenes: { ...s.scenes, [scene.camera_id]: scene } }));
   }
   // alerts 频道同时承载行为事件（含 behavior 字段）与网络告警；场景只用行为事件，告警等级随设备推送
   if (frame.channel === "alerts" && "behavior" in (data as object)) {
