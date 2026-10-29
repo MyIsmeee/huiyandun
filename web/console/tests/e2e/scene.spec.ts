@@ -316,5 +316,12 @@ test.describe("感知场景", () => {
     await shown(page, sockets[0], ELEMENTS);
 
     await expect(scene(page)).toHaveScreenshot("scene-2d-elements.png");
+
+    // 断线：保留最后一帧场景并降饱和（V-U3、V-G3）
+    await page.routeWebSocket("/ws", (route) => route.close());
+    await sockets[0]?.close();
+    await expect(scene(page).getByText(/^数据非实时/)).toBeVisible();
+    await expect(scene(page)).toHaveClass(/saturate-50/);
+    await expect(scene(page)).toHaveScreenshot("scene-2d-disconnected.png");
   });
 });
