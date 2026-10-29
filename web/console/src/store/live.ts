@@ -9,15 +9,21 @@ type Frame = Schemas["WsFrame"];
 
 /** 轨迹拖尾的固定时间窗（V-A5） */
 export const TRAIL_MS = 10_000;
-/** 超过此时长无位置更新即移除化身：人已离开画面（V-U4） */
+/** 超过此时长无位置更新即移除目标：已离开画面（V-U4） */
 export const TRACK_TTL_MS = 2_000;
 
-export interface Person {
+export type TargetClass = Track["object_class"];
+
+/** 检出目标：人员或车辆（FR-102） */
+export interface Target {
   camera_id: string;
   track_id: number;
+  object_class: TargetClass;
   x: number;
   y: number;
   uncertainty_m: number;
+  /** 运动方向，0 为平面 +x、逆时针为正；静止或起步不足 3 帧时为 null */
+  heading_deg: number | null;
   /** 近 TRAIL_MS 内的位置 [x, y, 收到时刻]，按时间先后排列 */
   trail: (readonly [number, number, number])[];
 }
@@ -26,13 +32,13 @@ interface LiveState {
   /** 推送的设备最新状态，覆盖 GET /api/site 中的初始值 */
   devices: Record<string, Device>;
   /** 键为 "摄像头/track_id"：track_id 只在单个摄像头内唯一 */
-  people: Record<string, Person>;
+  targets: Record<string, Target>;
   /** 每台摄像头最近一次行为事件，供事件卡显示 */
   behaviors: Record<string, Behavior>;
 }
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
-export const useLive = create<LiveState>()(() => ({ devices: {}, people: {}, behaviors: {} }));
+export const useLive = create<LiveState>()(() => ({ devices: {}, targets: {}, behaviors: {} }));
 
 /** keep 为假时去掉 id 对应的项 */
 const drop = <T,>(map: Record<string, T>, id: string, keep: boolean) =>
@@ -58,28 +64,29 @@ export function receive(frame: Frame, now: number): void {
   }
 }
 
-function move({ camera_id, track_id, x, y, uncertainty_m }: Track, now: number) {
+function move({ camera_id, track_id, object_class, x, y, uncertainty_m, heading_deg }: Track, now: number) {
   const key = `${camera_id}/${track_id}`;
   useLive.setState((s) => {
-    const trail = [...(s.people[key]?.trail ?? []), [x, y, now] as const].filter(([, , t]) => t >= now - TRAIL_MS);
-    return { people: { ...s.people, [key]: { camera_id, track_id, x, y, uncertainty_m, trail } } };
+    const trail = [...(s.targets[key]?.trail ?? []), [x, y, now] as const].filter(([, , t]) => t >= now - TRAIL_MS);
+    const target: Target = { camera_id, track_id, object_class, x, y, uncertainty_m, heading_deg, trail };
+    return { targets: { ...s.targets, [key]: target } };
   });
 }
 
-/** 移除超时的化身并裁剪轨迹；无变化时不更新状态 */
+/** 移除超时的目标并裁剪轨迹；无变化时不更新状态 */
 export function prune(now: number): void {
-  const { people } = useLive.getState();
-  const next: Record<string, Person> = {};
+  const { targets } = useLive.getState();
+  const next: Record<string, Target> = {};
   let changed = false;
-  for (const [key, person] of Object.entries(people)) {
-    const last = person.trail.at(-1)?.[2] ?? 0;
+  for (const [key, target] of Object.entries(targets)) {
+    const last = target.trail.at(-1)?.[2] ?? 0;
     if (last < now - TRACK_TTL_MS) {
       changed = true;
       continue;
     }
-    const trail = person.trail.filter(([, , t]) => t >= now - TRAIL_MS);
-    changed ||= trail.length !== person.trail.length;
-    next[key] = trail.length === person.trail.length ? person : { ...person, trail };
+    const trail = target.trail.filter(([, , t]) => t >= now - TRAIL_MS);
+    changed ||= trail.length !== target.trail.length;
+    next[key] = trail.length === target.trail.length ? target : { ...target, trail };
   }
-  if (changed) useLive.setState({ people: next });
+  if (changed) useLive.setState({ targets: next });
 }
