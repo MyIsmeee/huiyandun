@@ -89,6 +89,8 @@ export async function open(page: Page, devices: object[]) {
   await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices } }));
   const sockets = await mockSocket(page);
   await page.goto("/");
+  // 先等场景代码与车辆模型加载完：加载按真实时间进行，期间 sceneSettled 逐帧推进的模拟时钟会随加载快慢漂移
+  await page.waitForLoadState("networkidle");
   await sceneSettled(page);
   return sockets;
 }

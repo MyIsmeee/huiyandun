@@ -161,6 +161,45 @@ bundled:
       - { name: libxcb, version: 1.17.0, license: X11 }
       - { name: libXau, version: 1.0.9, license: X11 }
 
+# 场景资产（REUSE-13，D-053）：前端本地打包的 CC0 成品模型，原样分发，运行时不联网（G-05）
+# source 记录下载出处（站点与页面编号），不写成网址：本文件不放行 CI-07
+assets:
+  - name: Quaternius Cars · Car（NormalCar1）
+    file: web/console/public/models/quaternius-car.glb
+    sha256: bf00f2f0386a25aa310abc0424d22586e46a59ee6c737e6b375c97c9f01bd462
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/Cz6yDaUcM9（Quaternius Cars 包）
+    purpose: 轿车模型（04 §5.1 L4）
+    owner: MyIsmeee
+  - name: Quaternius Truck
+    file: web/console/public/models/quaternius-truck.glb
+    sha256: a5d107b5b06f8ca2d8d7e66ae6309f2e1a25cac577c5db8ebb661b3f0ca5ed8f
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/cXw6oiFtZ8
+    purpose: 货车模型
+    owner: MyIsmeee
+  - name: Quaternius Public Transport · Bus
+    file: web/console/public/models/quaternius-bus.obj
+    sha256: 04120821058586326c4db9abb455f8d680d2aadf6e2d59a6bf3e1ac0f3f74490
+    license: CC0-1.0
+    source: Quaternius 官网 Public Transport 包下载页（OBJ/Bus.obj）
+    purpose: 公交模型
+    owner: MyIsmeee
+  - name: Quaternius Public Transport · Bicycle
+    file: web/console/public/models/quaternius-bicycle.obj
+    sha256: 0fbaab4418722d8f1baf11be05d099d79bfe704fb109a555924d49171fa39b92
+    license: CC0-1.0
+    source: Quaternius 官网 Public Transport 包下载页（OBJ/Bicycle.obj）
+    purpose: 自行车模型
+    owner: MyIsmeee
+  - name: AliceCassie · Cartoony Purple Motorcycle
+    file: web/console/public/models/alicecassie-motorcycle.glb
+    sha256: 86219f3bd3c14d50f822def3ce080db11b3d0f45123db5f3b9ace4d7b44a8124
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/j20srJUjpB
+    purpose: 摩托车模型（Kenney、Quaternius 均无 CC0 摩托车）
+    owner: MyIsmeee
+
 # 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
 # 依赖由 tools/dev/export_efficientvit_seg.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
 build_tools:
