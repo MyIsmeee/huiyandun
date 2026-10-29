@@ -100,7 +100,7 @@ def create_app(config: ApiConfig) -> FastAPI:
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
         ]
         try:
-            await relay.start(bus, app.state.hub, app.state.devices)
+            await relay.start(bus, app.state.hub, app.state.devices, app.state.scenes)
             yield
         finally:
             for task in tasks:
@@ -120,6 +120,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.site = site.load(config.site_file)
     app.state.hub = ws.Hub()
     app.state.devices = Devices(app.state.site.devices)
+    app.state.scenes = {}
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(site.router)

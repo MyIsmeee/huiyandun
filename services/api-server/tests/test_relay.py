@@ -21,11 +21,13 @@ from py_contracts.api import Device, WsFrame
 from py_contracts.events.event_base_schema import EventBase
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 
 WS_URL = "wss://testserver/ws"
 SENTINEL = WsFrame(channel="system", data={"type": "sentinel"})
 TRACK, BEHAVIOR, ALERT = "hyd.vision.track.v1", "hyd.vision.behavior.v1", "hyd.security.alert.v1"
+SCENE = "hyd.vision.scene.v1"
 type Connect = Callable[[], AbstractContextManager[WebSocketTestSession]]
 
 
@@ -47,6 +49,21 @@ def behavior() -> VisionBehaviorV1:
         **common(), camera_id="cam-01", track_id=1, behavior="fall",
         confidence_avg=0.8, duration_s=2.0, ts_start=now, ts_end=now,
     )  # fmt: skip
+
+
+def scene(camera_id: str = "cam-01", surface: str = "road") -> VisionSceneV1:
+    polygon = [[0.0, 0.0], [4.0, 0.0], [4.0, 9.0]]
+    return VisionSceneV1.model_validate(
+        common()
+        | {
+            "camera_id": camera_id,
+            "surfaces": [{"class": surface, "polygon": polygon}],
+            "walls": [],
+            "objects": [],
+            "trees": [],
+            "markings": [],
+        }
+    )
 
 
 def alert() -> SecurityAlertV1:
@@ -102,6 +119,7 @@ def next_frame(client: TestClient, ws: WebSocketTestSession) -> WsFrame:
         (TRACK, track(), "tracks"),
         (BEHAVIOR, behavior(), "alerts"),
         (ALERT, alert(), "alerts"),
+        (SCENE, scene(), "scene"),
     ],
 )
 def test_forwards_event_to_channel(
@@ -173,3 +191,22 @@ def test_expired_alert_pushes_restored_device(
         next_frame(client, ws)
 
         assert device_state(next_frame(client, ws)) == ("devices", "cam-01", "normal", None)
+
+
+def test_new_connection_receives_latest_scene_of_each_camera(
+    client: TestClient, ws_connect: Connect, nats_url: str
+) -> None:
+    """连接建立时先补推设备，再补推各摄像头最新一帧场景（HYD-PLAN-007 §3）。"""
+    latest = scene("cam-01", "grass")
+    with ws_connect() as ws:
+        for event in (scene("cam-01", "road"), scene("cam-02", "floor"), latest):
+            publish(nats_url, SCENE, event)
+            next_frame(client, ws)
+
+    with client.websocket_connect(WS_URL) as ws:
+        frames = [next_frame(client, ws) for _ in range(4)]
+
+    assert [f.channel for f in frames] == ["devices", "devices", "scene", "scene"]
+    scenes = {s.camera_id: s for s in (VisionSceneV1.model_validate(f.data) for f in frames[2:])}
+    assert scenes["cam-01"] == latest
+    assert scenes["cam-02"].surfaces[0].class_ == "floor"
