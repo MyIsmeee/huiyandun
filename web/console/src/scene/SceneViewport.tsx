@@ -21,7 +21,7 @@ import { CameraControls } from "./CameraControls";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
-import { isoView, OVERVIEW, planView, type Size, type View } from "./layout";
+import { OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
 import { Scene2D } from "./Scene2D";
 import { TargetMarker } from "./TargetMarker";
 import { pickTarget, RENDER_DELAY_MS, visibleTargets } from "./targets";
@@ -76,9 +76,13 @@ export function SceneViewport({ site }: { site: Site }) {
   const [failed, setFailed] = useState(false);
   const pose = useCamera((s) => s.pose);
   const cameras = useCameras(site.devices);
-  const iso = useMemo(() => (size && webgl2 ? isoView(site, size, pose) : null), [site, size, webgl2, pose]);
+  const view3d = useMemo(() => {
+    if (!size || !webgl2) return null;
+    const { shot, panLimit } = overviewShot(site, size, pose);
+    return sceneView(shot, size, panLimit);
+  }, [site, size, webgl2, pose]);
   const plan = useMemo(() => (size && !webgl2 ? planView(site, size, pose) : null), [site, size, webgl2, pose]);
-  const view = iso ?? plan;
+  const view = view3d ?? plan;
   const state = failed ? "error" : !webgl2 ? "2d" : ready ? "ready" : "loading";
   const { dragged, ...drag } = useDragPan(view);
   useEffect(() => moveCamera(OVERVIEW, false), []); // 每次进入主界面从总览开始
@@ -90,20 +94,20 @@ export function SceneViewport({ site }: { site: Site }) {
 
   // 单击人员或车辆：选中并展开详情，镜头不动（V-I2、D-054）；按渲染中的位置命中。2D 降级视图不绘制目标
   const pick = (e: MouseEvent<HTMLDivElement>) => {
-    if (!iso || dragged.current || (e.target as Element).closest("button")) return;
+    if (!view3d || dragged.current || (e.target as Element).closest("button")) return;
     const { targets, behaviors } = useLive.getState();
     const box = e.currentTarget.getBoundingClientRect();
     const point = [e.clientX - box.left, e.clientY - box.top] as const;
-    const key = pickTarget(visibleTargets(targets, cameras, behaviors), iso, point, Date.now() - RENDER_DELAY_MS);
+    const key = pickTarget(visibleTargets(targets, cameras, behaviors), view3d, point, Date.now() - RENDER_DELAY_MS);
     if (key) selectTarget(key);
   };
 
   return (
     <div ref={ref} data-scene={state} {...drag} onClick={pick}>
-      {iso && (
+      {view3d && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene3D site={site} cameras={cameras} view={iso} onReady={() => setReady(true)} />
+            <Scene3D site={site} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
           </Suspense>
         </Boundary>
       )}
@@ -112,7 +116,7 @@ export function SceneViewport({ site }: { site: Site }) {
         <>
           <DeviceTags cameras={cameras} view={view} />
           <DevicePicker cameras={cameras} view={view} />
-          {iso && <TargetMarker />}
+          {view3d && <TargetMarker />}
         </>
       )}
       {(state === "ready" || state === "2d") && (

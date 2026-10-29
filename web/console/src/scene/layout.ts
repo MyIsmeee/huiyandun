@@ -27,15 +27,19 @@ export const OVERVIEW: Pose = { azimuth: 0, zoom: 1, pan: [0, 0] };
 export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 4;
 
-// V-I1：等距正交投影，默认相机位于 (+x, +y, +z) 方向俯视
-const BACK: Vec3 = [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)];
-const RIGHT: Vec3 = [1 / Math.sqrt(2), 0, -1 / Math.sqrt(2)];
-const UP: Vec3 = [-1 / Math.sqrt(6), 2 / Math.sqrt(6), -1 / Math.sqrt(6)];
-const CAMERA_NEAR_M = 1;
+// V-I1：透视总览，俯角 45°，默认相机位于 (+x, +y, +z) 方向
+const BACK: Vec3 = [0.5, Math.SQRT1_2, 0.5];
+const RIGHT: Vec3 = [Math.SQRT1_2, 0, -Math.SQRT1_2];
+const UP: Vec3 = [-0.5, Math.SQRT1_2, -0.5];
+/** 总览的竖直视场角：视场越小越接近等距，越大近大远小越明显 */
+const OVERVIEW_FOV = (35 * Math.PI) / 180;
+const CAMERA_NEAR_M = 0.5;
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const along = (a: Vec3, axis: Vec3, k: number): Vec3 => [a[0] + axis[0] * k, a[1] + axis[1] * k, a[2] + axis[2] * k];
+const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit = (a: Vec3): Vec3 => along([0, 0, 0], a, 1 / Math.hypot(...a));
 /** 绕竖轴旋转：相机绕站点逆时针（俯视）转动，场景在画面上顺时针转动 */
 const turn = ([x, y, z]: Vec3, a: number): Vec3 => [
   x * Math.cos(a) + z * Math.sin(a),
@@ -44,23 +48,34 @@ const turn = ([x, y, z]: Vec3, a: number): Vec3 => [
 ];
 
 export interface View {
-  /** 每米对应的像素数 */
+  /** 每米对应的像素数；透视视图为取景中心处 */
   zoom: number;
-  /** 场景坐标 → 视口内像素坐标 */
-  project: (p: Vec3) => Point;
+  /** 场景坐标 → 视口内像素坐标；在相机近裁面以内或身后的点为 null */
+  project: (p: Vec3) => Point | null;
+  /** 该点处每米对应的像素数：透视视图近大远小 */
+  scale: (p: Vec3) => number;
   /** 平移上限：pan 各分量的绝对值不超过此值，取景中心不离开站点 */
   panLimit: Point;
 }
 
-export interface IsoView extends View {
-  target: Vec3;
-  position: Vec3;
+/** 透视机位：视点、取景中心、竖直视场角（弧度），取景中心落在视口内 center 像素处 */
+export interface Shot {
+  eye: Vec3;
+  look: Vec3;
+  fov: number;
+  center: Point;
+}
+
+export interface SceneView extends View {
+  shot: Shot;
   /** 相机可见深度范围，单位米 */
   near: number;
   far: number;
 }
 
 export interface PlanView extends View {
+  /** 俯视平面上每个点都可见 */
+  project: (p: Vec3) => Point;
   /** SVG 变换：平面坐标 → 视口内像素坐标，与 project 一致 */
   transform: string;
 }
@@ -69,36 +84,59 @@ function usable({ width, height }: Size) {
   return { width: width - INSET.left - INSET.right, height: height - INSET.top - INSET.bottom };
 }
 
-/** 等距视图：总览时站点包围盒（含墙高）完整落在视口可用区域内并居中；缩放以可用区域中心为锚点 */
-export function isoView(site: Site, size: Size, pose: Pose = OVERVIEW): IsoView {
-  const [back, right, up] = [turn(BACK, pose.azimuth), turn(RIGHT, pose.azimuth), turn(UP, pose.azimuth)];
-  const corners: Vec3[] = [];
-  for (const x of [0, site.width_m])
-    for (const y of [0, WALL_HEIGHT_M]) for (const z of [0, site.height_m]) corners.push([x, y, z]);
-  const center: Vec3 = [site.width_m / 2, 0, site.height_m / 2];
-  const extent = (axis: Vec3) => corners.map((c) => dot(sub(c, center), axis));
-  const [rs, us] = [extent(right), extent(up)];
-  const [spanR, spanU] = [Math.max(...rs) - Math.min(...rs), Math.max(...us) - Math.min(...us)];
-  const area = usable(size);
-  const zoom = Math.min(area.width / spanR, area.height / spanU) * pose.zoom;
-  // 包围盒投影的中点对齐可用区域的中点，再按 pan 偏移
-  const r0 = (Math.max(...rs) + Math.min(...rs)) / 2 - (INSET.left - INSET.right) / 2 / zoom + pose.pan[0];
-  const u0 = (Math.max(...us) + Math.min(...us)) / 2 + (INSET.top - INSET.bottom) / 2 / zoom - pose.pan[1];
-  const target = along(along(center, right, r0), up, u0);
-  // 包围盒各点沿视线方向距中心不超过半条对角线：相机退到一条对角线外，可见深度取其 2 倍
-  const distance = Math.hypot(site.width_m, WALL_HEIGHT_M, site.height_m) + 10;
-  const position = along(target, back, distance);
+/** 透视视图：按机位把场景投影到视口，与 Scene3D 的透视相机一致（竖直视场 fov、取景中心在 center 像素处） */
+export function sceneView(shot: Shot, size: Size, panLimit: Point = [0, 0]): SceneView {
+  const { eye, look, fov, center } = shot;
+  const back = unit(sub(eye, look));
+  const right = unit(cross([0, 1, 0], back));
+  const up = cross(back, right);
+  const focal = size.height / 2 / Math.tan(fov / 2);
+  const depth = (p: Vec3) => -dot(sub(p, eye), back);
   return {
-    zoom,
-    target,
-    position,
+    shot,
+    zoom: focal / Math.hypot(...sub(eye, look)),
     near: CAMERA_NEAR_M,
-    far: distance * 2,
-    panLimit: [spanR / 2, spanU / 2],
-    project: (p) => [
-      size.width / 2 + zoom * dot(sub(p, target), right),
-      size.height / 2 - zoom * dot(sub(p, target), up),
-    ],
+    far: GROUND_M,
+    panLimit,
+    scale: (p) => focal / Math.max(depth(p), CAMERA_NEAR_M),
+    project: (p) => {
+      const d = depth(p);
+      if (d <= CAMERA_NEAR_M) return null;
+      const v = sub(p, eye);
+      return [center[0] + (focal * dot(v, right)) / d, center[1] - (focal * dot(v, up)) / d];
+    },
+  };
+}
+
+/**
+ * 透视总览（V-I1）：俯角 45°，取景中心为站点中心、对准可用区域中心；视点退到站点包围盒（含墙高）完整落在可用区域内的最近处。
+ * 缩放按倍数拉近视点；平移在画面平面内移动相机，与取景中心同深度的内容每米移动 zoom 像素
+ */
+export function overviewShot(site: Site, size: Size, pose: Pose = OVERVIEW): { shot: Shot; panLimit: Point } {
+  const [back, right, up] = [turn(BACK, pose.azimuth), turn(RIGHT, pose.azimuth), turn(UP, pose.azimuth)];
+  const center: Vec3 = [site.width_m / 2, 0, site.height_m / 2];
+  const offsets: Vec3[] = [];
+  for (const x of [0, site.width_m])
+    for (const y of [0, WALL_HEIGHT_M]) for (const z of [0, site.height_m]) offsets.push(sub([x, y, z], center));
+  const area = usable(size);
+  const focal = size.height / 2 / Math.tan(OVERVIEW_FOV / 2);
+  // 角点沿视线方向比中心近 b、深度为 distance - b：横向与纵向都不超出可用区域的半宽、半高
+  const fit = Math.max(
+    ...offsets.map((v) => {
+      const b = dot(v, back);
+      return Math.max(b + (focal * Math.abs(dot(v, right))) / (area.width / 2), b + (focal * Math.abs(dot(v, up))) / (area.height / 2));
+    }),
+  );
+  const look = along(along(center, right, pose.pan[0]), up, -pose.pan[1]);
+  const span = (axis: Vec3) => Math.max(...offsets.map((v) => Math.abs(dot(v, axis))));
+  return {
+    shot: {
+      eye: along(look, back, fit / pose.zoom),
+      look,
+      fov: OVERVIEW_FOV,
+      center: [INSET.left + area.width / 2, INSET.top + area.height / 2],
+    },
+    panLimit: [span(right), span(up)],
   };
 }
 
@@ -115,6 +153,7 @@ export function planView(site: Site, size: Size, pose: Pose = OVERVIEW): PlanVie
   return {
     zoom,
     panLimit: [spanX / 2, spanY / 2],
+    scale: () => zoom,
     // 画面 y 轴向下，正角度为顺时针
     project: ([x, , z]) => {
       const [vx, vz] = [x - w / 2, z - h / 2];

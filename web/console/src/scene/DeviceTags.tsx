@@ -25,7 +25,9 @@ export function DeviceTags({ cameras, view }: { cameras: Camera[]; view: View })
   return cameras.map(({ id, state, pose }) => {
     const { tags } = deviceLook(state);
     if (tags.length === 0) return null;
-    const [left, top] = view.project([pose.x, pose.height_m + ABOVE_M, pose.y]);
+    const at = view.project([pose.x, pose.height_m + ABOVE_M, pose.y]);
+    if (!at) return null;
+    const [left, top] = at;
     return (
       <div
         key={id}

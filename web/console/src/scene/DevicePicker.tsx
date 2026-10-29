@@ -13,9 +13,12 @@ const HEAD_M = 1;
  */
 export function DevicePicker({ cameras, view }: { cameras: Camera[]; view: View }) {
   const selected = useSelection((s) => s.deviceId);
-  const size = Math.max(MIN_PX, HEAD_M * view.zoom);
   return cameras.map(({ id, pose }) => {
-    const [left, top] = view.project([pose.x, pose.height_m, pose.y]);
+    const head = [pose.x, pose.height_m, pose.y] as const;
+    const at = view.project(head);
+    if (!at) return null;
+    const [left, top] = at;
+    const size = Math.max(MIN_PX, HEAD_M * view.scale(head));
     return (
       <button
         key={id}
