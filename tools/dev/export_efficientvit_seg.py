@@ -21,6 +21,7 @@
 工作区锁文件与运行镜像；上游代码固定到 UPSTREAM_COMMIT（git 提交号即内容校验）。
 """
 
+import shutil
 import subprocess
 import sys
 import types
@@ -36,14 +37,18 @@ TIMEOUT_S = 600  # 拉取上游代码的上限
 
 
 def fetch_code() -> Path:
-    if not (CODE_DIR / ".git").is_dir():
-        CODE_DIR.mkdir(parents=True)
+    """先拉到临时目录，完整检出后再改名：中途失败（如断网）不留下残缺的缓存，重跑即可恢复。"""
+    if not CODE_DIR.is_dir():
+        partial = CODE_DIR.with_name(CODE_DIR.name + ".partial")
+        shutil.rmtree(partial, ignore_errors=True)
+        partial.mkdir(parents=True)
         for args in (
             ["init", "-q"],
             ["fetch", "-q", "--depth", "1", UPSTREAM, UPSTREAM_COMMIT],
             ["checkout", "-q", "FETCH_HEAD"],
         ):
-            subprocess.run(["git", "-C", str(CODE_DIR), *args], check=True, timeout=TIMEOUT_S)
+            subprocess.run(["git", "-C", str(partial), *args], check=True, timeout=TIMEOUT_S)
+        partial.rename(CODE_DIR)
     head = subprocess.run(
         ["git", "-C", str(CODE_DIR), "rev-parse", "HEAD"],
         check=True,
