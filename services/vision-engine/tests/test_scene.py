@@ -1,18 +1,23 @@
-"""场景感知（TK-118、FR-108）：分割结果归并、投影、平滑与无效帧。
+"""场景感知（TK-118、FR-108）：分割结果归并、演示帧快照、投影、平滑与无效帧。
 
-投影以已知单应矩阵检验平面坐标；分割以假会话代替模型。
+scenes/*.npz 由 tools/dev/record_scene.py 从 demo/media/src/ 的素材帧录制，只含 64×64 的渲染类别编号；
+映射表或阈值变化后须重新录制。投影以已知单应矩阵检验平面坐标；分割以假会话代替模型。
 """
 
 from collections import deque
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import cv2
 import numpy as np
 import pytest
 
 from vision_engine.geometry import GroundMapping
 from vision_engine.scene import (
+    CLASSES,
     GRID,
+    LUT,
     MAX_POLYGONS,
     ScenePerception,
     Segmenter,
@@ -20,6 +25,7 @@ from vision_engine.scene import (
     smooth,
 )
 
+SCENES = Path(__file__).parent / "scenes"
 SIZE = 640  # 测试画面 640×640：每格 10 像素
 # 正视地面：1 像素 = 1 cm，即每格 0.1 m
 TOP_DOWN = GroundMapping.fit([[u, v, u / 100, v / 100] for u in (0, 1000) for v in (0, 700)])
@@ -47,6 +53,69 @@ def grid(**blocks: list[tuple[slice, slice]]) -> np.ndarray:
 
 def blank(value: int = 100) -> np.ndarray:
     return np.full((SIZE, SIZE, 3), value, np.uint8)
+
+
+def snapshot(name: str) -> tuple[np.ndarray, tuple[int, int]]:
+    data = np.load(SCENES / f"{name}.npz")
+    # 类别名或 ADE20K 编号映射任一变化，录制结果即失效
+    assert data["classes"].tolist() == CLASSES, "映射表已变化，须重新录制"
+    assert (data["lut"] == LUT).all(), "映射表已变化，须重新录制"
+    return data["labels"], tuple(data["shape"].tolist())
+
+
+def share(labels: np.ndarray, *names: str) -> float:
+    return float(np.isin(labels, [label(n) for n in names]).mean())
+
+
+# --- 演示帧快照 ---
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        # 步行街俯拍：路面与人行道分开，两侧建筑
+        ("street-1", {("road",): 0.3, ("sidewalk",): 0.2, ("building",): 0.1}),
+        # 路口与斑马线：路面与建筑
+        ("street-2", {("road",): 0.3, ("building",): 0.15}),
+        # 客厅：地面、墙、家具
+        ("indoor-1", {("floor",): 0.1, ("wall",): 0.4, ("furniture",): 0.03}),
+        # 车行：地面与墙（摩托车不在场景中，记为未识别）
+        ("indoor-2", {("floor",): 0.15, ("wall",): 0.15}),
+        # 乡村路：路面多被识别为泥地，栏杆与树检出
+        ("rural-1", {("road", "earth"): 0.2, ("railing", "fence"): 0.1, ("tree",): 0.03}),
+    ],
+)
+def test_demo_frame_classes(name: str, expected: dict[tuple[str, ...], float]) -> None:
+    labels, _ = snapshot(name)
+
+    found = {names: round(share(labels, *names), 2) for names in expected}
+    assert all(found[names] >= least for names, least in expected.items()), found
+
+
+def test_dark_fire_frame_is_not_recognized() -> None:
+    """浓烟与火光画面识别不可靠：几乎全部不输出，没有地面与立面（设计 §3.7）。"""
+    labels, shape = snapshot("fire-1")
+
+    assert (labels == 0).mean() >= 0.95
+    scene = perception().project(labels, np.zeros((*shape, 3), np.uint8))
+    assert scene["surfaces"] == scene["walls"] == []
+
+
+def test_street_projects_road_sidewalk_and_building() -> None:
+    """斜视的街道画面：画面下方 0.4 高以上为远处，超出视距的部分丢弃。"""
+    labels, (h, w) = snapshot("street-1")
+    oblique = GroundMapping.fit(
+        [[0, h, -3, 2], [w, h, 3, 2], [w * 0.25, h * 0.4, -6, 15], [w * 0.75, h * 0.4, 6, 15]]
+    )
+    pose = {"x": 0.0, "y": 0.0, "range_m": 30.0}
+
+    scene = perception(pose, oblique).project(labels, np.full((h, w, 3), 100, np.uint8))
+
+    surfaces = {s["class"] for s in scene["surfaces"]}
+    assert {"road", "sidewalk"} <= surfaces
+    assert "building" in {w["class"] for w in scene["walls"]}
+    points = [p for s in scene["surfaces"] for p in s["polygon"]]
+    assert max(np.hypot(*p) for p in points) <= 30.0 + 0.2
 
 
 # --- 投影 ---
@@ -90,6 +159,46 @@ def test_ground_beyond_range_and_above_horizon_is_dropped() -> None:
     assert polygon[:, 1].min() == pytest.approx(1000 / (SIZE - 5 - 200), abs=0.01)  # 最低一行格中心
 
 
+def test_wall_follows_bottom_edge() -> None:
+    labels = grid(wall=[(slice(0, 20), slice(5, 41))], floor=[(slice(20, GRID), slice(0, GRID))])
+
+    (wall,) = perception().project(labels, blank())["walls"]
+
+    assert wall["class"] == "wall"
+    assert wall["height_m"] == 2.8
+    assert wall["line"] == [[0.55, 2.0], [4.05, 2.0]]  # 第 19 行格底边 y = 20 × 0.1 m
+
+
+def test_wall_splits_where_bottom_jumps() -> None:
+    labels = grid(building=[(slice(0, 20), slice(5, 21)), (slice(0, 40), slice(21, 41))])
+
+    walls = perception().project(labels, blank())["walls"]
+
+    assert sorted(w["line"][0][1] for w in walls) == [2.0, 4.0]
+    assert all(w["height_m"] == 6.0 for w in walls)
+
+
+def test_object_footprint_extends_away_from_camera() -> None:
+    """家具只见正面：底边向远离摄像头一侧补出 0.6 m 深的底面。"""
+    labels = grid(furniture=[(slice(20, 30), slice(30, 40))])
+
+    (item,) = perception().project(labels, blank())["objects"]
+
+    polygon = np.array(item["polygon"])
+    assert item["height_m"] == 0.8
+    assert polygon[:, 1].max() == pytest.approx(3.0)
+    assert polygon[:, 1].min() == pytest.approx(2.4, abs=0.02)
+
+
+def test_tree_at_bottom_center() -> None:
+    labels = grid(tree=[(slice(10, 20), slice(30, 34))], plant=[(slice(40, 45), slice(5, 8))])
+
+    trees = perception().project(labels, blank())["trees"]
+
+    assert {"x": 3.2, "y": 2.0, "height_m": 5.0} in trees
+    assert {"x": 0.65, "y": 4.5, "height_m": 1.0} in trees
+
+
 def test_polygons_capped_by_area() -> None:
     """每帧多边形合计不超过 64 个，保留面积最大的。"""
     blocks = [(slice(r, r + 5), slice(c, c + 5)) for r in range(0, 63, 7) for c in range(0, 63, 7)]
@@ -100,6 +209,27 @@ def test_polygons_capped_by_area() -> None:
 
     assert len(surfaces) == MAX_POLYGONS
     assert "sidewalk" in {s["class"] for s in surfaces}
+
+
+def test_crosswalk_and_lane_markings() -> None:
+    """路面内的白色条纹：4 条并排的为斑马线；与其垂直、单独的一条为车道线。"""
+    frame = blank()
+    for x in range(60, 360, 80):
+        cv2.rectangle(frame, (x, 50), (x + 40, 250), (255, 255, 255), -1)
+    cv2.rectangle(frame, (100, 450), (400, 470), (255, 255, 255), -1)
+    labels = grid(road=[(slice(0, GRID), slice(0, GRID))])
+
+    markings = perception().project(labels, frame)["markings"]
+
+    assert sorted(m["class"] for m in markings) == ["crosswalk"] * 4 + ["lane"]
+
+
+def test_white_outside_road_is_not_marking() -> None:
+    frame = blank()
+    cv2.rectangle(frame, (60, 50), (100, 250), (255, 255, 255), -1)
+    labels = grid(sidewalk=[(slice(0, GRID), slice(0, GRID))])
+
+    assert perception().project(labels, frame)["markings"] == []
 
 
 # --- 分割、平滑与无效帧 ---

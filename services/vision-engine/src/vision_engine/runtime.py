@@ -31,6 +31,11 @@ class VisionConfig(ServiceConfig):
         description="RF-DETR ONNX 模型文件的本地路径，检出车辆（REUSE-22、C-RU-06）；"
         "未配置时只检测人员（如关键点录制工具）",
     )
+    scene_model_file: FilePath | None = Field(
+        None,
+        description="EfficientViT-Seg ONNX 模型文件的本地路径，识别已标定摄像头画面中的环境"
+        "（REUSE-25、FR-108）；未配置时不输出场景",
+    )
     gpu_mem_limit_mb: int = Field(
         2048,
         gt=0,
@@ -53,8 +58,9 @@ class DeviceError(RuntimeError):
 
 
 def model_files(config: VisionConfig) -> list[Path]:
-    """服务加载的全部模型：RTMO，以及配置了的 RF-DETR。"""
-    return [config.model_file] + ([config.vehicle_model_file] if config.vehicle_model_file else [])
+    """服务加载的全部模型：RTMO，以及配置了的 RF-DETR、EfficientViT-Seg。"""
+    optional = [config.vehicle_model_file, config.scene_model_file]
+    return [config.model_file] + [f for f in optional if f]
 
 
 def create_session(config: VisionConfig, model_file: Path, models: int = 1) -> ort.InferenceSession:

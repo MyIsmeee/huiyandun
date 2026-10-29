@@ -1,7 +1,8 @@
 """场景感知（TK-118、FR-108）：EfficientViT-Seg 识别环境 → 归并为渲染类别 → 时间平滑 → 投影到平面。
 
 每台已标定摄像头每秒 1 次，取最新帧。输出只含平面坐标（米）的多边形与线段，不含图像（G-04）；
-人员与车辆不在场景中，由 track 事件呈现。地面类别取掩码外轮廓。
+人员与车辆不在场景中，由 track 事件呈现。地面类别取掩码外轮廓；立面与物体取与地面接触的下边缘
+（每列最低一格）；树取底部中心；路面标线在路面区域内按白色条纹检出（ADE20K 无此类别）。
 """
 
 import uuid
@@ -28,9 +29,18 @@ MIN_CONFIDENCE = 0.5
 DARK, BRIGHT = 40, 250
 HISTORY = 3  # 近 3 次的多数类别：画面变化后连续 2 次识别即翻转（约 2 s）
 SIMPLIFY_M = 0.2
-MAX_POLYGONS = 64  # 按面积保留最大的
+MAX_POLYGONS = 64  # 地面、物体与标线合计，按面积保留最大的
 MIN_CELLS = 3  # 小于 3 格的区域视为噪声
 MIN_AREA_M2 = 0.1
+MIN_LENGTH_M = 0.5  # 墙脚线
+JUMP_CELLS = 2  # 相邻列的下边缘相差超过 2 格视为不同立面，断开
+# 路面标线：HSV 亮度不低于 WHITE_V、饱和度不高于 WHITE_S 的细长条纹（长宽比 ≥ 3、宽 ≤ 1 m）
+WHITE_V, WHITE_S = 190, 50
+MIN_STRIPE_PX = 30
+STRIPE_RATIO = 3.0
+STRIPE_WIDTH_M = 1.0
+CROSSWALK_ANGLE_DEG = 15.0  # 斑马线：至少 3 条平行条纹并排（沿条纹方向错开不超过半长）、间距 3 m 内
+CROSSWALK_GAP_M = 3.0
 
 # 渲染类别 → ADE20K 类别编号（从 0 起，顺序见上游 eval_efficientvit_seg_model.py），随代码版本化
 ADE20K = {
@@ -53,6 +63,10 @@ ADE20K = {
 }
 CLASSES = list(ADE20K)  # 格子取值 = 下标 + 1，0 为未识别
 SURFACES = ["road", "sidewalk", "floor", "grass", "earth"]
+WALL_HEIGHT_M = {"wall": 2.8, "building": 6.0, "fence": 1.2, "railing": 1.0}
+OBJECT_HEIGHT_M = 0.8
+OBJECT_DEPTH_M = {"furniture": 0.6, "street_furniture": 0.4}  # 只见正面，向远离摄像头一侧补出底面
+TREE_HEIGHT_M = {"tree": 5.0, "plant": 1.0}
 
 LUT = np.zeros(150, np.uint8)
 for _i, _name in enumerate(CLASSES, 1):
@@ -135,12 +149,30 @@ class ScenePerception:
         for name in SURFACES:
             for points in self._outlines((labels == label(name)) & valid):
                 polygons += self._polygon("surfaces", name, centers.reshape(GRID, GRID, 2)[points])
+        walls = [
+            {"class": name, "line": _round(line), "height_m": height_m}
+            for name, height_m in WALL_HEIGHT_M.items()
+            for edge in self._bottom_edges(labels == label(name))
+            if len(line := _simplify(edge, closed=False)) >= 2
+            and np.linalg.norm(np.diff(line, axis=0), axis=1).sum() >= MIN_LENGTH_M
+        ]
+        for name, depth in OBJECT_DEPTH_M.items():
+            for edge in self._bottom_edges(labels == label(name)):
+                away = edge - self._camera
+                back = edge + depth * away / np.linalg.norm(away, axis=1, keepdims=True)
+                polygons += self._polygon("objects", name, np.concatenate([edge, back[::-1]]))
+        trees = [
+            {"x": x, "y": y, "height_m": height_m}
+            for name, height_m in TREE_HEIGHT_M.items()
+            for x, y in self._bases(labels == label(name))
+        ]
+        polygons += self._markings(frame, labels == label("road"))
         polygons.sort(key=lambda p: -p[0])
         scene: dict[str, list[dict[str, Any]]] = {
             "surfaces": [],
-            "walls": [],
+            "walls": walls,
             "objects": [],
-            "trees": [],
+            "trees": trees,
             "markings": [],
         }
         for _, kind, item in polygons[:MAX_POLYGONS]:
@@ -166,12 +198,90 @@ class ScenePerception:
             if cv2.contourArea(contour) >= MIN_CELLS - 1:
                 yield contour[:, 0, 1], contour[:, 0, 0]
 
+    def _bottom_edges(self, mask: np.ndarray) -> Iterator[np.ndarray]:
+        """各连通区域每列最低一格的底边中点，投影到平面；遇无效点、断列或跳变处分段。"""
+        count, components = cv2.connectedComponents(mask.astype(np.uint8))
+        for k in range(1, count):
+            rows, cols = np.nonzero(components == k)
+            if len(rows) < MIN_CELLS:
+                continue
+            bottom = np.full(GRID, -1)
+            np.maximum.at(bottom, cols, rows)
+            columns = np.nonzero(bottom >= 0)[0]
+            plane = self._plane(np.column_stack([columns + 0.5, bottom[columns] + 1.0]))
+            segment: list[np.ndarray] = []
+            for j, column in enumerate(columns):
+                split = j and (
+                    column - columns[j - 1] > 1
+                    or abs(bottom[column] - bottom[columns[j - 1]]) > JUMP_CELLS
+                )
+                if split or not np.isfinite(plane[j, 0]):
+                    if len(segment) >= 2:
+                        yield np.array(segment)
+                    segment = []
+                if np.isfinite(plane[j, 0]):
+                    segment.append(plane[j])
+            if len(segment) >= 2:
+                yield np.array(segment)
+
+    def _bases(self, mask: np.ndarray) -> Iterator[tuple[float, float]]:
+        """各连通区域最低一行的中点（树干底部）。"""
+        count, components = cv2.connectedComponents(mask.astype(np.uint8))
+        for k in range(1, count):
+            rows, cols = np.nonzero(components == k)
+            if len(rows) < MIN_CELLS:
+                continue
+            bottom = rows.max()
+            point = self._plane(np.array([[cols[rows == bottom].mean() + 0.5, bottom + 1.0]]))[0]
+            if np.isfinite(point[0]):
+                yield round(float(point[0]), 2), round(float(point[1]), 2)
+
+    def _markings(self, frame: np.ndarray, road: np.ndarray) -> list[tuple[float, str, dict]]:
+        """路面外轮廓内的白色细长条纹；至少 3 条平行并排的为斑马线，其余为车道线。"""
+        height, width = frame.shape[:2]
+        area = np.zeros((GRID, GRID), np.uint8)
+        contours, _ = cv2.findContours(
+            road.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        cv2.drawContours(area, contours, -1, 1, thickness=-1)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        white = (hsv[..., 2] >= WHITE_V) & (hsv[..., 1] <= WHITE_S)
+        inside = cv2.resize(area, (width, height), interpolation=cv2.INTER_NEAREST).astype(bool)
+        mask = cv2.morphologyEx((white & inside).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3)))
+        stripes = []
+        for contour in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+            if cv2.contourArea(contour) < MIN_STRIPE_PX:
+                continue
+            corners = self._clip(self._mapping.to_plane(cv2.boxPoints(cv2.minAreaRect(contour))))
+            if not np.isfinite(corners).all():
+                continue
+            sides = np.diff(np.vstack([corners, corners[:1]]), axis=0)[:2]
+            lengths = np.linalg.norm(sides, axis=1)
+            long, short = lengths.argmax(), lengths.argmin()
+            if lengths[short] > STRIPE_WIDTH_M or lengths[long] < STRIPE_RATIO * lengths[short]:
+                continue
+            stripes.append((corners, corners.mean(0), sides[long] / lengths[long], lengths[long]))
+        result = []
+        for corners, center, direction, length in stripes:
+            beside = sum(
+                abs(float(direction @ other)) >= np.cos(np.radians(CROSSWALK_ANGLE_DEG))
+                and abs(float(direction @ (c - center))) <= length / 2
+                and 0 < np.linalg.norm(c - center) <= CROSSWALK_GAP_M
+                for _, c, other, _ in stripes
+            )
+            name = "crosswalk" if beside >= 2 else "lane"
+            result.append((_area(corners), "markings", {"class": name, "polygon": _round(corners)}))
+        return result
+
     @staticmethod
     def _polygon(kind: str, name: str, points: np.ndarray) -> list[tuple[float, str, dict]]:
         polygon = _simplify(points, closed=True)
         if len(polygon) < 3 or (area := _area(polygon)) < MIN_AREA_M2:
             return []
-        return [(area, kind, {"class": name, "polygon": _round(polygon)})]
+        item: dict[str, Any] = {"class": name, "polygon": _round(polygon)}
+        if kind == "objects":
+            item["height_m"] = OBJECT_HEIGHT_M
+        return [(area, kind, item)]
 
 
 def _simplify(points: np.ndarray, closed: bool) -> np.ndarray:

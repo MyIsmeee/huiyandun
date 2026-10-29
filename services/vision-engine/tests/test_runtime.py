@@ -25,7 +25,9 @@ MODEL = get_example("sigmoid.onnx")  # onnxruntime 自带的最小模型
 
 def config(**env: str) -> VisionConfig:
     return load_config(
-        VisionConfig, {"HYD_MODEL_FILE": MODEL, "HYD_VEHICLE_MODEL_FILE": MODEL} | env
+        VisionConfig,
+        {"HYD_MODEL_FILE": MODEL, "HYD_VEHICLE_MODEL_FILE": MODEL, "HYD_SCENE_MODEL_FILE": MODEL}
+        | env,
     )
 
 
@@ -70,19 +72,20 @@ def test_cuda_active(fake_session: type[FakeSession]) -> None:
 
 
 def test_memory_limit_is_shared_by_loaded_models(fake_session: type[FakeSession]) -> None:
-    """C-HW-12：HYD_GPU_MEM_LIMIT_MB 是整个服务的上限，加载的模型平分，总占用不超过该值。"""
+    """C-HW-12：HYD_GPU_MEM_LIMIT_MB 是整个服务的上限，加载的模型（RTMO、RF-DETR、EfficientViT-Seg）
+    平分，总占用不超过该值。"""
     fake_session.active = [CUDA, CPU]
-    cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="2048")
+    cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="3072")
     limits = []
     for model_file in model_files(cfg):
         create_session(cfg, model_file, models=len(model_files(cfg)))
         limits.append(fake_session.requested[0][1]["gpu_mem_limit"])
 
-    assert limits == [1024 * 2**20, 1024 * 2**20]
+    assert limits == [1024 * 2**20] * 3
 
 
-def test_vehicle_model_is_optional() -> None:
-    """未配置车辆模型时只检测人员（如关键点录制工具），只加载一个模型、独占显存上限。"""
+def test_vehicle_and_scene_models_are_optional() -> None:
+    """未配置车辆与场景模型时只检测人员（如关键点录制工具），只加载一个模型、独占显存上限。"""
     cfg = load_config(VisionConfig, {"HYD_DEVICE": "cpu", "HYD_MODEL_FILE": MODEL})
 
     assert model_files(cfg) == [Path(MODEL)]
