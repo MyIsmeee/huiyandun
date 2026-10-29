@@ -3,6 +3,8 @@
 JSON Schema 无法表达以下约束，在此统一校验：
 - 数值必须有限：NaN / inf 序列化为 JSON 时变成 null，消费方校验会失败；
 - 时间必须为 UTC（HYD-PLAN-007 §1、CD-07）：date-time 上的 pattern 会被代码生成忽略。
+
+字段名为 Python 关键字（如场景帧的 class）时，生成代码以 class_ 加别名表示；序列化一律输出契约字段名。
 """
 
 from datetime import datetime, timedelta
@@ -11,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class ContractModel(BaseModel):
-    model_config = ConfigDict(allow_inf_nan=False)
+    model_config = ConfigDict(allow_inf_nan=False, serialize_by_alias=True)
 
     @field_validator("*")
     @classmethod

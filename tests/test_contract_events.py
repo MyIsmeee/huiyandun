@@ -310,3 +310,11 @@ def test_entity_validates_without_event_envelope(entity: type[BaseModel], subjec
     fields = SAMPLES[subject][1]
 
     assert entity.model_validate(fields).model_dump(mode="json").keys() == fields.keys()
+
+
+def test_dump_uses_contract_field_names() -> None:
+    """字段名为 Python 关键字（class）时生成代码以别名 class_ 访问；序列化须输出契约字段名。"""
+    data = validate("hyd.vision.scene.v1", event("hyd.vision.scene.v1")).model_dump(mode="json")
+
+    assert data["surfaces"][0]["class"] == "road"
+    assert "class_" not in data["surfaces"][0]
