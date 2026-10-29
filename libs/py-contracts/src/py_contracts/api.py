@@ -301,11 +301,12 @@ class WsFrame(ContractModel):
     """
     WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
+    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
+    FR-1102）；system 为系统消息（如心跳）
 
     """
 
-    channel: Literal["tracks", "devices", "alerts", "incidents", "system"]
+    channel: Literal["tracks", "devices", "alerts", "incidents", "ai", "system"]
     data: dict[str, Any]
 
 
@@ -323,6 +324,62 @@ class EventBase(ContractModel):
     """
     UTC，RFC 3339，毫秒精度
     """
+
+
+class InvestigationProvider(ContractModel):
+    name: str
+    location: Literal["internal", "public"]
+    """
+    网络位置（C-LLM-13）；public 表示发送内容已脱敏
+    """
+
+
+class InvestigationStep(ContractModel):
+    tool: str
+    """
+    只读工具名
+    """
+    args_summary: str
+    result_summary: str
+    """
+    工具结果摘要（本地数据，未脱敏）
+    """
+    reason: str
+    """
+    模型给出的本步理由
+    """
+
+
+class InvestigationVerdict(ContractModel):
+    is_attack: bool
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    techniques: list[Technique]
+    narrative: str
+    recommendation: str
+    """
+    只作文字建议，不进入任何执行路径（G-03）
+    """
+    unverified: list[str]
+    """
+    无法在工具结果中溯源的实体（C-LLM-06）
+    """
+
+
+class Investigation(ContractModel):
+    """
+    AI 安全值班员调查记录（HYD-PLAN-007 §1 AiInvestigation）；verdict 为 null 表示进行中或失败
+    """
+
+    incident_id: str
+    steps: list[InvestigationStep]
+    verdict: InvestigationVerdict | None
+    error: str | None
+    """
+    失败原因，如"无可用供应商"
+    """
+    provider: InvestigationProvider | None
+    started_at: AwareDatetime
+    finished_at: AwareDatetime | None
 
 
 class HeadingDeg(RootModel[float]):
@@ -481,6 +538,35 @@ class EgressStats(ContractModel):
     targets: list[EgressTarget]
 
 
+class InvestigationFrame(ContractModel):
+    """
+    AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（HYD-REQ-006 US-11）
+    """
+
+    incident_id: str
+    seq: int = Field(..., ge=0)
+    """
+    同一关联事件内从 0 递增
+    """
+    kind: Literal["step", "verdict", "failed"]
+    step: InvestigationStep | None
+    """
+    kind=step 时有值
+    """
+    verdict: InvestigationVerdict | None
+    """
+    kind=verdict 时有值
+    """
+    error: str | None
+    """
+    kind=failed 时的原因，如"无可用供应商"
+    """
+    provider: InvestigationProvider | None
+    """
+    本次调查使用的供应商；无可用供应商时为 null
+    """
+
+
 class VisionTrackV1(EventBase, Track):
     """
     检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
@@ -526,6 +612,12 @@ class Device(ContractModel):
     """
 
 
+class AiInvestigationV1(EventBase, InvestigationFrame):
+    """
+    AI 安全值班员调查流，字段即 InvestigationFrame（生产者 llm-gateway）
+    """
+
+
 class VisionTrack(RootModel[VisionTrackV1]):
     model_config = {"allow_inf_nan": False}
     root: VisionTrackV1
@@ -546,3 +638,8 @@ class Site(ContractModel):
     """
     zones: list[Zone]
     devices: list[Device]
+
+
+class AiInvestigation(RootModel[AiInvestigationV1]):
+    model_config = {"allow_inf_nan": False}
+    root: AiInvestigationV1

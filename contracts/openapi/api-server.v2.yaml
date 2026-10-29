@@ -116,6 +116,36 @@ paths:
               schema: { $ref: "../events/incident.schema.json" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/incidents/{id}/confirm-containment:
+    post:
+      operationId: confirmContainment
+      description: |
+        确认处置（FR-407）：只对 requires_confirmation 为 true 的关联事件有效，否则返回 400。
+        发布 hyd.correlator.confirmation.v1 并写审计日志；处置参数仍只取关联事件的结构化字段（G-03）
+      x-min-role: operator
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "202": { description: 已受理，执行器收到确认后执行 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/incidents/{id}/investigation:
+    get:
+      operationId: getInvestigation
+      description: AI 安全值班员的调查记录（FR-1102）；尚未开始调查时返回 404
+      x-min-role: viewer
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: 调查记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Investigation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/incidents/{id}/reports:
     post:
       operationId: createReport
@@ -658,11 +688,33 @@ components:
       description: |
         WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-        alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；system 为系统消息（如心跳）
+        alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
+        FR-1102）；system 为系统消息（如心跳）
       required: [channel, data]
       properties:
-        channel: { enum: [tracks, devices, alerts, incidents, system] }
+        channel: { enum: [tracks, devices, alerts, incidents, ai, system] }
         data: { type: object }
+    AiInvestigation: { $ref: "../events/hyd.ai.investigation.v1.schema.json" }
+    Investigation:
+      type: object
+      description: AI 安全值班员调查记录（HYD-PLAN-007 §1 AiInvestigation）；verdict 为 null 表示进行中或失败
+      required: [incident_id, steps, verdict, error, provider, started_at, finished_at]
+      properties:
+        incident_id: { type: string }
+        steps:
+          type: array
+          items: { $ref: "../events/investigation_frame.schema.json#/$defs/InvestigationStep" }
+        verdict:
+          anyOf:
+            - { $ref: "../events/investigation_frame.schema.json#/$defs/InvestigationVerdict" }
+            - { type: "null" }
+        error: { anyOf: [{ type: string }, { type: "null" }], description: 失败原因，如"无可用供应商" }
+        provider:
+          anyOf:
+            - { $ref: "../events/investigation_frame.schema.json#/$defs/InvestigationProvider" }
+            - { type: "null" }
+        started_at: { type: string, format: date-time }
+        finished_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     VisionTrack: { $ref: "../events/hyd.vision.track.v1.schema.json" }
     VisionBehavior: { $ref: "../events/hyd.vision.behavior.v1.schema.json" }
     SecurityAlert: { $ref: "../events/hyd.security.alert.v1.schema.json" }
