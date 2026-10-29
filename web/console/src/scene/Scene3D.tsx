@@ -1,12 +1,12 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Object3D, OrthographicCamera } from "three";
+import type { Object3D, PerspectiveCamera } from "three";
 import type { Site } from "../lib/api";
 import { useTheme } from "../theme/store";
 import { DeviceMarkers } from "./DeviceMarkers";
 import { TargetModels } from "./TargetModels";
 import type { Camera } from "./devices";
-import { GROUND_M, type IsoView, type Vec3, WALL_HEIGHT_M } from "./layout";
+import { GROUND_M, type SceneView, type Vec3, WALL_HEIGHT_M } from "./layout";
 import { type Lighting, lightingAt, lightStep } from "./lighting";
 import { PerceivedScene } from "./PerceivedScene";
 
@@ -32,15 +32,15 @@ function useLighting(): Lighting {
  * 按需渲染（frameloop="demand"）：无常驻动效（V-A3），只有对应真实告警的动效持续请求重绘。
  * flat 关闭色调映射，地面等色值与规范一致；阴影另以阴影材质叠加在地面与地面色块之上（地面色块先绘制），不改变其色值。
  */
-export default function Scene3D(props: { site: Site; cameras: Camera[]; view: IsoView; onReady: () => void }) {
+export default function Scene3D(props: { site: Site; cameras: Camera[]; view: SceneView; onReady: () => void }) {
   const { site, cameras, view, onReady } = props;
   useTheme((s) => s.theme); // 订阅主题：切换时重新渲染并取色
   const colors = themeColors();
   const lighting = useLighting();
   const center: Vec3 = [site.width_m / 2, 0, site.height_m / 2];
   return (
-    <Canvas orthographic flat shadows="percentage" frameloop="demand">
-      <IsoCamera view={view} />
+    <Canvas flat shadows="percentage" frameloop="demand">
+      <ViewCamera view={view} />
       <FirstFrame onReady={onReady} />
       <Lights site={site} lighting={lighting} />
       <mesh rotation-x={-Math.PI / 2} position={center}>
@@ -91,17 +91,21 @@ function Lights({ site, lighting }: { site: Site; lighting: Lighting }) {
   );
 }
 
-function IsoCamera({ view }: { view: IsoView }) {
+/** 透视相机按机位摆放，与 layout.ts 的 sceneView 投影一致：画面中心平移到取景中心的像素位置 */
+function ViewCamera({ view }: { view: SceneView }) {
   const get = useThree((s) => s.get);
   useLayoutEffect(() => {
     // 在副作用中经 get() 取相机并直接修改：R3F 推荐的命令式写法
     const state = get();
-    const camera = state.camera as OrthographicCamera;
-    camera.position.set(...view.position);
-    camera.zoom = view.zoom;
+    const camera = state.camera as PerspectiveCamera;
+    const { width, height } = state.size;
+    const { eye, look, fov, center } = view.shot;
+    camera.position.set(...eye);
+    camera.fov = (fov * 180) / Math.PI;
     camera.near = view.near;
     camera.far = view.far;
-    camera.lookAt(...view.target);
+    camera.setViewOffset(width, height, width / 2 - center[0], height / 2 - center[1], width, height);
+    camera.lookAt(...look);
     camera.updateProjectionMatrix();
     state.invalidate();
   }, [get, view]);

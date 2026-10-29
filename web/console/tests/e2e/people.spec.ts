@@ -220,7 +220,7 @@ test("人形补全：桌后只见上半身时腿半透明补全，完全不可�
   await expect(scene(page)).toHaveScreenshot("person-completion.png");
 
   // 完全不可辨的人员同样可选中，括框按补全的人形投影
-  await scene(page).click({ position: { x: 617, y: 425 } });
+  await scene(page).click({ position: { x: 599, y: 375 } });
   await page.clock.runFor(100);
   await expect(page.getByRole("region", { name: "详情" }).getByRole("heading", { level: 2 })).toHaveText("人员 #3");
   await expect(scene(page)).toHaveScreenshot("person-completion-selected.png");
@@ -241,7 +241,7 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
     await page.clock.runFor(500);
   }
 
-  await scene(page).click({ position: { x: 570, y: 375 } }); // 人员所在位置（与 person-normal 截图一致）
+  await scene(page).click({ position: { x: 564, y: 330 } }); // 人员所在位置（与 person-normal 截图一致）
   await page.clock.runFor(100); // 时钟暂停：推进一帧，括框按投影就位
   const panel = page.getByRole("region", { name: "详情" });
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("人员 #7");
@@ -251,7 +251,7 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   await expectNoOverflow(page);
   await expect(page).toHaveScreenshot("target-selected.png");
 
-  await scene(page).click({ position: { x: 555, y: 310 } }); // 轿车：括框按车身投影范围
+  await scene(page).click({ position: { x: 547, y: 235 } }); // 轿车：括框按车身投影范围
   await page.clock.runFor(100);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("轿车 #1000001");
   await expect(scene(page)).toHaveScreenshot("target-selected-car.png");
@@ -260,15 +260,15 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   const box = await scene(page).boundingBox();
-  await page.mouse.move((box?.x ?? 0) + 555, (box?.y ?? 0) + 310);
+  await page.mouse.move((box?.x ?? 0) + 547, (box?.y ?? 0) + 235);
   await page.mouse.down();
-  await page.mouse.move((box?.x ?? 0) + 585, (box?.y ?? 0) + 330, { steps: 3 });
+  await page.mouse.move((box?.x ?? 0) + 577, (box?.y ?? 0) + 255, { steps: 3 });
   await page.mouse.up();
   await page.clock.runFor(100);
   await expect(panel).toHaveCount(0);
 
   // 选中轿车后停止推送：2 s 无更新即移除（V-U4），详情与括框随之收起（D-054）
-  await scene(page).click({ position: { x: 585, y: 330 } }); // 平移后轿车所在位置
+  await scene(page).click({ position: { x: 577, y: 250 } }); // 平移后轿车所在位置
   await page.clock.runFor(100);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("轿车 #1000001");
   await page.clock.runFor(2500);

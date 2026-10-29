@@ -94,9 +94,11 @@ export function pickTarget(list: Visible[], view: View, [px, py]: readonly [numb
   let best: { key: string; distance: number } | null = null;
   for (const target of list) {
     const [x, y] = positionAt(target.trail, t);
-    const [sx, sy] = view.project([x, 0.9, y]);
-    const distance = Math.hypot(sx - px, sy - py);
-    const radius = Math.max(MIN_HIT_PX, HIT_M[target.object_class] * view.zoom);
+    const center = [x, 0.9, y] as const;
+    const screen = view.project(center);
+    if (!screen) continue;
+    const distance = Math.hypot(screen[0] - px, screen[1] - py);
+    const radius = Math.max(MIN_HIT_PX, HIT_M[target.object_class] * view.scale(center));
     if (distance <= radius && (!best || distance < best.distance)) best = { key: target.key, distance };
   }
   return best?.key ?? null;

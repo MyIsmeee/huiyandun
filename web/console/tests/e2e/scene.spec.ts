@@ -133,7 +133,12 @@ test.describe("相机控件", () => {
     await page.mouse.move(x - 40, y - 30);
     await page.mouse.up();
 
-    await expect.poll(() => labelAt(page)).toEqual([(before?.[0] ?? 0) - 40, (before?.[1] ?? 0) - 30]);
+    // 透视：与取景中心同深度的内容随指针移动；标签在机头上方，与之深度不同，视差不超过 2 像素
+    const drift = async () => {
+      const [x = 0, y = 0] = (await labelAt(page)) ?? [];
+      return Math.max(Math.abs(x - ((before?.[0] ?? 0) - 40)), Math.abs(y - ((before?.[1] ?? 0) - 30)));
+    };
+    await expect.poll(drift).toBeLessThanOrEqual(2);
   });
 
   test("转场以动画进行；开启降低动效后瞬时切换", async ({ page }) => {

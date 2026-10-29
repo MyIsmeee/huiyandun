@@ -131,7 +131,7 @@ describe("targetLabel", () => {
 
 describe("pickTarget", () => {
   // 俯视：每米 10 像素，场景 (x, *, y) 投影到 (10x, 10y)
-  const view: View = { zoom: 10, project: ([x, , z]) => [x * 10, z * 10], panLimit: [0, 0] };
+  const view: View = { zoom: 10, project: ([x, , z]) => [x * 10, z * 10], scale: () => 10, panLimit: [0, 0] };
   const list = visibleTargets(
     targets({ ...target(1), x: 1, y: 2, trail: [[1, 2, 0]] }, { ...target(2, 0.4, "cam-01", "bus"), trail: [[10, 2, 0]] }),
     [cam("normal")],
@@ -145,5 +145,13 @@ describe("pickTarget", () => {
 
   it("车辆按模型半长命中", () => {
     expect(pickTarget(list, view, [100 + 39, 20], 0)).toBe("cam-01/2");
+  });
+
+  it("透视：命中半径按目标处的每米像素数；在相机身后的目标不命中", () => {
+    const perspective: View = { ...view, scale: ([x]) => (x > 5 ? 5 : 10) };
+    expect(pickTarget(list, perspective, [100 + 19, 20], 0)).toBe("cam-01/2");
+    expect(pickTarget(list, perspective, [100 + 21, 20], 0)).toBeNull();
+    const behind: View = { ...view, project: ([x, y, z]) => (x > 5 ? null : view.project([x, y, z])) };
+    expect(pickTarget(list, behind, [100, 20], 0)).toBeNull();
   });
 });
