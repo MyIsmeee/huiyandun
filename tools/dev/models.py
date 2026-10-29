@@ -2,13 +2,17 @@
 
 用法：python tools/dev/models.py fetch|verify <models 目录>
 权重不入库（R-03）：fetch 按 registry.yaml 的 source 下载，校验哈希；source 为压缩包时取出
-source_member，上游直接发布权重文件时 source_member 留空、下载内容即权重；写到 <models 目录>/weights/<file>；已存在且哈希一致时跳过。verify 检查每个模型的字段、类别、许可证、
-模型卡与权重哈希。任一不符以 1 退出。
+source_member，上游直接发布权重文件时 source_member 留空、下载内容即权重；上游只发布 PyTorch 权重时
+由 convert 脚本（相对仓库根目录）转为 ONNX：脚本在 uv 的临时环境中运行，依赖由其同名 .lock 锁定，
+不进入工作区锁文件与运行镜像。写到 <models 目录>/weights/<file>；已存在且哈希一致时跳过。verify
+检查每个模型的字段、类别、许可证、模型卡与权重哈希。任一不符以 1 退出。
 """
 
 import hashlib
 import io
+import subprocess
 import sys
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -30,11 +34,14 @@ FIELDS = (
     "owner",
 )
 # 类别白名单：人脸检测/识别、ReID、属性识别不得加入（G-04、C-CV-01）
-# pose：人体检测与骨骼关键点；detection：人员与车辆检测，只到类别（不识别车牌）
-TASKS = {"pose", "detection"}
+# pose：人体检测与骨骼关键点；detection：人员与车辆检测，只到类别（不识别车牌）；
+# segmentation：场景语义分割，只取地面、墙、树等环境类别（REUSE-25）
+TASKS = {"pose", "detection", "segmentation"}
 # G-08 白名单中适用于模型权重的许可证（SPDX）
 LICENSES = {"Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0"}
 TIMEOUT_S = 300  # 单个压缩包下载上限
+CONVERT_TIMEOUT_S = 3600  # 单个模型转换上限：首次运行需下载 PyTorch
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def sha256(data: bytes) -> str:
@@ -54,11 +61,28 @@ def fetch(models: Path, model: dict[str, Any]) -> str | None:
             weights = z.read(model["source_member"])
     else:
         weights = archive
+    if model.get("convert"):
+        try:
+            weights = convert(ROOT / model["convert"], weights)
+        except subprocess.CalledProcessError:
+            return f"{model['name']}: 转换失败（{model['convert']}）"
     if sha256(weights) != model["sha256"]:
         return f"{model['name']}: 权重哈希不符，拒绝使用"
     target.parent.mkdir(exist_ok=True)
     target.write_bytes(weights)
     return None
+
+
+def convert(script: Path, source: bytes) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        source_file, output = Path(tmp) / "source", Path(tmp) / "output"
+        source_file.write_bytes(source)
+        subprocess.run(
+            ["uv", "run", "--script", "--locked", str(script), str(source_file), str(output)],
+            check=True,
+            timeout=CONVERT_TIMEOUT_S,
+        )
+        return output.read_bytes()
 
 
 def verify(models: Path, model: dict[str, Any]) -> list[str]:

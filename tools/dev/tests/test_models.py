@@ -152,3 +152,51 @@ def test_detection_task_allowed(models: Path) -> None:
     update(models, task="detection")
 
     assert run("verify", models).returncode == 0
+
+
+def test_segmentation_task_allowed(models: Path) -> None:
+    """场景语义分割（地面、墙、树等环境类别，REUSE-25）在白名单内。"""
+    run("fetch", models)
+    update(models, task="segmentation")
+
+    assert run("verify", models).returncode == 0
+
+
+CONVERT = """# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1]).read_bytes()
+if data != b"pytorch weights":
+    sys.exit("unexpected source")
+Path(sys.argv[2]).write_bytes(b"onnx weights")
+"""
+
+
+@pytest.mark.parametrize(("source", "ok"), [(b"pytorch weights", True), (b"other", False)])
+def test_fetch_converts_source(models: Path, tmp_path: Path, source: bytes, ok: bool) -> None:
+    """上游只发布 PyTorch 权重时，核对其哈希后由 convert 脚本转为 ONNX，再核对 ONNX 哈希（REUSE-25）。"""
+    script = tmp_path / "convert.py"
+    script.write_text(CONVERT, encoding="utf-8")
+    subprocess.run(["uv", "lock", "--script", str(script)], check=True, timeout=60)
+    upstream = tmp_path / "model.pt"
+    upstream.write_bytes(source)
+    update(
+        models,
+        source=upstream.as_uri(),
+        source_sha256=sha256(source),
+        source_member="",
+        convert=str(script),
+    )
+
+    result = run("fetch", models)
+
+    assert (result.returncode == 0) == ok, result.stderr
+    if ok:
+        assert (models / "weights/demo.onnx").read_bytes() == WEIGHTS
+    else:
+        assert "转换失败" in result.stderr
+        assert not (models / "weights/demo.onnx").exists()
