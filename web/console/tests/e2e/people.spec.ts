@@ -157,11 +157,13 @@ test("人员与车辆：按类别显示模型，沿运动方向朝向（FR-102�
   await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await zoomIn(page);
-  // 每 200 ms 一次实测（5 FPS）：轿车向 +x、公交向 +y、摩托车向 -x、人员斜向行走
+  // 每 200 ms 一次实测（5 FPS）：轿车与自行车向 +x、公交向 +y、货车向 -y、摩托车向 -x、人员斜向行走
   const movers = [
     { track_id: 1000001, object_class: "car", x: 12, y: 8, dx: 1, dy: 0, heading_deg: 0 },
     { track_id: 1000002, object_class: "bus", x: 22, y: 6, dx: 0, dy: 0.8, heading_deg: 90 },
     { track_id: 1000003, object_class: "motorcycle", x: 24, y: 15, dx: -1.2, dy: 0, heading_deg: 180 },
+    { track_id: 1000004, object_class: "truck", x: 12, y: 19, dx: 0, dy: -0.8, heading_deg: 270 },
+    { track_id: 1000005, object_class: "bicycle", x: 19, y: 18, dx: 0.8, dy: 0, heading_deg: 0 },
     { track_id: 7, object_class: "person", x: 16, y: 14, dx: 0.25, dy: -0.15, heading_deg: 329 },
   ];
   for (let i = 0; i < 6; i += 1) {

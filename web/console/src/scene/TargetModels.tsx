@@ -11,16 +11,14 @@ import {
   Object3D,
   RingGeometry,
   SphereGeometry,
-  TorusGeometry,
   Vector3,
 } from "three";
-import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { TRAIL_MS, type TargetClass, useLive } from "../store/live";
 import { useMotion } from "./DeviceMarkers";
 import { type Camera, STATUS } from "./devices";
 import { facing, type Figure, figure, HEAD_R } from "./pose";
 import { LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, visibleTargets } from "./targets";
+import { useVehicleModels, type Vehicle } from "./vehicles";
 
 /** 每个图层的实例上限：C-FE-04 的 200 个目标，固定容量免得目标数变化时重建网格 */
 const CAPACITY = 256;
@@ -38,65 +36,18 @@ const TRAIL_VERTICES = CAPACITY * 2 * (TRAIL_MS / 1000) * 5;
 /** 轨迹重建的最短间隔：200 个目标每秒约 1000 次推送，轨迹只需跟上实测频率（SC-10） */
 const TRAIL_REBUILD_MS = 200;
 
-/** 模型部件：几何体 + 明度系数（车身 1、车窗 0.55、轮胎 0.3），单色按明度区分部件，不引入新色相（UP-2） */
-type Part = { geometry: BufferGeometry; shade: number };
-
-/** 圆角长方体部件：长（沿行进方向 +x）、高、宽，中心位于 (dx, y, 0) */
-const box = (length: number, height: number, width: number, radius: number, dx: number, y: number, shade = 1): Part => ({
-  geometry: new RoundedBoxGeometry(length, height, width, 2, radius).translate(dx, y, 0),
-  shade,
-});
-
-/** 车轮：轮轴沿宽度方向；axles 为各轴的前后位置，track 为左右轮距，ring 为两轮车的细轮圈 */
-function wheels(radius: number, width: number, axles: number[], track: number, ring = false): Part {
-  const sides = track === 0 ? [0] : [-track / 2, track / 2];
-  const parts = axles.flatMap((dx) =>
-    sides.map((dz) =>
-      (ring ? new TorusGeometry(radius, width / 2, 8, 24) : new CylinderGeometry(radius, radius, width, 20).rotateX(Math.PI / 2)).translate(
-        dx,
-        radius,
-        dz,
-      ),
-    ),
-  );
-  return { geometry: mergeGeometries(parts), shade: 0.3 };
-}
-
-type Vehicle = Exclude<TargetClass, "person">;
-
-/**
- * 车辆模型（§5.1 L4，程序化生成的低多边形，借鉴车机 SR 的单色简化外形）：局部坐标 +x 为行进方向，底面落在地面。
- * 尺寸取常见车型：轿车 4.5 m、货车 7 m、公交 11 m；车窗与轮胎以明度区分，便于一眼认出车型与车头方向。
- */
-const MODELS: Record<Vehicle, Part[]> = {
-  bicycle: [box(1.05, 0.07, 0.06, 0.03, 0, 0.72), box(0.1, 0.42, 0.05, 0.02, 0.15, 0.55), wheels(0.33, 0.05, [-0.52, 0.52], 0, true)],
-  motorcycle: [box(1.35, 0.42, 0.34, 0.12, -0.05, 0.72), box(0.55, 0.12, 0.3, 0.05, -0.3, 0.98, 0.55), wheels(0.32, 0.13, [-0.72, 0.72], 0, true)],
-  car: [box(4.5, 0.62, 1.8, 0.14, 0, 0.6), box(2.4, 0.5, 1.6, 0.14, -0.25, 1.15, 0.55), wheels(0.34, 0.24, [-1.45, 1.45], 1.62)],
-  bus: [box(11, 2.6, 2.5, 0.18, 0, 1.7), box(10.5, 0.85, 2.54, 0.06, 0, 2.25, 0.55), wheels(0.5, 0.32, [-3.8, 3.4], 2.2)],
-  truck: [
-    box(2.0, 2.1, 2.3, 0.14, 2.45, 1.4),
-    box(0.25, 0.8, 2.1, 0.04, 3.4, 1.85, 0.55),
-    box(5.0, 2.6, 2.4, 0.06, -1.15, 1.75),
-    wheels(0.5, 0.3, [-3.0, -1.8, 2.4], 2.1),
-  ],
-};
 /** 人形的骨段（沿 +y 的单位圆柱，按半径与长度缩放）与关节、头部（单位球）：两者拼成胶囊肢体 */
 const BONE = new CylinderGeometry(1, 1, 1, 10, 1, true).translate(0, 0.5, 0);
 const JOINT = new SphereGeometry(1, 12, 8);
 
-/** 图层：实体、高误差（半透明、不投影，V-U1）、细描边（背面外扩，只画实体） */
+/** 图层：实体、高误差（半透明、不投影，V-U1）、细描边（背面外扩，只画实体）；车辆带部件明度顶点色 */
 type Kind = "solid" | "ghost" | "outline";
-const LAYERS: { key: string; geometry: BufferGeometry; capacity: number; kind: Kind }[] = [
-  ...(Object.keys(MODELS) as Vehicle[]).flatMap((cls) =>
-    MODELS[cls].flatMap(({ geometry }, p) =>
-      (["solid", "ghost"] as const).map((kind) => ({ key: `${cls}/${p}/${kind}`, geometry, capacity: CAPACITY, kind })),
-    ),
-  ),
-  ...(["solid", "ghost", "outline"] as const).flatMap((kind) => [
-    { key: `bone/${kind}`, geometry: BONE, capacity: BONE_CAPACITY, kind },
-    { key: `joint/${kind}`, geometry: JOINT, capacity: JOINT_CAPACITY, kind },
-  ]),
-];
+type Layer = { key: string; geometry: BufferGeometry; capacity: number; kind: Kind; shaded: boolean };
+const KINDS = ["solid", "ghost", "outline"] as const;
+const FIGURE_LAYERS: Layer[] = KINDS.flatMap((kind) => [
+  { key: `bone/${kind}`, geometry: BONE, capacity: BONE_CAPACITY, kind, shaded: false },
+  { key: `joint/${kind}`, geometry: JOINT, capacity: JOINT_CAPACITY, kind, shaded: false },
+]);
 /** 人形各部件要画的图层与半径：实体另画外扩 OUTLINE_M 的描边 */
 const outlined = (kind: Kind, radius: number): (readonly [Kind, number])[] =>
   kind === "solid" ? [["solid", radius], ["outline", radius + OUTLINE_M]] : [[kind, radius]];
@@ -116,6 +67,22 @@ const colorOf = (t: Visible) => (t.alert ? STATUS.physical : FILL);
  */
 export function TargetModels({ cameras }: { cameras: Camera[] }) {
   const meshes = useRef<Record<string, InstancedMesh | null>>({});
+  const vehicles = useVehicleModels(OUTLINE_M);
+  const layers = useMemo(
+    () => [
+      ...(Object.keys(vehicles) as Vehicle[]).flatMap((cls) =>
+        KINDS.map((kind) => ({
+          key: `${cls}/${kind}`,
+          geometry: kind === "outline" ? vehicles[cls].outline : vehicles[cls].geometry,
+          capacity: CAPACITY,
+          kind,
+          shaded: kind !== "outline",
+        })),
+      ),
+      ...FIGURE_LAYERS,
+    ],
+    [vehicles],
+  );
   const discs = useRef<InstancedMesh>(null);
   const rings = useRef<InstancedMesh>(null);
   const headings = useRef(new Map<string, number>());
@@ -221,7 +188,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         o.rotation.set(0, angle, 0);
         o.scale.set(1, 1, 1);
         o.updateMatrix();
-        MODELS[object_class].forEach(({ shade }, p) => put(`${object_class}/${p}/${kind}`, base.clone().multiplyScalar(shade)));
+        put(`${object_class}/${kind}`, base);
+        if (kind === "solid") put(`${object_class}/outline`);
       }
       o.position.set(x, 0, y);
       o.rotation.set(0, 0, 0);
@@ -238,7 +206,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       }
     }
     for (const key of headings.current.keys()) if (!seen.has(key)) headings.current.delete(key);
-    for (const { key } of LAYERS) finish(meshes.current[key], counts[key] ?? 0);
+    for (const { key } of layers) finish(meshes.current[key], counts[key] ?? 0);
     finish(discs.current, discCount);
     finish(rings.current, ringCount);
     if (motion && pending) invalidate();
@@ -246,7 +214,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
 
   return (
     <>
-      {LAYERS.map(({ key, geometry, capacity, kind }) => (
+      {layers.map(({ key, geometry, capacity, kind, shaded }) => (
         <instancedMesh
           key={key}
           ref={(m) => {
@@ -256,8 +224,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
           castShadow={kind === "solid"}
           frustumCulled={false}
         >
-          {kind === "solid" && <meshLambertMaterial />}
-          {kind === "ghost" && <meshLambertMaterial transparent opacity={0.35} depthWrite={false} />}
+          {kind === "solid" && <meshLambertMaterial vertexColors={shaded} />}
+          {kind === "ghost" && <meshLambertMaterial vertexColors={shaded} transparent opacity={0.35} depthWrite={false} />}
           {kind === "outline" && (
             <meshBasicMaterial color={STATUS.neutral} transparent opacity={0.4} side={BackSide} depthWrite={false} />
           )}
