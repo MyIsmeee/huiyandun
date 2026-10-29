@@ -142,10 +142,12 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         put(`joint/${layer}`, layer === "outline" ? undefined : color);
       }
     };
-    const drawFigure = ({ bones, head }: Figure, x: number, y: number, kind: Kind, color: Color) => {
+    /** 人形：推测的部位与高误差目标一样半透明（D-056、V-U1） */
+    const drawFigure = ({ bones, head }: Figure, x: number, y: number, uncertain: boolean, color: Color) => {
       const from = new Vector3();
       const to = new Vector3();
       for (const bone of bones) {
+        const kind = uncertain || bone.inferred ? "ghost" : "solid";
         from.set(x + bone.from[0], bone.from[1], y + bone.from[2]);
         to.set(x + bone.to[0], bone.to[1], y + bone.to[2]);
         sphere(from, bone.radius, kind, color);
@@ -160,7 +162,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
           put(`bone/${layer}`, layer === "outline" ? undefined : color);
         }
       }
-      if (head) sphere(new Vector3(x + head[0], head[1], y + head[2]), HEAD_R, kind, color);
+      const at = new Vector3(x + head.at[0], head.at[1], y + head.at[2]);
+      sphere(at, HEAD_R, uncertain || head.inferred ? "ghost" : "solid", color);
     };
     const poses = new Map(cameras.map((c) => [c.id, c.pose]));
     const selected = useSelection.getState().targetKey;
@@ -186,7 +189,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       const { object_class } = target;
       if (object_class === "person") {
         const f = pose && figure(target.keypoints, target.bbox, facing(pose, x, y));
-        if (f) drawFigure(f, x, y, kind, base);
+        if (f) drawFigure(f, x, y, target.uncertain, base);
         if (f && target.key === selected) bounds = figureBounds(f, x, y);
       } else {
         o.position.set(x, 0, y);
@@ -303,7 +306,7 @@ function figureBounds({ bones, head }: Figure, x: number, y: number): Box3 {
     box.expandByPoint(new Vector3(x + from[0], from[1], y + from[2]));
     box.expandByPoint(new Vector3(x + to[0], to[1], y + to[2]));
   }
-  if (head) box.expandByPoint(new Vector3(x + head[0], head[1] + HEAD_R, y + head[2]));
+  box.expandByPoint(new Vector3(x + head.at[0], head.at[1] + HEAD_R, y + head.at[2]));
   return box;
 }
 

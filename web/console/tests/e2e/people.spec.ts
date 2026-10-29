@@ -26,12 +26,20 @@ const STANDING: [number, number][] = [
 /** 双手举过头顶：肘与腕抬高 */
 const RAISED = STANDING.map(([side, height], i): [number, number] => (i >= 7 && i <= 10 ? [side * 1.1, i <= 8 ? 1.7 : 1.98] : [side, height]));
 
-/** 画到 16:9 画面上，人高约占画面三成；rotate 为画面内旋转（跌倒为 90°）；检测框底边为最低关键点 */
-function pose(points: [number, number][], rotate = 0) {
+/**
+ * 画到 16:9 画面上，人高约占画面三成；rotate 为画面内旋转（跌倒为 90°）；hidden 中的关键点置信度为 0（看不清）；
+ * 检测框底边为最低的可见关键点
+ */
+function pose(points: [number, number][], rotate = 0, hidden: number[] = []) {
   const [c, s, k] = [Math.cos(rotate), Math.sin(rotate), 0.3 / 1.7];
-  const keypoints = points.map(([side, h]) => [0.45 + ((side * c + h * s) * k * 9) / 16, 0.8 - (h * c - side * s) * k, 0.9]);
-  const us = keypoints.map(([u = 0]) => u);
-  const vs = keypoints.map(([, v = 0]) => v);
+  const keypoints = points.map(([side, h], i) => [
+    0.45 + ((side * c + h * s) * k * 9) / 16,
+    0.8 - (h * c - side * s) * k,
+    hidden.includes(i) ? 0 : 0.9,
+  ]);
+  const seen = keypoints.filter(([, , score]) => score);
+  const us = (seen.length ? seen : keypoints).map(([u = 0]) => u);
+  const vs = (seen.length ? seen : keypoints).map(([, v = 0]) => v);
   return { bbox: [Math.min(...us), Math.min(...vs) - 0.02, Math.max(...us), Math.max(...vs)], keypoints };
 }
 
@@ -193,6 +201,29 @@ test("姿态人形：站立、抬手、跌倒与画面姿态一致（FR-109）",
   await page.clock.runFor(600);
 
   await expect(scene(page)).toHaveScreenshot("person-poses.png");
+});
+
+test("人形补全：桌后只见上半身时腿半透明补全，完全不可辨时为半透明标准人形（D-056）", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  const people = [
+    { track_id: 1, x: 17, y: 12, ...pose(STANDING) },
+    { track_id: 2, x: 18.2, y: 11.4, ...pose(STANDING, 0, [13, 14, 15, 16]) },
+    { track_id: 3, x: 19.4, y: 10.8, ...pose(STANDING, 0, STANDING.map((_, i) => i)) },
+  ];
+  for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
+  await page.clock.runFor(500);
+  await page.getByRole("button", { name: "向右旋转 90°" }).click();
+  await page.clock.runFor(600);
+
+  await expect(scene(page)).toHaveScreenshot("person-completion.png");
+
+  // 完全不可辨的人员同样可选中，括框按补全的人形投影
+  await scene(page).click({ position: { x: 617, y: 425 } });
+  await page.clock.runFor(100);
+  await expect(page.getByRole("region", { name: "详情" }).getByRole("heading", { level: 2 })).toHaveText("人员 #3");
+  await expect(scene(page)).toHaveScreenshot("person-completion-selected.png");
 });
 
 test("单击人员：四角括框与胶囊标签，详情播放所属摄像头画面；离开画面即收起（D-054）", async ({ page }) => {
