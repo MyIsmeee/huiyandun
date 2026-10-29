@@ -3,8 +3,40 @@ import { camera, expectNoOverflow, freezeClock, open, presetTheme, zoomIn } from
 
 // HYD-UIX-004 §8 TargetModels：人员 / 各类车辆 / 告警 / 高误差；V-U4 事件卡
 const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", ts: "2026-10-27T06:30:00Z" };
-/** track 1.1 的新增字段；人员默认无朝向（静止或起步） */
-const TARGET = { object_class: "person", heading_deg: null, speed_mps: null, bbox: [0.4, 0.3, 0.5, 0.8], keypoints: null };
+/** 1.7 m 人员站立时 COCO 17 点相对脚点的横向偏移与高度（米），画面右侧为正 */
+const STANDING: [number, number][] = [
+  [0, 1.58],
+  [-0.03, 1.62],
+  [0.03, 1.62],
+  [-0.07, 1.6],
+  [0.07, 1.6],
+  [-0.19, 1.4],
+  [0.19, 1.4],
+  [-0.22, 1.08],
+  [0.22, 1.08],
+  [-0.22, 0.82],
+  [0.22, 0.82],
+  [-0.1, 0.9],
+  [0.1, 0.9],
+  [-0.1, 0.5],
+  [0.1, 0.5],
+  [-0.1, 0.08],
+  [0.1, 0.08],
+];
+/** 双手举过头顶：肘与腕抬高 */
+const RAISED = STANDING.map(([side, height], i): [number, number] => (i >= 7 && i <= 10 ? [side * 1.1, i <= 8 ? 1.7 : 1.98] : [side, height]));
+
+/** 画到 16:9 画面上，人高约占画面三成；rotate 为画面内旋转（跌倒为 90°）；检测框底边为最低关键点 */
+function pose(points: [number, number][], rotate = 0) {
+  const [c, s, k] = [Math.cos(rotate), Math.sin(rotate), 0.3 / 1.7];
+  const keypoints = points.map(([side, h]) => [0.45 + ((side * c + h * s) * k * 9) / 16, 0.8 - (h * c - side * s) * k, 0.9]);
+  const us = keypoints.map(([u = 0]) => u);
+  const vs = keypoints.map(([, v = 0]) => v);
+  return { bbox: [Math.min(...us), Math.min(...vs) - 0.02, Math.max(...us), Math.max(...vs)], keypoints };
+}
+
+/** track 1.1 的新增字段；人员默认站立、无朝向（静止或起步） */
+const TARGET = { object_class: "person", heading_deg: null, speed_mps: null, ...pose(STANDING) };
 const scene = (page: Page) => page.getByRole("region", { name: "场景" });
 
 /** 推送一个人员 2 s 内的 5 个位置（每 500 ms 一次，FR-102），留下一段轨迹 */
@@ -53,6 +85,8 @@ test("跌倒：化身转物理告警，摄像头旁弹出事件卡（V-U4）", a
   await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await walk(page, ws, 0.4);
+  const fallen = { ...BASE, ...TARGET, ...pose(STANDING, Math.PI / 2), camera_id: "cam-01", track_id: 7, x: 19.4, y: 10.8, uncertainty_m: 0.4 };
+  ws?.send(JSON.stringify({ channel: "tracks", data: fallen }));
   ws?.send(JSON.stringify({ channel: "alerts", data: fall }));
   ws?.send(JSON.stringify({ channel: "devices", data: camera("physical_alert") }));
 
@@ -139,4 +173,22 @@ test("人员与车辆：按类别显示模型，沿运动方向朝向（FR-102�
   }
 
   await expect(scene(page)).toHaveScreenshot("targets-mixed.png");
+});
+
+test("姿态人形：站立、抬手、跌倒与画面姿态一致（FR-109）", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  const people = [
+    { track_id: 1, x: 17, y: 12, ...pose(STANDING) },
+    { track_id: 2, x: 18.2, y: 11.4, ...pose(RAISED) },
+    { track_id: 3, x: 19.4, y: 10.8, ...pose(STANDING, Math.PI / 2) },
+  ];
+  for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
+  await page.clock.runFor(500);
+  // 人形朝向摄像头：转到摄像头一侧观看，三种姿态都能看清
+  await page.getByRole("button", { name: "向右旋转 90°" }).click();
+  await page.clock.runFor(600);
+
+  await expect(scene(page)).toHaveScreenshot("person-poses.png");
 });
