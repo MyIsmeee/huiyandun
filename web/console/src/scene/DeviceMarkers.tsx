@@ -15,6 +15,7 @@ import { useConnection } from "../store/connection";
 import { useShallow } from "zustand/react/shallow";
 import { useLive } from "../store/live";
 import { useTheme } from "../theme/store";
+import { useViewpointCamera } from "./camera";
 import { type Camera, deviceLook, type Look, STATUS } from "./devices";
 import { type Instance, Instanced } from "./Instanced";
 import { coneOpacity, detectingByCamera } from "./targets";
@@ -48,13 +49,15 @@ const turn = (yawDeg: number) => (-yawDeg * Math.PI) / 180;
  * 按不透明度分组：实心、离线半透明；"处置中"不填充，只画轮廓。
  */
 export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
-  const placed = cameras.map((camera) => ({ camera, look: deviceLook(camera.state) }));
+  // 视点一侧的摄像头挡在视线上：不画它的模型与立杆，视场照常（V-I1）
+  const viewing = useViewpointCamera();
+  const placed = cameras.map((camera) => ({ camera, look: deviceLook(camera.state), shown: camera.id !== viewing }));
   // 每次推送只统计一次；计数不变时不重渲染
   const detecting = useLive(useShallow((s) => detectingByCamera(s.targets)));
-  const solid = placed.filter(({ look }) => look.fill && look.opacity === 1);
-  const faded = placed.filter(({ look }) => look.fill && look.opacity < 1);
+  const solid = placed.filter(({ look, shown }) => shown && look.fill && look.opacity === 1);
+  const faded = placed.filter(({ look, shown }) => shown && look.fill && look.opacity < 1);
   // 立杆随机身变色会使状态色块面积失真：立杆始终为中性色（V-S1）
-  const poles = cameras.map(({ pose }): Instance => ({
+  const poles = placed.filter(({ shown }) => shown).map(({ camera: { pose } }): Instance => ({
     position: [pose.x, 0, pose.y],
     scale: [1, pose.height_m, 1],
     color: STATUS.neutral,
@@ -64,8 +67,8 @@ export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
       <Instanced geometry={POLE} items={poles} />
       <Instanced geometry={HEAD} items={solid.map(head)} />
       <Instanced geometry={HEAD} items={faded.map(head)} opacity={0.5} />
-      {placed.map(({ camera, look }) => (
-        <Extras key={camera.id} camera={camera} look={look} detecting={detecting[camera.id] ?? 0} />
+      {placed.map(({ camera, look, shown }) => (
+        <Extras key={camera.id} camera={camera} look={shown ? look : { ...look, outline: null }} detecting={detecting[camera.id] ?? 0} />
       ))}
     </>
   );

@@ -257,6 +257,25 @@ test.describe("感知场景", () => {
     await expect(scene(page)).toHaveScreenshot("scene-elements.png");
   });
 
+  // V-I1：双击摄像头，镜头站到摄像头位置沿其朝向看出去，所见即该摄像头的重建场景；"返回总览"回到默认机位
+  test("双击摄像头：摄像头视角；返回总览", async ({ page }) => {
+    await presetTheme(page, "light", true);
+    const [ws] = await open(page, [cam01()]);
+    await shown(page, ws, SCENES.street);
+    const picker = scene(page).getByRole("button", { name: "查看 cam-01 详情" });
+
+    await picker.dblclick();
+    await page.clock.runFor(100);
+    await expect(picker).toHaveCount(0); // 视点就在机头处
+    await expect(page.getByRole("region", { name: "详情" }).getByRole("heading", { level: 2 })).toHaveText("cam-01");
+    await expect(scene(page)).toHaveScreenshot("scene-camera-view.png");
+
+    await page.getByRole("toolbar", { name: "视角" }).getByRole("button", { name: "返回总览" }).click();
+    await page.clock.runFor(100);
+    await expect(picker).toBeVisible();
+    await expect(page.getByRole("toolbar", { name: "视角" }).getByRole("button", { name: "放大" })).toBeEnabled();
+  });
+
   test("未标定摄像头不重建环境，只显示设备与未标定提示（V-U2）", async ({ page }) => {
     await presetTheme(page, "light", true);
     const [ws] = await open(page, [cam01("uncalibrated", false)]);

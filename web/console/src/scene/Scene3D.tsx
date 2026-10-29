@@ -3,12 +3,16 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Object3D, PerspectiveCamera } from "three";
 import type { Site } from "../lib/api";
 import { useTheme } from "../theme/store";
+import { useCamera } from "./camera";
 import { DeviceMarkers } from "./DeviceMarkers";
 import { TargetModels } from "./TargetModels";
 import type { Camera } from "./devices";
 import { GROUND_M, type SceneView, type Vec3, WALL_HEIGHT_M } from "./layout";
 import { type Lighting, lightingAt, lightStep } from "./lighting";
 import { PerceivedScene } from "./PerceivedScene";
+
+/** 渐隐的过渡距离，单位米 */
+const FOG_M = 50;
 
 /** 取当前主题的色值（theme.css），场景与界面同源（§3.1、§5.1） */
 function themeColors() {
@@ -37,9 +41,15 @@ export default function Scene3D(props: { site: Site; cameras: Camera[]; view: Sc
   useTheme((s) => s.theme); // 订阅主题：切换时重新渲染并取色
   const colors = themeColors();
   const lighting = useLighting();
+  // 1 m 栅格是总览的比例尺；跟随与摄像头视角贴近地面，栅格在透视下挤成密集条纹，不画（车机 SR 同样没有栅格）
+  const focused = useCamera((s) => s.focus !== null);
   const center: Vec3 = [site.width_m / 2, 0, site.height_m / 2];
+  // 远处渐隐为地面色（透视下远处 1 m 栅格挤成密集条纹）：站点在取景中心周围时始终不受影响，跟随视角下地平线柔和过渡
+  const fogNear = Math.hypot(...view.shot.eye.map((v, i) => v - (view.shot.look[i] ?? 0))) + Math.hypot(site.width_m, site.height_m) / 2;
   return (
     <Canvas flat shadows="percentage" frameloop="demand">
+      <color attach="background" args={[colors.ground]} />
+      <fog attach="fog" args={[colors.ground, fogNear, fogNear + FOG_M]} />
       <ViewCamera view={view} />
       <FirstFrame onReady={onReady} />
       <Lights site={site} lighting={lighting} />
@@ -51,7 +61,7 @@ export default function Scene3D(props: { site: Site; cameras: Camera[]; view: Sc
         <planeGeometry args={[GROUND_M, GROUND_M]} />
         <shadowMaterial opacity={lighting.shadowOpacity} />
       </mesh>
-      <Grid center={center} color={colors.grid} />
+      {!focused && <Grid center={center} color={colors.grid} />}
       <PerceivedScene cameras={cameras} />
       <DeviceMarkers cameras={cameras} />
       <TargetModels cameras={cameras} />

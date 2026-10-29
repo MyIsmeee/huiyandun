@@ -16,8 +16,8 @@ import type { Site } from "../lib/api";
 import { useConnection } from "../store/connection";
 import { useLive } from "../store/live";
 import { selectTarget } from "../store/selection";
-import { moveCamera, panned, useCamera } from "./camera";
-import { CameraControls } from "./CameraControls";
+import { focusOn, moveCamera, panned, useCamera, useFocusShot } from "./camera";
+import { CameraControls, useAnimate } from "./CameraControls";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
@@ -76,34 +76,65 @@ export function SceneViewport({ site }: { site: Site }) {
   const [failed, setFailed] = useState(false);
   const pose = useCamera((s) => s.pose);
   const cameras = useCameras(site.devices);
-  const view3d = useMemo(() => {
-    if (!size || !webgl2) return null;
-    const { shot, panLimit } = overviewShot(site, size, pose);
-    return sceneView(shot, size, panLimit);
-  }, [site, size, webgl2, pose]);
+  const animate = useAnimate();
+  const overviewed = useMemo(() => (size && webgl2 ? overviewShot(site, size, pose) : null), [site, size, webgl2, pose]);
+  const shot = useFocusShot(overviewed?.shot ?? null, size, cameras, animate());
+  const view3d = useMemo(
+    () => (size && shot && overviewed ? sceneView(shot, size, overviewed.panLimit) : null),
+    [size, shot, overviewed],
+  );
   const plan = useMemo(() => (size && !webgl2 ? planView(site, size, pose) : null), [site, size, webgl2, pose]);
   const view = view3d ?? plan;
   const state = failed ? "error" : !webgl2 ? "2d" : ready ? "ready" : "loading";
   const { dragged, ...drag } = useDragPan(view);
-  useEffect(() => moveCamera(OVERVIEW, false), []); // 每次进入主界面从总览开始
+  // 每次进入主界面从总览开始
+  useEffect(() => {
+    focusOn(null, false);
+    moveCamera(OVERVIEW, false);
+  }, []);
   // 断线时所有动效立即停止（V-U3、C-FE-05）：进行中的转场直接到位
   const offline = useConnection((s) => !s.open && !s.connecting);
   useEffect(() => {
-    if (offline) moveCamera(useCamera.getState().goal, false);
+    if (!offline) return;
+    const { goal, focus } = useCamera.getState();
+    moveCamera(goal, false);
+    // 飞行直接到位：跟随中按最新实测位置取景，飞回总览则直接按总览姿态取景
+    useCamera.setState(focus ? { flight: null } : { flight: null, shot: null });
   }, [offline]);
 
-  // 单击人员或车辆：选中并展开详情，镜头不动（V-I2、D-054）；按渲染中的位置命中。2D 降级视图不绘制目标
-  const pick = (e: MouseEvent<HTMLDivElement>) => {
-    if (!view3d || dragged.current || (e.target as Element).closest("button")) return;
+  // Esc：处于跟随视角时先回到总览，详情保留；再按一次由详情面板收起（V-I2、D-048）。捕获阶段先于详情面板处理
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !useCamera.getState().focus) return;
+      e.preventDefault();
+      focusOn(null, animate());
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+
+  /** 指针下的人员或车辆：按渲染中的位置命中。2D 降级视图不绘制目标 */
+  const hit = (e: MouseEvent<HTMLDivElement>) => {
+    if (!view3d || dragged.current || (e.target as Element).closest("button")) return null;
     const { targets, behaviors } = useLive.getState();
     const box = e.currentTarget.getBoundingClientRect();
     const point = [e.clientX - box.left, e.clientY - box.top] as const;
-    const key = pickTarget(visibleTargets(targets, cameras, behaviors), view3d, point, Date.now() - RENDER_DELAY_MS);
+    return pickTarget(visibleTargets(targets, cameras, behaviors), view3d, point, Date.now() - RENDER_DELAY_MS);
+  };
+  // 单击：选中并展开详情，镜头不动（V-I2、D-054）；双击：飞入跟随视角（V-I1）
+  const pick = (e: MouseEvent<HTMLDivElement>) => {
+    const key = hit(e);
     if (key) selectTarget(key);
+  };
+  const follow = (e: MouseEvent<HTMLDivElement>) => {
+    const key = hit(e);
+    if (!key) return;
+    selectTarget(key);
+    focusOn({ kind: "target", key }, animate());
   };
 
   return (
-    <div ref={ref} data-scene={state} {...drag} onClick={pick}>
+    <div ref={ref} data-scene={state} {...drag} onClick={pick} onDoubleClick={follow}>
       {view3d && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
@@ -115,7 +146,11 @@ export function SceneViewport({ site }: { site: Site }) {
       {view && (state === "ready" || state === "2d") && (
         <>
           <DeviceTags cameras={cameras} view={view} />
-          <DevicePicker cameras={cameras} view={view} />
+          <DevicePicker
+            cameras={cameras}
+            view={view}
+            onFocus={view3d ? (id) => focusOn({ kind: "camera", id }, animate()) : undefined}
+          />
           {view3d && <TargetMarker />}
         </>
       )}
@@ -147,11 +182,12 @@ function Note({ children }: { children: ReactNode }) {
   );
 }
 
-/** 放大后拖拽平移（V-I1）：总览倍数下不响应；拖拽即时生效，并打断进行中的转场。dragged：本次按下后发生过平移，松开时的单击不选中目标 */
+/** 放大后拖拽平移（V-I1）：总览倍数下、跟随视角下不响应；拖拽即时生效，并打断进行中的转场。dragged：本次按下后发生过平移，松开时的单击不选中目标 */
 function useDragPan(view: View | null) {
   const last = useRef<readonly [number, number] | null>(null);
   const dragged = useRef(false);
-  const zoomedIn = useCamera((s) => s.goal.zoom > OVERVIEW.zoom);
+  // 跟随视角下机位由目标或摄像头决定，不响应拖拽（D-058）
+  const zoomedIn = useCamera((s) => s.goal.zoom > OVERVIEW.zoom && !s.focus);
   const end = () => {
     last.current = null;
   };

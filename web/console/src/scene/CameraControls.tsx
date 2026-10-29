@@ -2,7 +2,7 @@ import { House, type LucideIcon, Minus, Plus, RotateCcw, RotateCw } from "lucide
 import type { ReactNode } from "react";
 import { useConnection } from "../store/connection";
 import { prefersReducedMotion } from "../theme/store";
-import { moveCamera, overview, rotated, useCamera, zoomed } from "./camera";
+import { focusOn, moveCamera, overview, rotated, useCamera, zoomed } from "./camera";
 import { type Pose, ZOOM_MAX, ZOOM_MIN } from "./layout";
 
 /** 转场是否播放：降低动效或断线时瞬时切换（V-A4、C-FE-05） */
@@ -17,12 +17,14 @@ export function useAnimate(): () => boolean {
  */
 export function CameraControls({ notice }: { notice?: { text: string; title: string } }) {
   const goal = useCamera((s) => s.goal);
+  // 跟随视角下机位由目标或摄像头决定，只有"返回总览"可用（D-058）
+  const focused = useCamera((s) => s.focus !== null);
   const animate = useAnimate();
   const buttons: [string, LucideIcon, (pose: Pose) => Pose, boolean][] = [
-    ["缩小", Minus, (p) => zoomed(p, -1), goal.zoom <= ZOOM_MIN],
-    ["放大", Plus, (p) => zoomed(p, 1), goal.zoom >= ZOOM_MAX],
-    ["向左旋转 90°", RotateCcw, (p) => rotated(p, -1), false],
-    ["向右旋转 90°", RotateCw, (p) => rotated(p, 1), false],
+    ["缩小", Minus, (p) => zoomed(p, -1), focused || goal.zoom <= ZOOM_MIN],
+    ["放大", Plus, (p) => zoomed(p, 1), focused || goal.zoom >= ZOOM_MAX],
+    ["向左旋转 90°", RotateCcw, (p) => rotated(p, -1), focused],
+    ["向右旋转 90°", RotateCw, (p) => rotated(p, 1), focused],
     ["返回总览", House, overview, false],
   ];
   return (
@@ -37,7 +39,7 @@ export function CameraControls({ notice }: { notice?: { text: string; title: str
         </span>
       )}
       {buttons.map(([label, Icon, next, disabled]) => (
-        <ControlButton key={label} label={label} disabled={disabled} onClick={() => moveCamera(next(goal), animate())}>
+        <ControlButton key={label} label={label} disabled={disabled} onClick={() => (focused ? focusOn(null, animate()) : moveCamera(next(goal), animate()))}>
           <Icon aria-hidden className="size-4" />
         </ControlButton>
       ))}
