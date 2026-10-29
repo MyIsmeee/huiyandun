@@ -1,9 +1,9 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import {
+  BackSide,
   BufferAttribute,
   BufferGeometry,
-  CapsuleGeometry,
   CircleGeometry,
   Color,
   CylinderGeometry,
@@ -12,16 +12,25 @@ import {
   RingGeometry,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { TRAIL_MS, type TargetClass, useLive } from "../store/live";
 import { useMotion } from "./DeviceMarkers";
 import { type Camera, STATUS } from "./devices";
+import { facing, type Figure, figure, HEAD_R } from "./pose";
 import { LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, visibleTargets } from "./targets";
 
 /** 每个图层的实例上限：C-FE-04 的 200 个目标，固定容量免得目标数变化时重建网格 */
 const CAPACITY = 256;
+/** 人形的骨段与关节容量：每人至多 12 段（躯干、颈部、双肩、双髋与四肢），关节为每段两端加头部 */
+const BONE_CAPACITY = CAPACITY * 12;
+const JOINT_CAPACITY = CAPACITY * 25;
+/** 人员与车辆默认白色，带中性细描边（§5.1 L4） */
+const FILL = "#F7F8FA";
+const OUTLINE_M = 0.02;
+const UP = new Vector3(0, 1, 0);
 /** 转向角速度上限（弧度每秒）：车辆掉头约 1 s 完成，不瞬间翻转 */
 const TURN_RATE = 3;
 /** 轨迹顶点容量：每个目标近 10 s、每秒 5 次实测（FR-101）的连线，每段 2 个顶点 */
@@ -53,15 +62,13 @@ function wheels(radius: number, width: number, axles: number[], track: number, r
   return { geometry: mergeGeometries(parts), shade: 0.3 };
 }
 
+type Vehicle = Exclude<TargetClass, "person">;
+
 /**
- * 目标模型（§5.1 L4，程序化生成的低多边形，借鉴车机 SR 的单色简化外形）：局部坐标 +x 为行进方向，底面落在地面。
+ * 车辆模型（§5.1 L4，程序化生成的低多边形，借鉴车机 SR 的单色简化外形）：局部坐标 +x 为行进方向，底面落在地面。
  * 尺寸取常见车型：轿车 4.5 m、货车 7 m、公交 11 m；车窗与轮胎以明度区分，便于一眼认出车型与车头方向。
  */
-const MODELS: Record<TargetClass, Part[]> = {
-  person: [
-    { geometry: new CapsuleGeometry(0.2, 0.95, 2, 8).translate(0, 0.68, 0), shade: 1 },
-    { geometry: new SphereGeometry(0.15, 12, 8).translate(0, 1.5, 0), shade: 1 },
-  ],
+const MODELS: Record<Vehicle, Part[]> = {
   bicycle: [box(1.05, 0.07, 0.06, 0.03, 0, 0.72), box(0.1, 0.42, 0.05, 0.02, 0.15, 0.55), wheels(0.33, 0.05, [-0.52, 0.52], 0, true)],
   motorcycle: [box(1.35, 0.42, 0.34, 0.12, -0.05, 0.72), box(0.55, 0.12, 0.3, 0.05, -0.3, 0.98, 0.55), wheels(0.32, 0.13, [-0.72, 0.72], 0, true)],
   car: [box(4.5, 0.62, 1.8, 0.14, 0, 0.6), box(2.4, 0.5, 1.6, 0.14, -0.25, 1.15, 0.55), wheels(0.34, 0.24, [-1.45, 1.45], 1.62)],
@@ -73,7 +80,26 @@ const MODELS: Record<TargetClass, Part[]> = {
     wheels(0.5, 0.3, [-3.0, -1.8, 2.4], 2.1),
   ],
 };
-const CLASSES = Object.keys(MODELS) as TargetClass[];
+/** 人形的骨段（沿 +y 的单位圆柱，按半径与长度缩放）与关节、头部（单位球）：两者拼成胶囊肢体 */
+const BONE = new CylinderGeometry(1, 1, 1, 10, 1, true).translate(0, 0.5, 0);
+const JOINT = new SphereGeometry(1, 12, 8);
+
+/** 图层：实体、高误差（半透明、不投影，V-U1）、细描边（背面外扩，只画实体） */
+type Kind = "solid" | "ghost" | "outline";
+const LAYERS: { key: string; geometry: BufferGeometry; capacity: number; kind: Kind }[] = [
+  ...(Object.keys(MODELS) as Vehicle[]).flatMap((cls) =>
+    MODELS[cls].flatMap(({ geometry }, p) =>
+      (["solid", "ghost"] as const).map((kind) => ({ key: `${cls}/${p}/${kind}`, geometry, capacity: CAPACITY, kind })),
+    ),
+  ),
+  ...(["solid", "ghost", "outline"] as const).flatMap((kind) => [
+    { key: `bone/${kind}`, geometry: BONE, capacity: BONE_CAPACITY, kind },
+    { key: `joint/${kind}`, geometry: JOINT, capacity: JOINT_CAPACITY, kind },
+  ]),
+];
+/** 人形各部件要画的图层与半径：实体另画外扩 OUTLINE_M 的描边 */
+const outlined = (kind: Kind, radius: number): (readonly [Kind, number])[] =>
+  kind === "solid" ? [["solid", radius], ["outline", radius + OUTLINE_M]] : [[kind, radius]];
 /** 不确定圆：单位半径，按 uncertainty_m 缩放（V-U1） */
 const DISC = new CircleGeometry(1, 32).rotateX(-Math.PI / 2).translate(0, 0.02, 0);
 /** 锁定环：新目标出现时由 0.4 扩散到 1.6 倍目标尺度（§5.1 L4） */
@@ -81,16 +107,15 @@ const RING = new RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2).translate(0, 0.
 /** 锁定环的基准半径：人员 0.6 m，车辆按车长 */
 const RING_RADIUS: Record<TargetClass, number> = { person: 0.6, bicycle: 1.1, motorcycle: 1.2, car: 2.6, bus: 6, truck: 4 };
 
-const colorOf = (t: Visible) => (t.alert ? STATUS.physical : STATUS.neutral);
+const colorOf = (t: Visible) => (t.alert ? STATUS.physical : FILL);
 
 /**
- * 检出目标：人员与车辆的 3D 模型、不确定圆、锁定环与轨迹（§5.1 L4、L5；V-U1；FR-102）。
- * 模型每帧按渲染时间轴（落后最新实测 200 ms）在相邻两次实测之间插值，并沿运动方向转向；不外推。
+ * 检出目标：人员的姿态人形、车辆的 3D 模型、不确定圆、锁定环与轨迹（§5.1 L4、L5；V-U1；FR-102）。
+ * 模型每帧按渲染时间轴（落后最新实测 200 ms）在相邻两次实测之间插值，车辆沿运动方向转向，人形朝向摄像头；不外推。
  * 只在仍有目标移动、转向或锁定环未结束时逐帧重绘；断线或降低动效时停在最新实测位置（V-U3、V-A4）。
  */
 export function TargetModels({ cameras }: { cameras: Camera[] }) {
-  const solid = useRef<Record<string, InstancedMesh | null>>({});
-  const ghost = useRef<Record<string, InstancedMesh | null>>({});
+  const meshes = useRef<Record<string, InstancedMesh | null>>({});
   const discs = useRef<InstancedMesh>(null);
   const rings = useRef<InstancedMesh>(null);
   const headings = useRef(new Map<string, number>());
@@ -129,6 +154,46 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     }
     const o = new Object3D();
     const counts: Record<string, number> = {};
+    /** 把 o 的当前变换（与颜色）写入图层 key 的下一个实例；超出容量的不画 */
+    const put = (key: string, color?: Color) => {
+      const mesh = meshes.current[key];
+      const i = counts[key] ?? 0;
+      if (!mesh || i >= mesh.instanceMatrix.count) return;
+      counts[key] = i + 1;
+      mesh.setMatrixAt(i, o.matrix);
+      if (color) mesh.setColorAt(i, color);
+    };
+    /** 球：关节与头部；实体另画外扩的描边 */
+    const sphere = (at: Vector3, radius: number, kind: Kind, color: Color) => {
+      o.position.copy(at);
+      o.quaternion.identity();
+      for (const [layer, r] of outlined(kind, radius)) {
+        o.scale.setScalar(r);
+        o.updateMatrix();
+        put(`joint/${layer}`, layer === "outline" ? undefined : color);
+      }
+    };
+    const drawFigure = ({ bones, head }: Figure, x: number, y: number, kind: Kind, color: Color) => {
+      const from = new Vector3();
+      const to = new Vector3();
+      for (const bone of bones) {
+        from.set(x + bone.from[0], bone.from[1], y + bone.from[2]);
+        to.set(x + bone.to[0], bone.to[1], y + bone.to[2]);
+        sphere(from, bone.radius, kind, color);
+        sphere(to, bone.radius, kind, color);
+        const length = from.distanceTo(to);
+        if (length < 1e-6) continue;
+        o.position.copy(from);
+        o.quaternion.setFromUnitVectors(UP, to.sub(from).divideScalar(length));
+        for (const [layer, r] of outlined(kind, bone.radius)) {
+          o.scale.set(r, length, r);
+          o.updateMatrix();
+          put(`bone/${layer}`, layer === "outline" ? undefined : color);
+        }
+      }
+      if (head) sphere(new Vector3(x + head[0], head[1], y + head[2]), HEAD_R, kind, color);
+    };
+    const poses = new Map(cameras.map((c) => [c.id, c.pose]));
     let discCount = 0;
     let ringCount = 0;
     const seen = new Set<string>();
@@ -144,21 +209,22 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         desired === undefined ? (previous ?? 0) : previous === undefined || !motion ? desired : turnToward(previous, desired, TURN_RATE * dt);
       headings.current.set(target.key, angle);
       pending ||= t < (target.trail.at(-1)?.[2] ?? 0) || (desired !== undefined && Math.abs(angle - desired) > 1e-3);
-      o.position.set(x, 0, y);
-      o.rotation.set(0, angle, 0);
-      o.scale.set(1, 1, 1);
-      o.updateMatrix();
-      const layer = `${target.object_class}/${target.uncertain ? "ghost" : "solid"}`;
-      const i = counts[layer] ?? 0;
-      counts[layer] = i + 1;
+      const kind = target.uncertain ? "ghost" : "solid";
       const base = new Color(colorOf(target));
-      const meshes = target.uncertain ? ghost.current : solid.current;
-      MODELS[target.object_class].forEach(({ shade }, p) => {
-        const mesh = meshes[`${target.object_class}/${p}`];
-        if (!mesh || i >= CAPACITY) return;
-        mesh.setMatrixAt(i, o.matrix);
-        mesh.setColorAt(i, base.clone().multiplyScalar(shade));
-      });
+      const pose = poses.get(target.camera_id);
+      const { object_class } = target;
+      if (object_class === "person") {
+        const f = pose && figure(target.keypoints, target.bbox, facing(pose, x, y));
+        if (f) drawFigure(f, x, y, kind, base);
+      } else {
+        o.position.set(x, 0, y);
+        o.rotation.set(0, angle, 0);
+        o.scale.set(1, 1, 1);
+        o.updateMatrix();
+        MODELS[object_class].forEach(({ shade }, p) => put(`${object_class}/${p}/${kind}`, base.clone().multiplyScalar(shade)));
+      }
+      o.position.set(x, 0, y);
+      o.rotation.set(0, 0, 0);
       o.scale.set(target.uncertainty_m, 1, target.uncertainty_m);
       o.updateMatrix();
       if (discCount < CAPACITY) discs.current?.setMatrixAt(discCount++, o.matrix);
@@ -172,12 +238,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       }
     }
     for (const key of headings.current.keys()) if (!seen.has(key)) headings.current.delete(key);
-    for (const cls of CLASSES)
-      for (const [kind, meshes] of [
-        ["solid", solid.current],
-        ["ghost", ghost.current],
-      ] as const)
-        MODELS[cls].forEach((_, p) => finish(meshes[`${cls}/${p}`], counts[`${cls}/${kind}`] ?? 0));
+    for (const { key } of LAYERS) finish(meshes.current[key], counts[key] ?? 0);
     finish(discs.current, discCount);
     finish(rings.current, ringCount);
     if (motion && pending) invalidate();
@@ -185,32 +246,23 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
 
   return (
     <>
-      {CLASSES.flatMap((cls) =>
-        MODELS[cls].flatMap(({ geometry }, p) => [
-          <instancedMesh
-            key={`${cls}/${p}/solid`}
-            ref={(m) => {
-              solid.current[`${cls}/${p}`] = m;
-            }}
-            args={[geometry, undefined, CAPACITY]}
-            castShadow
-            frustumCulled={false}
-          >
-            <meshLambertMaterial />
-          </instancedMesh>,
-          // 高误差：模型半透明、不投影（V-U1）
-          <instancedMesh
-            key={`${cls}/${p}/ghost`}
-            ref={(m) => {
-              ghost.current[`${cls}/${p}`] = m;
-            }}
-            args={[geometry, undefined, CAPACITY]}
-            frustumCulled={false}
-          >
-            <meshLambertMaterial transparent opacity={0.35} depthWrite={false} />
-          </instancedMesh>,
-        ]),
-      )}
+      {LAYERS.map(({ key, geometry, capacity, kind }) => (
+        <instancedMesh
+          key={key}
+          ref={(m) => {
+            meshes.current[key] = m;
+          }}
+          args={[geometry, undefined, capacity]}
+          castShadow={kind === "solid"}
+          frustumCulled={false}
+        >
+          {kind === "solid" && <meshLambertMaterial />}
+          {kind === "ghost" && <meshLambertMaterial transparent opacity={0.35} depthWrite={false} />}
+          {kind === "outline" && (
+            <meshBasicMaterial color={STATUS.neutral} transparent opacity={0.4} side={BackSide} depthWrite={false} />
+          )}
+        </instancedMesh>
+      ))}
       <instancedMesh ref={discs} args={[DISC, undefined, CAPACITY]} frustumCulled={false}>
         <meshBasicMaterial color={STATUS.uncertain} transparent opacity={0.2} depthWrite={false} />
       </instancedMesh>
@@ -231,7 +283,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
  */
 function finish(mesh: InstancedMesh | null | undefined, written: number) {
   if (!mesh) return;
-  const count = Math.min(written, CAPACITY); // 超出容量的目标不绘制，不能让整层消失
+  const count = Math.min(written, mesh.instanceMatrix.count); // 超出容量的目标不绘制，不能让整层消失
   mesh.count = count;
   mesh.visible = count > 0;
   if (count === 0) return;
@@ -252,7 +304,7 @@ function writeTrails(geometry: BufferGeometry, list: Visible[]) {
   const color = geometry.getAttribute("color") as BufferAttribute;
   let v = 0;
   for (const target of list) {
-    const { r, g, b } = new Color(colorOf(target));
+    const { r, g, b } = new Color(target.alert ? STATUS.physical : STATUS.neutral);
     for (let i = 1; i < target.trail.length && v + 2 <= TRAIL_VERTICES; i += 1) {
       const prev = target.trail[i - 1];
       const cur = target.trail[i];

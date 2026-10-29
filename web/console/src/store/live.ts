@@ -25,6 +25,12 @@ export interface Target {
   uncertainty_m: number;
   /** 运动方向，0 为平面 +x、逆时针为正；静止或起步不足 3 帧时为 null */
   heading_deg: number | null;
+  /** 平面速度（米每秒）；起步不足 3 帧时为 null */
+  speed_mps: number | null;
+  /** 最新一次实测的画面归一化检测框 [x1, y1, x2, y2] */
+  bbox: Track["bbox"];
+  /** 最新一次实测的 COCO 17 关键点 [u, v, score]，画面归一化；车辆为 null */
+  keypoints: Track["keypoints"];
   /** 近 TRAIL_MS 内的位置 [x, y, 收到时刻]，按时间先后排列 */
   trail: (readonly [number, number, number])[];
 }
@@ -71,11 +77,12 @@ export function receive(frame: Frame, now: number): void {
   }
 }
 
-function move({ camera_id, track_id, object_class, x, y, uncertainty_m, heading_deg }: Track, now: number) {
+function move(track: Track, now: number) {
+  const { camera_id, track_id, object_class, x, y, uncertainty_m, heading_deg, speed_mps, bbox, keypoints } = track;
   const key = `${camera_id}/${track_id}`;
   useLive.setState((s) => {
     const trail = [...(s.targets[key]?.trail ?? []), [x, y, now] as const].filter(([, , t]) => t >= now - TRAIL_MS);
-    const target: Target = { camera_id, track_id, object_class, x, y, uncertainty_m, heading_deg, trail };
+    const target: Target = { camera_id, track_id, object_class, x, y, uncertainty_m, heading_deg, speed_mps, bbox, keypoints, trail };
     return { targets: { ...s.targets, [key]: target } };
   });
 }

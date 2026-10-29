@@ -13,6 +13,9 @@ const target = (track_id: number, uncertainty_m = 0.4, camera_id = "cam-01", obj
   y: 2,
   uncertainty_m,
   heading_deg: null,
+  speed_mps: null,
+  bbox: [0, 0, 1, 1],
+  keypoints: null,
   trail: [[1, 2, 0]],
 });
 const targets = (...list: Target[]) => Object.fromEntries(list.map((p) => [`${p.camera_id}/${p.track_id}`, p]));
