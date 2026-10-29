@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Site } from "../../src/lib/api";
-import { OVERVIEW, overviewShot, type Pose, planView, sceneView, type View, WALL_HEIGHT_M } from "../../src/scene/layout";
+import {
+  blendShot,
+  cameraShot,
+  followShot,
+  OVERVIEW,
+  overviewShot,
+  type Pose,
+  planView,
+  sceneView,
+  type View,
+  WALL_HEIGHT_M,
+} from "../../src/scene/layout";
 
 const SITE: Site = { id: "s", name: "站点", width_m: 40, height_m: 24, walls: [], doors: [], zones: [], devices: [] };
 const SIZE = { width: 1100, height: 700 };
@@ -182,5 +193,53 @@ describe("相机姿态", () => {
     expect(planView(SITE, SIZE, { ...OVERVIEW, azimuth: Math.PI / 2 }).panLimit.map((v) => Math.round(v))).toEqual([
       12, 20,
     ]);
+  });
+});
+
+// V-I1、设计 §3.5：跟随视角与摄像头视角
+describe("跟随与摄像头机位", () => {
+  const degrees = (rad: number) => (rad * 180) / Math.PI;
+
+  it("跟随：视点在目标 bearing 一侧水平 8 m、高 4 m，俯角 25° 看向目标，取景中心为视口中心", () => {
+    const shot = followShot([10, 5], Math.PI / 2, SIZE);
+    expect(shot.eye[0]).toBeCloseTo(10);
+    expect(shot.eye[1]).toBe(4);
+    expect(shot.eye[2]).toBeCloseTo(13);
+    const [dx, dy, dz] = [shot.look[0] - shot.eye[0], shot.look[1] - shot.eye[1], shot.look[2] - shot.eye[2]];
+    expect(degrees(Math.atan2(-dy, Math.hypot(dx, dz)))).toBeCloseTo(25);
+    expect(dx).toBeCloseTo(0);
+    expect(dz).toBeLessThan(0); // 朝目标看
+    expect(shot.center).toEqual([SIZE.width / 2, SIZE.height / 2]);
+    // 目标在画面中部偏下，人形（1.7 m）完整入画
+    const view = sceneView(shot, SIZE);
+    const [feet, head] = [at(view, [10, 0, 5]), at(view, [10, 1.7, 5])];
+    expect(feet[0]).toBeCloseTo(SIZE.width / 2);
+    expect(feet[1]).toBeGreaterThan(SIZE.height / 2);
+    expect(feet[1]).toBeLessThan(SIZE.height);
+    expect(head[1]).toBeGreaterThan(0);
+  });
+
+  it("摄像头视角：视点在机头，沿朝向与俯仰看出去，水平视场与摄像头一致", () => {
+    const pose = { x: 2, y: 3, height_m: 3, yaw_deg: 90, pitch_deg: -30, hfov_deg: 90 };
+    const shot = cameraShot(pose, SIZE);
+    expect(shot.eye).toEqual([2, 3, 3]);
+    const [dx, dy, dz] = [shot.look[0] - 2, shot.look[1] - 3, shot.look[2] - 3];
+    expect(dx).toBeCloseTo(0);
+    expect(dz).toBeGreaterThan(0); // yaw 90°：朝平面 +y
+    expect(degrees(Math.atan2(-dy, dz))).toBeCloseTo(30);
+    // 与视线同深度、水平偏转 45° 的点落在视口左右边缘
+    const view = sceneView(shot, SIZE);
+    const ahead = [shot.look[0], shot.look[1], shot.look[2]] as const;
+    const reach = Math.hypot(dx, dy, dz);
+    expect(at(view, [ahead[0] + reach, ahead[1], ahead[2]])[0]).toBeCloseTo(0);
+    expect(at(view, [ahead[0] - reach, ahead[1], ahead[2]])[0]).toBeCloseTo(SIZE.width);
+  });
+
+  it("机位插值：两端分别为出发与目标机位", () => {
+    const a = followShot([0, 0], 0, SIZE);
+    const b = cameraShot({ x: 5, y: 5, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 60 }, SIZE);
+    expect(blendShot(a, b, 0)).toEqual(a);
+    expect(blendShot(a, b, 1).eye).toEqual(b.eye);
+    expect(blendShot(a, b, 0.5).fov).toBeCloseTo((a.fov + b.fov) / 2);
   });
 });

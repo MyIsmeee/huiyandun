@@ -140,6 +140,40 @@ export function overviewShot(site: Site, size: Size, pose: Pose = OVERVIEW): { s
   };
 }
 
+/** 跟随视角（设计 §3.5）：视点距目标水平 8 m、高 4 m，俯角 25°；视场比总览宽，近似车机跟车 */
+const FOLLOW = { back: 8, height: 4, pitch: (25 * Math.PI) / 180, fov: (45 * Math.PI) / 180 };
+
+/** 跟随机位：视点在目标 (x, y) 沿平面方向 bearing（弧度，由 +x 转向 +y）一侧，朝目标看去，取景中心为视口中心 */
+export function followShot([x, y]: Point, bearing: number, size: Size): Shot {
+  const [dx, dy] = [Math.cos(bearing), Math.sin(bearing)];
+  const eye: Vec3 = [x + dx * FOLLOW.back, FOLLOW.height, y + dy * FOLLOW.back];
+  const reach = FOLLOW.height / Math.tan(FOLLOW.pitch); // 视线落地处距视点的水平距离
+  return { eye, look: [eye[0] - dx * reach, 0, eye[2] - dy * reach], fov: FOLLOW.fov, center: [size.width / 2, size.height / 2] };
+}
+
+type CameraPose = { x: number; y: number; height_m: number; yaw_deg: number; pitch_deg: number; hfov_deg: number };
+
+/** 摄像头视角：视点在摄像头安装位置，沿其朝向与俯仰看出去，水平视场与摄像头一致 */
+export function cameraShot(pose: CameraPose, size: Size): Shot {
+  const [yaw, pitch] = [(pose.yaw_deg * Math.PI) / 180, (pose.pitch_deg * Math.PI) / 180];
+  const eye: Vec3 = [pose.x, pose.height_m, pose.y];
+  const direction: Vec3 = [Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)];
+  const fov = 2 * Math.atan((Math.tan((pose.hfov_deg * Math.PI) / 360) * size.height) / size.width);
+  return { eye, look: along(eye, direction, 10), fov, center: [size.width / 2, size.height / 2] };
+}
+
+/** 两个机位之间按 t（0～1）插值：飞入、飞回的转场 */
+export function blendShot(a: Shot, b: Shot, t: number): Shot {
+  const mix = (p: number, q: number) => p + (q - p) * t;
+  const mix3 = (p: Vec3, q: Vec3): Vec3 => [mix(p[0], q[0]), mix(p[1], q[1]), mix(p[2], q[2])];
+  return {
+    eye: mix3(a.eye, b.eye),
+    look: mix3(a.look, b.look),
+    fov: mix(a.fov, b.fov),
+    center: [mix(a.center[0], b.center[0]), mix(a.center[1], b.center[1])],
+  };
+}
+
 /** 2D 俯视视图（C-FE-08 降级）：总览时 x 向右、y 向下，等比缩放、完整落在可用区域内并居中 */
 export function planView(site: Site, size: Size, pose: Pose = OVERVIEW): PlanView {
   const [c, s] = [Math.cos(pose.azimuth), Math.sin(pose.azimuth)];
