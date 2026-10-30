@@ -231,6 +231,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: 处置执行器暂不可达（回滚请求的流尚未创建），请稍后重试
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/incidents/{id}/evidence/export:
     post:
       operationId: exportEvidence

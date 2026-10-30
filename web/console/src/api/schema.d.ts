@@ -1345,6 +1345,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description 处置执行器暂不可达（回滚请求的流尚未创建），请稍后重试 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     exportEvidence: {
