@@ -25,6 +25,10 @@ class Incident(ContractModel):
     id: str
     rule_id: str
     rule_version: str
+    mode: Literal["monitor", "enforce"]
+    """
+    来自关联规则；处置只对 enforce 执行（C-SEC-04、D-068）
+    """
     title: str
     """
     来自规则 emit.title

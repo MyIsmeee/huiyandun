@@ -18,6 +18,10 @@ class SecurityAlertV1(EventBase):
 
     rule_id: str
     rule_version: str
+    mode: Literal["monitor", "enforce"]
+    """
+    monitor 只显示、不参与关联与处置：自研规则取其 hyd_mode，外部规则一律 monitor（C-SEC-04、C-RU-05、D-068）
+    """
     category: str
     """
     如 auth_bruteforce

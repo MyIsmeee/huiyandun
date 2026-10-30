@@ -600,6 +600,11 @@ export interface components {
             id: string;
             rule_id: string;
             rule_version: string;
+            /**
+             * @description 来自关联规则；处置只对 enforce 执行（C-SEC-04、D-068）
+             * @enum {unknown}
+             */
+            mode: "monitor" | "enforce";
             /** @description 来自规则 emit.title */
             title: string;
             /** @enum {unknown} */
@@ -846,6 +851,11 @@ export interface components {
         "hyd.security.alert.v1.schema": {
             rule_id: string;
             rule_version: string;
+            /**
+             * @description monitor 只显示、不参与关联与处置：自研规则取其 hyd_mode，外部规则一律 monitor（C-SEC-04、C-RU-05、D-068）
+             * @enum {unknown}
+             */
+            mode: "monitor" | "enforce";
             /** @description 如 auth_bruteforce */
             category: string;
             /**

@@ -84,6 +84,7 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
         {
             "rule_id": "2024897",
             "rule_version": "3",
+            "mode": "monitor",
             "category": "auth_bruteforce",
             "severity": "high",
             "src_ip": "172.30.0.66",
@@ -102,6 +103,7 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "id": "inc-0001",
             "rule_id": "HYD-X-0001",
             "rule_version": "1.0.0",
+            "mode": "enforce",
             "title": "摄像头疑似被入侵且画面遭篡改",
             "severity": "critical",
             "device_ids": ["cam-02"],

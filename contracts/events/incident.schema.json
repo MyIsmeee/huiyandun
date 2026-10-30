@@ -6,6 +6,7 @@
     "id",
     "rule_id",
     "rule_version",
+    "mode",
     "title",
     "severity",
     "device_ids",
@@ -22,6 +23,10 @@
     "id": { "type": "string" },
     "rule_id": { "type": "string" },
     "rule_version": { "type": "string" },
+    "mode": {
+      "enum": ["monitor", "enforce"],
+      "description": "来自关联规则；处置只对 enforce 执行（C-SEC-04、D-068）"
+    },
     "title": { "type": "string", "description": "来自规则 emit.title" },
     "severity": { "enum": ["critical", "high", "medium", "low"] },
     "device_ids": { "type": "array", "items": { "type": "string" } },

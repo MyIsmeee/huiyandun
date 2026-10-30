@@ -98,6 +98,10 @@ class Incident(ContractModel):
     id: str
     rule_id: str
     rule_version: str
+    mode: Literal["monitor", "enforce"]
+    """
+    来自关联规则；处置只对 enforce 执行（C-SEC-04、D-068）
+    """
     title: str
     """
     来自规则 emit.title
@@ -499,6 +503,10 @@ class SecurityAlertV1(EventBase):
 
     rule_id: str
     rule_version: str
+    mode: Literal["monitor", "enforce"]
+    """
+    monitor 只显示、不参与关联与处置：自研规则取其 hyd_mode，外部规则一律 monitor（C-SEC-04、C-RU-05、D-068）
+    """
     category: str
     """
     如 auth_bruteforce

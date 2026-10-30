@@ -7,5 +7,6 @@
 # HYD-NET-0001 RTSP 认证爆破（FR-202）：同一设备对同一来源 60 s 内 5 次拒绝凭据，每个时间窗只告警一次
 # 只计带凭据请求之后的 401：客户端首次请求不带凭据，收到 401 是正常的认证质询（Digest）
 # 告警落在设备的回包上，报文源是设备：以 target:src_ip 标明受害方，EVE 的 alert.source 才是攻击方
+# rev 3 转 enforce：已经正反例回放（TK-030）与实时攻击实测（TK-031）验证，参与关联与处置（D-068）
 alert tcp any any -> any any (msg:"HYD-NET-0001 RTSP request with credentials"; flow:established,to_server,no_stream; content:" RTSP/1.0|0d 0a|"; content:"|0d 0a|Authorization|3a|"; nocase; flowbits:set,hyd.rtsp.auth; flowbits:noalert; sid:1100001; rev:1;)
-alert tcp any any -> any any (msg:"HYD-NET-0001 RTSP authentication brute force"; flow:established,to_client,no_stream; flowbits:isset,hyd.rtsp.auth; content:"RTSP/1.0 401"; startswith; threshold:type both, track by_both, count 5, seconds 60; target:src_ip; classtype:attempted-user; metadata:hyd_rule_id HYD-NET-0001, hyd_category auth_bruteforce, hyd_mode monitor, mitre_tactic_id TA0006, mitre_tactic_name Credential_Access, mitre_technique_id T1110, mitre_technique_name Brute_Force; sid:1000001; rev:2;)
+alert tcp any any -> any any (msg:"HYD-NET-0001 RTSP authentication brute force"; flow:established,to_client,no_stream; flowbits:isset,hyd.rtsp.auth; content:"RTSP/1.0 401"; startswith; threshold:type both, track by_both, count 5, seconds 60; target:src_ip; classtype:attempted-user; metadata:hyd_rule_id HYD-NET-0001, hyd_category auth_bruteforce, hyd_mode enforce, mitre_tactic_id TA0006, mitre_tactic_name Credential_Access, mitre_technique_id T1110, mitre_technique_name Brute_Force; sid:1000001; rev:3;)

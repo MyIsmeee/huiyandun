@@ -6,6 +6,7 @@
   "required": [
     "rule_id",
     "rule_version",
+    "mode",
     "category",
     "severity",
     "src_ip",
@@ -20,6 +21,10 @@
   "properties": {
     "rule_id": { "type": "string" },
     "rule_version": { "type": "string" },
+    "mode": {
+      "enum": ["monitor", "enforce"],
+      "description": "monitor 只显示、不参与关联与处置：自研规则取其 hyd_mode，外部规则一律 monitor（C-SEC-04、C-RU-05、D-068）"
+    },
     "category": { "type": "string", "description": "如 auth_bruteforce" },
     "severity": {
       "enum": ["critical", "high", "medium", "low"],
