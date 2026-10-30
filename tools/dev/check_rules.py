@@ -64,7 +64,8 @@ def main(image: str, rules: Path) -> int:
     check = suricata(image, "-T", "--include", CONFIG)
     if check.returncode:
         errors.append(f"规则加载失败\n{check.stdout}{check.stderr}")
-    metas = sorted((rules / "tests").glob("*/*.meta.yaml"))
+    # 只回放 Suricata 规则的 pcap 样本；关联规则（HYD-X-*）的事件序列样本由 correlator 测试回放
+    metas = sorted((rules / "tests").glob("HYD-NET-*/*.meta.yaml"))
     errors += [e for meta in metas if (e := replay(image, meta))]
     for error in errors:
         print(error, file=sys.stderr)

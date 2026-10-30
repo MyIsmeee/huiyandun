@@ -1,0 +1,5 @@
+# 合成样本（R-02）：按 HYD-PLAN-007 §2 的事件契约手写的事件序列，services/correlator/tests/test_rule_samples.py 回放
+source: 合成
+license: 自研，无第三方内容
+anonymization: 不含真实数据；只用演示站点的设备 ID
+description: 按序命中、到达乱序、顺序颠倒、超出窗口、不同设备、monitor 告警、无关画面事件、持续攻击去重
