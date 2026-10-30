@@ -1,0 +1,17 @@
+# 跨域关联（FR-303）：同一设备 300 s 内先被认证爆破或行为异常、后画面冻结或重放
+# 样本：rules/tests/HYD-X-0001/sequences.yaml
+id: HYD-X-0001
+version: 1.0.0
+name: 认证爆破后画面遭篡改
+mode: enforce  # 上线即生效，C-SEC-04 的例外（D-071）：只关联 enforce 告警，含模型或姿态证据时须人工确认
+window_s: 300
+group_by: device_id
+sequence:
+  - subject: hyd.security.alert.v1
+    match: { category: [auth_bruteforce, behavior_anomaly] }
+  - subject: hyd.vision.integrity.v1
+    match: { type: [freeze, replay] }
+emit:
+  severity: critical
+  title: 摄像头疑似被入侵且画面遭篡改
+  techniques: [T1110, T0832]  # Brute Force；Manipulation of View（ICS）
