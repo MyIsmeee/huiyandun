@@ -40,7 +40,7 @@ TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
 SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
-# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 由 TK-040 发布。
+# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 由 TK-114 发布。
 # 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
 STREAM = "HYD_VISION"
 STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, "hyd.vision.integrity.v1"]
@@ -95,7 +95,7 @@ class FrameReader(threading.Thread):
                     self._latest = (seq, frame)
             capture.release()
             if not lost:
-                # 不静默跳过（C-CV-09）；stream_lost 事件由 TK-040 发布
+                # 不静默跳过（C-CV-09）；stream_lost 事件由 TK-114 发布
                 log.warning("vision.stream_lost", extra={"camera_id": self._camera_id})
                 lost = True
             threading.Event().wait(RECONNECT_S)
