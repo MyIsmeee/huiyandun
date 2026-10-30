@@ -1,5 +1,6 @@
+import { Box3, BoxGeometry, type BufferAttribute, Group, Mesh, MeshBasicMaterial } from "three";
 import { describe, expect, it } from "vitest";
-import { arrange } from "../../src/scene/furniture";
+import { arrange, bakeUnit } from "../../src/scene/furniture";
 
 /** 平面上的矩形底面：x0～x1 × y0～y1 */
 const rect = (x0: number, y0: number, x1: number, y1: number) => [
@@ -55,5 +56,34 @@ describe("arrange（D-059）", () => {
     expect((b?.y ?? 0) - (a?.y ?? 0)).toBeCloseTo(1.2 * c);
     expect(Math.sin(a?.yaw ?? 0)).toBeCloseTo(c); // 摄像头在右下方：正面朝 (1, -1)
     expect(Math.cos(a?.yaw ?? 0)).toBeCloseTo(-c);
+  });
+});
+
+describe("bakeUnit", () => {
+  /** 长边沿 z 的桌子：桌面 1 × 0.1 × 2（深色木纹），桌腿 0.1 × 0.7 × 0.1（浅色），不在原点 */
+  function toyTable() {
+    const top = new Mesh(new BoxGeometry(1, 0.1, 2), new MeshBasicMaterial({ name: "DarkWood" }));
+    top.position.set(3, 0.75, 1);
+    const leg = new Mesh(new BoxGeometry(0.1, 0.7, 0.1), new MeshBasicMaterial({ name: "Wood" }));
+    leg.position.set(3, 0.35, 1.9);
+    const root = new Group();
+    root.add(top, leg);
+    return root;
+  }
+
+  it("缩放为宽、高、深均为 1 的单位尺寸，底面落地、水平居中；长边转到 x", () => {
+    const geometry = bakeUnit(toyTable(), Math.PI / 2);
+    const box = new Box3().setFromBufferAttribute(geometry.getAttribute("position") as BufferAttribute);
+
+    [box.min.x, box.max.x, box.min.y, box.max.y, box.min.z, box.max.z].forEach((v, i) =>
+      expect(v).toBeCloseTo([-0.5, 0.5, 0, 1, -0.5, 0.5][i] ?? NaN),
+    );
+  });
+
+  it("部件明度提亮到 0.72～1：深色件 0.72，其余 1", () => {
+    const color = bakeUnit(toyTable(), 0).getAttribute("color");
+    const shades = new Set([...Array(color.count).keys()].map((i) => Math.round(color.getX(i) * 100) / 100));
+
+    expect([...shades].sort()).toEqual([0.72, 1]);
   });
 });

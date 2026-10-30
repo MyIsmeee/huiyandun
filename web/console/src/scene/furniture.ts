@@ -1,6 +1,6 @@
 import { useLoader } from "@react-three/fiber";
 import { useMemo } from "react";
-import type { BufferGeometry } from "three";
+import type { BufferGeometry, Object3D } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { SceneFrame } from "../store/live";
 import { bake } from "./vehicles";
@@ -66,7 +66,21 @@ export function arrange(polygon: number[][], width_m: number, camera: [number, n
   });
 }
 
-/** 加载并烘焙全部家具模型为单位尺寸（宽、高、深均为 1，底面落地、水平居中），顶点色为部件明度；加载期间挂起 */
+/**
+ * 把一个家具模型烘焙为单位尺寸：宽、高、深均为 1，底面落地、水平居中，正面转到局部 +z；
+ * 顶点色为部件明度，深色部件（深色木纹桌面、床架）按车辆明度会压成大块深灰，提亮到 0.72～1，仍可分辨部件
+ */
+export function bakeUnit(root: Object3D, yaw: number): BufferGeometry {
+  const { geometry, outline } = bake(root, 1, yaw, 0);
+  outline.dispose();
+  const box = geometry.boundingBox;
+  if (box) geometry.scale(1, 1 / (box.max.y - box.min.y), 1 / (box.max.z - box.min.z));
+  const shade = geometry.getAttribute("color");
+  for (let k = 0; k < shade.array.length; k += 1) shade.array[k] = FLOOR_SHADE + (1 - FLOOR_SHADE) * (shade.array[k] ?? 1);
+  return geometry;
+}
+
+/** 加载并烘焙全部家具模型为单位尺寸（bakeUnit）；加载期间挂起 */
 export function useFurnitureModels(): Record<Furniture, BufferGeometry> {
   const gltf = useLoader(
     GLTFLoader,
@@ -75,16 +89,7 @@ export function useFurnitureModels(): Record<Furniture, BufferGeometry> {
   return useMemo(
     () =>
       Object.fromEntries(
-        gltf.map(({ scene }, i) => {
-          const { geometry, outline } = bake(scene, 1, SPECS[FURNITURE[i] as Furniture].yaw, 0);
-          outline.dispose();
-          const box = geometry.boundingBox;
-          if (box) geometry.scale(1, 1 / (box.max.y - box.min.y), 1 / (box.max.z - box.min.z));
-          // 家具的深色部件（深色木纹桌面、床架）按车辆明度会压成大块深灰：提亮到 0.72～1，仍可分辨部件
-          const shade = geometry.getAttribute("color");
-          for (let k = 0; k < shade.array.length; k += 1) shade.array[k] = FLOOR_SHADE + (1 - FLOOR_SHADE) * (shade.array[k] ?? 1);
-          return [FURNITURE[i], geometry];
-        }),
+        gltf.map(({ scene }, i) => [FURNITURE[i], bakeUnit(scene, SPECS[FURNITURE[i] as Furniture].yaw)]),
       ) as Record<Furniture, BufferGeometry>,
     [gltf],
   );
