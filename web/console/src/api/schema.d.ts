@@ -662,9 +662,16 @@ export interface components {
             playbook_id: string;
             playbook_version: string;
             incident_id: string;
+            /** @description 来自关联事件，供设备状态计算（HYD-UIX-004 §5.2） */
+            device_ids: string[];
             target: string;
-            /** @enum {unknown} */
-            state: "pending" | "executing" | "verifying" | "contained" | "failed" | "rolled_back";
+            /**
+             * @description pending 为等待人工确认；notify_only 为部署模式不支持执行、只通知（FR-1001）；skipped 为白名单等原因不处置（FR-403）；expired 为 30 分钟内未确认（D-073）
+             * @enum {unknown}
+             */
+            state: "pending" | "executing" | "verifying" | "contained" | "failed" | "rolled_back" | "notify_only" | "skipped" | "expired";
+            /** @description 失败、跳过、只通知、过期的原因，供详情面板说明（FR-403、FR-406） */
+            reason: string | null;
             /** @description C-BE-05 */
             ttl_s: number;
             /** @description 执行前为 null */

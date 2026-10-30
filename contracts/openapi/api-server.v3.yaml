@@ -1,11 +1,12 @@
 # api-server 对外接口（HYD-PLAN-007 §3、C-BE-01）
-# 主版本编码在文件名中；破坏性变更须新建 api-server.v3.yaml（CI-08）
+# 主版本编码在文件名中；破坏性变更须新建 api-server.v4.yaml（CI-08）
+# v3：PlaybookExecution 增加只通知、跳过、过期状态（TK-050），回滚接口的返回取值增加
 # x-min-role：最低角色（C-BE-07）；写操作要求 X-Request-ID（C-BE-08）
 # 会话凭证只经 HttpOnly Cookie 传递，浏览器脚本不可读（C-FE-06、DP-12）
 openapi: 3.1.0
 info:
   title: 慧眼盾 api-server
-  version: 2.0.0
+  version: 3.0.0
 security:
   - session: []
 

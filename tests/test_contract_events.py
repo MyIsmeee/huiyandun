@@ -10,6 +10,7 @@ from py_contracts.events.hyd_ai_investigation_v1_schema import AiInvestigationV1
 from py_contracts.events.hyd_correlator_confirmation_v1_schema import CorrelatorConfirmationV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
+from py_contracts.events.hyd_playbook_rollback_v1_schema import PlaybookRollbackV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
@@ -124,8 +125,10 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "playbook_id": "isolate-attacker",
             "playbook_version": "1.0.0",
             "incident_id": "inc-0001",
+            "device_ids": ["cam-02"],
             "target": "172.30.0.66",
             "state": "contained",
+            "reason": None,
             "ttl_s": 180,
             "expires_at": TS,
             "verify_result": {"passed": True, "reason": None},
@@ -153,6 +156,10 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "hyd.correlator.confirmation.v1": (
         CorrelatorConfirmationV1,
         {"incident_id": "inc-0001", "actor": "operator1", "request_id": "req-1"},
+    ),
+    "hyd.playbook.rollback.v1": (
+        PlaybookRollbackV1,
+        {"execution_id": "exe-0001", "actor": "operator1", "request_id": "req-2"},
     ),
 }
 
@@ -285,6 +292,7 @@ def test_rejects_invalid_value(subject: str, field: str, value: Any) -> None:
         ("hyd.correlator.incident.v1", "source_ip"),
         ("hyd.playbook.execution.v1", "expires_at"),
         ("hyd.playbook.execution.v1", "verify_result"),
+        ("hyd.playbook.execution.v1", "reason"),
         ("hyd.vision.track.v1", "heading_deg"),
         ("hyd.vision.track.v1", "speed_mps"),
         ("hyd.vision.track.v1", "keypoints"),
