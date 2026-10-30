@@ -16,7 +16,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api_server import audit, auth, executions, relay, site, video, ws
+from api_server import audit, auth, containment, executions, relay, site, video, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
@@ -92,6 +92,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bus = await Bus.connect(config.nats_url, name="api-server", timeout_s=config.nats_timeout_s)
+        app.state.bus = bus  # 手动回滚经它发布请求
         app.state.engine = create_engine(config)
         app.state.go2rtc = httpx2.AsyncClient(
             base_url=config.go2rtc_url, timeout=config.go2rtc_timeout_s
@@ -129,6 +130,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.history = History()
     app.include_router(auth.router)
     app.include_router(audit.router)
+    app.include_router(containment.router)
     app.include_router(site.router)
     app.include_router(ws.router)
     app.include_router(video.router)
