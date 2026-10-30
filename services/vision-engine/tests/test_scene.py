@@ -261,6 +261,17 @@ def test_board_reaches_wall_foot_across_unrecognized_gap() -> None:
     assert sorted(lines) == [[[1.55, 2.0], [2.95, 2.0]], [[4.55, 0.8], [5.45, 0.8]]]
 
 
+def test_board_stops_at_furniture_in_front_of_wall() -> None:
+    """黑板下方的墙被桌子挡住：取桌子以上最低的墙格，不越过桌子取更下方的墙。"""
+    labels = grid(wall=[(slice(8, 20), slice(5, 41))], floor=[(slice(20, GRID), slice(0, GRID))])
+    labels[2:8, 15:30] = label("board")
+    labels[12:14, 10:35] = label("table")
+
+    (board,) = [w for w in perception().project(labels, blank())["walls"] if w["class"] == "board"]
+
+    assert board["line"] == [[1.55, 1.2], [2.95, 1.2]]  # 第 11 行格底边
+
+
 def test_tree_at_bottom_center() -> None:
     labels = grid(tree=[(slice(10, 20), slice(30, 34))], plant=[(slice(40, 45), slice(5, 8))])
 
