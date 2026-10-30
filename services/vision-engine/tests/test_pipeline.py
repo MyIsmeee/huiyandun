@@ -3,6 +3,8 @@
 import asyncio
 import importlib.util
 import logging
+import threading
+import time
 from collections import Counter
 from pathlib import Path
 from typing import cast
@@ -11,12 +13,11 @@ import nats
 import numpy as np
 import pytest
 import supervision as sv
-from onnxruntime.datasets import get_example
 
 from py_common.bus import Bus
-from py_common.config import load_config
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
+from vision_engine import pipeline as pipeline_module
 from vision_engine.detector import PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
 from vision_engine.pipeline import (
@@ -26,9 +27,10 @@ from vision_engine.pipeline import (
     VEHICLE_ID_BASE,
     CameraPipeline,
     FrameReader,
+    Health,
     run_camera,
+    supervise,
 )
-from vision_engine.runtime import VisionConfig
 
 # 正视地面：1 像素 = 1 cm
 MAPPING = GroundMapping.fit([[u, v, u / 100, v / 100] for u in (0, 1000) for v in (0, 700)])
@@ -210,43 +212,126 @@ class FakeBus:
         raise nats.errors.TimeoutError
 
 
-def run_for(camera: CameraPipeline, bus: FakeBus, tmp_path: Path, seconds: float) -> None:
-    config = load_config(
-        VisionConfig,
-        {
-            "HYD_DEVICE": "cpu",
-            "HYD_MODEL_FILE": get_example("sigmoid.onnx"),
-            "HYD_VEHICLE_MODEL_FILE": get_example("sigmoid.onnx"),
-            "HYD_HEARTBEAT_FILE": str(tmp_path / "alive"),
-        },
-    )
-    run = run_camera(camera, cast(FrameReader, FakeReader()), cast(Bus, bus), config)
+def run_for(camera: CameraPipeline, bus: FakeBus, seconds: float) -> int:
+    """运行检测循环，返回完成的周期数。"""
+    beats = 0
+
+    def beat() -> None:
+        nonlocal beats
+        beats += 1
+
+    run = run_camera(camera, cast(FrameReader, FakeReader()), cast(Bus, bus), beat)
     with pytest.raises(TimeoutError):
         asyncio.run(asyncio.wait_for(run, seconds))
+    return beats
 
 
-def test_each_track_published_at_least_2_hz(tmp_path: Path) -> None:
+def test_each_track_published_at_least_2_hz() -> None:
     camera, _ = pipeline(MAPPING)
     bus = FakeBus()
 
-    run_for(camera, bus, tmp_path, 3)
+    beats = run_for(camera, bus, 3)
 
     per_track = Counter(e.track_id for e in bus.events)
     assert per_track and min(per_track.values()) / 3 >= 2  # FR-102：位置更新间隔 ≤ 500 ms
-    assert (tmp_path / "alive").exists()
+    assert beats >= 3 * FPS - 1  # 每个周期登记一次健康
 
 
 def test_behavior_publish_failure_is_logged_and_detection_continues(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """行为事件经 JetStream 持久化（HYD-PLAN-007 §2）；发布失败记录错误，位置照常发布。"""
     camera, _ = pipeline(MAPPING, lying=True)
     bus = FakeBus()
 
     with caplog.at_level(logging.ERROR):
-        run_for(camera, bus, tmp_path, 3.5)
+        run_for(camera, bus, 3.5)
 
     assert [b.behavior for b in bus.behaviors] == ["fall"]
     failed = [r for r in caplog.records if r.getMessage() == "vision.behavior_publish_failed"]
     assert len(failed) == 1
     assert bus.events[-1].ts > bus.behaviors[0].ts
+
+
+def test_failed_loop_is_logged_and_retried_without_stopping_others(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """#79：单路循环异常只重试该路，其他路照常运行。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.05)
+    health = Health(tmp_path / "alive")
+    attempts = 0
+    other_beats = 0
+
+    async def broken(beat: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("推理失败")
+
+    async def healthy(beat: object) -> None:
+        nonlocal other_beats
+        while True:
+            other_beats += 1
+            await asyncio.sleep(0.01)
+
+    async def main() -> None:
+        await asyncio.gather(
+            supervise("cam-01/detect", broken, health), supervise("cam-02/detect", healthy, health)
+        )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(main(), 0.5))
+
+    assert attempts >= 3
+    assert other_beats >= 20
+    failed = [r for r in caplog.records if r.getMessage() == "vision.loop_failed"]
+    assert failed and failed[0].loop == "cam-01/detect"
+
+
+def test_heartbeat_stops_when_any_loop_stalls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#79：心跳按路判断，任一循环超过 STALL_S 未完成周期即不再更新心跳文件。"""
+    monkeypatch.setattr(pipeline_module, "STALL_S", 0.2)
+    health = Health(tmp_path / "alive")
+    health.beat("cam-01/detect")
+    health.beat("cam-02/detect")
+    assert health.healthy()
+
+    time.sleep(0.3)
+    health.beat("cam-01/detect")
+
+    assert not health.healthy()
+
+
+def test_heartbeat_stops_when_reader_thread_exits(tmp_path: Path) -> None:
+    health = Health(tmp_path / "alive")
+    reader = threading.Thread(target=lambda: None)
+    reader.start()
+    reader.join()
+    health.watch(reader)
+    health.beat("cam-01/detect")
+
+    assert not health.healthy()
+
+
+def test_reader_survives_capture_exception(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#79：读帧异常记录后按断流重连，读帧线程不退出。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
+    calls = 0
+
+    def capture(*args: object) -> object:
+        nonlocal calls
+        calls += 1
+        raise pipeline_module.cv2.error("模拟解码器异常")
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", capture)
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01")
+    with caplog.at_level(logging.ERROR):
+        reader.start()
+        time.sleep(0.2)
+
+    assert reader.is_alive()
+    assert calls >= 2
+    assert any(r.getMessage() == "vision.reader_failed" for r in caplog.records)

@@ -49,7 +49,8 @@ class VisionConfig(ServiceConfig):
         "rtsp://go2rtc:8554", description="go2rtc 的 RTSP 地址，流名取自 site.yaml（C-CV-10）"
     )
     heartbeat_file: Path = Field(
-        Path("/tmp/hyd-vision-alive"), description="检测循环每个周期更新其修改时间，供健康检查判断"
+        Path("/tmp/hyd-vision-alive"),
+        description="全部循环与读帧线程都有进展时每秒更新其修改时间，供健康检查判断（#79）",
     )
 
 

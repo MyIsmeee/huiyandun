@@ -3,6 +3,8 @@ hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
+
+各路相互隔离（#79）：单路循环异常只重试该路；健康检查按路判断，任一路停滞即 unhealthy。
 """
 
 import asyncio
@@ -12,7 +14,10 @@ import threading
 import time
 import uuid
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
+from pathlib import Path
 
 import cv2
 import nats
@@ -48,7 +53,8 @@ STREAM_MAX_AGE_S = 180 * 86400
 SCHEMA_VERSION = "1.0.0"
 TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（HYD-PLAN-007 v1.9）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
-RECONNECT_S = 2.0
+RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
+STALL_S = 10.0  # 任一循环超过此时长未完成周期即视为停滞，与 compose 健康检查的阈值一致
 # 新轨迹须连续 2 帧、置信度 ≥ 0.5；RTMO 对远处行人的置信度多在 0.5～0.6（模型卡）
 TRACK_ACTIVATION = 0.5
 # 车辆与人员分别跟踪（骑车人与自行车框重叠，混合跟踪会互换编号）；车辆轨迹编号加此偏移，同一路内不重复
@@ -73,27 +79,31 @@ class FrameReader(threading.Thread):
     def run(self) -> None:
         seq, lost = 0, False
         while True:
-            capture = cv2.VideoCapture(
-                self._url,
-                cv2.CAP_FFMPEG,
-                [
-                    cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
-                    TIMEOUT_MS,
-                    cv2.CAP_PROP_READ_TIMEOUT_MSEC,
-                    TIMEOUT_MS,
-                ],
-            )
-            while True:
-                ok, frame = capture.read()
-                if not ok:
-                    break
-                if lost:
-                    log.info("vision.stream_restored", extra={"camera_id": self._camera_id})
-                    lost = False
-                seq += 1
-                with self._lock:
-                    self._latest = (seq, frame)
-            capture.release()
+            try:
+                capture = cv2.VideoCapture(
+                    self._url,
+                    cv2.CAP_FFMPEG,
+                    [
+                        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
+                        TIMEOUT_MS,
+                        cv2.CAP_PROP_READ_TIMEOUT_MSEC,
+                        TIMEOUT_MS,
+                    ],
+                )
+                while True:
+                    ok, frame = capture.read()
+                    if not ok:
+                        break
+                    if lost:
+                        log.info("vision.stream_restored", extra={"camera_id": self._camera_id})
+                        lost = False
+                    seq += 1
+                    with self._lock:
+                        self._latest = (seq, frame)
+                capture.release()
+            except cv2.error:
+                # 解码器异常按断流处理并重连，读帧线程不退出（#79）
+                log.exception("vision.reader_failed", extra={"camera_id": self._camera_id})
             if not lost:
                 # 不静默跳过（C-CV-09）；stream_lost 事件由 TK-114 发布
                 log.warning("vision.stream_lost", extra={"camera_id": self._camera_id})
@@ -247,46 +257,89 @@ class CameraPipeline:
         return events
 
 
+class Health:
+    """按路判断健康（#79）：各循环每完成一个周期登记一次；全部循环在 STALL_S 内有登记、
+    且全部读帧线程存活时才更新心跳文件，任一路停滞即由健康检查判为 unhealthy。"""
+
+    def __init__(self, heartbeat_file: Path) -> None:
+        self._file = heartbeat_file
+        self._beats: dict[str, float] = {}
+        self._readers: list[threading.Thread] = []
+
+    def watch(self, reader: threading.Thread) -> None:
+        self._readers.append(reader)
+
+    def beat(self, name: str) -> None:
+        self._beats[name] = time.monotonic()
+
+    def healthy(self) -> bool:
+        now = time.monotonic()
+        return all(now - t <= STALL_S for t in self._beats.values()) and all(
+            r.is_alive() for r in self._readers
+        )
+
+    async def run(self) -> None:
+        while True:
+            if self.healthy():
+                self._file.touch()
+            await asyncio.sleep(1)
+
+
+async def supervise(
+    name: str, run: Callable[[Callable[[], None]], Awaitable[None]], health: Health
+) -> None:
+    """运行一路循环；异常时记录并在 RECONNECT_S 后重试，不影响其他路（#79）。"""
+    health.beat(name)  # 从未完成周期的循环同样计入停滞判断
+    while True:
+        try:
+            await run(partial(health.beat, name))
+        except Exception:
+            log.exception("vision.loop_failed", extra={"loop": name})
+            await asyncio.sleep(RECONNECT_S)
+
+
 async def run_camera(
-    pipeline: CameraPipeline, reader: FrameReader, bus: Bus, config: VisionConfig
+    pipeline: CameraPipeline, reader: FrameReader, bus: Bus, beat: Callable[[], None]
 ) -> None:
     loop = asyncio.get_running_loop()
     next_tick, last_seq = loop.time(), 0
     while True:
         next_tick = max(next_tick + 1 / FPS, loop.time())  # 处理超时后不补跑积压的周期
         await asyncio.sleep(next_tick - loop.time())
-        config.heartbeat_file.touch()
         latest = reader.latest()
-        if latest is None or latest[0] == last_seq:
-            continue
-        last_seq, frame = latest
-        events = await asyncio.to_thread(pipeline.process, frame, time.monotonic())
-        for event in events:
-            if isinstance(event, VisionTrackV1):
-                await bus.publish(TRACK_SUBJECT, event)
-                continue
-            try:
-                await bus.js_publish(BEHAVIOR_SUBJECT, event)
-            except (nats.errors.Error, TimeoutError):
-                # 记录后继续检测：持续满足的行为 30 s 后重发（C-CV-09 不静默）
-                log.exception(
-                    "vision.behavior_publish_failed", extra={"event_id": str(event.event_id)}
-                )
+        if latest is not None and latest[0] != last_seq:
+            last_seq, frame = latest
+            events = await asyncio.to_thread(pipeline.process, frame, time.monotonic())
+            for event in events:
+                if isinstance(event, VisionTrackV1):
+                    await bus.publish(TRACK_SUBJECT, event)
+                    continue
+                try:
+                    await bus.js_publish(BEHAVIOR_SUBJECT, event)
+                except (nats.errors.Error, TimeoutError):
+                    # 记录后继续检测：持续满足的行为 30 s 后重发（C-CV-09 不静默）
+                    log.exception(
+                        "vision.behavior_publish_failed", extra={"event_id": str(event.event_id)}
+                    )
+        beat()
 
 
-async def run_scene(perception: ScenePerception, reader: FrameReader, bus: Bus) -> None:
+async def run_scene(
+    perception: ScenePerception, reader: FrameReader, bus: Bus, beat: Callable[[], None]
+) -> None:
     loop = asyncio.get_running_loop()
     next_tick, last_seq = loop.time(), 0
     while True:
         next_tick = max(next_tick + 1 / SCENE_FPS, loop.time())
         await asyncio.sleep(next_tick - loop.time())
         latest = reader.latest()
-        if latest is None or latest[0] == last_seq:
-            continue  # 断流时不发布：大屏保留最后一帧（设计 §3.7）
-        last_seq, frame = latest
-        event = await asyncio.to_thread(perception.process, frame)
-        if event is not None:
-            await bus.publish(SCENE_SUBJECT, event)
+        # 断流时不发布：大屏保留最后一帧（设计 §3.7）
+        if latest is not None and latest[0] != last_seq:
+            last_seq, frame = latest
+            event = await asyncio.to_thread(perception.process, frame)
+            if event is not None:
+                await bus.publish(SCENE_SUBJECT, event)
+        beat()
 
 
 async def serve(config: VisionConfig) -> None:
@@ -314,6 +367,7 @@ async def serve(config: VisionConfig) -> None:
     site = SiteConfig.model_validate(yaml.safe_load(config.site_file.read_text(encoding="utf-8")))
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
+    health = Health(config.heartbeat_file)
     runs = []
     for camera in site.model_dump(mode="json")["cameras"]:
         mapping = GroundMapping.fit(camera["calibration"])
@@ -321,22 +375,20 @@ async def serve(config: VisionConfig) -> None:
             log.warning("vision.uncalibrated", extra={"camera_id": camera["id"]})
         reader = FrameReader(camera["id"], f"{config.go2rtc_rtsp}/{camera['stream']}")
         reader.start()
+        health.watch(reader)
         if mapping is not None and segmenter is not None:
+            perception = ScenePerception(camera["id"], mapping, camera["pose"], segmenter)
             runs.append(
-                run_scene(
-                    ScenePerception(camera["id"], mapping, camera["pose"], segmenter), reader, bus
+                supervise(
+                    f"{camera['id']}/scene", partial(run_scene, perception, reader, bus), health
                 )
             )
+        detection = CameraPipeline(camera["id"], mapping, detector, camera["climb_lines"], vehicles)
         runs.append(
-            run_camera(
-                CameraPipeline(camera["id"], mapping, detector, camera["climb_lines"], vehicles),
-                reader,
-                bus,
-                config,
-            )
+            supervise(f"{camera['id']}/detect", partial(run_camera, detection, reader, bus), health)
         )
     log.info("vision.started", extra={"device": config.device, "cameras": len(site.cameras)})
-    await asyncio.gather(*runs)
+    await asyncio.gather(health.run(), *runs)
 
 
 def main() -> None:
