@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import nats
 import pytest
+from nats.js.client import JetStreamContext
 
 from py_common.bus import Bus
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
@@ -142,6 +143,36 @@ def test_js_subscribe_without_history_returns_at_once(nats_url: str) -> None:
             await bus.close()
 
     assert asyncio.run(main()) < 1
+
+
+def test_js_subscribe_unsubscribes_when_setup_fails(
+    nats_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """订阅建立后查询消费者状态失败：先退订再报错，重试不会留下重复订阅。"""
+
+    async def fail(self: object) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(JetStreamContext.PushSubscription, "consumer_info", fail)
+
+    async def main() -> list[int]:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        await bus.ensure_stream("UNSUB", ["hyd.test.unsub"], 60)
+        received: list[int] = []
+
+        async def handler(event: VisionTrackV1) -> None:
+            received.append(event.track_id)
+
+        try:
+            with pytest.raises(TimeoutError):
+                await bus.js_subscribe("hyd.test.unsub", VisionTrackV1, handler, datetime.now(UTC))
+            await bus.js_publish("hyd.test.unsub", track(7))
+            await asyncio.sleep(0.5)
+            return received
+        finally:
+            await bus.close()
+
+    assert asyncio.run(main()) == []
 
 
 def test_ensure_stream_is_idempotent_and_persists(nats_url: str) -> None:

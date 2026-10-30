@@ -131,7 +131,12 @@ class Bus:
             deliver_policy=DeliverPolicy.BY_START_TIME,
             config=ConsumerConfig(opt_start_time=since),
         )
-        info = await sub.consumer_info()
+        try:
+            info = await sub.consumer_info()
+        except (errors.Error, TimeoutError):
+            # 订阅已建立：先退订再报错，调用方重试时不会留下重复订阅、同一事件处理两次
+            await sub.unsubscribe()
+            raise
         if info.num_pending == 0 and info.delivered.consumer_seq == 0:
             caught_up.set()  # since 之后没有该主题的历史消息
         try:
