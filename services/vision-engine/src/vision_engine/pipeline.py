@@ -299,6 +299,8 @@ async def supervise(
             await run(partial(health.beat, name))
         except Exception:
             log.exception("vision.loop_failed", extra={"loop": name})
+            # 出错后仍在重试不算停滞：否则持续报错的一路会让整个进程退出，连累其他路
+            health.beat(name)
             await asyncio.sleep(RECONNECT_S)
 
 

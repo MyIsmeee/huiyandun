@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -287,6 +288,44 @@ def test_failed_loop_is_logged_and_retried_without_stopping_others(
     assert failed and failed[0].loop == "cam-01/detect"
 
 
+def test_persistently_failing_loop_does_not_exit_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#79：一路持续报错时只在该路重试，不判为停滞、不退出进程，另一路照常运行。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.05)
+    monkeypatch.setattr(pipeline_module, "STALL_S", 0.2)
+
+    def exit_(code: int) -> None:
+        raise SystemExit(code)
+
+    monkeypatch.setattr(pipeline_module.os, "_exit", exit_)
+    health = Health(tmp_path / "alive")
+    other_beats = 0
+
+    async def broken(beat: Callable[[], None]) -> None:
+        raise RuntimeError("推理失败")
+
+    async def healthy(beat: Callable[[], None]) -> None:
+        nonlocal other_beats
+        while True:
+            other_beats += 1
+            beat()
+            await asyncio.sleep(0.01)
+
+    async def main() -> None:
+        await asyncio.gather(
+            health.run(),
+            supervise("cam-01/detect", broken, health),
+            supervise("cam-02/detect", healthy, health),
+        )
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(main(), 2.5))  # 心跳每秒检查一次，覆盖两次检查
+
+    assert other_beats >= 100
+    assert (tmp_path / "alive").exists()
+
+
 def test_heartbeat_updated_while_all_loops_progress(tmp_path: Path) -> None:
     health = Health(tmp_path / "alive")
     health.beat("cam-01/detect")
@@ -349,3 +388,42 @@ def test_reader_survives_capture_exception(
     assert reader.is_alive()
     assert len(beats) == 3
     assert any(r.getMessage() == "vision.reader_failed" for r in caplog.records)
+
+
+def test_reader_beats_on_connect_and_every_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#79：读帧线程建连前后与每读到一帧都登记一次健康，卡在读帧调用中即停滞。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
+    beats = []
+    done = threading.Event()
+
+    class Capture:
+        def __init__(self) -> None:
+            self.frames = 2
+
+        def read(self) -> tuple[bool, np.ndarray | None]:
+            if self.frames:
+                self.frames -= 1
+                return True, frame(0)
+            return False, None
+
+        def release(self) -> None:
+            pass
+
+    calls = 0
+
+    def capture(*args: object) -> Capture:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            done.set()
+            threading.Event().wait()  # 第二次建连起一直阻塞：测试结束后线程不再连真实地址
+        return Capture()
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", capture)
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: beats.append(1))
+    reader.start()
+    assert done.wait(2)
+
+    # 第一次：建连前、建连后、两帧各一次；第二次：建连前一次
+    assert len(beats) == 5
+    assert reader.latest() is not None and reader.latest()[0] == 2
