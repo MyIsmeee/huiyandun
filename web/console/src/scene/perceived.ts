@@ -15,6 +15,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { type SceneFrame, useLive } from "../store/live";
 import type { Theme } from "../theme/store";
 import type { Camera } from "./devices";
+import { arrange, type Furniture, isFurniture, widthOf } from "./furniture";
 
 /** 场景帧自带的 ts 早于此时长即为陈旧，弱化显示（设计 §3.7） */
 export const STALE_MS = 10_000;
@@ -24,6 +25,9 @@ export const STALE_OPACITY = 0.5;
 export const FADE_MS = 300;
 /** 立面沿墙脚线挤出的厚度 */
 const WALL_THICKNESS_M = 0.2;
+/** 黑板（D-059）：离地 0.9 m，比墙厚 4 cm，两面各凸出墙面 2 cm */
+const BOARD_BASE_M = 0.9;
+const BOARD_THICKNESS_M = 0.24;
 /**
  * 地面色块与标线的高度：与栅格（0.005 m）相距 5 cm。深度缓冲精度可能很低（软件渲染实测 3 cm 仍会闪出栅格线），过近即争深度。
  * 色块不写深度，阴影与视场按绘制顺序叠在其上（PerceivedScene）
@@ -33,6 +37,7 @@ const MARKING_Y = 0.055;
 
 /** 环境类别色（§5.1 L1、V-S5）：两套分别取值，均为去饱和色，与状态色的色差 ΔE2000 ≥ 20 */
 export interface Palette {
+  /** 路面，另作黑板色（D-059） */
   road: string;
   sidewalk: string;
   floor: string;
@@ -119,7 +124,23 @@ function paint(geometry: BufferGeometry, color: string): BufferGeometry {
   return flat.setAttribute("color", new BufferAttribute(colors, 3));
 }
 
-const merge = (parts: BufferGeometry[]) => (parts.length === 0 ? null : mergeGeometries(parts));
+/** 材质不用贴图：去掉 uv，家具模型（无 uv）可与程序化几何体合并 */
+const merge = (parts: BufferGeometry[]) =>
+  parts.length === 0 ? null : mergeGeometries(parts.map((g) => g.deleteAttribute("uv")));
+
+/** 按部件明度着色：顶点色（明度）乘以类别色 */
+function tint(geometry: BufferGeometry, color: string): BufferGeometry {
+  const { r, g, b } = new Color(color);
+  const shade = geometry.getAttribute("color");
+  for (let i = 0; i < shade.count; i += 1) shade.setXYZ(i, shade.getX(i) * r, shade.getY(i) * g, shade.getZ(i) * b);
+  return geometry;
+}
+
+/** 家具模型（单位尺寸，useFurnitureModels）与该摄像头的平面位置：家具正面朝向摄像头（D-059） */
+export interface Furnishing {
+  models: Record<Furniture, BufferGeometry>;
+  camera: [number, number];
+}
 
 /** 程序化低多边形树：树干 + 二十面体树冠（顶点最高处为半径的 0.85 倍，树冠顶即树高），按高度等比缩放，立在树干底部中心 */
 function tree({ x, y, height_m }: SceneFrame["trees"][number], palette: Palette): BufferGeometry[] {
@@ -131,24 +152,31 @@ function tree({ x, y, height_m }: SceneFrame["trees"][number], palette: Palette)
 
 /**
  * 一帧场景的几何体（§5.1 L1），每台摄像头两次绘制：
- * flat 为地面色块（面积从大到小）与路面标线，不受光照；solid 为立面、物体与树，受光照并投射阴影。
+ * flat 为地面色块（面积从大到小）与路面标线，不受光照；solid 为立面、黑板、物体与树，受光照并投射阴影。
+ * 桌、椅、柜、沙发、床以家具模型沿底面轮廓排开，其余物体由底面轮廓挤出（D-059）
  */
-export function sceneGeometry(frame: SceneFrame, palette: Palette) {
+export function sceneGeometry(frame: SceneFrame, palette: Palette, furnishing: Furnishing) {
   const flat = [
     ...largestFirst(frame.surfaces).map((s) => paint(upright(new ShapeGeometry(shape(s.polygon)), SURFACE_Y), palette[s.class])),
     ...frame.markings.map((m) => paint(upright(new ShapeGeometry(shape(m.polygon)), MARKING_Y), palette.marking)),
   ];
-  const walls = frame.walls.flatMap(({ line, height_m }) =>
-    line.slice(1).map((to, i) => {
+  const walls = frame.walls.flatMap(({ class: kind, line, height_m }) => {
+    const [base, thickness, color] =
+      kind === "board" ? [BOARD_BASE_M, BOARD_THICKNESS_M, palette.road] : [0, WALL_THICKNESS_M, palette.facade];
+    return line.slice(1).map((to, i) => {
       const [[x1 = 0, y1 = 0], [x2 = 0, y2 = 0]] = [line[i] ?? [], to];
-      const box = new BoxGeometry(Math.hypot(x2 - x1, y2 - y1), height_m, WALL_THICKNESS_M)
+      const box = new BoxGeometry(Math.hypot(x2 - x1, y2 - y1), height_m, thickness)
         .rotateY(-Math.atan2(y2 - y1, x2 - x1))
-        .translate((x1 + x2) / 2, height_m / 2, (y1 + y2) / 2);
-      return paint(box, palette.facade);
-    }),
-  );
-  const objects = frame.objects.map(({ polygon, height_m }) =>
-    paint(upright(new ExtrudeGeometry(shape(polygon), { depth: height_m, bevelEnabled: false })), palette.facade),
+        .translate((x1 + x2) / 2, base + height_m / 2, (y1 + y2) / 2);
+      return paint(box, color);
+    });
+  });
+  const objects = frame.objects.flatMap(({ class: kind, polygon, height_m }) =>
+    isFurniture(kind)
+      ? arrange(polygon, widthOf(kind), furnishing.camera).map(({ x, y, yaw, width, depth }) =>
+          tint(furnishing.models[kind].clone().scale(width, height_m, depth).rotateY(yaw).translate(x, 0, y), palette.facade),
+        )
+      : [paint(upright(new ExtrudeGeometry(shape(polygon), { depth: height_m, bevelEnabled: false })), palette.facade)],
   );
   const trees = frame.trees.flatMap((t) => tree(t, palette));
   return { flat: merge(flat), solid: merge([...walls, ...objects, ...trees]) };
