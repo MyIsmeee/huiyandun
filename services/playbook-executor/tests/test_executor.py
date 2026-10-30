@@ -289,6 +289,32 @@ def test_manual_rollback_cancels_ttl() -> None:
     assert rolled.reason == "由 operator1 手动回滚"
 
 
+def test_wait_follows_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """单调时钟落后于墙上时钟时（WSL 对时），到期等待仍按墙上时钟结束，不晚醒一整段。"""
+    monkeypatch.setattr(executor_module, "WAIT_STEP_S", 0.01)
+    start = datetime.now(UTC)
+    jumped = {"done": False}
+    real_now = datetime.now
+
+    class Clock:
+        @staticmethod
+        def now(tz: Any = None) -> datetime:
+            # 第一次检查后墙上时钟前跳 60 s：模拟虚拟机对时
+            value = real_now(tz) + (timedelta(seconds=60) if jumped["done"] else timedelta())
+            jumped["done"] = True
+            return value
+
+    monkeypatch.setattr(executor_module, "datetime", Clock)
+
+    async def main() -> float:
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        await executor_module._sleep_until(start + timedelta(seconds=30))
+        return loop.time() - began
+
+    assert asyncio.run(main()) < 1
+
+
 def test_resume_after_restart() -> None:
     """重启：已生效的到期回滚；执行到一半的撤销并记为失败；等待确认的超时即过期。"""
     h = Harness()

@@ -26,6 +26,9 @@ EVIDENCE_WINDOW_S, EVIDENCE_INTERVAL_S = 30.0, 5.0  # D-072
 # 执行 ID 由 Playbook 与关联事件派生：重放同一关联事件不会重复执行
 EXECUTION_NAMESPACE = uuid.UUID("2c4b9e71-5a0d-4f3e-8b6a-9d1c7e2f4a03")
 
+# 到期等待按墙上时钟分段检查：WSL 等虚拟机里单调时钟可能落后于墙上时钟，一次长睡会晚醒数秒
+WAIT_STEP_S = 1.0
+
 type Network = IPv4Network | IPv6Network
 type Publish = Callable[[PlaybookExecutionV1], Awaitable[None]]
 
@@ -236,7 +239,7 @@ class Executor:
 
     async def _ttl(self, execution: PlaybookExecutionV1) -> None:
         assert execution.expires_at is not None
-        await asyncio.sleep(max(0.0, (execution.expires_at - datetime.now(UTC)).total_seconds()))
+        await _sleep_until(execution.expires_at)
         # 内核已按超时删除元素；再解封一次确保一致，失败也如实记为已回滚（FR-404、D-075）
         current = self._executions[execution.id]
         failed = await self._undo(current)
@@ -247,7 +250,7 @@ class Executor:
         await self._update(current, state="rolled_back", reason=reason)
 
     async def _expire(self, execution: PlaybookExecutionV1, after: timedelta) -> None:
-        await asyncio.sleep(max(0.0, after.total_seconds()))
+        await _sleep_until(datetime.now(UTC) + after)
         current = self._executions[execution.id]
         if current.state == "pending":
             await self._update(current, state="expired", reason="30 分钟内未确认，已过期")
@@ -303,3 +306,10 @@ class Executor:
         task = self._tasks.pop(execution_id, None)
         if task is not None and task is not asyncio.current_task():
             task.cancel()
+
+
+async def _sleep_until(when: datetime) -> None:
+    remaining = (when - datetime.now(UTC)).total_seconds()
+    while remaining > 0:
+        await asyncio.sleep(min(remaining, WAIT_STEP_S))
+        remaining = (when - datetime.now(UTC)).total_seconds()
