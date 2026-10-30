@@ -16,7 +16,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api_server import audit, auth, relay, site, video, ws
+from api_server import audit, auth, executions, relay, site, video, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
@@ -98,6 +98,7 @@ def create_app(config: ApiConfig) -> FastAPI:
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
+            asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
         ]
         try:
             await relay.start(bus, app.state.hub, app.state.devices, app.state.scenes)
