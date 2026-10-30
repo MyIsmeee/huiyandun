@@ -7,8 +7,10 @@
     "playbook_id",
     "playbook_version",
     "incident_id",
+    "device_ids",
     "target",
     "state",
+    "reason",
     "ttl_s",
     "expires_at",
     "verify_result"
@@ -18,9 +20,29 @@
     "playbook_id": { "type": "string" },
     "playbook_version": { "type": "string" },
     "incident_id": { "type": "string" },
+    "device_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "来自关联事件，供设备状态计算（HYD-UIX-004 §5.2）"
+    },
     "target": { "type": "string" },
     "state": {
-      "enum": ["pending", "executing", "verifying", "contained", "failed", "rolled_back"]
+      "enum": [
+        "pending",
+        "executing",
+        "verifying",
+        "contained",
+        "failed",
+        "rolled_back",
+        "notify_only",
+        "skipped",
+        "expired"
+      ],
+      "description": "pending 为等待人工确认；notify_only 为部署模式不支持执行、只通知（FR-1001）；skipped 为白名单等原因不处置（FR-403）；expired 为 30 分钟内未确认（D-073）"
+    },
+    "reason": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "失败、跳过、只通知、过期的原因，供详情面板说明（FR-403、FR-406）"
     },
     "ttl_s": { "type": "integer", "minimum": 1, "maximum": 86400, "description": "C-BE-05" },
     "expires_at": {

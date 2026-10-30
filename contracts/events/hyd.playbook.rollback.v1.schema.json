@@ -1,0 +1,12 @@
+{
+  "title": "PlaybookRollbackV1",
+  "description": "操作员手动回滚处置（生产者 api-server，消费者 playbook-executor，HYD-REQ-006 FR-405）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["execution_id", "actor", "request_id"],
+  "properties": {
+    "execution_id": { "type": "string" },
+    "actor": { "type": "string", "description": "操作者账户" },
+    "request_id": { "type": "string", "description": "C-BE-08" }
+  }
+}

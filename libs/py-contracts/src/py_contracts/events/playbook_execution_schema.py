@@ -28,8 +28,29 @@ class PlaybookExecution(ContractModel):
     playbook_id: str
     playbook_version: str
     incident_id: str
+    device_ids: list[str]
+    """
+    来自关联事件，供设备状态计算（HYD-UIX-004 §5.2）
+    """
     target: str
-    state: Literal["pending", "executing", "verifying", "contained", "failed", "rolled_back"]
+    state: Literal[
+        "pending",
+        "executing",
+        "verifying",
+        "contained",
+        "failed",
+        "rolled_back",
+        "notify_only",
+        "skipped",
+        "expired",
+    ]
+    """
+    pending 为等待人工确认；notify_only 为部署模式不支持执行、只通知（FR-1001）；skipped 为白名单等原因不处置（FR-403）；expired 为 30 分钟内未确认（D-073）
+    """
+    reason: str | None
+    """
+    失败、跳过、只通知、过期的原因，供详情面板说明（FR-403、FR-406）
+    """
     ttl_s: int = Field(..., ge=1, le=86400)
     """
     C-BE-05
