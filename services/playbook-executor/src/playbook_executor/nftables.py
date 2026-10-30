@@ -9,13 +9,13 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
 
-from playbook_executor.action import ActionContext, Result
+from playbook_executor.action import ActionContext, ActionError, Result
 from privileged_helper.protocol import Reply, command, encode
 
 TIMEOUT_S = 5.0  # 每条指令的往返上限（CD-04）
 
 
-class HelperError(RuntimeError):
+class HelperError(ActionError):
     pass
 
 
