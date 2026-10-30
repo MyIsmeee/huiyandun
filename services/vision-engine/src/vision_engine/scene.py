@@ -18,7 +18,7 @@ import onnxruntime as ort
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from vision_engine.geometry import GroundMapping
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"  # 1.1：家具细分为桌、椅、柜、沙发、床，立面增加黑板（TK-122）
 INPUT = 512  # 模型输入 512×512，输出 64×64 格
 GRID = 64
 MEAN = np.array([0.485, 0.456, 0.406]) * 255  # ImageNet 归一化，与上游评测一致
@@ -53,9 +53,14 @@ ADE20K = {
     "building": [1, 25, 48, 79, 84],  # building、house、skyscraper、hovel、tower
     "fence": [32],
     "railing": [38, 95],  # railing、bannister
-    # bed、cabinet、table、chair、sofa、shelf、armchair、seat、desk、wardrobe、chest of drawers、
-    # counter、bookcase、coffee table、stool
-    "furniture": [7, 10, 15, 19, 23, 24, 30, 31, 33, 35, 44, 45, 62, 64, 110],
+    # 黑板：ADE20K 150 类无此类别，教室黑板多识别为 bulletin board，投影幕为 screen（D-059）
+    "board": [130, 144],
+    "table": [15, 33, 64],  # table、desk、coffee table
+    "chair": [19, 30, 31, 75, 110],  # chair、armchair、seat、swivel chair、stool
+    "cabinet": [10, 24, 35, 44, 62],  # cabinet、shelf、wardrobe、chest of drawers、bookcase
+    "sofa": [23],
+    "bed": [7],
+    "furniture": [45],  # counter：以低矮立体块呈现
     # signboard、bench、streetlight、pole、traffic light、ashcan
     "street_furniture": [43, 69, 87, 93, 136, 138],
     "tree": [4, 72],  # tree、palm
@@ -63,9 +68,18 @@ ADE20K = {
 }
 CLASSES = list(ADE20K)  # 格子取值 = 下标 + 1，0 为未识别
 SURFACES = ["road", "sidewalk", "floor", "grass", "earth"]
-WALL_HEIGHT_M = {"wall": 2.8, "building": 6.0, "fence": 1.2, "railing": 1.0}
-OBJECT_HEIGHT_M = 0.8
-OBJECT_DEPTH_M = {"furniture": 0.6, "street_furniture": 0.4}  # 只见正面，向远离摄像头一侧补出底面
+# 黑板取其下方的墙脚线，板高 1.2 m（离地 0.9 m 由大屏绘制）
+WALL_HEIGHT_M = {"wall": 2.8, "building": 6.0, "fence": 1.2, "railing": 1.0, "board": 1.2}
+# 物体只见正面，向远离摄像头一侧补出底面：(深, 高) 按类别取常见尺寸
+OBJECT_SIZE_M = {
+    "table": (0.6, 0.75),
+    "chair": (0.5, 0.9),
+    "cabinet": (0.5, 1.2),  # 台下柜与储物柜的折中
+    "sofa": (0.9, 0.85),
+    "bed": (1.5, 0.6),
+    "furniture": (0.6, 0.8),
+    "street_furniture": (0.4, 0.8),
+}
 TREE_HEIGHT_M = {"tree": 5.0, "plant": 1.0}
 
 LUT = np.zeros(150, np.uint8)
@@ -152,11 +166,15 @@ class ScenePerception:
         walls = [
             {"class": name, "line": _round(line), "height_m": height_m}
             for name, height_m in WALL_HEIGHT_M.items()
-            for edge in self._bottom_edges(labels == label(name))
+            for edge in (
+                self._board_edges(labels)
+                if name == "board"
+                else self._bottom_edges(labels == label(name))
+            )
             if len(line := _simplify(edge, closed=False)) >= 2
             and np.linalg.norm(np.diff(line, axis=0), axis=1).sum() >= MIN_LENGTH_M
         ]
-        for name, depth in OBJECT_DEPTH_M.items():
+        for name, (depth, _) in OBJECT_SIZE_M.items():
             for edge in self._bottom_edges(labels == label(name)):
                 away = edge - self._camera
                 back = edge + depth * away / np.linalg.norm(away, axis=1, keepdims=True)
@@ -224,6 +242,23 @@ class ScenePerception:
             if len(segment) >= 2:
                 yield np.array(segment)
 
+    def _board_edges(self, labels: np.ndarray) -> Iterator[np.ndarray]:
+        """各块黑板所在各列：自黑板底边向下越过墙与未识别的格（如板槽），遇其他类别即止，
+        取其中最低的墙或黑板格，即挂黑板那面墙的墙脚线。"""
+        wall = (labels == label("wall")) | (labels == label("board"))
+        count, boards = cv2.connectedComponents((labels == label("board")).astype(np.uint8))
+        for k in range(1, count):
+            mask = boards == k
+            for column in np.unique(np.nonzero(mask)[1]):
+                top = bottom = np.nonzero(mask[:, column])[0].max()
+                for row in range(top + 1, GRID):
+                    if wall[row, column]:
+                        bottom = row
+                    elif labels[row, column]:
+                        break
+                mask[top : bottom + 1, column] = True
+            yield from self._bottom_edges(mask)
+
     def _bases(self, mask: np.ndarray) -> Iterator[tuple[float, float]]:
         """各连通区域最低一行的中点（树干底部）。"""
         count, components = cv2.connectedComponents(mask.astype(np.uint8))
@@ -280,7 +315,7 @@ class ScenePerception:
             return []
         item: dict[str, Any] = {"class": name, "polygon": _round(polygon)}
         if kind == "objects":
-            item["height_m"] = OBJECT_HEIGHT_M
+            item["height_m"] = OBJECT_SIZE_M[name][1]
         return [(area, kind, item)]
 
 

@@ -23,12 +23,12 @@
         "type": "object",
         "required": ["class", "line", "height_m"],
         "properties": {
-          "class": { "enum": ["wall", "building", "fence", "railing"] },
+          "class": { "enum": ["wall", "building", "fence", "railing", "board"] },
           "line": { "$ref": "#/$defs/Line" },
           "height_m": { "type": "number", "exclusiveMinimum": 0 }
         }
       },
-      "description": "立面：沿墙脚线挤出，高度按类别取默认值"
+      "description": "立面：沿墙脚线挤出，高度按类别取默认值。board 为黑板（含投影幕、公告板），line 为其下方的墙脚线，板面离地 0.9 m、高 height_m"
     },
     "objects": {
       "type": "array",
@@ -36,12 +36,12 @@
         "type": "object",
         "required": ["class", "polygon", "height_m"],
         "properties": {
-          "class": { "enum": ["furniture", "street_furniture"] },
+          "class": { "enum": ["table", "chair", "cabinet", "sofa", "bed", "furniture", "street_furniture"] },
           "polygon": { "$ref": "#/$defs/Polygon" },
           "height_m": { "type": "number", "exclusiveMinimum": 0 }
         }
       },
-      "description": "物体：底面轮廓挤出的低矮立体块"
+      "description": "物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块"
     },
     "trees": {
       "type": "array",

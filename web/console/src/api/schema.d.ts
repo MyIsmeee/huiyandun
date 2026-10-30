@@ -785,17 +785,17 @@ export interface components {
                 class: "road" | "sidewalk" | "floor" | "grass" | "earth";
                 polygon: components["schemas"]["Polygon"];
             }[];
-            /** @description 立面：沿墙脚线挤出，高度按类别取默认值 */
+            /** @description 立面：沿墙脚线挤出，高度按类别取默认值。board 为黑板（含投影幕、公告板），line 为其下方的墙脚线，板面离地 0.9 m、高 height_m */
             walls: {
                 /** @enum {unknown} */
-                class: "wall" | "building" | "fence" | "railing";
+                class: "wall" | "building" | "fence" | "railing" | "board";
                 line: components["schemas"]["Line"];
                 height_m: number;
             }[];
-            /** @description 物体：底面轮廓挤出的低矮立体块 */
+            /** @description 物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块 */
             objects: {
                 /** @enum {unknown} */
-                class: "furniture" | "street_furniture";
+                class: "table" | "chair" | "cabinet" | "sofa" | "bed" | "furniture" | "street_furniture";
                 polygon: components["schemas"]["Polygon"];
                 height_m: number;
             }[];

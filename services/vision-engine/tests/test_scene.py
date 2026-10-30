@@ -1,7 +1,9 @@
 """场景感知（TK-118、FR-108）：分割结果归并、演示帧快照、投影、平滑与无效帧。
 
 scenes/*.npz 由 tools/dev/record_scene.py 从 demo/media/src/ 的素材帧录制，只含 64×64 的渲染类别编号；
-映射表或阈值变化后须重新录制。投影以已知单应矩阵检验平面坐标；分割以假会话代替模型。
+映射表或阈值变化后须按下表重新录制（快照名：素材 秒）——fire-1：ebike-fire-1 129；indoor-1：fall-1 2；
+indoor-2：moto-fire-1 3；rural-1：climb-1 1；street-1：crowd-1 10；street-2：fall-2 1；
+classroom-1：classroom-1 20；lab-1：actions-1 0。投影以已知单应矩阵检验平面坐标；分割以假会话代替模型。
 """
 
 import asyncio
@@ -81,12 +83,16 @@ def share(labels: np.ndarray, *names: str) -> float:
         ("street-1", {("road",): 0.3, ("sidewalk",): 0.2, ("building",): 0.1}),
         # 路口与斑马线：路面与建筑
         ("street-2", {("road",): 0.3, ("building",): 0.15}),
-        # 客厅：地面、墙、家具
-        ("indoor-1", {("floor",): 0.1, ("wall",): 0.4, ("furniture",): 0.03}),
+        # 客厅：地面、墙、茶几（桌）与塑料椅
+        ("indoor-1", {("floor",): 0.1, ("wall",): 0.4, ("table",): 0.03, ("chair",): 0.01}),
         # 车行：地面与墙（摩托车不在场景中，记为未识别）
         ("indoor-2", {("floor",): 0.15, ("wall",): 0.15}),
         # 乡村路：路面多被识别为泥地，栏杆与树检出
         ("rural-1", {("road", "earth"): 0.2, ("railing", "fence"): 0.1, ("tree",): 0.03}),
+        # 空教室：课桌逐张检出，后墙黑板识别为公告板（D-059）
+        ("classroom-1", {("floor",): 0.15, ("wall",): 0.25, ("table",): 0.1, ("board",): 0.02}),
+        # 实验室：实验台、椅、台下柜与投影幕（实验台另有部分被识别为床，D-059）
+        ("lab-1", {("table",): 0.02, ("chair",): 0.005, ("cabinet",): 0.02, ("board",): 0.05}),
     ],
 )
 def test_demo_frame_classes(name: str, expected: dict[tuple[str, ...], float]) -> None:
@@ -120,6 +126,20 @@ def test_street_projects_road_sidewalk_and_building() -> None:
     assert "building" in {w["class"] for w in scene["walls"]}
     points = [p for s in scene["surfaces"] for p in s["polygon"]]
     assert max(np.hypot(*p) for p in points) <= 30.0 + 0.2
+
+
+def test_classroom_projects_tables_and_board() -> None:
+    """斜视的教室画面：课桌为物体，黑板为立面中的 board。"""
+    labels, (h, w) = snapshot("classroom-1")
+    oblique = GroundMapping.fit(
+        [[0, h, -3, 2], [w, h, 3, 2], [w * 0.25, h * 0.2, -4, 12], [w * 0.75, h * 0.2, 4, 12]]
+    )
+    pose = {"x": 0.0, "y": 0.0, "range_m": 30.0}
+
+    scene = perception(pose, oblique).project(labels, np.full((h, w, 3), 100, np.uint8))
+
+    assert "table" in {o["class"] for o in scene["objects"]}
+    assert "board" in {w["class"] for w in scene["walls"]}
 
 
 # --- 投影 ---
@@ -192,6 +212,64 @@ def test_object_footprint_extends_away_from_camera() -> None:
     assert item["height_m"] == 0.8
     assert polygon[:, 1].max() == pytest.approx(3.0)
     assert polygon[:, 1].min() == pytest.approx(2.4, abs=0.02)
+
+
+@pytest.mark.parametrize(
+    ("name", "depth", "height"),
+    [
+        ("table", 0.6, 0.75),
+        ("chair", 0.5, 0.9),
+        ("cabinet", 0.5, 1.2),
+        ("sofa", 0.9, 0.85),
+        ("bed", 1.5, 0.6),
+    ],
+)
+def test_furniture_classes_have_own_depth_and_height(
+    name: str, depth: float, height: float
+) -> None:
+    """桌、椅、柜、沙发、床分别输出，底面深度与高度按类别取常见尺寸（D-059）。"""
+    labels = grid(**{name: [(slice(20, 30), slice(30, 40))]})
+
+    (item,) = perception().project(labels, blank())["objects"]
+
+    polygon = np.array(item["polygon"])
+    assert (item["class"], item["height_m"]) == (name, height)
+    assert polygon[:, 1].max() - polygon[:, 1].min() == pytest.approx(depth, abs=0.02)
+
+
+def test_board_sits_on_wall_foot_below() -> None:
+    """黑板挂在墙上：取其所在各列的墙脚线，墙本身照常输出（D-059）。"""
+    labels = grid(wall=[(slice(0, 20), slice(5, 41))], floor=[(slice(20, GRID), slice(0, GRID))])
+    labels[2:9, 15:30] = label("board")
+
+    walls = perception().project(labels, blank())["walls"]
+
+    assert {"class": "wall", "line": [[0.55, 2.0], [4.05, 2.0]], "height_m": 2.8} in walls
+    assert {"class": "board", "line": [[1.55, 2.0], [2.95, 2.0]], "height_m": 1.2} in walls
+
+
+def test_board_reaches_wall_foot_across_unrecognized_gap() -> None:
+    """黑板与下方的墙之间隔着未识别的格（如板槽）仍取墙脚线；遇到其他类别即止。"""
+    labels = grid(wall=[(slice(10, 20), slice(5, 41))], floor=[(slice(20, GRID), slice(0, GRID))])
+    labels[2:8, 15:30] = label("board")
+    labels[2:8, 45:55] = label("board")  # 下方直接是地面：取黑板自身的底边
+
+    lines = [
+        w["line"] for w in perception().project(labels, blank())["walls"] if w["class"] == "board"
+    ]
+
+    assert sorted(lines) == [[[1.55, 2.0], [2.95, 2.0]], [[4.55, 0.8], [5.45, 0.8]]]
+
+
+def test_board_stops_at_furniture_in_front_of_wall() -> None:
+    """黑板下方的墙被桌子挡住：取桌子以上最低的墙格，不越过桌子取更下方的墙。"""
+    labels = grid(wall=[(slice(8, 20), slice(5, 41))], floor=[(slice(20, GRID), slice(0, GRID))])
+    labels[2:8, 15:30] = label("board")
+    labels[12:14, 10:35] = label("table")
+
+    (board,) = [w for w in perception().project(labels, blank())["walls"] if w["class"] == "board"]
+
+    assert board["line"] == [[1.55, 1.2], [2.95, 1.2]]  # 第 11 行格底边
 
 
 def test_tree_at_bottom_center() -> None:

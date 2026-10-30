@@ -658,13 +658,15 @@ class Surface(ContractModel):
 
 
 class Wall1(ContractModel):
-    class_: Literal["wall", "building", "fence", "railing"] = Field(..., alias="class")
+    class_: Literal["wall", "building", "fence", "railing", "board"] = Field(..., alias="class")
     line: Line
     height_m: float = Field(..., gt=0.0)
 
 
 class Object(ContractModel):
-    class_: Literal["furniture", "street_furniture"] = Field(..., alias="class")
+    class_: Literal["table", "chair", "cabinet", "sofa", "bed", "furniture", "street_furniture"] = (
+        Field(..., alias="class")
+    )
     polygon: Polygon
     height_m: float = Field(..., gt=0.0)
 
@@ -686,11 +688,11 @@ class SceneFrame(ContractModel):
     """
     walls: list[Wall1]
     """
-    立面：沿墙脚线挤出，高度按类别取默认值
+    立面：沿墙脚线挤出，高度按类别取默认值。board 为黑板（含投影幕、公告板），line 为其下方的墙脚线，板面离地 0.9 m、高 height_m
     """
     objects: list[Object]
     """
-    物体：底面轮廓挤出的低矮立体块
+    物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块
     """
     trees: list[Tree]
     """
