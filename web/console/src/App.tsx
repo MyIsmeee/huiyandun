@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, type Site } from "./lib/api";
+import { useSession } from "./store/session";
 import { LoginPage } from "./panels/LoginPage/LoginPage";
 import { Shell } from "./panels/Shell/Shell";
 
@@ -12,7 +13,14 @@ export function App() {
   const probe = useCallback(
     () =>
       api.getSite().then(
-        (site) => setGate({ kind: "ready", site }),
+        (site) => {
+          setGate({ kind: "ready", site });
+          // 角色只决定渲染哪些操作；查询失败时按未知处理，不渲染需要权限的操作（C-FE-07）
+          api.session().then(
+            (s) => useSession.setState({ role: s.role }),
+            () => useSession.setState({ role: null }),
+          );
+        },
         (e: unknown) =>
           setGate({ kind: e instanceof ApiError && e.status === 401 ? "login" : "unreachable" }),
       ),
