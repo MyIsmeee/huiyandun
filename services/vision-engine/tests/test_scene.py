@@ -406,8 +406,11 @@ def test_scene_published_once_per_second_for_new_frames(new: bool, published: in
     camera = perception(segmenter=SequenceSegmenter(*[road] * 5))
     bus = SceneBus()
 
-    run = run_scene(camera, cast(FrameReader, Reader(new)), cast(Bus, bus))
+    beats = []
+
+    run = run_scene(camera, cast(FrameReader, Reader(new)), cast(Bus, bus), lambda: beats.append(1))
     with pytest.raises(TimeoutError):
         asyncio.run(asyncio.wait_for(run, 2.5))
 
     assert len(bus.events) == published
+    assert len(beats) == 2  # 断流时循环照常完成周期，不算停滞（#79）
