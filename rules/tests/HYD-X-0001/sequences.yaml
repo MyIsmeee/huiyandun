@@ -1,0 +1,61 @@
+# 关联规则样本（C-SEC-01）：按列表顺序送入引擎（即到达顺序），t 为事件发生时刻（秒）
+# 未写的字段由测试补默认值：告警为 enforce、rule 来源的 auth_bruteforce，画面事件为 rule 来源的 freeze
+cases:
+  - name: 爆破后画面冻结
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 120, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+    incidents: [{ requires_confirmation: false }]
+
+  - name: 行为模型告警后画面重放，含模型证据须确认
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: behavior_anomaly, source: model }
+      - { t: 60, subject: hyd.vision.integrity.v1, camera_id: cam-02, type: replay, source: model }
+    incidents: [{ requires_confirmation: true }]
+
+  - name: 先到达画面事件、后到达更早发生的告警，仍按发生先后命中
+    events:
+      - { t: 100, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+      - { t: 50, subject: hyd.security.alert.v1, device_id: cam-02 }
+    incidents: [{ requires_confirmation: false }]
+
+  - name: 画面冻结发生在爆破之前
+    events:
+      - { t: 0, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+      - { t: 30, subject: hyd.security.alert.v1, device_id: cam-02 }
+    incidents: []
+
+  - name: 超出 300 s 窗口
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 301, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+    incidents: []
+
+  - name: 不同设备
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 10, subject: hyd.vision.integrity.v1, camera_id: cam-01 }
+    incidents: []
+
+  - name: monitor 告警不参与关联
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, mode: monitor }
+      - { t: 10, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+    incidents: []
+
+  - name: 不相关的画面事件类型
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 10, subject: hyd.vision.integrity.v1, camera_id: cam-02, type: occlusion, source: model }
+    incidents: []
+
+  - name: 攻击持续时不重复生成，停止 5 分钟后再次出现才算新事件
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 10, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+      - { t: 200, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 250, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+      - { t: 520, subject: hyd.security.alert.v1, device_id: cam-02 }  # 距上次命中 270 s：仍在顺延的去重期内
+      - { t: 900, subject: hyd.security.alert.v1, device_id: cam-02 }  # 停止 380 s 后再次出现
+      - { t: 910, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+    incidents: [{ requires_confirmation: false }, { requires_confirmation: false }]
