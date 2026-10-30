@@ -95,6 +95,7 @@ services:
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro  # ATT&CK 精简查表（D-070）
     depends_on: { nats: { condition: service_healthy } }
     networks: [core-net]
+    restart: unless-stopped  # 进程退出后自动拉起：告警归一化与关联不因一次错误停止
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]

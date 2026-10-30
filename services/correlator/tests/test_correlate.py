@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import nats
 import pytest
@@ -106,3 +107,60 @@ def test_missing_vision_stream_retried_until_created(
         incident = asyncio.run(scenario())
     assert incident.rule_id == "HYD-X-0001"
     assert any(r.getMessage() == "correlator.stream_missing" for r in caplog.records)
+
+
+class FakeBus:
+    """记录调用；js_publish 前 failures 次超时，js_subscribe 第一次超时。"""
+
+    def __init__(self, failures: int = 0) -> None:
+        self.failures = failures
+        self.published: list[CorrelatorIncidentV1] = []
+        self.subscriptions: list[tuple[str, datetime]] = []
+
+    async def js_publish(self, subject: str, event: CorrelatorIncidentV1) -> None:
+        if self.failures:
+            self.failures -= 1
+            raise TimeoutError
+        self.published.append(event)
+
+    async def js_subscribe(
+        self, subject: str, model: object, handler: object, since: datetime
+    ) -> None:
+        self.subscriptions.append((subject, since))
+        if len(self.subscriptions) == 1:
+            raise TimeoutError
+
+
+def test_incident_publish_retried_until_success(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """发布失败不丢弃：丢弃后该设备 5 分钟内不再生成，这次攻击就不会触发处置。"""
+    monkeypatch.setattr(service, "RETRY_MIN_S", 0.01)
+    engine = Engine(RULES, ATTACK)
+    (incident,) = engine.feed(SUBJECT, alert(0)) + engine.feed(INTEGRITY, integrity(10))
+    bus = FakeBus(failures=4)
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(service.publish_incident(cast(Bus, bus), incident))
+
+    assert bus.published == [incident]
+    failed = [r for r in caplog.records if r.getMessage() == "correlator.incident_publish_failed"]
+    assert len(failed) == 4
+
+
+def test_subscribe_failure_retried_and_restore_covers_longest_window(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """建立订阅失败时重试，不让关联部分的错误连累归一化；重启恢复的范围不短于最长规则窗口。"""
+    monkeypatch.setattr(service, "RESUBSCRIBE_S", 0.01)
+    bus = FakeBus()
+    window = timedelta(minutes=10)
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(correlate(Engine(RULES, ATTACK), cast(Bus, bus), window))
+
+    subjects = [subject for subject, _ in bus.subscriptions]
+    assert subjects[:2] == [INCIDENT_SUBJECT, INCIDENT_SUBJECT]  # 第一次超时后重试
+    restored_since = bus.subscriptions[1][1]
+    assert datetime.now(UTC) - restored_since >= window
+    assert any(r.getMessage() == "correlator.subscribe_failed" for r in caplog.records)

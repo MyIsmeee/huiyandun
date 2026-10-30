@@ -39,7 +39,8 @@ INCIDENT_SUBJECT = "hyd.correlator.incident.v1"
 INCIDENT_STREAM = "HYD_INCIDENT"
 INCIDENT_MAX_AGE_S = 365 * 86400
 RESUBSCRIBE_S = 5.0  # 视觉事件的流由 vision-engine 创建：尚未创建时按此间隔重试订阅
-PUBLISH_ATTEMPTS = 3
+# 关联事件发布失败时一直重试，间隔逐次加倍至上限：丢弃会让这次攻击不触发处置（ID 确定，重复发布由 JetStream 去重）
+RETRY_MIN_S, RETRY_MAX_S = 0.5, 10.0
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +94,9 @@ async def run(tail: EveTail, devices: dict[Ip, str], bus: Bus, config: Correlato
 
 
 async def publish_incident(bus: Bus, incident: CorrelatorIncidentV1) -> None:
-    for attempt in range(1, PUBLISH_ATTEMPTS + 1):
+    delay, attempt = RETRY_MIN_S, 0
+    while True:
+        attempt += 1
         try:
             await bus.js_publish(INCIDENT_SUBJECT, incident)
         except (nats.errors.Error, TimeoutError) as e:
@@ -101,7 +104,8 @@ async def publish_incident(bus: Bus, incident: CorrelatorIncidentV1) -> None:
                 "correlator.incident_publish_failed",
                 extra={"incident_id": incident.id, "attempt": attempt, "error": repr(e)},
             )
-            await asyncio.sleep(1)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, RETRY_MAX_S)
             continue
         log.info(
             "correlator.incident_published",
@@ -113,20 +117,22 @@ async def publish_incident(bus: Bus, incident: CorrelatorIncidentV1) -> None:
             },
         )
         return
-    log.error("correlator.incident_lost", extra={"incident_id": incident.id})
 
 
 async def follow[T: Event](
     bus: Bus, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]], since: datetime
 ) -> None:
-    """订阅并重放 since 之后的事件；流尚未创建（如未启动 vision-engine）时记录并重试。"""
+    """订阅并重放 since 之后的事件；流尚未创建（如未启动 vision-engine）或建立订阅失败时记录并重试，
+    不让关联部分的错误连累同一进程里的告警归一化。"""
     while True:
         try:
             await bus.js_subscribe(subject, model, handler, since)
             return
         except nats.js.errors.NotFoundError:
             log.warning("correlator.stream_missing", extra={"subject": subject})
-            await asyncio.sleep(RESUBSCRIBE_S)
+        except (nats.errors.Error, TimeoutError) as e:
+            log.warning("correlator.subscribe_failed", extra={"subject": subject, "error": repr(e)})
+        await asyncio.sleep(RESUBSCRIBE_S)
 
 
 async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
@@ -136,7 +142,10 @@ async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
     async def restore(incident: CorrelatorIncidentV1) -> None:
         engine.restore(incident)
 
-    await bus.js_subscribe(INCIDENT_SUBJECT, CorrelatorIncidentV1, restore, started - SUPPRESS)
+    # 窗口内的事件会被重放，近期关联事件须覆盖同样的时长才能全部去重
+    await follow(
+        bus, INCIDENT_SUBJECT, CorrelatorIncidentV1, restore, started - max(SUPPRESS, window)
+    )
 
     async def on_event(subject: str, event: Event) -> None:
         for incident in engine.feed(subject, event):

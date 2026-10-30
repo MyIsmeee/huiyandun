@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 # 导致断连的错误：nats-py 先报告错误、随后才切换为重连状态
 # JetStream 错误码：同名流已存在且配置不同
 STREAM_NAME_IN_USE = 10058
+# js_subscribe 等待历史消息重放完的上限；超时只记警告，订阅照常有效
+REPLAY_TIMEOUT_S = 30.0
 CONNECTION_LOST = (errors.UnexpectedEOF, errors.StaleConnectionError, OSError)
 
 
@@ -112,7 +114,8 @@ class Bus:
         since: datetime,
     ) -> None:
         """有序消费者：从 since 起按流中顺序投递，之后持续接收新消息。返回时 since 之后的历史消息
-        已全部交给 handler。流须已由生产者创建，否则按 JetStream 的 NotFoundError 报错。"""
+        已全部交给 handler（超过 REPLAY_TIMEOUT_S 仍未重放完时记警告后返回，订阅照常有效）。
+        流须已由生产者创建，否则按 JetStream 的 NotFoundError 报错，此时订阅未建立，可重试。"""
         caught_up = asyncio.Event()
         deliver = _on_message(model, handler)
 
@@ -131,7 +134,10 @@ class Bus:
         info = await sub.consumer_info()
         if info.num_pending == 0 and info.delivered.consumer_seq == 0:
             caught_up.set()  # since 之后没有该主题的历史消息
-        await asyncio.wait_for(caught_up.wait(), self._timeout_s)
+        try:
+            await asyncio.wait_for(caught_up.wait(), REPLAY_TIMEOUT_S)
+        except TimeoutError:
+            log.warning("bus.replay_incomplete", extra={"subject": subject})
 
     async def close(self) -> None:
         if self._client.is_connected:
