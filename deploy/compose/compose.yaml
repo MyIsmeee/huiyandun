@@ -108,6 +108,29 @@ services:
       start_period: 10s
       start_interval: 2s
 
+  # 特权动作（C-SEC-06、D-074）：宿主网络加 NET_ADMIN 操作内核防火墙，封禁作用于宿主转发路径；
+  # 不接入任何容器网络，只经与 playbook-executor 共享的卷中的套接字接受签名指令（DP-05 例外）
+  privileged-helper:
+    image: huiyandun/privileged-helper:local
+    build: { context: ../.., dockerfile: services/privileged-helper/Dockerfile }
+    profiles: [core]
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    secrets: [helper_public_key]
+    volumes:
+      - helper-run:/run/hyd-helper
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os, sys; sys.exit(not os.path.exists('/run/hyd-helper/helper.sock'))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
   # 唯一对外入口（C-OPS-05）：前端页面与 /api、/ws 同源反向代理，配置见 Caddyfile
   web-console:
     image: huiyandun/web-console:local
@@ -331,6 +354,7 @@ volumes:
   suricata-cache:
   correlator-state:
   zeek-logs:
+  helper-run:  # privileged-helper 的套接字，只与 playbook-executor 共享
 
 # 口令由 make demo-up 首次运行时生成，不入库（G-14）
 secrets:
@@ -340,3 +364,6 @@ secrets:
     file: .secrets/db_app_password
   db_audit_password:
     file: .secrets/db_audit_password
+  # playbook-executor 签名密钥对应的公钥（D-074）
+  helper_public_key:
+    file: .secrets/helper_public_key
