@@ -1,0 +1,20 @@
+[project]
+name = "privileged-helper"
+version = "0.0.0"
+description = "特权动作：只接受签名指令，以固定模板操作 nftables（HYD-ARCH-001 C-SEC-06）"
+requires-python = "==3.12.*"
+dependencies = [
+    "cryptography>=50,<51",  # 与 api-server 一致；Ed25519 签名校验
+    "py-common",
+    "pydantic>=2.14,<3",
+]
+
+[project.scripts]
+hyd-helper = "privileged_helper.server:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+py-common = { workspace = true }
