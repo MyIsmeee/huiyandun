@@ -20,7 +20,7 @@
   - 已标定摄像头的每条已确认轨迹每帧发布一条 `hyd.vision.track.v1`（核心 NATS，不持久化），含类别、朝向、速度、画面归一化框与骨骼（车辆无骨骼）；脚点取框底边中点；未标定摄像头照常检测跟踪，但不发布坐标（FR-902）
   - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`（`stream_lost` 事件由 TK-114 发布）
   - 各路隔离（#79）：单路检测或场景循环抛出异常时记录 `vision.loop_failed`，2 s 后只重试该路；读帧异常记录 `vision.reader_failed` 后按断流重连
-  - 健康检查：按路判断，全部检测与场景循环在 10 s 内完成过周期、且全部读帧线程存活时，每秒更新 `HYD_HEARTBEAT_FILE`；任一路停滞即不再更新，10 s 后为 unhealthy。进程退出时由 Compose `restart: unless-stopped` 拉起
+  - 健康检查：按路判断，检测与场景循环每完成一个周期、读帧线程每次建连与每读到一帧登记一次；全部在 10 s 内有登记时每秒更新 `HYD_HEARTBEAT_FILE`。任一路停滞（卡住或线程意外退出）即记录 `vision.stalled` 并退出进程，由 Compose `restart: unless-stopped` 拉起
 - 场景感知（`scene.py`，FR-108）：已标定摄像头每秒 1 次取最新帧，EfficientViT-Seg L1 ADE20K（REUSE-25，`HYD_SCENE_MODEL_FILE` 未配置时不输出场景）输出 64×64 格，150 类按随代码版本化的映射表归并为渲染类别（地面 road / sidewalk / floor / grass / earth，立面 wall / building / fence / railing / board（黑板），物体 table / chair / cabinet / sofa / bed / furniture / street_furniture，植被 tree / plant）；人员与车辆不在场景中
   - 不输出：最大类别概率低于 0.5 的格，灰度均值低于 40 或高于 250 的格（暗光、过曝、画面黑边）
   - 平滑：每格取近 3 次的多数类别，连续 2 次识别即翻转

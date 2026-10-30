@@ -155,10 +155,10 @@ services:
       nats: { condition: service_healthy }
       go2rtc: { condition: service_healthy }
     networks: [core-net, demo-net]
-    # 进程退出（如未捕获的异常）后自动拉起；单路异常在进程内重试，不会退出（#79）
+    # 进程退出后自动拉起：单路异常在进程内重试；任一路停滞时进程主动退出（#79）
     restart: unless-stopped
     healthcheck:
-      # 全部检测与场景循环、读帧线程都在 10 s 内有进展时才更新心跳文件；任一路停滞即 unhealthy（#79）
+      # 全部检测与场景循环、读帧线程都在 10 s 内有进展时每秒更新心跳文件（#79）
       test: ["CMD", "python3", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/hyd-vision-alive') > 10)"]
       interval: 10s
       timeout: 5s

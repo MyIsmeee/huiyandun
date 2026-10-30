@@ -4,11 +4,12 @@ hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
 
-各路相互隔离（#79）：单路循环异常只重试该路；健康检查按路判断，任一路停滞即 unhealthy。
+各路相互隔离（#79）：单路循环异常只重试该路；任一路循环或读帧线程停滞时进程退出，由 Compose 拉起。
 """
 
 import asyncio
 import logging
+import os
 import sys
 import threading
 import time
@@ -64,10 +65,11 @@ log = logging.getLogger(__name__)
 
 
 class FrameReader(threading.Thread):
-    def __init__(self, camera_id: str, url: str) -> None:
+    def __init__(self, camera_id: str, url: str, beat: Callable[[], None]) -> None:
         super().__init__(name=f"reader-{camera_id}", daemon=True)
         self._camera_id = camera_id
         self._url = url
+        self._beat = beat  # 每次建连与每读到一帧登记一次，卡在读帧调用中即停滞（#79）
         self._lock = threading.Lock()
         self._latest: tuple[int, np.ndarray] | None = None
 
@@ -79,6 +81,7 @@ class FrameReader(threading.Thread):
     def run(self) -> None:
         seq, lost = 0, False
         while True:
+            self._beat()
             try:
                 capture = cv2.VideoCapture(
                     self._url,
@@ -90,6 +93,8 @@ class FrameReader(threading.Thread):
                         TIMEOUT_MS,
                     ],
                 )
+                # 建连与读帧各有 5 s 超时：建连后再登记一次，断流重连的整个周期不超过 STALL_S
+                self._beat()
                 while True:
                     ok, frame = capture.read()
                     if not ok:
@@ -98,6 +103,7 @@ class FrameReader(threading.Thread):
                         log.info("vision.stream_restored", extra={"camera_id": self._camera_id})
                         lost = False
                     seq += 1
+                    self._beat()
                     with self._lock:
                         self._latest = (seq, frame)
                 capture.release()
@@ -258,30 +264,28 @@ class CameraPipeline:
 
 
 class Health:
-    """按路判断健康（#79）：各循环每完成一个周期登记一次；全部循环在 STALL_S 内有登记、
-    且全部读帧线程存活时才更新心跳文件，任一路停滞即由健康检查判为 unhealthy。"""
+    """按路判断健康（#79）：各循环每完成一个周期、读帧线程每次建连与每读到一帧登记一次。
+    全部在 STALL_S 内有登记时每秒更新心跳文件；任一路停滞（卡住或线程意外退出）即退出进程，
+    由 Compose 的重启策略拉起——卡在推理或读帧调用中的线程无法在进程内恢复。"""
 
     def __init__(self, heartbeat_file: Path) -> None:
         self._file = heartbeat_file
         self._beats: dict[str, float] = {}
-        self._readers: list[threading.Thread] = []
-
-    def watch(self, reader: threading.Thread) -> None:
-        self._readers.append(reader)
 
     def beat(self, name: str) -> None:
         self._beats[name] = time.monotonic()
 
-    def healthy(self) -> bool:
+    def stalled(self) -> list[str]:
         now = time.monotonic()
-        return all(now - t <= STALL_S for t in self._beats.values()) and all(
-            r.is_alive() for r in self._readers
-        )
+        return [name for name, t in self._beats.items() if now - t > STALL_S]
 
     async def run(self) -> None:
         while True:
-            if self.healthy():
-                self._file.touch()
+            stalled = self.stalled()
+            if stalled:
+                log.error("vision.stalled", extra={"loops": stalled})
+                os._exit(1)  # 不等待卡住的线程：asyncio.run 退出时会等执行器线程结束
+            self._file.touch()
             await asyncio.sleep(1)
 
 
@@ -373,9 +377,14 @@ async def serve(config: VisionConfig) -> None:
         mapping = GroundMapping.fit(camera["calibration"])
         if mapping is None:
             log.warning("vision.uncalibrated", extra={"camera_id": camera["id"]})
-        reader = FrameReader(camera["id"], f"{config.go2rtc_rtsp}/{camera['stream']}")
+        reader_name = f"{camera['id']}/reader"
+        health.beat(reader_name)
+        reader = FrameReader(
+            camera["id"],
+            f"{config.go2rtc_rtsp}/{camera['stream']}",
+            partial(health.beat, reader_name),
+        )
         reader.start()
-        health.watch(reader)
         if mapping is not None and segmenter is not None:
             perception = ScenePerception(camera["id"], mapping, camera["pose"], segmenter)
             runs.append(

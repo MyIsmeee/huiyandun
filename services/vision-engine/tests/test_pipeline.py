@@ -287,51 +287,65 @@ def test_failed_loop_is_logged_and_retried_without_stopping_others(
     assert failed and failed[0].loop == "cam-01/detect"
 
 
-def test_heartbeat_stops_when_any_loop_stalls(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """#79：心跳按路判断，任一循环超过 STALL_S 未完成周期即不再更新心跳文件。"""
-    monkeypatch.setattr(pipeline_module, "STALL_S", 0.2)
+def test_heartbeat_updated_while_all_loops_progress(tmp_path: Path) -> None:
     health = Health(tmp_path / "alive")
     health.beat("cam-01/detect")
-    health.beat("cam-02/detect")
-    assert health.healthy()
+    health.beat("cam-01/reader")
 
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(health.run(), 0.1))
+
+    assert (tmp_path / "alive").exists()
+
+
+def test_stalled_loop_exits_process(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """#79：任一循环或读帧线程超过 STALL_S 未登记即退出进程，由 Compose 拉起；不更新心跳文件。"""
+    monkeypatch.setattr(pipeline_module, "STALL_S", 0.2)
+
+    def exit_(code: int) -> None:
+        raise SystemExit(code)
+
+    monkeypatch.setattr(pipeline_module.os, "_exit", exit_)
+    health = Health(tmp_path / "alive")
+    health.beat("cam-01/detect")
+    health.beat("cam-01/reader")
     time.sleep(0.3)
     health.beat("cam-01/detect")
 
-    assert not health.healthy()
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exited:
+        asyncio.run(health.run())
 
-
-def test_heartbeat_stops_when_reader_thread_exits(tmp_path: Path) -> None:
-    health = Health(tmp_path / "alive")
-    reader = threading.Thread(target=lambda: None)
-    reader.start()
-    reader.join()
-    health.watch(reader)
-    health.beat("cam-01/detect")
-
-    assert not health.healthy()
+    assert exited.value.code == 1
+    stalled = [r for r in caplog.records if r.getMessage() == "vision.stalled"]
+    assert stalled and stalled[0].loops == ["cam-01/reader"]
+    assert not (tmp_path / "alive").exists()
 
 
 def test_reader_survives_capture_exception(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """#79：读帧异常记录后按断流重连，读帧线程不退出。"""
+    """#79：读帧异常记录后按断流重连，读帧线程不退出；每次建连登记一次健康。"""
     monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
     calls = 0
+    beats = []
+    done = threading.Event()
 
     def capture(*args: object) -> object:
         nonlocal calls
         calls += 1
+        if calls > 2:
+            done.set()
+            threading.Event().wait()  # 之后一直阻塞：测试结束后线程不再连真实地址
         raise pipeline_module.cv2.error("模拟解码器异常")
 
     monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", capture)
-    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01")
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: beats.append(1))
     with caplog.at_level(logging.ERROR):
         reader.start()
-        time.sleep(0.2)
+        assert done.wait(2)
 
     assert reader.is_alive()
-    assert calls >= 2
+    assert len(beats) == 3
     assert any(r.getMessage() == "vision.reader_failed" for r in caplog.records)
