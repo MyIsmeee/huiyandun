@@ -14,6 +14,10 @@ class ActionContext:
     params: dict[str, Any]
 
 
+class ActionError(RuntimeError):
+    """动作执行失败：原因写入执行记录（FR-406）。"""
+
+
 @dataclass(frozen=True)
 class Result:
     passed: bool
