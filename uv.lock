@@ -8,6 +8,7 @@ members = [
     "audit-service",
     "correlator",
     "huiyandun",
+    "playbook-executor",
     "privileged-helper",
     "py-common",
     "py-contracts",
@@ -881,6 +882,31 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/58/e6/d0abbb256b44e6a05748c6942511ff67db8dbb068de0c35b24bf1b395b09/platformdirs-4.13.5.tar.gz", hash = "sha256:05831adf87d392760f4b5c3a0a95579ab5a10b18b9b9bd43680dcb47544788a0", size = 62362, upload-time = "2026-10-19T01:02:11.778Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6c/8a/1d8cb3842909dc193a73835adedf412e32e18f8ffd59f43983949622fe6f/platformdirs-4.13.5-py3-none-any.whl", hash = "sha256:53d3ec4280b815c1e0b02edad7f9ee8fda1ba9c0865dd9c2e6e63849ce82fc1e", size = 32779, upload-time = "2026-10-19T01:02:10.17Z" },
+]
+
+[[package]]
+name = "playbook-executor"
+version = "0.0.0"
+source = { editable = "services/playbook-executor" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "nats-py" },
+    { name = "privileged-helper" },
+    { name = "py-common" },
+    { name = "py-contracts" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=50,<51" },
+    { name = "nats-py", specifier = ">=2.16.0,<2.17" },
+    { name = "privileged-helper", editable = "services/privileged-helper" },
+    { name = "py-common", editable = "libs/py-common" },
+    { name = "py-contracts", editable = "libs/py-contracts" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
 ]
 
 [[package]]

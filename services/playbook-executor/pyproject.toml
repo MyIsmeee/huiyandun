@@ -1,0 +1,26 @@
+[project]
+name = "playbook-executor"
+version = "0.0.0"
+description = "确定性处置执行器：Playbook 编排、TTL、白名单、互斥、回滚（HYD-ARCH-001 §4、C-BE-03～05）"
+requires-python = "==3.12.*"
+dependencies = [
+    "cryptography>=50,<51",  # 与 privileged-helper 一致；签名指令
+    "nats-py>=2.16.0,<2.17",  # 与 py-common 一致；捕获发布失败的异常类型
+    "privileged-helper",  # 只用其指令协议
+    "py-common",
+    "py-contracts",
+    "pydantic>=2.14,<3",
+    "pyyaml>=6.0.3,<7",
+]
+
+[project.scripts]
+hyd-playbook = "playbook_executor.service:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+privileged-helper = { workspace = true }
+py-common = { workspace = true }
+py-contracts = { workspace = true }
