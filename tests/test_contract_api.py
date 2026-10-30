@@ -23,7 +23,7 @@ from py_contracts.api import (
 )
 
 SPEC = yaml.safe_load(
-    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v2.yaml").read_text()
+    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v3.yaml").read_text()
 )
 WRITE_METHODS = {"post", "put", "patch", "delete"}
 

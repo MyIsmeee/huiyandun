@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "codegen": "openapi-typescript ../../contracts/openapi/api-server.v2.yaml -o src/api/schema.d.ts",
-    "codegen:check": "openapi-typescript ../../contracts/openapi/api-server.v2.yaml -o src/api/schema.d.ts --check",
+    "codegen": "openapi-typescript ../../contracts/openapi/api-server.v3.yaml -o src/api/schema.d.ts",
+    "codegen:check": "openapi-typescript ../../contracts/openapi/api-server.v3.yaml -o src/api/schema.d.ts --check",
     "e2e": "playwright test"
   },
   "dependencies": {
