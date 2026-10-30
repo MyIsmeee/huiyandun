@@ -24,11 +24,14 @@ def test_samples_reproducible(tmp_path: Path) -> None:
 
 
 def test_vendor_rulesets_registered() -> None:
-    """C-RU-01：rules/vendor/ 下的快照逐一登记于 deploy/third-party.yaml，哈希一致。"""
+    """C-RU-01：rules/vendor/ 下的快照与 ATT&CK 精简查表逐一登记于 deploy/third-party.yaml，哈希一致。"""
     registry = yaml.safe_load((ROOT / "deploy/third-party.yaml").read_text(encoding="utf-8"))
     registered = {r["file"]: r["sha256"] for r in registry["rulesets"]}
     snapshots = {
         p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (ROOT / "rules/vendor").rglob("*.tar.gz")
+        for p in [
+            *(ROOT / "rules/vendor").rglob("*.tar.gz"),
+            *(ROOT / "rules/attack").glob("*.json"),
+        ]
     }
     assert snapshots == registered

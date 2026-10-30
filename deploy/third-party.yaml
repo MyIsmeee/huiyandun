@@ -106,6 +106,16 @@ rulesets:
     purpose: Suricata 签名规则：扫描、爆破、常见利用（01 §6.1）
     owner: MyIsmeee
 
+  - name: MITRE ATT&CK 精简查表（Enterprise、ICS）
+    version: "20.0"
+    file: rules/attack/techniques.json
+    sha256: d72d4703a5c067a583e9a1e9952b577c5849b8654976066a601556987501fb3a
+    # ATT&CK 使用条款：允许复制与再分发，须保留 MITRE 版权声明与署名（01 REUSE-11）
+    license: LicenseRef-MITRE-ATTACK-Terms-of-Use
+    # 由 tools/dev/attack_table.py 从 MITRE attack-stix-data 仓库 v20.0 的 STIX 数据抽取（D-070）
+    purpose: 技术编号 → 名称、战术：关联事件的战术阶段、值班员查表（HYD-PLAN-007 §1）
+    owner: MyIsmeee
+
 # Python 包自带的二进制库（wheel 内 *.libs/）：随 wheel 分发、进程内动态链接、未经修改（G-08）
 # 版本取自 wheel 内的 SBOM、库的 soname 与版本接口；所属包升级时须重新核对
 bundled:
