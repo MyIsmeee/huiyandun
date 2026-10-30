@@ -7,6 +7,7 @@ import asyncio
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from pydantic import ValidationError
 
 from playbook_executor.action import ActionContext, Result
 from privileged_helper.protocol import Reply, command, encode
@@ -41,7 +42,11 @@ class Helper:
             raw = await asyncio.wait_for(exchange(), TIMEOUT_S)
         except (OSError, TimeoutError) as e:
             raise HelperError(f"privileged-helper 不可达：{e!r}") from e
-        reply = Reply.model_validate_json(raw)
+        try:
+            reply = Reply.model_validate_json(raw)
+        except ValidationError as e:
+            # helper 重启或处理中崩溃时断开连接而不回复：按失败处理，不让目标一直被占用
+            raise HelperError(f"privileged-helper 回复为空或格式错误：{raw[:80]!r}") from e
         if not reply.ok:
             raise HelperError(reply.error or "privileged-helper 拒绝执行")
         return reply

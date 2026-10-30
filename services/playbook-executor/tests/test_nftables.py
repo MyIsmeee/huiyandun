@@ -93,3 +93,24 @@ def test_helper_unreachable_raised(tmp_path: Path) -> None:
     action = BlockIp(Helper(tmp_path / "missing.sock", KEY))
     with pytest.raises(HelperError, match="不可达"):
         asyncio.run(action.execute(CTX))
+
+
+@pytest.mark.parametrize("reply", [b"", b"not json\n", b'{"ok": true, "extra": 1}\n'])
+def test_helper_dropping_or_garbling_reply_is_failure(tmp_path: Path, reply: bytes) -> None:
+    """helper 重启、处理中崩溃时会断开连接而不回复：按动作失败处理，编排据此回滚并释放目标（FR-406）。"""
+    socket = tmp_path / "helper.sock"
+
+    async def drop(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readline()
+        writer.write(reply)
+        writer.close()
+
+    async def main() -> None:
+        server = await asyncio.start_unix_server(drop, path=str(socket))
+        try:
+            await BlockIp(Helper(socket, KEY)).execute(CTX)
+        finally:
+            server.close()
+
+    with pytest.raises(HelperError, match="回复"):
+        asyncio.run(main())
