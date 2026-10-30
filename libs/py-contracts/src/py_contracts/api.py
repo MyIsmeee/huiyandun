@@ -28,6 +28,12 @@ class LoginRequest(ContractModel):
     password: SecretStr
 
 
+class Session(ContractModel):
+    username: str
+    role: Role
+    expires_at: AwareDatetime
+
+
 class LoginResponse(ContractModel):
     role: Role
     expires_at: AwareDatetime
@@ -305,13 +311,17 @@ class WsFrame(ContractModel):
     """
     WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
-    FR-1102）；scene 为 VisionScene（各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；
-    system 为系统消息（如心跳）
+    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
+    （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；scene 为 VisionScene
+    （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；system 为系统消息（如心跳）。
+    连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
+    各自的最新状态），按发生先后排列（D-077）
 
     """
 
-    channel: Literal["tracks", "devices", "alerts", "incidents", "ai", "scene", "system"]
+    channel: Literal[
+        "tracks", "devices", "alerts", "incidents", "executions", "ai", "scene", "system"
+    ]
     data: dict[str, Any]
 
 

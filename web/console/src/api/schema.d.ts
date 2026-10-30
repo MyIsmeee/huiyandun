@@ -36,6 +36,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 当前会话的账户与角色：页面刷新后据此决定渲染哪些操作（C-FE-07） */
+        get: operations["getSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/site": {
         parameters: {
             query?: never;
@@ -389,6 +406,12 @@ export interface components {
             /** Format: password */
             password: string;
         };
+        Session: {
+            username: string;
+            role: components["schemas"]["Role"];
+            /** Format: date-time */
+            expires_at: string;
+        };
         LoginResponse: {
             role: components["schemas"]["Role"];
             /** Format: date-time */
@@ -566,13 +589,15 @@ export interface components {
         /**
          * @description WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
          *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-         *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
-         *     FR-1102）；scene 为 VisionScene（各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；
-         *     system 为系统消息（如心跳）
+         *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
+         *     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；scene 为 VisionScene
+         *     （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；system 为系统消息（如心跳）。
+         *     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
+         *     各自的最新状态），按发生先后排列（D-077）
          */
         WsFrame: {
             /** @enum {unknown} */
-            channel: "tracks" | "devices" | "alerts" | "incidents" | "ai" | "scene" | "system";
+            channel: "tracks" | "devices" | "alerts" | "incidents" | "executions" | "ai" | "scene" | "system";
             data: Record<string, never>;
         };
         AiInvestigation: components["schemas"]["hyd.ai.investigation.v1.schema"];
@@ -1002,6 +1027,27 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    getSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话有效 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     getSite: {
         parameters: {
             query?: never;
@@ -1277,7 +1323,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 回滚后的执行状态 */
+            /** @description 已受理：返回当前执行状态；回滚由 playbook-executor 执行，结果经 WS executions 频道推送 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1290,6 +1336,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description 执行不处于已生效状态，无需回滚 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     exportEvidence: {

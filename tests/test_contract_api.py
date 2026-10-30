@@ -31,6 +31,7 @@ WRITE_METHODS = {"post", "put", "patch", "delete"}
 ENDPOINTS = [
     ("post", "/api/auth/login", None),
     ("post", "/api/auth/logout", "viewer"),
+    ("get", "/api/auth/session", "viewer"),
     ("get", "/api/site", "viewer"),
     ("get", "/api/devices/{id}", "viewer"),
     ("post", "/api/devices/{id}/webrtc", "viewer"),

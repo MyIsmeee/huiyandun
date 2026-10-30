@@ -42,6 +42,18 @@ paths:
         "204": { description: 会话已失效，Cookie 已清除 }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/auth/session:
+    get:
+      operationId: getSession
+      description: 当前会话的账户与角色：页面刷新后据此决定渲染哪些操作（C-FE-07）
+      x-min-role: viewer
+      responses:
+        "200":
+          description: 会话有效
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/site:
     get:
       operationId: getSite
@@ -206,7 +218,7 @@ paths:
         - { $ref: "#/components/parameters/RequestId" }
       responses:
         "200":
-          description: 回滚后的执行状态
+          description: 已受理：返回当前执行状态；回滚由 playbook-executor 执行，结果经 WS executions 频道推送
           content:
             application/json:
               schema: { $ref: "../events/playbook_execution.schema.json" }
@@ -214,6 +226,11 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 执行不处于已生效状态，无需回滚
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/incidents/{id}/evidence/export:
     post:
       operationId: exportEvidence
@@ -451,6 +468,13 @@ components:
       properties:
         username: { type: string }
         password: { type: string, format: password }
+    Session:
+      type: object
+      required: [username, role, expires_at]
+      properties:
+        username: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        expires_at: { type: string, format: date-time }
     LoginResponse:
       type: object
       required: [role, expires_at]
@@ -689,12 +713,14 @@ components:
       description: |
         WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-        alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；ai 为 AiInvestigation（值班员调查流，
-        FR-1102）；scene 为 VisionScene（各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；
-        system 为系统消息（如心跳）
+        alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
+        （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；scene 为 VisionScene
+        （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；system 为系统消息（如心跳）。
+        连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
+        各自的最新状态），按发生先后排列（D-077）
       required: [channel, data]
       properties:
-        channel: { enum: [tracks, devices, alerts, incidents, ai, scene, system] }
+        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, scene, system] }
         data: { type: object }
     AiInvestigation: { $ref: "../events/hyd.ai.investigation.v1.schema.json" }
     Investigation:
