@@ -3,11 +3,13 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import nats
 import nats.js.errors
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 
 from api_server import executions
 from api_server.audit import audit_log
@@ -57,7 +59,7 @@ async def audited(config: ApiConfig) -> list[tuple[str, str, str]]:
 def test_each_state_change_audited_once_across_restart(
     db: tuple[ApiConfig, ApiConfig], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(executions, "RESUBSCRIBE_S", 0.1)
+    monkeypatch.setattr(executions, "RETRY_S", 0.1)
     config = db[1]
     states = [
         execution("executing"),
@@ -97,3 +99,55 @@ def test_each_state_change_audited_once_across_restart(
         ("playbook-executor", "playbook.contained", "172.30.0.100"),
         ("playbook-executor", "playbook.rolled_back", "172.30.0.100"),
     ]
+
+
+def test_database_unreachable_at_start_retried_not_raised(
+    db: tuple[ApiConfig, ApiConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """启动时数据库尚未就绪：一直重试、不抛错（否则后台任务结束，整个进程生命周期都不写处置审计）。"""
+    monkeypatch.setattr(executions, "RETRY_S", 0.05)
+    config = db[1].model_copy(update={"db_host": "db.invalid", "db_timeout_s": 0.5})
+
+    async def scenario() -> bool:
+        bus = await Bus.connect(config.nats_url, name="test", timeout_s=2)
+        engine = create_engine(config)
+        task = asyncio.create_task(executions.follow(bus, engine))
+        await asyncio.sleep(1.5)
+        alive = not task.done()
+        task.cancel()
+        await bus.close()
+        await engine.dispose()
+        return alive
+
+    assert asyncio.run(scenario())
+
+
+def test_failed_write_retried_without_gap(
+    db: tuple[ApiConfig, ApiConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """写审计失败时重试到成功：不能跳过这条，否则审计出现缺口。"""
+    monkeypatch.setattr(executions, "RETRY_S", 0.05)
+    real = executions.record
+    calls = {"n": 0}
+
+    async def flaky(*args: Any, **kwargs: Any) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OperationalError("insert", {}, Exception("connection lost"))
+        await real(*args, **kwargs)
+
+    monkeypatch.setattr(executions, "record", flaky)
+    config = db[1]
+    event = execution("failed", "privileged-helper 不可达")
+
+    async def scenario() -> int:
+        engine = create_engine(config)
+        await executions.audit_execution(engine, event)
+        async with engine.connect() as conn:
+            count = await conn.scalar(
+                select(func.count()).where(audit_log.c.request_id == str(event.event_id))
+            )
+        await engine.dispose()
+        return count or 0
+
+    assert asyncio.run(scenario()) == 1
