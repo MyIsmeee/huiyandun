@@ -6,7 +6,16 @@ export type Device = Schemas["Device"];
 export type Behavior = Schemas["VisionBehavior"];
 type Track = Schemas["VisionTrack"];
 export type SceneFrame = Schemas["VisionScene"];
+export type SecurityAlert = Schemas["SecurityAlert"];
+export type Incident = Schemas["incident.schema"];
+export type Execution = Schemas["playbook_execution.schema"];
+/** 告警列表的单条告警：网络告警或行为事件（D-077） */
+export type Alert = SecurityAlert | Behavior;
 type Frame = Schemas["WsFrame"];
+
+/** 告警列表与关联事件的保留条数，与连接补推的上限一致（D-077） */
+export const MAX_ALERTS = 200;
+export const MAX_INCIDENTS = 50;
 
 /** 轨迹拖尾的固定时间窗（V-A5） */
 export const TRAIL_MS = 10_000;
@@ -44,10 +53,24 @@ interface LiveState {
   behaviors: Record<string, Behavior>;
   /** 每台摄像头最新一帧识别的环境（FR-108） */
   scenes: Record<string, SceneFrame>;
+  /** 单条告警，新的在前，按 event_id 去重（连接补推与实时转发可能重复） */
+  alerts: Alert[];
+  /** 关联事件，新的在前，按 id 去重 */
+  incidents: Incident[];
+  /** 处置执行的最新状态，键为执行 id */
+  executions: Record<string, Execution>;
 }
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
-export const useLive = create<LiveState>()(() => ({ devices: {}, targets: {}, behaviors: {}, scenes: {} }));
+export const useLive = create<LiveState>()(() => ({
+  devices: {},
+  targets: {},
+  behaviors: {},
+  scenes: {},
+  alerts: [],
+  incidents: [],
+  executions: {},
+}));
 
 /** keep 为假时去掉 id 对应的项 */
 const drop = <T,>(map: Record<string, T>, id: string, keep: boolean) =>
@@ -71,9 +94,29 @@ export function receive(frame: Frame, now: number): void {
     useLive.setState((s) => ({ scenes: { ...s.scenes, [scene.camera_id]: scene } }));
   }
   // alerts 频道同时承载行为事件（含 behavior 字段）与网络告警；场景只用行为事件，告警等级随设备推送
+  if (frame.channel === "alerts") {
+    const alert = data as Alert;
+    useLive.setState((s) => ({
+      alerts: s.alerts.some((a) => a.event_id === alert.event_id)
+        ? s.alerts
+        : [alert, ...s.alerts].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, MAX_ALERTS),
+    }));
+  }
   if (frame.channel === "alerts" && "behavior" in (data as object)) {
     const behavior = data as Behavior;
     useLive.setState((s) => ({ behaviors: { ...s.behaviors, [behavior.camera_id]: behavior } }));
+  }
+  if (frame.channel === "incidents") {
+    const incident = data as Incident;
+    useLive.setState((s) => ({
+      incidents: [incident, ...s.incidents.filter((i) => i.id !== incident.id)]
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, MAX_INCIDENTS),
+    }));
+  }
+  if (frame.channel === "executions") {
+    const execution = data as Execution;
+    useLive.setState((s) => ({ executions: { ...s.executions, [execution.id]: execution } }));
   }
 }
 
