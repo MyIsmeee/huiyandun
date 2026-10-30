@@ -108,6 +108,34 @@ services:
       start_period: 10s
       start_interval: 2s
 
+  # 确定性处置（TK-050、G-03）：关联事件 → Playbook → 经 privileged-helper 的签名指令封禁；不 import 任何 LLM 客户端
+  playbook-executor:
+    image: huiyandun/playbook-executor:local
+    build: { context: ../.., dockerfile: services/playbook-executor/Dockerfile }
+    profiles: [core]
+    secrets: [executor_signing_key]
+    volumes:
+      - helper-run:/run/hyd-helper
+      - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 部署模式与核心业务白名单（C-SEC-03）
+      - ../../playbooks:/etc/hyd/playbooks:ro
+    depends_on:
+      nats: { condition: service_healthy }
+      correlator: { condition: service_healthy }  # 关联事件的流由 correlator 创建
+      privileged-helper: { condition: service_healthy }
+    networks: [core-net]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      # 事件循环每秒更新心跳文件；10 s 未更新视为卡死
+      test: ["CMD", "python3", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/hyd-playbook-alive') > 10)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
   # 特权动作（C-SEC-06、D-074）：宿主网络加 NET_ADMIN 操作内核防火墙，封禁作用于宿主转发路径；
   # 不接入任何容器网络，只经与 playbook-executor 共享的卷中的套接字接受签名指令（DP-05 例外）
   privileged-helper:
@@ -364,6 +392,8 @@ secrets:
     file: .secrets/db_app_password
   db_audit_password:
     file: .secrets/db_audit_password
-  # playbook-executor 签名密钥对应的公钥（D-074）
+  # playbook-executor 的签名私钥与 privileged-helper 的公钥（D-074）
+  executor_signing_key:
+    file: .secrets/executor_signing_key
   helper_public_key:
     file: .secrets/helper_public_key
