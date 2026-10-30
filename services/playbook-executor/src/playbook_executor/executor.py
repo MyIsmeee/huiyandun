@@ -96,7 +96,7 @@ class Executor:
             log.warning("playbook.rollback_ignored", extra={"execution_id": request.execution_id})
             return
         self._cancel(execution.id)
-        await self._roll_back(execution, f"由 {request.actor} 手动回滚")  # FR-405
+        await self._manual_roll_back(execution, request.actor)  # FR-405
 
     # ── 重启恢复 ───────────────────────────────────────────
 
@@ -116,8 +116,11 @@ class Executor:
                 self._spawn(execution.id, self._ttl(execution))
             elif execution.state in ("executing", "verifying"):
                 # 执行到一半时退出：撤销可能已写入的封禁，如实记为失败
-                await self._undo(execution)
-                await self._update(execution, state="failed", reason="执行中断：处置执行器重启")
+                failed = await self._undo(execution)
+                reason = "执行中断：处置执行器重启"
+                if failed:
+                    reason += f"；回滚失败：{failed}，封禁可能仍在，将于到期时自动解除"
+                await self._update(execution, state="failed", reason=reason)
 
     # ── 编排 ──────────────────────────────────────────────
 
@@ -152,7 +155,9 @@ class Executor:
         return None
 
     def _steps(self, execution: PlaybookExecutionV1) -> list[tuple[Action, ActionContext]]:
-        playbook = self._playbooks[execution.playbook_id]
+        playbook = self._playbooks.get(execution.playbook_id)
+        if playbook is None:
+            raise ActionError(f"Playbook {execution.playbook_id} 已不存在")
         target = ip_address(execution.target)
         return [
             (
@@ -175,19 +180,21 @@ class Executor:
                 checked = await action.precheck(ctx)
                 if not checked.passed:
                     raise ActionError(checked.reason or "预检未通过")
+                done.append((action, ctx))  # execute 失败（如回复超时）时可能已生效，同样回滚
                 await action.execute(ctx)
-                done.append((action, ctx))
             execution = await self._update(execution, state="verifying")
             for action, ctx in done:
                 verified = await action.verify(ctx)
                 if not verified.passed:
                     raise ActionError(verified.reason or "校验未通过")
         except ActionError as e:
-            # 回滚已执行的部分，设备保持告警态（FR-406）
-            for action, ctx in done:
-                await self._safe_rollback(action, ctx)
+            # 回滚已执行的部分，设备保持告警态（FR-406）；回滚也失败时如实写明（D-075）
+            failed = await self._undo_steps(done)
             self._active.discard(execution.target)
-            await self._update(execution, state="failed", reason=str(e))
+            reason = str(e)
+            if failed:
+                reason += f"；回滚也失败：{failed}，封禁可能仍在，将于到期时自动解除"
+            await self._update(execution, state="failed", reason=reason)
             return
         execution = await self._update(
             execution,
@@ -204,13 +211,23 @@ class Executor:
         """生效后 30 s 内读拦截计数，作为证据写入 verify_result（D-072），不影响已生效的判定。"""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + EVIDENCE_WINDOW_S
+        readable = False
         while loop.time() < deadline:
             await asyncio.sleep(EVIDENCE_INTERVAL_S)
-            packets = sum([await a.intercepted(c) or 0 for a, c in self._steps(execution)])
+            try:
+                packets = sum([await a.intercepted(c) or 0 for a, c in self._steps(execution)])
+            except ActionError as e:
+                log.warning(
+                    "playbook.evidence_failed",
+                    extra={"execution_id": execution.id, "error": str(e)},
+                )
+                continue
+            readable = True
             if packets:
                 await self._annotate(execution.id, f"封禁规则已生效，已拦截 {packets} 个数据包")
                 return
-        await self._annotate(execution.id, "封禁规则已生效，未观察到攻击流量")
+        note = "未观察到攻击流量" if readable else "未能读取拦截计数"
+        await self._annotate(execution.id, f"封禁规则已生效，{note}")
 
     async def _annotate(self, execution_id: str, reason: str) -> None:
         current = self._executions[execution_id]
@@ -220,8 +237,14 @@ class Executor:
     async def _ttl(self, execution: PlaybookExecutionV1) -> None:
         assert execution.expires_at is not None
         await asyncio.sleep(max(0.0, (execution.expires_at - datetime.now(UTC)).total_seconds()))
-        # 内核已按超时删除元素；再解封一次确保一致，并记录回滚（FR-404）
-        await self._roll_back(self._executions[execution.id], "TTL 到期自动解除")
+        # 内核已按超时删除元素；再解封一次确保一致，失败也如实记为已回滚（FR-404、D-075）
+        current = self._executions[execution.id]
+        failed = await self._undo(current)
+        reason = "TTL 到期自动解除"
+        if failed:
+            reason += f"（内核已按超时删除；解封确认失败：{failed}）"
+        self._active.discard(current.target)
+        await self._update(current, state="rolled_back", reason=reason)
 
     async def _expire(self, execution: PlaybookExecutionV1, after: timedelta) -> None:
         await asyncio.sleep(max(0.0, after.total_seconds()))
@@ -229,22 +252,36 @@ class Executor:
         if current.state == "pending":
             await self._update(current, state="expired", reason="30 分钟内未确认，已过期")
 
-    async def _roll_back(self, execution: PlaybookExecutionV1, reason: str) -> None:
-        await self._undo(execution)
+    async def _manual_roll_back(self, execution: PlaybookExecutionV1, actor: str) -> None:
+        failed = await self._undo(execution)
+        if failed:
+            # 攻击源实际仍被封禁：保持已处置并写明，到期照常解除，操作员可再次解封（D-075）
+            current = await self._update(
+                execution, reason=f"解封失败：{failed}，将于到期时自动解除"
+            )
+            self._spawn(current.id, self._ttl(current))
+            return
         self._active.discard(execution.target)
-        await self._update(execution, state="rolled_back", reason=reason)
+        await self._update(execution, state="rolled_back", reason=f"由 {actor} 手动回滚")
 
-    async def _undo(self, execution: PlaybookExecutionV1) -> None:
-        for action, ctx in self._steps(execution):
-            await self._safe_rollback(action, ctx)
+    async def _undo(self, execution: PlaybookExecutionV1) -> str | None:
+        """回滚全部步骤；返回失败原因，全部成功为 None。"""
+        try:
+            steps = self._steps(execution)
+        except ActionError as e:
+            return str(e)
+        return await self._undo_steps(steps)
 
     @staticmethod
-    async def _safe_rollback(action: Action, ctx: ActionContext) -> None:
-        try:
-            await action.rollback(ctx)
-        except ActionError:
-            # 封禁仍会按内核超时到期解除；记录后继续，不掩盖原始结果
-            log.exception("playbook.rollback_failed", extra={"target": str(ctx.target)})
+    async def _undo_steps(steps: list[tuple[Action, ActionContext]]) -> str | None:
+        failed = None
+        for action, ctx in steps:
+            try:
+                await action.rollback(ctx)
+            except ActionError as e:
+                log.exception("playbook.rollback_failed", extra={"target": str(ctx.target)})
+                failed = str(e)
+        return failed
 
     async def _update(self, execution: PlaybookExecutionV1, **changes: Any) -> PlaybookExecutionV1:
         updated = execution.model_copy(

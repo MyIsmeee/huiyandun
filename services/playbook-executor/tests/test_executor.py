@@ -31,9 +31,12 @@ def fast(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FakeAction:
-    def __init__(self, fail: str | None = None, packets: int | None = 60) -> None:
-        self.fail = fail  # execute / verify：在该步失败
+    def __init__(
+        self, fail: str | None = None, packets: int | None = 60, rollback_fails: bool = False
+    ) -> None:
+        self.fail = fail  # execute / verify / intercepted：在该步失败
         self.packets = packets
+        self.rollback_fails = rollback_fails
         self.calls: list[str] = []
 
     async def precheck(self, ctx: ActionContext) -> Result:
@@ -53,8 +56,12 @@ class FakeAction:
 
     async def rollback(self, ctx: ActionContext) -> None:
         self.calls.append("rollback")
+        if self.rollback_fails:
+            raise ActionError("privileged-helper 不可达")
 
     async def intercepted(self, ctx: ActionContext) -> int | None:
+        if self.fail == "intercepted":
+            raise ActionError("privileged-helper 不可达")
         return self.packets
 
 
@@ -234,7 +241,7 @@ def test_same_target_mutually_exclusive() -> None:
 @pytest.mark.parametrize(
     ("fail", "reason", "calls"),
     [
-        ("execute", "privileged-helper 不可达", ["precheck", "execute"]),
+        ("execute", "privileged-helper 不可达", ["precheck", "execute", "rollback"]),
         ("verify", "封禁规则未在内核防火墙中生效", ["precheck", "execute", "verify", "rollback"]),
     ],
 )
@@ -244,6 +251,17 @@ def test_failure_rolls_back_and_reports(fail: str, reason: str, calls: list[str]
     run(h.executor.on_incident(incident()))
     assert h.states()[-1] == "failed" and h.published[-1].reason == reason
     assert h.action.calls == calls
+
+
+def rollback_request(execution_id: str) -> PlaybookRollbackV1:
+    return PlaybookRollbackV1(
+        schema_version="1.0.0",
+        event_id=uuid.uuid4(),
+        ts=datetime.now(UTC),
+        execution_id=execution_id,
+        actor="operator1",
+        request_id="req-2",
+    )
 
 
 def test_manual_rollback_cancels_ttl() -> None:
@@ -309,3 +327,78 @@ def test_resume_after_restart() -> None:
         "exe-2": ("failed", "执行中断：处置执行器重启"),
         "exe-3": ("expired", "30 分钟内未确认，已过期"),
     }
+
+
+def test_rollback_failure_after_verify_failure_reported() -> None:
+    """D-075：校验失败后的回滚也失败时记为失败，写明封禁可能仍在、将于到期时自动解除。"""
+    h = Harness(FakeAction(fail="verify", rollback_fails=True))
+    run(h.executor.on_incident(incident()))
+    assert h.states()[-1] == "failed"
+    assert h.published[-1].reason == (
+        "封禁规则未在内核防火墙中生效；回滚也失败：privileged-helper 不可达，"
+        "封禁可能仍在，将于到期时自动解除"
+    )
+
+
+def test_manual_rollback_failure_keeps_contained() -> None:
+    """D-075：手动解封失败时仍为 contained 并写明原因，到期照常回滚，操作员可再次解封。"""
+    action = FakeAction(rollback_fails=True)
+    h = Harness(action)
+
+    async def scenario() -> None:
+        await h.executor.on_incident(incident())
+        await asyncio.sleep(0.05)
+        await h.executor.on_rollback(rollback_request(h.published[-1].id))
+        assert h.states()[-1] == "contained"
+        assert h.published[-1].reason == "解封失败：privileged-helper 不可达，将于到期时自动解除"
+        action.rollback_fails = False  # 到期时 helper 已恢复
+
+    run(scenario(), settle=1.3)
+    assert h.states()[-1] == "rolled_back" and h.published[-1].reason == "TTL 到期自动解除"
+
+
+def test_ttl_rollback_failure_still_rolled_back() -> None:
+    """D-075：到期时内核已按超时删除封禁，解封调用失败仍记为已回滚并注明。"""
+    h = Harness(FakeAction(rollback_fails=True))
+    run(h.executor.on_incident(incident()), settle=1.3)
+    assert h.states()[-1] == "rolled_back"
+    assert h.published[-1].reason == (
+        "TTL 到期自动解除（内核已按超时删除；解封确认失败：privileged-helper 不可达）"
+    )
+
+
+def test_evidence_survives_helper_errors() -> None:
+    """读拦截计数失败不影响处置，到窗口结束写明未能读取。"""
+    h = Harness(FakeAction(fail="intercepted"), ttl_override_s=5)
+    run(h.executor.on_incident(incident()))
+    assert h.states()[-1] == "contained"
+    assert h.published[-1].verify_result is not None
+    assert h.published[-1].verify_result.reason == "封禁规则已生效，未能读取拦截计数"
+
+
+def test_resume_with_removed_playbook() -> None:
+    """重启前用到的 Playbook 已被删除：不让执行器启动失败，等待确认的过期、执行中的记为失败。"""
+    h = Harness()
+    base = {
+        "schema_version": "1.1.0",
+        "event_id": str(uuid.uuid4()),
+        "ts": datetime.now(UTC).isoformat(),
+        "playbook_id": "removed-playbook",
+        "playbook_version": "1.0.0",
+        "incident_id": "inc-1",
+        "device_ids": ["cam-02"],
+        "target": "172.30.0.100",
+        "reason": None,
+        "ttl_s": 150,
+        "expires_at": None,
+        "verify_result": None,
+    }
+    h.executor.restore(PlaybookExecutionV1.model_validate(base | {"id": "a", "state": "executing"}))
+    h.executor.restore(
+        PlaybookExecutionV1.model_validate(
+            base | {"id": "b", "state": "pending", "ts": "2026-01-01T00:00:00Z"}
+        )
+    )
+    run(h.executor.resume())
+    final = {e.id: e.state for e in h.published}
+    assert final == {"a": "failed", "b": "expired"}
