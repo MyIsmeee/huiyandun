@@ -108,8 +108,8 @@ class Engine:
             key = (rule.id, device)
             quiet = self._quiet_until.get(key)
             if quiet is not None and event.ts < quiet:
-                # 攻击仍在持续：顺延去重期，攻击停止 5 分钟后再次出现才算新事件（D-067）
-                self._quiet_until[key] = event.ts + SUPPRESS
+                # 攻击仍在持续：顺延去重期（只顺延、不提前），攻击停止 5 分钟后再次出现才算新事件（D-067）
+                self._quiet_until[key] = max(quiet, event.ts + SUPPRESS)
                 continue
             hits = self._hits[key]
             hits += [_Hit(i, subject, event) for i in steps]

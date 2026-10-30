@@ -117,6 +117,16 @@ def test_restored_incident_suppresses_replayed_sequence() -> None:
     assert feed(restarted, (ALERT, alert((later - T0).total_seconds() + 1))) == []
 
 
+def test_late_earlier_event_does_not_shorten_suppression() -> None:
+    """去重期只顺延、不提前：发生得早却到达得晚的事件（如重启后乱序重放）不缩短截止时间（D-067）。"""
+    engine = Engine(RULES, ATTACK)
+    assert len(feed(engine, (ALERT, alert(0)), (INTEGRITY, integrity(10)))) == 1
+    feed(engine, (ALERT, alert(250)))  # 持续攻击：去重期顺延到 550 s
+    feed(engine, (ALERT, alert(20)))  # 迟到的早期告警，不得把截止时间拉回 320 s
+
+    assert feed(engine, (ALERT, alert(400)), (INTEGRITY, integrity(410))) == []
+
+
 def test_behavior_event_requires_confirmation() -> None:
     """骨骼姿态判定的行为事件按模型证据处理（D-069）。"""
     rule = RULES[0].model_copy(
