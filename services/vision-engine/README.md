@@ -18,12 +18,12 @@
   - 跟踪：Roboflow trackers 的 ByteTrack，只用框的运动，不用外观特征（G-04、REUSE-07）；新轨迹须连续 2 帧、置信度 ≥ 0.5
   - 人员与车辆分别跟踪（骑车人与车框重叠，混合跟踪会互换编号）；车辆轨迹编号加 1 000 000，类别取轨迹内多数，避免两轮车在自行车与摩托车之间闪烁
   - 已标定摄像头的每条已确认轨迹每帧发布一条 `hyd.vision.track.v1`（核心 NATS，不持久化），含类别、朝向、速度、画面归一化框与骨骼（车辆无骨骼）；脚点取框底边中点；未标定摄像头照常检测跟踪，但不发布坐标（FR-902）
-  - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`（`stream_lost` 事件由 TK-040 发布）
+  - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`（`stream_lost` 事件由 TK-114 发布）
   - 健康检查：检测循环每个周期更新 `HYD_HEARTBEAT_FILE`，10 s 未更新视为卡死
-- 场景感知（`scene.py`，FR-108）：已标定摄像头每秒 1 次取最新帧，EfficientViT-Seg L1 ADE20K（REUSE-25，`HYD_SCENE_MODEL_FILE` 未配置时不输出场景）输出 64×64 格，150 类按随代码版本化的映射表归并为渲染类别（地面 road / sidewalk / floor / grass / earth，立面 wall / building / fence / railing，物体 furniture / street_furniture，植被 tree / plant）；人员与车辆不在场景中
+- 场景感知（`scene.py`，FR-108）：已标定摄像头每秒 1 次取最新帧，EfficientViT-Seg L1 ADE20K（REUSE-25，`HYD_SCENE_MODEL_FILE` 未配置时不输出场景）输出 64×64 格，150 类按随代码版本化的映射表归并为渲染类别（地面 road / sidewalk / floor / grass / earth，立面 wall / building / fence / railing / board（黑板），物体 table / chair / cabinet / sofa / bed / furniture / street_furniture，植被 tree / plant）；人员与车辆不在场景中
   - 不输出：最大类别概率低于 0.5 的格，灰度均值低于 40 或高于 250 的格（暗光、过曝、画面黑边）
   - 平滑：每格取近 3 次的多数类别，连续 2 次识别即翻转
-  - 投影（与 track 同一套单应映射）：地面取外轮廓（人与车辆遮挡处不留孔洞）；立面取每列最低一格的底边为墙脚线，遇跳变断开，高度按类别取 2.8 / 6 / 1.2 / 1.0 m；物体取底边并向远离摄像头一侧补出 0.6 m（家具）或 0.4 m（街道设施）深的底面，高 0.8 m；树取底部中心，高 5 m（盆栽 1 m）；地平线以上与超出 `pose.range_m` 的部分丢弃；按 0.2 m 简化
+  - 投影（与 track 同一套单应映射）：地面取外轮廓（人与车辆遮挡处不留孔洞）；立面取每列最低一格的底边为墙脚线，遇跳变断开，高度按类别取 2.8 / 6 / 1.2 / 1.0 m，黑板取其下方的墙脚线、高 1.2 m；物体取底边并向远离摄像头一侧补出底面，深与高按类别取常见尺寸（`scene.py` 的 `OBJECT_SIZE_M`）；树取底部中心，高 5 m（盆栽 1 m）；地平线以上与超出 `pose.range_m` 的部分丢弃；按 0.2 m 简化
   - 路面标线：路面外轮廓内亮度 ≥ 190、饱和度 ≤ 50 的细长条纹（长宽比 ≥ 3、宽 ≤ 1 m）；至少 3 条平行并排、间距 3 m 内的为斑马线，其余为车道线
   - 地面、物体与标线合计保留面积最大的 64 个多边形；每帧发布一条 `hyd.vision.scene.v1`（核心 NATS，不持久化），无任何有效识别或断流时不发布，大屏保留上一帧
 - 依赖：supervision 声明的 PyAV（自带 GPL 的 x264 / x265）与 matplotlib 由根 `pyproject.toml` 的 `override-dependencies` 去掉（G-08、REUSE-07）
