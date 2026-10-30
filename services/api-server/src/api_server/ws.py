@@ -85,8 +85,9 @@ async def push(websocket: WebSocket) -> None:
     await websocket.accept()
     hub: Hub = websocket.app.state.hub
     subscriber = hub.subscribe(principal.token_hash)
-    # 先补推当前设备状态与各摄像头最新场景：断线期间错过的变化无从补齐
-    for frame in [*websocket.app.state.devices.snapshot(), *websocket.app.state.scenes.values()]:
+    # 先补推当前设备状态与各摄像头最新场景，再补推近 24 小时的告警、关联事件与处置执行（D-077）
+    state = websocket.app.state
+    for frame in [*state.devices.snapshot(), *state.scenes.values(), *state.history.snapshot()]:
         subscriber.queue.put_nowait(frame.model_dump_json())
 
     async def send() -> None:

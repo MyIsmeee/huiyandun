@@ -8,6 +8,7 @@ import pytest
 
 from api_server import site
 from api_server.devices import CYBER_HOLD_S, PHYSICAL_HOLD_S, Devices
+from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 
@@ -128,3 +129,47 @@ def test_snapshot_pushes_devices_then_behaviors_in_physical_alert(devices: Devic
     assert VisionBehaviorV1.model_validate(frames[2].data) == event
     devices.expire(PHYSICAL_HOLD_S)
     assert [f.channel for f in devices.snapshot()] == ["devices", "devices"]
+
+
+def execution(state: str, device_id: str = "cam-01") -> PlaybookExecutionV1:
+    return PlaybookExecutionV1.model_validate(
+        {
+            "schema_version": "1.1.0", "event_id": str(uuid.uuid4()),
+            "ts": datetime.now(UTC).isoformat(), "id": "exe-1", "playbook_id": "isolate-attacker",
+            "playbook_version": "1.0.0", "incident_id": "inc-1", "device_ids": [device_id],
+            "target": "172.30.1.20", "state": state, "reason": None, "ttl_s": 150,
+            "expires_at": None, "verify_result": None,
+        }
+    )  # fmt: skip
+
+
+def test_execution_overrides_alert_state_until_rolled_back(devices: Devices) -> None:
+    """04 §5.2：执行中为处置中，生效为已处置（网络告警解除后仍保持），回滚后回到按告警计算的状态。"""
+    devices.on_alert(alert(), 0)
+    assert [d.state for d in devices.on_execution(execution("executing"), 1)] == ["pending_action"]
+    assert devices.on_execution(execution("verifying"), 2) == []  # 状态未变
+    assert [d.state for d in devices.on_execution(execution("contained"), 3)] == ["contained"]
+    # 告警到期：已处置不变，告警等级清零
+    assert [(d.state, d.alert_severity) for d in devices.expire(CYBER_HOLD_S + 1)] == [
+        ("contained", None)
+    ]
+    rolled = devices.on_execution(execution("rolled_back"), CYBER_HOLD_S + 2)
+    assert [d.state for d in rolled] == ["normal"]
+
+
+@pytest.mark.parametrize("state", ["pending", "failed", "expired", "skipped"])
+def test_non_overriding_states_keep_alert(devices: Devices, state: str) -> None:
+    devices.on_alert(alert(), 0)
+    assert devices.on_execution(execution(state), 1) == []
+    assert states(devices)["cam-01"] == ("cyber_alert", "high")
+
+
+def test_notify_only_shown_during_cyber_alert(devices: Devices) -> None:
+    """V-T1：旁路模式只通知，网络攻击期间显示"已通知 · 待联动"，告警解除后回到常态。"""
+    devices.on_alert(alert(), 0)
+    assert [d.state for d in devices.on_execution(execution("notify_only"), 1)] == ["notify_only"]
+    assert [d.state for d in devices.expire(CYBER_HOLD_S + 1)] == ["normal"]
+
+
+def test_execution_for_unknown_device_ignored(devices: Devices) -> None:
+    assert devices.on_execution(execution("contained", "cam-99"), 0) == []
