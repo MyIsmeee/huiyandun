@@ -39,9 +39,10 @@ def test_service_has_healthcheck(name: str) -> None:
     assert SERVICES[name].get("healthcheck", {}).get("test")
 
 
-def test_vision_engine_restarts_after_exit() -> None:
-    """#79：检测进程退出后自动拉起，演示中不因一次崩溃停止检测。"""
-    assert SERVICES["vision-engine"]["restart"] == "unless-stopped"
+@pytest.mark.parametrize("name", ["vision-engine", "correlator"])
+def test_service_restarts_after_exit(name: str) -> None:
+    """#79、TK-041：检测与关联进程退出后自动拉起，演示中不因一次崩溃停止。"""
+    assert SERVICES[name]["restart"] == "unless-stopped"
 
 
 @pytest.mark.parametrize("name", SERVICES)

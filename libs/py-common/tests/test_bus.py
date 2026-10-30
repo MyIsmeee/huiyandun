@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import nats
 import pytest
@@ -89,6 +89,59 @@ def test_js_publish_deduplicates_by_event_id(nats_url: str) -> None:
             await bus.close()
 
     assert asyncio.run(main()) == 1
+
+
+def test_js_subscribe_replays_since_then_follows(nats_url: str) -> None:
+    """重启恢复：返回时 since 之后的历史消息已全部交给 handler，之后的新消息继续投递。"""
+
+    async def main() -> tuple[list[int], list[int]]:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        await bus.ensure_stream("REPLAY", ["hyd.test.replay"], 60)
+        try:
+            await bus.js_publish("hyd.test.replay", track(1))  # since 之前，不投递
+            await asyncio.sleep(0.5)
+            since = datetime.now(UTC)
+            for i in (2, 3):
+                await bus.js_publish("hyd.test.replay", track(i))
+            received: list[int] = []
+
+            async def handler(event: VisionTrackV1) -> None:
+                received.append(event.track_id)
+
+            await bus.js_subscribe("hyd.test.replay", VisionTrackV1, handler, since)
+            history = list(received)
+            await bus.js_publish("hyd.test.replay", track(4))
+            for _ in range(50):
+                if len(received) == 3:
+                    break
+                await asyncio.sleep(0.05)
+            return history, received
+        finally:
+            await bus.close()
+
+    assert asyncio.run(main()) == ([2, 3], [2, 3, 4])
+
+
+def test_js_subscribe_without_history_returns_at_once(nats_url: str) -> None:
+    """同一流的其他主题有消息、本主题没有时同样立即返回（如 HYD_VISION 只有画面事件、没有行为事件）。"""
+
+    async def main() -> float:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        await bus.ensure_stream("EMPTY", ["hyd.test.empty", "hyd.test.other"], 60)
+        try:
+            await bus.js_publish("hyd.test.other", track())
+
+            async def handler(event: VisionTrackV1) -> None:
+                pass
+
+            started = time.monotonic()
+            since = datetime.now(UTC) - timedelta(minutes=1)
+            await bus.js_subscribe("hyd.test.empty", VisionTrackV1, handler, since)
+            return time.monotonic() - started
+        finally:
+            await bus.close()
+
+    assert asyncio.run(main()) < 1
 
 
 def test_ensure_stream_is_idempotent_and_persists(nats_url: str) -> None:

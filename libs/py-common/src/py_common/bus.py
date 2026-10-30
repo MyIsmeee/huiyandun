@@ -3,18 +3,20 @@
 - publish：核心 NATS，写入发送缓冲即返回，用于不持久化的高频事件（如 track）；
 - js_publish：JetStream，等待服务端确认；以 event_id 去重，重试不会产生重复消息；主题所属的流
   由生产者启动时以 ensure_stream 创建；
-- subscribe：消息按模型校验；非法消息与 handler 异常记录错误后跳过，不中断订阅。
+- subscribe：消息按模型校验；非法消息与 handler 异常记录错误后跳过，不中断订阅；
+- js_subscribe：从指定时刻起重放流中的消息后持续接收新消息，重启后据此恢复窗口内的状态。
 """
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Self
 
 from nats import errors
 from nats.aio.client import Client
 from nats.aio.msg import Msg
-from nats.js.api import StorageType, StreamConfig
+from nats.js.api import ConsumerConfig, DeliverPolicy, StorageType, StreamConfig
 from nats.js.errors import BadRequestError
 from pydantic import ValidationError
 
@@ -24,6 +26,8 @@ log = logging.getLogger(__name__)
 # 导致断连的错误：nats-py 先报告错误、随后才切换为重连状态
 # JetStream 错误码：同名流已存在且配置不同
 STREAM_NAME_IN_USE = 10058
+# js_subscribe 等待历史消息重放完的上限；超时只记警告，订阅照常有效
+REPLAY_TIMEOUT_S = 30.0
 CONNECTION_LOST = (errors.UnexpectedEOF, errors.StaleConnectionError, OSError)
 
 
@@ -99,20 +103,41 @@ class Bus:
     async def subscribe[T: EventBase](
         self, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]]
     ) -> None:
-        async def on_message(msg: Msg) -> None:
-            try:
-                event = model.model_validate_json(msg.data)
-            except ValidationError as e:
-                log.error("bus.invalid_payload", extra={"subject": msg.subject, "error": str(e)})
-                return
-            try:
-                await handler(event)
-            except Exception:
-                # 单条消息处理失败不中断订阅；记录主题以便定位
-                log.exception("bus.handler_failed", extra={"subject": msg.subject})
-
-        await self._client.subscribe(subject, cb=on_message)
+        await self._client.subscribe(subject, cb=_on_message(model, handler))
         await self._client.flush(timeout=self._timeout_s)
+
+    async def js_subscribe[T: EventBase](
+        self,
+        subject: str,
+        model: type[T],
+        handler: Callable[[T], Awaitable[None]],
+        since: datetime,
+    ) -> None:
+        """有序消费者：从 since 起按流中顺序投递，之后持续接收新消息。返回时 since 之后的历史消息
+        已全部交给 handler（超过 REPLAY_TIMEOUT_S 仍未重放完时记警告后返回，订阅照常有效）。
+        流须已由生产者创建，否则按 JetStream 的 NotFoundError 报错，此时订阅未建立，可重试。"""
+        caught_up = asyncio.Event()
+        deliver = _on_message(model, handler)
+
+        async def on_message(msg: Msg) -> None:
+            await deliver(msg)
+            if msg.metadata.num_pending == 0:
+                caught_up.set()
+
+        sub = await self._js.subscribe(
+            subject,
+            cb=on_message,
+            ordered_consumer=True,
+            deliver_policy=DeliverPolicy.BY_START_TIME,
+            config=ConsumerConfig(opt_start_time=since),
+        )
+        info = await sub.consumer_info()
+        if info.num_pending == 0 and info.delivered.consumer_seq == 0:
+            caught_up.set()  # since 之后没有该主题的历史消息
+        try:
+            await asyncio.wait_for(caught_up.wait(), REPLAY_TIMEOUT_S)
+        except TimeoutError:
+            log.warning("bus.replay_incomplete", extra={"subject": subject})
 
     async def close(self) -> None:
         if self._client.is_connected:
@@ -124,3 +149,21 @@ class Bus:
         self._client._pending.clear()
         self._client._pending_data_size = 0
         await self._client.close()
+
+
+def _on_message[T: EventBase](
+    model: type[T], handler: Callable[[T], Awaitable[None]]
+) -> Callable[[Msg], Awaitable[None]]:
+    async def on_message(msg: Msg) -> None:
+        try:
+            event = model.model_validate_json(msg.data)
+        except ValidationError as e:
+            log.error("bus.invalid_payload", extra={"subject": msg.subject, "error": str(e)})
+            return
+        try:
+            await handler(event)
+        except Exception:
+            # 单条消息处理失败不中断订阅；记录主题以便定位
+            log.exception("bus.handler_failed", extra={"subject": msg.subject})
+
+    return on_message
