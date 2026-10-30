@@ -13,7 +13,7 @@ from api_server.app import create_app
 from api_server.auth import ROLES, require, verify_password
 from api_server.config import ApiConfig
 from api_server.db import transaction
-from py_contracts.api import Error, LoginResponse
+from py_contracts.api import Error, LoginResponse, Session
 
 RID = {"X-Request-ID": "req-auth"}
 # cryptography 47.0.0 以 hash_password 的参数生成；口令 legacy-pass-1 仅用于本测试
@@ -78,6 +78,22 @@ def test_role_inclusion(client: TestClient, password: str, min_role: str, role: 
 
     expected = 200 if (min_role, role) in ALLOWED else 403
     assert client.get(f"/t/{min_role}").status_code == expected
+
+
+@pytest.mark.parametrize("username", ["viewer", "operator", "auditor"])
+def test_session_returns_account_and_role(client: TestClient, password: str, username: str) -> None:
+    """#40：页面刷新后按角色决定渲染哪些操作（C-FE-07）。"""
+    login(client, username, password)
+
+    r = client.get("/api/auth/session")
+
+    assert r.status_code == 200
+    session = Session.model_validate(r.json())
+    assert (session.username, session.role.root) == (username, username)
+
+
+def test_session_without_login_unauthorized(client: TestClient) -> None:
+    assert client.get("/api/auth/session").status_code == 401
 
 
 def test_logout_revokes_session(client: TestClient, password: str) -> None:
