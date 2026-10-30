@@ -1,7 +1,7 @@
 """处置编排（TK-050，设计 docs/design/050-containment.md）：关联事件 → Playbook → 四接口 → TTL 到期回滚。
 
 判定只依据关联事件的结构化字段与 Playbook，不 import 任何 LLM 客户端（G-03、D-01）。状态只在本进程内维护，
-每次变化发布一条 hyd.playbook.execution.v1。
+每次变化发布一条 hyd.playbook.execution.v1；重启时由 restore 以流中各执行的最后状态恢复。
 """
 
 import asyncio
@@ -14,11 +14,15 @@ from typing import Any
 
 from playbook_executor.action import Action, ActionContext, ActionError
 from playbook_executor.playbooks import Playbook
+from py_contracts.events.hyd_correlator_confirmation_v1_schema import CorrelatorConfirmationV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
+from py_contracts.events.hyd_playbook_rollback_v1_schema import PlaybookRollbackV1
 from py_contracts.events.incident_schema import Incident
 from py_contracts.events.playbook_execution_schema import VerifyResult
 
 SCHEMA_VERSION = "1.1.0"  # 1.1：device_ids、reason，只通知、跳过、过期状态
+CONFIRM_TIMEOUT = timedelta(minutes=30)  # D-073
+EVIDENCE_WINDOW_S, EVIDENCE_INTERVAL_S = 30.0, 5.0  # D-072
 # 执行 ID 由 Playbook 与关联事件派生：重放同一关联事件不会重复执行
 EXECUTION_NAMESPACE = uuid.UUID("2c4b9e71-5a0d-4f3e-8b6a-9d1c7e2f4a03")
 
@@ -47,6 +51,7 @@ class Executor:
         self._executions: dict[str, PlaybookExecutionV1] = {}
         self._active: set[str] = set()  # 执行中或已生效的目标，同一目标互斥（C-BE-04）
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._background: set[asyncio.Task[None]] = set()
 
     # ── 输入 ──────────────────────────────────────────────
 
@@ -71,9 +76,48 @@ class Executor:
             elif reason := self._skip_reason(incident):
                 await self._update(execution, state="skipped", reason=reason)
             elif incident.requires_confirmation:
-                await self._update(execution, reason="含模型证据，等待人工确认")
+                pending = await self._update(execution, reason="含模型证据，等待人工确认")
+                self._spawn(execution_id, self._expire(pending, CONFIRM_TIMEOUT))
             else:
                 self._spawn(execution_id, self._run(execution))
+
+    async def on_confirmation(self, confirmation: CorrelatorConfirmationV1) -> None:
+        for execution in list(self._executions.values()):
+            if execution.incident_id == confirmation.incident_id and execution.state == "pending":
+                log.info(
+                    "playbook.confirmed",
+                    extra={"execution_id": execution.id, "actor": confirmation.actor},
+                )
+                self._spawn(execution.id, self._run(execution, f"{confirmation.actor} 已确认"))
+
+    async def on_rollback(self, request: PlaybookRollbackV1) -> None:
+        execution = self._executions.get(request.execution_id)
+        if execution is None or execution.state != "contained":
+            log.warning("playbook.rollback_ignored", extra={"execution_id": request.execution_id})
+            return
+        self._cancel(execution.id)
+        await self._roll_back(execution, f"由 {request.actor} 手动回滚")  # FR-405
+
+    # ── 重启恢复 ───────────────────────────────────────────
+
+    def restore(self, execution: PlaybookExecutionV1) -> None:
+        """重放流中的执行记录，保留各执行的最后状态；全部重放后调用 resume。"""
+        self._executions[execution.id] = execution
+
+    async def resume(self) -> None:
+        now = datetime.now(UTC)
+        for execution in list(self._executions.values()):
+            if execution.state == "pending":
+                self._spawn(
+                    execution.id, self._expire(execution, CONFIRM_TIMEOUT - (now - execution.ts))
+                )
+            elif execution.state == "contained" and execution.expires_at is not None:
+                self._active.add(execution.target)
+                self._spawn(execution.id, self._ttl(execution))
+            elif execution.state in ("executing", "verifying"):
+                # 执行到一半时退出：撤销可能已写入的封禁，如实记为失败
+                await self._undo(execution)
+                await self._update(execution, state="failed", reason="执行中断：处置执行器重启")
 
     # ── 编排 ──────────────────────────────────────────────
 
@@ -152,12 +196,38 @@ class Executor:
             verify_result=VerifyResult(passed=True, reason=verified.reason if verified else None),
         )
         self._spawn(execution.id, self._ttl(execution))
+        evidence = asyncio.create_task(self._evidence(execution))
+        self._background.add(evidence)  # 保留引用直到结束，避免任务被回收
+        evidence.add_done_callback(self._background.discard)
+
+    async def _evidence(self, execution: PlaybookExecutionV1) -> None:
+        """生效后 30 s 内读拦截计数，作为证据写入 verify_result（D-072），不影响已生效的判定。"""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + EVIDENCE_WINDOW_S
+        while loop.time() < deadline:
+            await asyncio.sleep(EVIDENCE_INTERVAL_S)
+            packets = sum([await a.intercepted(c) or 0 for a, c in self._steps(execution)])
+            if packets:
+                await self._annotate(execution.id, f"封禁规则已生效，已拦截 {packets} 个数据包")
+                return
+        await self._annotate(execution.id, "封禁规则已生效，未观察到攻击流量")
+
+    async def _annotate(self, execution_id: str, reason: str) -> None:
+        current = self._executions[execution_id]
+        if current.state == "contained":
+            await self._update(current, verify_result=VerifyResult(passed=True, reason=reason))
 
     async def _ttl(self, execution: PlaybookExecutionV1) -> None:
         assert execution.expires_at is not None
         await asyncio.sleep(max(0.0, (execution.expires_at - datetime.now(UTC)).total_seconds()))
         # 内核已按超时删除元素；再解封一次确保一致，并记录回滚（FR-404）
         await self._roll_back(self._executions[execution.id], "TTL 到期自动解除")
+
+    async def _expire(self, execution: PlaybookExecutionV1, after: timedelta) -> None:
+        await asyncio.sleep(max(0.0, after.total_seconds()))
+        current = self._executions[execution.id]
+        if current.state == "pending":
+            await self._update(current, state="expired", reason="30 分钟内未确认，已过期")
 
     async def _roll_back(self, execution: PlaybookExecutionV1, reason: str) -> None:
         await self._undo(execution)
