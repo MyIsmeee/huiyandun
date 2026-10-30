@@ -13,7 +13,7 @@ from pydantic import AwareDatetime, BaseModel, ValidationError
 from py_contracts.config.site_schema import SiteConfig
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
-SCHEMA_VERSION = "1.1.0"  # 1.1：来源、可信度、说明（C-SEC-09）
+SCHEMA_VERSION = "1.2.0"  # 1.1：来源、可信度、说明（C-SEC-09）；1.2：mode（D-068）
 # event_id 由 EVE 原文派生：重启后重读未确认的一行时 ID 不变，由 JetStream 去重
 EVENT_NAMESPACE = uuid.UUID("5d0f6a52-4b0e-4f0c-9a51-3c7f3e0c7a10")
 # Suricata 优先级 1 最高；critical 留给跨域关联事件（HYD-PLAN-007 §4）
@@ -77,6 +77,8 @@ def normalize(line: str, devices: dict[Ip, str]) -> SecurityAlertV1 | None:
             # 自研规则带 HYD 规则 ID 与类别；外部规则以 sid 标识、取其 classtype
             rule_id=meta.get("hyd_rule_id", f"SID-{alert.signature_id}"),
             rule_version=str(alert.rev),
+            # 外部规则未经本地验证，一律 monitor：只显示、不参与关联与处置（C-RU-05、D-068）
+            mode=meta.get("hyd_mode", "monitor"),
             category=meta.get("hyd_category", alert.category),
             severity=SEVERITY.get(alert.severity, "low"),
             src_ip=src,

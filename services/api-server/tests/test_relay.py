@@ -68,7 +68,7 @@ def scene(camera_id: str = "cam-01", surface: str = "road") -> VisionSceneV1:
 
 def alert() -> SecurityAlertV1:
     return SecurityAlertV1(
-        **common(), rule_id="HYD-NET-0001", rule_version="1.0.0", category="auth_bruteforce",
+        **common(), rule_id="HYD-NET-0001", rule_version="1.0.0", mode="enforce", category="auth_bruteforce",
         severity="high", src_ip="172.30.1.20", dst_ip="172.30.0.12", device_id="cam-02",
         technique="T1110", evidence_ref="eve:1", source="rule", confidence=1.0,
         summary="HYD-NET-0001 RTSP authentication brute force",

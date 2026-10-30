@@ -25,7 +25,7 @@ def behavior(camera_id: str = "cam-01") -> VisionBehaviorV1:
 def alert(severity: str = "high", device_id: str | None = "cam-01") -> SecurityAlertV1:
     return SecurityAlertV1(
         schema_version="1.0.0", event_id=uuid.uuid4(), ts=datetime.now(UTC),
-        rule_id="HYD-NET-0001", rule_version="1.0.0", category="auth_bruteforce",
+        rule_id="HYD-NET-0001", rule_version="1.0.0", mode="enforce", category="auth_bruteforce",
         severity=severity, src_ip="172.30.1.20", dst_ip="172.30.0.11", device_id=device_id,
         technique="T1110", evidence_ref="eve:1", source="rule", confidence=1.0,
         summary="HYD-NET-0001 RTSP authentication brute force",

@@ -42,10 +42,11 @@ def test_bruteforce_alert_fields() -> None:
     alert = normalize(json.dumps(record()), DEVICES)
     assert alert is not None
     assert alert.model_dump(mode="json", exclude={"event_id"}) == {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "ts": "2026-10-28T16:29:01.987571Z",
         "rule_id": "HYD-NET-0001",
         "rule_version": "2",
+        "mode": "monitor",  # 录制时 rev 2 仍为 monitor，取自规则的 hyd_mode
         "category": "auth_bruteforce",
         "severity": "high",
         "src_ip": "172.30.0.100",
@@ -91,6 +92,14 @@ def test_external_rule_uses_packet_direction_and_sid() -> None:
         "medium",
     )
     assert (str(alert.src_ip), alert.device_id) == ("172.30.0.100", "cam-02")
+    assert alert.mode == "monitor"  # 外部规则未经本地验证，不参与关联与处置（D-068）
+
+
+def test_own_rule_mode_taken_from_metadata() -> None:
+    eve = record()
+    eve["alert"]["metadata"]["hyd_mode"] = ["enforce"]
+    alert = normalize(json.dumps(eve), DEVICES)
+    assert alert is not None and alert.mode == "enforce"
 
 
 def test_alert_without_technique_skipped(caplog: pytest.LogCaptureFixture) -> None:
