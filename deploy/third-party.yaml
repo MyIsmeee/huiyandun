@@ -199,6 +199,41 @@ assets:
     source: Poly Pizza 模型页 m/j20srJUjpB
     purpose: 摩托车模型（Kenney、Quaternius 均无 CC0 摩托车）
     owner: MyIsmeee
+  - name: Quaternius · Table
+    file: web/console/public/models/quaternius-table.glb
+    sha256: 230ac925ef408b64f3b215eb64c9999e2cd81a82c6d114b2cd50ea6d6d5e0cbe
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/yYEEJzKxb4
+    purpose: 桌（04 §5.1 L1，D-059）
+    owner: MyIsmeee
+  - name: Quaternius · Chair
+    file: web/console/public/models/quaternius-chair.glb
+    sha256: bdc6aeeb64524bbdccba2f079e6485e2a372aed1c428d976d5da67aadcf18b7a
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/iMNqRzPwwe
+    purpose: 椅
+    owner: MyIsmeee
+  - name: Quaternius · Closet
+    file: web/console/public/models/quaternius-closet.glb
+    sha256: 20c69ab0c009f5c7664183398b7a2a6cf72a886f1537c44d5bf2e5af30c00e84
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/BHEVb1DIuH
+    purpose: 柜
+    owner: MyIsmeee
+  - name: Quaternius · Sofa
+    file: web/console/public/models/quaternius-sofa.glb
+    sha256: 77ba2e485372b64b99a5e14c904a479cc7f330e6e4771d4db4baab636d69314f
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/l84E3NzGSF
+    purpose: 沙发
+    owner: MyIsmeee
+  - name: Quaternius · Bed Double
+    file: web/console/public/models/quaternius-bed.glb
+    sha256: e2bbb906e6f97f181017e10f1ca33f39beda517e0fca1d0a07d36835e6f86581
+    license: CC0-1.0
+    source: Poly Pizza 模型页 m/BuRay4fVFr
+    purpose: 床
+    owner: MyIsmeee
 
 # 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
 # 依赖由 tools/dev/export_efficientvit_seg.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件

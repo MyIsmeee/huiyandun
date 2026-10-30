@@ -1,10 +1,11 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { MeshBasicMaterial, MeshLambertMaterial } from "three";
+import type { BufferGeometry, MeshBasicMaterial, MeshLambertMaterial } from "three";
 import type { SceneFrame } from "../store/live";
 import { useTheme } from "../theme/store";
 import { useMotion } from "./DeviceMarkers";
 import type { Camera } from "./devices";
+import { type Furniture, useFurnitureModels } from "./furniture";
 import {
   FADE_MS,
   layerOpacity,
@@ -19,9 +20,22 @@ import {
 /** 各摄像头实时识别并投影的环境（§5.1 L1）；无识别结果即空白（UP-1） */
 export function PerceivedScene({ cameras }: { cameras: Camera[] }) {
   const palette = PALETTE[useTheme((s) => s.theme)];
-  return useScenes(cameras).map(({ frame, stale }) => (
-    <CameraScene key={frame.camera_id} frame={frame} palette={palette} stale={stale} />
-  ));
+  const models = useFurnitureModels();
+  return useScenes(cameras).map(({ frame, stale }) => {
+    // useScenes 只返回已登记摄像头的场景
+    const { pose } = cameras.find((c) => c.id === frame.camera_id) as Camera;
+    return (
+      <CameraScene
+        key={frame.camera_id}
+        frame={frame}
+        palette={palette}
+        stale={stale}
+        models={models}
+        x={pose.x}
+        y={pose.y}
+      />
+    );
+  });
 }
 
 interface Layer {
@@ -32,9 +46,17 @@ interface Layer {
   retired: boolean;
 }
 
-/** 一台摄像头的场景：新帧到达时新旧两层交叉渐变 300 ms；降低动效或断线时瞬时替换（V-A4、V-U3） */
-function CameraScene({ frame, palette, stale }: { frame: SceneFrame; palette: Palette; stale: boolean }) {
-  const geometry = useMemo(() => sceneGeometry(frame, palette), [frame, palette]);
+/** 一台摄像头的场景：新帧到达时新旧两层交叉渐变 300 ms；降低动效或断线时瞬时替换（V-A4、V-U3）。x、y 为摄像头平面位置 */
+function CameraScene(props: {
+  frame: SceneFrame;
+  palette: Palette;
+  stale: boolean;
+  models: Record<Furniture, BufferGeometry>;
+  x: number;
+  y: number;
+}) {
+  const { frame, palette, stale, models, x, y } = props;
+  const geometry = useMemo(() => sceneGeometry(frame, palette, { models, camera: [x, y] }), [frame, palette, models, x, y]);
   const motion = useMotion();
   const [layers, setLayers] = useState<Layer[]>([{ id: 0, geometry, retired: false }]);
   // 帧变化时在渲染中调整状态（React 推荐的"随属性变化调整状态"写法），不经副作用

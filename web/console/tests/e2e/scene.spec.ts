@@ -200,8 +200,8 @@ test.describe("相机控件", () => {
 });
 
 // §5.1 L1、§8 PerceivedScene：街道 / 室内 / 未标定 / 陈旧 / 断线。
-// SCENES 由 TK-118 的演示帧分割快照（services/vision-engine/tests/scenes/street-1、indoor-1）
-// 按演示站点 cam-01 的标定投影得到；快照不含图像，因而没有路面标线，标线与树另以 ELEMENTS 构造
+// SCENES 由演示帧分割快照（services/vision-engine/tests/scenes/street-1、indoor-1，TK-122 的 classroom-1、lab-1）
+// 投影得到：室内按演示站点 cam-01 的标定，教室与实验室按估计的标定；快照不含图像，因而没有路面标线，标线与树另以 ELEMENTS 构造
 test.describe("感知场景", () => {
   const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", camera_id: "cam-01" };
   const EMPTY = { surfaces: [], walls: [], objects: [], trees: [], markings: [] };
@@ -245,6 +245,24 @@ test.describe("感知场景", () => {
       await shown(page, ws, SCENES[frame]);
 
       await expectNoOverflow(page);
+      await expect(scene(page)).toHaveScreenshot(`scene-${name}.png`);
+    });
+  }
+
+  // D-059：桌、椅、柜等以家具模型沿识别区域排开、正面朝向摄像头，黑板贴在墙上；总览中家具过小，在摄像头视角下核对。
+  // 实验室的实验台另有部分被识别为床
+  for (const [name, frame, theme] of [
+    ["classroom", "classroom", "light"],
+    ["classroom-dark", "classroom", "dark"],
+    ["lab", "lab", "light"],
+  ] as const) {
+    test(`家具与黑板：${name}`, async ({ page }) => {
+      await presetTheme(page, theme, true);
+      const [ws] = await open(page, [cam01()]);
+      await shown(page, ws, SCENES[frame]);
+
+      await scene(page).getByRole("button", { name: "查看 cam-01 详情" }).dblclick();
+      await page.clock.runFor(100);
       await expect(scene(page)).toHaveScreenshot(`scene-${name}.png`);
     });
   }

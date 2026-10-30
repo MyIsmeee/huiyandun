@@ -48,7 +48,7 @@ function TopDown({ frame, palette }: { frame: SceneFrame; palette: Palette }) {
       {frame.walls.map((w, i) => (
         <g key={`w${i}`} fill="none" strokeLinejoin="round">
           <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M + EDGE_M * 2} className="stroke-grid" />
-          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M} stroke={palette.facade} />
+          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M} stroke={w.class === "board" ? palette.road : palette.facade} />
         </g>
       ))}
       {frame.objects.map((o, i) => (
