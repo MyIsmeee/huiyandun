@@ -135,6 +135,19 @@ def test_only_capture_tap_and_helper_use_host_network() -> None:
     assert "ports" not in SERVICES[helper]
 
 
+def test_helper_socket_shared_only_with_executor() -> None:
+    """D-074：能向 helper 发指令的只有 playbook-executor（还须持有签名私钥）。"""
+    mounts = {
+        n
+        for n, s in SERVICES.items()
+        if any(v.startswith("helper-run:") for v in s.get("volumes", []))
+    }
+    assert mounts == {"privileged-helper", "playbook-executor"}
+    assert {n for n, s in SERVICES.items() if "executor_signing_key" in s.get("secrets", [])} == {
+        "playbook-executor"
+    }
+
+
 @pytest.mark.parametrize("name", sorted(SENSORS))
 def test_sensor_least_privilege(name: str) -> None:
     """探针解析不可信流量，被攻破时不能成为跳板：只接入 tap-net、只读根文件系统、只保留抓包能力、
