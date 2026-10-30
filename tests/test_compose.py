@@ -121,14 +121,18 @@ SENSOR_CAPS = {
 }
 
 
-def test_only_capture_tap_uses_host_network() -> None:
-    """宿主网络绕过全部网络隔离（DP-05 例外）：只给配置镜像的 capture-tap，它执行一次即退出、
-    只有 NET_ADMIN，不处理流量。"""
-    assert {n for n, s in SERVICES.items() if s.get("network_mode") == "host"} == {TAP}
-    tap = SERVICES[TAP]
+def test_only_capture_tap_and_helper_use_host_network() -> None:
+    """宿主网络绕过全部网络隔离（DP-05 例外）：只给配置镜像的 capture-tap（执行一次即退出、不处理
+    流量）与操作防火墙的 privileged-helper（D-074）；两者都只有 NET_ADMIN、根文件系统只读。"""
+    helper = "privileged-helper"
+    assert {n for n, s in SERVICES.items() if s.get("network_mode") == "host"} == {TAP, helper}
     assert TAP in ONESHOT
-    assert tap["read_only"] is True
-    assert tap["cap_drop"] == ["ALL"] and tap["cap_add"] == ["NET_ADMIN"]
+    for name in (TAP, helper):
+        assert SERVICES[name]["read_only"] is True
+        assert SERVICES[name]["cap_drop"] == ["ALL"] and SERVICES[name]["cap_add"] == ["NET_ADMIN"]
+    # helper 只经套接字卷接受签名指令，不开放端口
+    assert SERVICES[helper]["volumes"] == ["helper-run:/run/hyd-helper"]
+    assert "ports" not in SERVICES[helper]
 
 
 @pytest.mark.parametrize("name", sorted(SENSORS))

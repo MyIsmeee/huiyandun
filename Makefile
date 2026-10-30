@@ -35,6 +35,7 @@ COMPOSE = docker compose -f deploy/compose/compose.yaml \
 SECRETS = deploy/compose/.secrets
 DB_SECRETS = $(SECRETS)/postgres_password $(SECRETS)/db_app_password \
 	$(SECRETS)/db_audit_password
+HELPER_KEY = $(SECRETS)/executor_signing_key
 
 doctor:
 	tools/dev/doctor.sh
@@ -45,10 +46,16 @@ $(DB_SECRETS):
 	@mkdir -p -m 700 $(@D)
 	@umask 077 && head -c 32 /dev/urandom | base64 | tr -d '+/=' > $@
 
+# playbook-executor 的签名私钥与 privileged-helper 的公钥（D-074），首次启动时生成，只存于本机（G-14）
+$(HELPER_KEY):
+	@mkdir -p -m 700 $(@D)
+	@umask 077 && openssl genpkey -algorithm ed25519 -out $@ \
+		&& openssl pkey -in $@ -pubout -out $(SECRETS)/helper_public_key
+
 # 目录只有本机属主可进入；文件须对容器内的非 root 进程可读（C-OPS-04）
 # --build：自研服务镜像随代码更新；源码未变时全部命中缓存，无需联网
-demo-up: $(DB_SECRETS)
-	@chmod 700 $(SECRETS) && chmod 644 $(DB_SECRETS)
+demo-up: $(DB_SECRETS) $(HELPER_KEY)
+	@chmod 700 $(SECRETS) && chmod 644 $(DB_SECRETS) $(HELPER_KEY) $(SECRETS)/helper_public_key
 	$(COMPOSE) up -d --build
 
 # 按 demo/media/*.meta.yaml 剪接演示视频（DM-12、FR-306）；原始片段放在 demo/media/src/
