@@ -78,6 +78,7 @@ known-first-party = [
     "api_server",
     "audit_service",
     "correlator",
+    "playbook_executor",
     "privileged_helper",
     "py_common",
     "py_contracts",

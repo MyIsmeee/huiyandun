@@ -1,0 +1,15 @@
+# 封禁攻击源（FR-401、FR-407）：跨域关联事件的攻击源 IP 经 nftables 封禁，到期自动解除
+id: isolate-attacker
+version: 1.0.0
+trigger:
+  rule_ids: [HYD-X-0001]  # 只引用规则引擎输出（C-SEC-02）
+  severity: [critical]
+requires_mode: [host_probe]  # 旁路模式下只通知不执行（FR-1001）
+target: incident.source_ip   # 只能引用 Incident 的结构化字段
+# incident.requires_confirmation 为 true 时，收到 hyd.correlator.confirmation.v1 后才执行（FR-407）
+ttl_s: 1800                  # 主剧本覆盖为 150（FR-404）
+actions:
+  - adapter: nftables
+    action: block_ip
+    params: { direction: inbound }
+on_failure: rollback_and_notify
