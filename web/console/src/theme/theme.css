@@ -84,6 +84,18 @@
   animation: enter 240ms ease-out both;
 }
 
+/* 一次性淡出（攻击连线断开，04 §5.2）：终态即不可见，动效停止时瞬时消失 */
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+}
+
+@utility animate-fade-out {
+  opacity: 0;
+  animation: fade-out 1500ms ease-out both;
+}
+
 /* V-A4：用户开关或系统偏好开启后，动效退化为瞬时切换；断线期间同样停止（C-FE-05、V-U3） */
 [data-motion="reduced"] *,
 [data-motion="reduced"] *::before,

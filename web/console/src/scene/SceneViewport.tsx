@@ -18,6 +18,7 @@ import { useLive } from "../store/live";
 import { select, selectTarget, useSelection } from "../store/selection";
 import { focusOn, moveCamera, panned, useCamera, useFocusShot } from "./camera";
 import { CameraControls, useAnimate } from "./CameraControls";
+import { AttackLines } from "./AttackLines";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
@@ -163,6 +164,7 @@ export function SceneViewport({ site }: { site: Site }) {
       {plan && <Scene2D site={site} cameras={cameras} view={plan} />}
       {view && (state === "ready" || state === "2d") && (
         <>
+          <AttackLines site={site} cameras={cameras} view={view} />
           <DeviceTags cameras={cameras} view={view} />
           <DevicePicker
             cameras={cameras}
