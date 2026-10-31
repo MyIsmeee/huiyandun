@@ -32,6 +32,10 @@ class History:
         while len(self._executions) > MAX_EXECUTIONS:
             self._executions.popitem(last=False)
 
+    def execution(self, execution_id: str) -> PlaybookExecutionV1 | None:
+        """执行的最新状态；超出保留范围时为 None。"""
+        return self._executions.get(execution_id)
+
     def snapshot(self) -> list[WsFrame]:
         """近 24 小时的记录，按发生先后排列。"""
         since = datetime.now(UTC) - WINDOW
