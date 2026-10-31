@@ -24,4 +24,4 @@ def test_upgrade_downgrade_upgrade(scratch_db: tuple[ApiConfig, ApiConfig]) -> N
             )
             return {r[0] for r in rows}
 
-    assert {"audit_log", "users", "sessions", "audit_seal"} <= asyncio.run(tables())
+    assert {"audit_log", "users", "sessions", "audit_seal", "report"} <= asyncio.run(tables())
