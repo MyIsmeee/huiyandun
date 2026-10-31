@@ -12,11 +12,13 @@ assert _spec and _spec.loader
 runner = importlib.util.module_from_spec(_spec)
 sys.modules["scenario_runner"] = runner  # dataclass 定义时按模块名查找所在模块
 _spec.loader.exec_module(runner)
-attack_blocked, load, matches, parse_at = (
+attack_blocked, load, matches, parse_args, parse_at, timeline = (
     runner.attack_blocked,
     runner.load,
     runner.matches,
+    runner.parse_args,
     runner.parse_at,
+    runner.timeline,
 )
 
 
@@ -46,6 +48,7 @@ def test_parse_at_rejects_malformed(text: str) -> None:
         ('{ name: x, at: "0:10", expect: { subject: a } }', "subject 与 within_s"),
         ('{ name: x, at: "0:10", expect: { subject: a, within_s: 5, mtach: {} } }', "未知字段"),
         ('{ name: x, at: "0:10", expect: { attack: allowed } }', "只能为 blocked"),
+        ('{ name: x, at: "0:10", expect: { attack: blocked } }', "须与 start_attack 同一步"),
         ('{ name: x, at: "0:10", wait: 3 }', "未知字段"),
     ],
 )
@@ -57,6 +60,24 @@ def test_invalid_step_rejected(tmp_path: Path, step: str, error: str) -> None:
 def test_unknown_override_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="未知字段"):
         load(write(tmp_path, "id: t\noverrides: { ttl: 1 }\nsteps: []\n"))
+
+
+def test_resume_keeps_steps_aligned_with_media(tmp_path: Path) -> None:
+    """续跑（FROM_STEP）：开场仍对应素材 0:00，第 N 步按原时刻到点，前面的步骤不执行。"""
+    steps = '  - { name: a, at: "0:00" }\n  - { name: b, at: "0:20" }\n'
+    scenario = load(write(tmp_path, f"id: t\nsteps:\n{steps}"))
+
+    assert [(i, at, s.name) for i, at, s in timeline(scenario, 2, 100.0)] == [(2, 120.0, "b")]
+
+
+def test_from_step_after_scenario_not_swallowed_by_compose() -> None:
+    """Makefile 把 --from-step 放在剧本之后、`--` 之前（05 §5.3）。"""
+    args, compose = parse_args(
+        ["main.yaml", "--from-step", "3", "--", "docker", "compose", "-f", "c.yaml"]
+    )
+
+    assert (args.scenario, args.from_step) == (Path("main.yaml"), 3)
+    assert compose == ["docker", "compose", "-f", "c.yaml"]
 
 
 def test_matches_scalar_list_field_and_options() -> None:

@@ -18,7 +18,6 @@ from typing import Any
 
 import yaml
 
-SITE = Path("demo/scenarios/site.yaml")
 ACTIONS = {"start_attack": "target", "freeze_camera": "camera", "restore_camera": "camera"}
 STEP_KEYS = {"name", "at", "do", "expect", "note"}
 EVENT_EXPECT_KEYS = {"subject", "match", "within_s"}
@@ -84,6 +83,8 @@ def load(path: Path) -> Scenario:
                 raise ValueError(f"{where}：expect 须有 subject 与 within_s")
         if expect is not None and expect.get("attack", "blocked") != "blocked":
             raise ValueError(f"{where}：expect.attack 只能为 blocked")
+        if expect is not None and "attack" in expect and (do or {}).get("action") != "start_attack":
+            raise ValueError(f"{where}：expect.attack 须与 start_attack 同一步")
         steps.append(Step(raw["name"], parse_at(raw["at"]), do, expect, raw.get("note")))
     return Scenario(data["id"], overrides.get("playbook_ttl_s"), steps)
 
@@ -97,6 +98,12 @@ def matches(event: dict[str, Any], expected: dict[str, Any]) -> bool:
         if not any(v in options for v in values):
             return False
     return True
+
+
+def timeline(scenario: Scenario, from_step: int, start: float) -> list[tuple[int, float, Step]]:
+    """要执行的步骤（序号、到点时刻、步骤）。开场 start 始终对应素材 0:00（setup 重启推流）：
+    续跑时跳过前面的步骤、到第 N 步的时刻再开始，素材相关的断言仍与时间线对齐（05 §5.3）。"""
+    return [(i, start + s.at_s, s) for i, s in enumerate(scenario.steps, 1) if i >= from_step]
 
 
 def attack_blocked(output: str) -> bool:
@@ -157,9 +164,9 @@ class Observer:
 
 
 class Runner:
-    def __init__(self, compose: list[str]) -> None:
+    def __init__(self, compose: list[str], site_file: Path) -> None:
         self._compose = compose
-        site = yaml.safe_load(SITE.read_text(encoding="utf-8"))
+        site = yaml.safe_load(site_file.read_text(encoding="utf-8"))
         self.streams = {c["id"]: c["stream"] for c in site["cameras"]}
 
     def compose(self, *args: str) -> str:
@@ -216,8 +223,8 @@ class Runner:
         return ""
 
 
-def run(scenario: Scenario, compose: list[str], from_step: int) -> int:
-    runner = Runner(compose)
+def run(scenario: Scenario, site_file: Path, compose: list[str], from_step: int) -> int:
+    runner = Runner(compose, site_file)
     cameras = {s.do["camera"] for s in scenario.steps if s.do and "camera" in s.do}
     if cameras - runner.streams.keys():
         raise ValueError(f"站点未登记摄像头 {sorted(cameras - runner.streams.keys())}")
@@ -226,15 +233,21 @@ def run(scenario: Scenario, compose: list[str], from_step: int) -> int:
     failed = 0
     try:
         runner.setup(scenario.ttl_s)
-        start = time.monotonic() - scenario.steps[from_step - 1].at_s
-        for i, step in enumerate(scenario.steps[from_step - 1 :], from_step):
-            at = start + step.at_s
+        for i, at, step in timeline(scenario, from_step, time.monotonic()):
             time.sleep(max(0.0, at - time.monotonic()))
             stamp = f"{step.at_s // 60}:{step.at_s % 60:02d}"
             print(f"[{i}/{len(scenario.steps)}] {stamp} {step.name}", flush=True)
             if step.note:
                 print(f"    提示：{step.note}", flush=True)
-            output = runner.act(step.do) if step.do else ""
+            try:
+                output = runner.act(step.do) if step.do else ""
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                # 记为本步失败并继续：后续的恢复画面等步骤照常执行，最后仍打印汇总
+                failed += 1
+                print(f"    失败：动作出错：{e}", flush=True)
+                if e.output:
+                    print(e.output, flush=True)
+                continue
             if step.expect is None:
                 continue
             if "attack" in step.expect:
@@ -262,17 +275,22 @@ def run(scenario: Scenario, compose: list[str], from_step: int) -> int:
     return 1 if failed else 0
 
 
-def main() -> int:
+def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
+    """以 `--` 分隔：前面是本脚本的参数（顺序不限），后面原样是 docker compose 命令。"""
+    cut = argv.index("--") if "--" in argv else len(argv)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scenario", type=Path)
     parser.add_argument("--from-step", type=int, default=1)
-    parser.add_argument("compose", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
+    return parser.parse_args(argv[:cut]), argv[cut + 1 :]
+
+
+def main() -> int:
+    args, compose = parse_args(sys.argv[1:])
     scenario = load(args.scenario)
     if not 1 <= args.from_step <= len(scenario.steps):
-        parser.error(f"--from-step 须在 1～{len(scenario.steps)}")
-    compose = args.compose[1:] if args.compose[:1] == ["--"] else args.compose
-    return run(scenario, compose, args.from_step)
+        sys.exit(f"--from-step 须在 1～{len(scenario.steps)}")
+    # 站点配置与剧本同目录（demo/scenarios/），不依赖当前目录
+    return run(scenario, args.scenario.parent / "site.yaml", compose, args.from_step)
 
 
 if __name__ == "__main__":
