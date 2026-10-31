@@ -154,6 +154,7 @@ def test_non_admin_rejected(client: TestClient, password: str, role: str) -> Non
     body = {"username": role, "password": password}
     assert client.post("/api/auth/login", json=body, headers=headers()).status_code == 200
     assert client.get("/api/llm/providers").status_code == 403
+    assert client.get("/api/llm/settings").status_code == 403
 
 
 def test_create_list_update_delete_audited(client: TestClient, db: tuple) -> None:
@@ -218,3 +219,42 @@ def test_internal_to_public_disables_unless_confirmed(client: TestClient) -> Non
         f"/api/llm/providers/{other}", json=CLOUD | {"enabled": True}, headers=headers()
     )
     assert r.json()["enabled"] is True
+
+
+def test_block_public_disables_and_forbids_enabling(client: TestClient, db: tuple) -> None:
+    """FR-604：开启全局禁止即停用全部公网供应商，之后不可启用；内网不受影响。"""
+    cloud = create(client, CLOUD)["id"]
+    lan = create(client, LAN)["id"]
+    client.patch(f"/api/llm/providers/{cloud}", json={"enabled": True}, headers=headers())
+
+    r = client.put("/api/llm/settings", json={"block_public": True}, headers=headers())
+    assert r.json() == {"block_public": True}
+    assert client.get("/api/llm/settings").json() == {"block_public": True}
+    enabled = {p["id"]: p["enabled"] for p in client.get("/api/llm/providers").json()["items"]}
+    assert enabled == {cloud: False, lan: True}
+    entry = audits(db[1], "llm.settings_updated")[-1]
+    assert entry["after"] == {"block_public": True, "disabled_provider_ids": [cloud]}
+
+    r = client.patch(f"/api/llm/providers/{cloud}", json={"enabled": True}, headers=headers())
+    assert r.status_code == 409
+
+
+def test_reorder_applies_and_audited(client: TestClient, db: tuple) -> None:
+    """FR-603：顺序即故障转移顺序，立即生效；删除后其余位置前移。"""
+    a, b, c = (create(client, LAN)["id"] for _ in range(3))
+    r = client.put("/api/llm/providers/order", json={"provider_ids": [c, a, b]}, headers=headers())
+    assert r.status_code == 204
+    items = client.get("/api/llm/providers").json()["items"]
+    assert [(p["id"], p["order"]) for p in items] == [(c, 0), (a, 1), (b, 2)]
+    assert audits(db[1], "llm.providers_reordered")[-1]["after"] == {"provider_ids": [c, a, b]}
+
+    client.delete(f"/api/llm/providers/{a}", headers=headers())
+    items = client.get("/api/llm/providers").json()["items"]
+    assert [(p["id"], p["order"]) for p in items] == [(c, 0), (b, 1)]
+
+
+@pytest.mark.parametrize("ids", [["x"], [], None], ids=["unknown", "missing", "duplicate"])
+def test_reorder_rejects_mismatched_set(client: TestClient, ids: list[str] | None) -> None:
+    a = create(client, LAN)["id"]
+    body = {"provider_ids": [a, a] if ids is None else ids}
+    assert client.put("/api/llm/providers/order", json=body, headers=headers()).status_code == 400
