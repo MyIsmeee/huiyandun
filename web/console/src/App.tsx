@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, type Site } from "./lib/api";
+import { useSession } from "./store/session";
 import { LoginPage } from "./panels/LoginPage/LoginPage";
 import { Shell } from "./panels/Shell/Shell";
 
@@ -8,13 +9,22 @@ type Gate = { kind: "checking" | "login" | "unreachable" } | { kind: "ready"; si
 export function App() {
   const [gate, setGate] = useState<Gate>({ kind: "checking" });
 
-  // 没有"当前会话"接口：以 viewer 即可访问的 GET /api/site 探测是否已登录
+  // 以 viewer 即可访问的 GET /api/site 探测是否已登录；未登录或不可达时清空角色，换账户登录后不沿用上一个角色
   const probe = useCallback(
     () =>
       api.getSite().then(
-        (site) => setGate({ kind: "ready", site }),
-        (e: unknown) =>
-          setGate({ kind: e instanceof ApiError && e.status === 401 ? "login" : "unreachable" }),
+        (site) => {
+          setGate({ kind: "ready", site });
+          // 角色只决定渲染哪些操作；查询失败时按未知处理，不渲染需要权限的操作（C-FE-07）
+          api.session().then(
+            (s) => useSession.setState({ role: s.role }),
+            () => useSession.setState({ role: null }),
+          );
+        },
+        (e: unknown) => {
+          useSession.setState({ role: null });
+          setGate({ kind: e instanceof ApiError && e.status === 401 ? "login" : "unreachable" });
+        },
       ),
     [],
   );
@@ -23,7 +33,10 @@ export function App() {
   // WS 被拒时核对会话：失效回到登录页；服务不可达时留在主界面，由连接状态提示断线（V-U3）
   const recheck = useCallback(() => {
     api.getSite().catch((e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) setGate({ kind: "login" });
+      if (e instanceof ApiError && e.status === 401) {
+        useSession.setState({ role: null });
+        setGate({ kind: "login" });
+      }
     });
   }, []);
   // 请求 ID（crypto.randomUUID）与 Secure 会话 Cookie 都要求安全上下文：http 访问时直接说明，不发请求

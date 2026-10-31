@@ -57,7 +57,7 @@ interface LiveState {
   alerts: Alert[];
   /** 关联事件，新的在前，按 id 去重 */
   incidents: Incident[];
-  /** 处置执行的最新状态，键为执行 id */
+  /** 处置执行的最新状态，键为执行 id；按最近更新排在最后 */
   executions: Record<string, Execution>;
 }
 
@@ -116,7 +116,11 @@ export function receive(frame: Frame, now: number): void {
   }
   if (frame.channel === "executions") {
     const execution = data as Execution;
-    useLive.setState((s) => ({ executions: { ...s.executions, [execution.id]: execution } }));
+    // 移到最后：遍历顺序即更新先后，设备取最近更新的执行
+    useLive.setState((s) => {
+      const rest = Object.fromEntries(Object.entries(s.executions).filter(([id]) => id !== execution.id));
+      return { executions: { ...rest, [execution.id]: execution } };
+    });
   }
 }
 

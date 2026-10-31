@@ -67,3 +67,37 @@ test("单击告警选中对应设备并展开详情（V-I3）", async ({ page })
   await page.getByRole("button", { name: /HYD-NET-0001 RTSP/ }).click();
   await expect(page.getByRole("heading", { name: "cam-02" })).toBeVisible();
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`处置栏：已处置的拦截证据、剩余时间与解封按钮（${theme}，TK-052）`, async ({ page }) => {
+    await presetTheme(page, theme, true);
+    await freezeClock(page);
+    await page.route("/api/auth/session", (route) =>
+      route.fulfill({ json: { username: "operator", role: "operator", expires_at: "2026-10-27T14:30:00Z" } }),
+    );
+    const sockets = await open(page, [camera("normal", "cam-01"), camera("contained", "cam-02")]);
+    // 到期时刻取页面时钟当前值加 130 s：加载场景时模拟时钟推进的量不固定，剩余时间须确定才能截图
+    const now = await page.evaluate(() => Date.now());
+    const expires_at = new Date(now + 130_000).toISOString();
+    sockets[0]?.send(JSON.stringify({ channel: "executions", data: { ...EXECUTION, expires_at } }));
+    sockets[0]?.send(JSON.stringify({ channel: "alerts", data: ALERTS[0] }));
+    await page.getByRole("button", { name: /HYD-NET-0001 RTSP/ }).click();
+
+    const bar = page.getByRole("region", { name: "处置" });
+    await expect(bar.getByRole("button", { name: "立即解封" })).toBeVisible();
+    await expect(bar).toContainText("剩余 2:10");
+    await expectNoOverflow(page);
+    await expect(bar).toHaveScreenshot(`action-bar-${theme}.png`);
+
+    // 错误态：解封请求被拒，显示原因，按钮恢复可点
+    await page.route("/api/executions/exe-1/rollback", (route) =>
+      route.fulfill({ status: 503, json: { code: "unavailable", message: "处置执行器暂不可达，请稍后重试", request_id: "req-1" } }),
+    );
+    await bar.getByRole("button", { name: "立即解封" }).click();
+    await page.clock.runFor(100);
+    await expect(bar.getByRole("alert")).toContainText("处置执行器暂不可达");
+    await expect(bar).toContainText("剩余 2:10");
+    await expectNoOverflow(page);
+    await expect(bar).toHaveScreenshot(`action-bar-failed-${theme}.png`);
+  });
+}
