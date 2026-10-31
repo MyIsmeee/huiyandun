@@ -139,21 +139,65 @@ class Incident(ContractModel):
     created_at: AwareDatetime
 
 
-class Report(ContractModel):
+class VerifyResult(ContractModel):
+    """
+    verify() 检查真实效果的结果（DP-10）；校验前为 null
+    """
+
+    passed: bool
+    reason: str | None
+
+
+class PlaybookExecution(ContractModel):
+    """
+    处置执行实体（HYD-PLAN-007 §1），事件与 API 共用
+    """
+
     id: str
+    playbook_id: str
+    playbook_version: str
     incident_id: str
-    facts: dict[str, Any]
+    device_ids: list[str]
     """
-    事实区，全部来自结构化数据（V-AI1）
+    来自关联事件，供设备状态计算（HYD-UIX-004 §5.2）
     """
-    ai: dict[str, Any] | None
+    target: str
+    state: Literal[
+        "pending",
+        "executing",
+        "verifying",
+        "contained",
+        "failed",
+        "rolled_back",
+        "notify_only",
+        "skipped",
+        "expired",
+    ]
     """
-    AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定
+    pending 为等待人工确认；notify_only 为部署模式不支持执行、只通知（FR-1001）；skipped 为白名单等原因不处置（FR-403）；expired 为 30 分钟内未确认（D-073）
     """
-    source: Literal["llm", "template"]
-    provider_id: str | None
-    reviewed_by: str | None
-    reviewed_at: AwareDatetime | None
+    reason: str | None
+    """
+    失败、跳过、只通知、过期的原因，供详情面板说明（FR-403、FR-406）
+    """
+    ttl_s: int = Field(..., ge=1, le=86400)
+    """
+    C-BE-05
+    """
+    expires_at: AwareDatetime | None
+    """
+    执行前为 null
+    """
+    verify_result: VerifyResult | None
+    """
+    verify() 检查真实效果的结果（DP-10）；校验前为 null
+    """
+
+
+class ReportDevice(ContractModel):
+    id: str
+    type: Literal["camera", "nvr", "switch"]
+    ip: IPv4Address | IPv6Address
 
 
 class Preset(
@@ -547,6 +591,28 @@ class SecurityAlertV1(EventBase):
     """
 
 
+class VisionIntegrityV1(EventBase):
+    """
+    画面完整性异常（生产者 vision-engine）
+    """
+
+    camera_id: str
+    type: Literal["freeze", "replay", "occlusion", "shift", "stream_lost"]
+    duration_s: float = Field(..., ge=0.0)
+    source: Literal["rule", "model"]
+    """
+    freeze、stream_lost 为确定性判定（rule）；replay、shift、occlusion 为视觉模型判定（model）
+    """
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    """
+    可信度；rule 来源为 1.0
+    """
+    detail: str | None
+    """
+    可读说明，如重放匹配到的历史时刻
+    """
+
+
 class CameraInfo(ContractModel):
     stream: str
     """
@@ -630,6 +696,11 @@ class SecurityAlert(RootModel[SecurityAlertV1]):
     root: SecurityAlertV1
 
 
+class VisionIntegrity(RootModel[VisionIntegrityV1]):
+    model_config = {"allow_inf_nan": False}
+    root: VisionIntegrityV1
+
+
 class Device(ContractModel):
     id: str
     type: Literal["camera", "nvr", "switch"]
@@ -657,6 +728,16 @@ class Device(ContractModel):
     """
     type 为 camera 时必有
     """
+
+
+class ReportTimelineEntry(ContractModel):
+    """
+    kind 与 event 为 null 表示证据缺失：事件已超出 24 小时保留或未收到
+    """
+
+    event_id: UUID
+    kind: Literal["security_alert", "behavior", "integrity"] | None
+    event: SecurityAlert | VisionBehavior | VisionIntegrity | None
 
 
 class AiInvestigationV1(EventBase, InvestigationFrame):
@@ -739,6 +820,26 @@ class Site(ContractModel):
     devices: list[Device]
 
 
+class ReportFacts(ContractModel):
+    """
+    事实区，全部来自结构化数据，不经过 LLM（V-AI1）
+    """
+
+    incident: Incident
+    devices: list[ReportDevice]
+    """
+    关联事件涉及的设备，取自站点登记
+    """
+    timeline: list[ReportTimelineEntry]
+    """
+    按 hit_path 顺序的命中事件
+    """
+    executions: list[PlaybookExecution]
+    """
+    该关联事件的处置执行，各自的最新状态
+    """
+
+
 class AiInvestigation(RootModel[AiInvestigationV1]):
     model_config = {"allow_inf_nan": False}
     root: AiInvestigationV1
@@ -748,6 +849,25 @@ class VisionSceneV1(EventBase, SceneFrame):
     """
     摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
     """
+
+
+class Report(ContractModel):
+    id: str
+    incident_id: str
+    facts: ReportFacts
+    ai: dict[str, Any] | None
+    """
+    AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定
+    """
+    source: Literal["llm", "template"]
+    provider_id: str | None
+    degraded_reason: str | None
+    """
+    模板报告的原因，如"未启用任何模型供应商"（FR-502、V-AI5）；source 为 llm 时为 null
+    """
+    reviewed_by: str | None
+    reviewed_at: AwareDatetime | None
+    created_at: AwareDatetime
 
 
 class VisionScene(RootModel[VisionSceneV1]):
