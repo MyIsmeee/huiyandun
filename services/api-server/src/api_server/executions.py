@@ -10,7 +10,7 @@ from functools import partial
 
 import nats
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from api_server.audit import audit_log, record
@@ -28,17 +28,21 @@ log = logging.getLogger(__name__)
 
 
 async def audit_execution(engine: AsyncEngine, execution: PlaybookExecutionV1) -> None:
-    """写入失败时重试到成功：跳过这条会让审计出现缺口；后续记录按流中顺序在其后处理。"""
+    """连接类失败（数据库暂不可达、连接中断）重试到成功，跳过会让审计出现缺口；权限不足、数据不合约束等
+    重试也不会好的错误记为错误后跳过，不让后续的处置审计全部卡住。"""
     while True:
         try:
             await _write(engine, execution)
             return
-        except (SQLAlchemyError, OSError) as e:
+        except (OperationalError, InterfaceError, OSError) as e:
             log.warning(
                 "api.execution_audit_failed",
                 extra={"execution_id": execution.id, "error": repr(e)},
             )
             await asyncio.sleep(RETRY_S)
+        except SQLAlchemyError:
+            log.exception("api.execution_audit_rejected", extra={"execution_id": execution.id})
+            return
 
 
 async def _write(engine: AsyncEngine, execution: PlaybookExecutionV1) -> None:

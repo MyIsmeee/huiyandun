@@ -1,6 +1,7 @@
 """处置执行写审计（G-13、TK-050）：对真实 PostgreSQL 与 nats-server 运行。"""
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -9,7 +10,7 @@ import nats
 import nats.js.errors
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from api_server import executions
 from api_server.audit import audit_log
@@ -151,3 +152,26 @@ def test_failed_write_retried_without_gap(
         return count or 0
 
     assert asyncio.run(scenario()) == 1
+
+
+def test_permanent_write_error_logged_and_skipped(
+    db: tuple[ApiConfig, ApiConfig],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """权限不足、数据不合约束等重试也不会好的错误：记为错误后跳过，不卡住后续的处置审计。"""
+    monkeypatch.setattr(executions, "RETRY_S", 0.05)
+
+    async def rejected(*args: Any, **kwargs: Any) -> None:
+        raise IntegrityError("insert", {}, Exception("violates check constraint"))
+
+    monkeypatch.setattr(executions, "record", rejected)
+
+    async def scenario() -> None:
+        engine = create_engine(db[1])
+        await asyncio.wait_for(executions.audit_execution(engine, execution("contained")), 2)
+        await engine.dispose()
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(scenario())
+    assert any(r.getMessage() == "api.execution_audit_rejected" for r in caplog.records)
