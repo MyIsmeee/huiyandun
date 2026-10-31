@@ -3,20 +3,30 @@
 请求体含已解密的 Key，不写日志（C-LLM-15）。
 """
 
+from pathlib import Path
+from typing import Literal
+
 import httpx2
 import uvicorn
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from llm_gateway.connect import ProbeFailure, Target, list_models
+from llm_gateway.probe import probe
 from py_common.config import ServiceConfig, load_config
 from py_common.log import configure_logging
-from py_contracts.api import ModelList
+from py_contracts.api import ModelList, ProviderTestResult
 
 
 class GatewayConfig(ServiceConfig):
     port: int = Field(8100, ge=1, le=65535, description="内部 HTTP 监听端口，只在 llm-net")
+    prompts_dir: Path = Field(Path("/app/prompts"), description="Prompt 模板目录（C-LLM-07）")
+
+
+class ProbeResponse(BaseModel):
+    result: ProviderTestResult
+    structured_output: Literal["json_schema", "json_object", "none"] | None
 
 
 def create_app(
@@ -24,6 +34,11 @@ def create_app(
 ) -> FastAPI:
     """transport 仅供测试注入录制响应。"""
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+
+    @app.post("/internal/probe")
+    async def run_probe(target: Target) -> ProbeResponse:
+        result, capability = await probe(target, config.prompts_dir, transport)
+        return ProbeResponse(result=result, structured_output=capability)
 
     @app.post("/internal/models", response_model=ModelList)
     async def models(target: Target) -> ModelList | JSONResponse:
