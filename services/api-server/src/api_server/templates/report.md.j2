@@ -1,0 +1,53 @@
+{% if not report.reviewed_by %}
+> **未复核草稿**：本报告未经人工复核，不得作为正式材料。
+
+{% endif %}
+# 溯源报告：{{ title }}
+
+- 报告编号：{{ report.id }}
+- 生成时间：{{ created_at }}
+- 生成方式：{{ "模板生成" if report.source == "template" else "模型生成" }}
+- 复核状态：{% if report.reviewed_by %}已复核：{{ report.reviewed_by }} 于 {{ reviewed_at }}{% else %}未复核草稿{% endif %}
+
+
+## 事实区
+
+### 事件概要
+
+{% for label, value in summary %}
+- {{ label }}：{{ value }}
+{% endfor %}
+
+### 命中路径
+
+{% for e in timeline %}
+{{ loop.index }}. {{ e.ts }} · {{ e.kind }} · {{ e.text }} · 来源：{{ e.source }}
+{% endfor %}
+
+### 证据引用
+
+{% for ref in evidence_refs %}
+- {{ ref }}
+{% else %}
+无
+{% endfor %}
+
+### 处置记录
+
+{% for line in executions %}
+- {{ line }}
+{% else %}
+未执行自动处置
+{% endfor %}
+
+## AI 分析区
+
+{% if report.source == "template" %}
+> 模型不可用，以下为规则模板生成（原因：{{ report.degraded_reason }}）
+
+{% endif %}
+{{ narrative }}
+{% if not report.reviewed_by %}
+
+> **未复核草稿**：本报告未经人工复核，不得作为正式材料。
+{% endif %}

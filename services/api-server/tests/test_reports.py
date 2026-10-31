@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
 ALERT_ID, FREEZE_ID, LOST_ID = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+MARKUP = "<script>alert(1)</script>"  # 事件内容来自外部输入，导出时须转义
 
 
 def common(event_id: uuid.UUID | None = None) -> dict[str, object]:
@@ -57,7 +59,7 @@ def alert() -> SecurityAlertV1:
 def freeze() -> VisionIntegrityV1:
     return VisionIntegrityV1(
         **common(FREEZE_ID), camera_id="cam-02", type="freeze", duration_s=4.0, source="rule",
-        confidence=1.0, detail=None,
+        confidence=1.0, detail=MARKUP,
     )  # fmt: skip
 
 
@@ -184,3 +186,54 @@ def test_review_recorded_and_audited(
     assert audited(db[1], headers["X-Request-ID"]) == [("admin", "report.reviewed", report.id)]
     assert client.post(f"/api/reports/{report.id}/review", headers=rid()).status_code == 409
     assert client.post("/api/reports/missing/review", headers=rid()).status_code == 404
+
+
+def export(client: TestClient, report_id: str, fmt: str) -> httpx2.Response:
+    return client.get(f"/api/reports/{report_id}/export", params={"format": fmt})
+
+
+def test_export_html_unreviewed(client: TestClient, password: str) -> None:
+    """FR-504、V-AI1、V-AI5：网页带水印，事实区与 AI 区分开，模板模式注明原因；事件内容转义。"""
+    login(client, "operator", password)
+    report = generate(client)
+    login(client, "viewer", password)
+
+    r = export(client, report.id, "html")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert r.headers["content-disposition"] == f'inline; filename="report-{report.id}.html"'
+    assert r.headers["content-security-policy"] == "default-src 'none'; style-src 'unsafe-inline'"
+    html = r.text
+    assert 'class="watermark"' in html and "未复核草稿" in html
+    assert html.index("事实区") < html.index("AI 分析区")
+    assert "模型不可用，以下为规则模板生成（原因：未启用任何模型供应商）" in html
+    assert "证据缺失" in html and "172.30.0.100" in html
+    assert MARKUP not in html and "&lt;script&gt;" in html
+
+
+def test_export_markdown(client: TestClient, password: str) -> None:
+    """D-078：Markdown 以附件下载，未复核时开头与结尾标注；复核后两种格式都不带水印。"""
+    login(client, "operator", password)
+    report = generate(client)
+
+    r = export(client, report.id, "md")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    assert r.headers["content-disposition"] == f'attachment; filename="report-{report.id}.md"'
+    lines = r.text.strip().splitlines()
+    assert "未复核草稿" in lines[0] and "未复核草稿" in lines[-1]
+    assert "## 事实区" in r.text and "## AI 分析区" in r.text
+    assert MARKUP not in r.text and r"\<script\>" in r.text
+
+    client.post(f"/api/reports/{report.id}/review", headers=rid())
+    assert "未复核草稿" not in export(client, report.id, "md").text
+    html = export(client, report.id, "html").text
+    assert 'class="watermark"' not in html and "已复核" in html
+
+
+def test_export_rejects_unknown(client: TestClient, password: str) -> None:
+    login(client, "viewer", password)
+    assert export(client, "missing", "html").status_code == 404
+    assert client.get("/api/reports/missing/export", params={"format": "pdf"}).status_code == 400
