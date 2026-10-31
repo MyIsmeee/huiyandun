@@ -5,13 +5,14 @@ import { CLASS_LABEL, kmh } from "../../scene/targets";
 import type { Device, Target } from "../../store/live";
 import { ActionBar } from "../ActionBar/ActionBar";
 import { LiveVideo, LiveVideoView } from "../LiveVideo/LiveVideo";
+import { ReportBar } from "../ReportBar/ReportBar";
 
 const TYPE: Record<Device["type"], string> = { camera: "摄像头", nvr: "录像机", switch: "交换机" };
 
 /**
  * D 详情面板（HYD-UIX-004 §4.1、§8）：选中设备时展开，Esc 或关闭按钮收起（V-I2）。
  * stale 为推送连接已断开：状态是断开前的最后值，弱化显示并标注（UP-3、V-U3）。
- * 处置操作见 ActionBar（TK-052）；事实区、AI 分析区由后续任务接入。
+ * 处置操作见 ActionBar（TK-052），报告入口见 ReportBar（TK-070）；事实区、AI 分析区由后续任务接入。
  */
 export function DetailPanel(props: { device: Device; stale: boolean; onClose: () => void }) {
   const { device, stale, onClose } = props;
@@ -30,6 +31,7 @@ export function DetailPanel(props: { device: Device; stale: boolean; onClose: ()
         </dd>
       </dl>
       <ActionBar deviceId={device.id} />
+      <ReportBar deviceId={device.id} />
       <h3 className="text-sm font-semibold">实时画面</h3>
       {/* key：切换设备时重建连接与状态 */}
       {device.camera ? <LiveVideo key={device.id} deviceId={device.id} /> : <LiveVideoView status={{ kind: "none" }} />}

@@ -5,6 +5,7 @@ import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
+import { type Report, ReportBarView, type ReportRequest } from "../../../src/panels/ReportBar/ReportBar";
 import { planView } from "../../../src/scene/layout";
 import { Scene2D } from "../../../src/scene/Scene2D";
 import type { Alert, Execution, Incident } from "../../../src/store/live";
@@ -77,15 +78,14 @@ const ALERTS = [
     summary: "HYD-NET-0001 RTSP authentication brute force",
   },
 ] as Alert[]; // prettier-ignore
-const INCIDENTS = [
-  {
-    id: "inc-1", rule_id: "HYD-X-0001", rule_version: "1.0.0", mode: "enforce",
-    title: "摄像头疑似被入侵且画面遭篡改", severity: "critical", device_ids: ["cam-02"],
-    source_ip: "172.30.0.100", techniques: ["T1110"], tactics: ["Credential Access"],
-    evidence_refs: [], hit_path: [], requires_confirmation: false, status: "open",
-    created_at: "2026-10-27T06:29:40Z",
-  },
-] as Incident[]; // prettier-ignore
+const INCIDENT = {
+  id: "inc-1", rule_id: "HYD-X-0001", rule_version: "1.0.0", mode: "enforce",
+  title: "摄像头疑似被入侵且画面遭篡改", severity: "critical", device_ids: ["cam-02"],
+  source_ip: "172.30.0.100", techniques: ["T1110"], tactics: ["Credential Access"],
+  evidence_refs: [], hit_path: [], requires_confirmation: false, status: "open",
+  created_at: "2026-10-27T06:29:40Z",
+} as Incident; // prettier-ignore
+const INCIDENTS = [INCIDENT];
 const EXECUTIONS = {
   "exe-1": {
     id: "exe-1", playbook_id: "isolate-attacker", playbook_version: "1.0.0", incident_id: "inc-1",
@@ -95,6 +95,17 @@ const EXECUTIONS = {
 } as Record<string, Execution>; // prettier-ignore
 const LAST_FRAME = Date.parse("2026-10-27T06:29:45Z");
 const alertList = (node: ReactNode) => <div className="flex h-80 w-80 flex-col">{node}</div>;
+const REPORT: Report = {
+  id: "rep-1", incident_id: INCIDENT.id,
+  facts: { incident: INCIDENT, devices: [], timeline: [], executions: [] },
+  ai: null, source: "template", provider_id: null, degraded_reason: "未启用任何模型供应商",
+  reviewed_by: null, reviewed_at: null, created_at: "2026-10-27T06:30:00Z",
+}; // prettier-ignore
+const reportBar = (report: Report | null, request: ReportRequest) => (
+  <div className="w-80 p-3">
+    <ReportBarView incident={INCIDENT} report={report} request={request} onGenerate={() => {}} onReview={() => {}} />
+  </div>
+);
 
 // 组件各状态的展示页：/tests/e2e/gallery/?component=<组件>，每个状态一个 [data-state]
 const GALLERY: Record<string, Record<string, ReactNode>> = {
@@ -122,6 +133,13 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     normal: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale={false} lastFrameAt={LAST_FRAME} />),
     empty: alertList(<AlertListView alerts={[]} incidents={[]} executions={{}} stale={false} lastFrameAt={LAST_FRAME} />),
     disconnected: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale lastFrameAt={LAST_FRAME} />),
+  },
+  ReportBar: {
+    empty: reportBar(null, { status: "idle" }),
+    loading: reportBar(null, { status: "pending" }),
+    normal: reportBar(REPORT, { status: "idle" }),
+    reviewed: reportBar({ ...REPORT, reviewed_by: "operator" }, { status: "idle" }),
+    error: reportBar(REPORT, { status: "failed", message: "报告已由 admin 复核" }),
   },
 };
 

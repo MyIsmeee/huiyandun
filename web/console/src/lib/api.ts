@@ -45,6 +45,12 @@ export const api = {
   /** 手动回滚（FR-405）：受理后返回当前执行状态，结果经 executions 频道推送 */
   rollback: (executionId: string) =>
     request<Schemas["playbook_execution.schema"]>("POST", `/api/executions/${encodeURIComponent(executionId)}/rollback`),
+  /** 生成溯源报告（FR-501）：没有可用供应商时为模板报告 */
+  createReport: (incidentId: string) =>
+    request<Schemas["Report"]>("POST", `/api/incidents/${encodeURIComponent(incidentId)}/reports`),
+  /** 标记报告已复核（FR-504），写审计 */
+  reviewReport: (reportId: string) =>
+    request<Schemas["Report"]>("POST", `/api/reports/${encodeURIComponent(reportId)}/review`),
   /** 实时画面的 WebRTC 信令：提交 SDP offer，返回 SDP answer（FR-106） */
   webrtc: async (deviceId: string, offer: string) =>
     (await send("POST", `/api/devices/${encodeURIComponent(deviceId)}/webrtc`, offer, "application/sdp")).text(),
