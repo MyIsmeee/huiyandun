@@ -7,6 +7,8 @@ const COMPONENTS = {
   LiveVideo: ["normal", "empty", "loading", "error", "disconnected"],
   // 空态即未选中时面板收起；错误态由 LiveVideo 覆盖
   DetailPanel: ["device", "disconnected"],
+  // 数据只来自推送，无加载与错误态：连接中与连不上由顶栏连接状态表示，断线后保留内容并标注
+  AlertList: ["normal", "empty", "disconnected"],
 };
 
 for (const [component, states] of Object.entries(COMPONENTS)) {

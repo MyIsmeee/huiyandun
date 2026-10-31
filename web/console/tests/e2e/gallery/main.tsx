@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Site } from "../../../src/lib/api";
+import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
 import { planView } from "../../../src/scene/layout";
 import { Scene2D } from "../../../src/scene/Scene2D";
+import type { Alert, Execution, Incident } from "../../../src/store/live";
 import "../../../src/theme/store";
 import "../../../src/theme/theme.css";
 
@@ -59,6 +61,41 @@ const SWITCH = {
   camera: null,
 } as const;
 
+const ALERTS = [
+  {
+    schema_version: "1.2.0", event_id: "00000000-0000-4000-8000-000000000020", ts: "2026-10-27T06:29:20Z",
+    rule_id: "HYD-NET-BEH", rule_version: "1", mode: "enforce", category: "behavior_anomaly",
+    severity: "medium", src_ip: "172.30.0.100", dst_ip: "172.30.0.12", device_id: "cam-02",
+    technique: "T1110", evidence_ref: "zeek:conn/1", source: "model", confidence: 0.82,
+    summary: "陌生访问方，失败率为基线 6 倍",
+  },
+  {
+    schema_version: "1.2.0", event_id: "00000000-0000-4000-8000-000000000010", ts: "2026-10-27T06:29:10Z",
+    rule_id: "HYD-NET-0001", rule_version: "3", mode: "enforce", category: "auth_bruteforce",
+    severity: "high", src_ip: "172.30.0.100", dst_ip: "172.30.0.12", device_id: "cam-02",
+    technique: "T1110", evidence_ref: "suricata:flow/1", source: "rule", confidence: 1,
+    summary: "HYD-NET-0001 RTSP authentication brute force",
+  },
+] as Alert[]; // prettier-ignore
+const INCIDENTS = [
+  {
+    id: "inc-1", rule_id: "HYD-X-0001", rule_version: "1.0.0", mode: "enforce",
+    title: "摄像头疑似被入侵且画面遭篡改", severity: "critical", device_ids: ["cam-02"],
+    source_ip: "172.30.0.100", techniques: ["T1110"], tactics: ["Credential Access"],
+    evidence_refs: [], hit_path: [], requires_confirmation: false, status: "open",
+    created_at: "2026-10-27T06:29:40Z",
+  },
+] as Incident[]; // prettier-ignore
+const EXECUTIONS = {
+  "exe-1": {
+    id: "exe-1", playbook_id: "isolate-attacker", playbook_version: "1.0.0", incident_id: "inc-1",
+    device_ids: ["cam-02"], target: "172.30.0.100", state: "contained", reason: null, ttl_s: 150,
+    expires_at: "2026-10-27T06:32:10Z", verify_result: { passed: true, reason: "封禁规则已生效" },
+  },
+} as Record<string, Execution>; // prettier-ignore
+const LAST_FRAME = Date.parse("2026-10-27T06:29:45Z");
+const alertList = (node: ReactNode) => <div className="flex h-80 w-80 flex-col">{node}</div>;
+
 // 组件各状态的展示页：/tests/e2e/gallery/?component=<组件>，每个状态一个 [data-state]
 const GALLERY: Record<string, Record<string, ReactNode>> = {
   KpiTile: {
@@ -80,6 +117,11 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
   DetailPanel: {
     device: <div className="w-80"><DetailPanel device={SWITCH} stale={false} onClose={() => {}} /></div>,
     disconnected: <div className="w-80"><DetailPanel device={SWITCH} stale onClose={() => {}} /></div>,
+  },
+  AlertList: {
+    normal: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale={false} lastFrameAt={LAST_FRAME} />),
+    empty: alertList(<AlertListView alerts={[]} incidents={[]} executions={{}} stale={false} lastFrameAt={LAST_FRAME} />),
+    disconnected: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale lastFrameAt={LAST_FRAME} />),
   },
 };
 

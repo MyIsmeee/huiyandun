@@ -5,6 +5,7 @@ import { SceneViewport } from "../../scene/SceneViewport";
 import { connect, useConnection } from "../../store/connection";
 import { useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
+import { AlertList } from "../AlertList/AlertList";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
 import { type KpiData, KpiTile } from "../KpiTile/KpiTile";
@@ -113,10 +114,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         {target && <TargetPanel target={target} stale={offline} onClose={deselect} />}
         <aside aria-label="告警" className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
           <h2 className="border-b border-line px-4 py-3 font-semibold">告警</h2>
-          <div className="m-auto text-center text-sm text-fg-3">
-            <p>暂无告警</p>
-            <p className="mt-1">最后更新 {formatTime(lastFrameAt)}</p>
-          </div>
+          <AlertList stale={offline} lastFrameAt={lastFrameAt} />
         </aside>
       </div>
 
