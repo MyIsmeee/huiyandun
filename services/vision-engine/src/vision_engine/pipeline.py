@@ -1,5 +1,6 @@
 """检测链路（TK-021、TK-022、TK-118）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
-hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 分割环境 → hyd.vision.scene.v1。
+hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 分割环境 → hyd.vision.scene.v1；
+画面冻结 → hyd.vision.integrity.v1（D-080）。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
@@ -32,10 +33,12 @@ from py_common.config import load_config
 from py_common.log import configure_logging
 from py_contracts.config.site_schema import SiteConfig
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine.behavior import BehaviorDetector
 from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
+from vision_engine.integrity import FREEZE_S, FreezeDetector
 from vision_engine.kinematics import Motion
 from vision_engine.motion import MotionGate
 from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
@@ -45,13 +48,15 @@ FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
+INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
 SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
-# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 由 TK-114 发布。
+# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 目前只有冻结，其余类型由 TK-114 发布。
 # 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
 STREAM = "HYD_VISION"
-STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, "hyd.vision.integrity.v1"]
+STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, INTEGRITY_SUBJECT]
 STREAM_MAX_AGE_S = 180 * 86400
 SCHEMA_VERSION = "1.0.0"
+INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（HYD-PLAN-007 v1.9）
 TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（HYD-PLAN-007 v1.9）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
@@ -133,6 +138,7 @@ class CameraPipeline:
         self._detector = detector
         self._vehicles = vehicles  # None 时只检测人员（如关键点录制工具）
         self._behaviors = BehaviorDetector(climb_lines or [])
+        self._freeze = FreezeDetector()
         self._gate = MotionGate()
         self._tracker, self._vehicle_tracker = (
             ByteTrackTracker(
@@ -177,13 +183,31 @@ class CameraPipeline:
 
     def process(
         self, frame: np.ndarray, timestamp: float
-    ) -> list[VisionTrackV1 | VisionBehaviorV1]:
+    ) -> list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1]:
+        # 冻结判定先于运动门控：定格画面没有运动，门控会跳过推理（C-CV-09）
+        integrity = (
+            [
+                VisionIntegrityV1(
+                    schema_version=INTEGRITY_SCHEMA_VERSION,
+                    event_id=uuid.uuid4(),
+                    ts=datetime.now(UTC),
+                    camera_id=self._camera_id,
+                    type="freeze",
+                    duration_s=FREEZE_S,
+                    source="rule",
+                    confidence=1.0,
+                    detail=None,
+                )
+            ]
+            if self._freeze.update(frame, timestamp)
+            else []
+        )
         tracked, vehicles = self.track(frame, timestamp)
         if not len(tracked) and not len(vehicles):
-            return []
+            return integrity
         now = datetime.now(UTC)
         # 未标定摄像头同样判定行为：只输出设备级告警（C-CV-05）
-        events: list[VisionTrackV1 | VisionBehaviorV1] = [
+        events: list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1] = integrity + [
             VisionBehaviorV1(
                 schema_version=SCHEMA_VERSION,
                 event_id=uuid.uuid4(),
@@ -320,12 +344,16 @@ async def run_camera(
                 if isinstance(event, VisionTrackV1):
                     await bus.publish(TRACK_SUBJECT, event)
                     continue
+                subject = (
+                    INTEGRITY_SUBJECT if isinstance(event, VisionIntegrityV1) else BEHAVIOR_SUBJECT
+                )
                 try:
-                    await bus.js_publish(BEHAVIOR_SUBJECT, event)
+                    await bus.js_publish(subject, event)
                 except (nats.errors.Error, TimeoutError):
-                    # 记录后继续检测：持续满足的行为 30 s 后重发（C-CV-09 不静默）
+                    # 记录后继续检测：持续满足的行为 30 s 后重发（C-CV-09 不静默）；冻结只报一次
                     log.exception(
-                        "vision.behavior_publish_failed", extra={"event_id": str(event.event_id)}
+                        "vision.event_publish_failed",
+                        extra={"subject": subject, "event_id": str(event.event_id)},
                     )
         beat()
 
