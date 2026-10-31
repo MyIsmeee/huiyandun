@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vision_engine.behavior import Behavior, BehaviorDetector
+from vision_engine.behavior import GAP_S, Behavior, BehaviorDetector
 
 CLIPS = Path(__file__).parent / "clips"
 CLIMB_1_LINE = [300, 700, 475, 340]  # climb-1 画面（1026×720）中院墙的墙顶
@@ -47,6 +47,19 @@ def test_target_action_detected_and_nothing_before(
     summary = [(b.behavior, b.track_id, round(b.start, 1)) for b in found]
     assert found and start_s[0] <= found[0].start <= start_s[1], summary
     assert all(b.behavior == behavior and b.start >= start_s[0] for b in found), summary
+
+
+def test_fall_2_one_track_one_event() -> None:
+    """#134：同一倒地者只有一条轨迹、一条 fall 事件（片段约 20 s，短于重发间隔），
+    其轨迹从倒地起持续 ≥ 10 s、中间不断（漏检不超过 GAP_S）。"""
+    found = replay("fall-2", [])
+
+    assert [b.behavior for b in found] == ["fall"], [(b.track_id, round(b.start, 1)) for b in found]
+    data = np.load(CLIPS / "fall-2.npz")
+    t = data["t"][data["track_id"] == found[0].track_id]
+    after = t[t >= found[0].start]
+    assert after.max() - found[0].start >= 10
+    assert np.diff(after).max() <= GAP_S
 
 
 @pytest.mark.parametrize("name", ["crowd-1", "actions-1"])

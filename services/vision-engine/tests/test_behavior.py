@@ -23,6 +23,7 @@ def pose(name: str, x: float = 300, feet: float = 400) -> np.ndarray:
         "lying": [(140, 0), (85, 0), (45, 0), (0, 0)],
         "bend": [(50, -90), (0, -85), (0, -45), (0, 0)],  # 弯腰捡物：躯干水平，髋部仍高
         "squat": [(0, -80), (0, -30), (20, -35), (0, 0)],
+        "propped": [(140, 0), (85, -35), (45, 0), (0, 0)],  # 倒地后撑起髋部：髋高约 0.54 个躯干
     }[name]
     (sx, sy), (hx, hy), (kx, ky), (ax, ay) = joints
     points = np.tile([x + hx, feet + hy], (17, 1)).astype(float)
@@ -93,6 +94,25 @@ def test_standing_up_interrupts() -> None:
     )
 
     assert run(BehaviorDetector([]), frames) == []
+
+
+def test_borderline_frame_after_fall_does_not_split_it() -> None:
+    """#134：发出跌倒事件后，髋部略抬过进入门限的一帧不中断（回差），一次跌倒只发一条事件。"""
+    frames = (
+        hold(pose("lying"), 0, 2.4) + hold(pose("propped"), 2.4, 0.2) + hold(pose("lying"), 2.6, 3)
+    )
+
+    assert [b.start for b in run(BehaviorDetector([]), frames)] == [0.0]
+
+
+def test_borderline_frame_before_fall_interrupts() -> None:
+    """发出前仍按进入门限：可疑姿态不因回差被延长成跌倒。"""
+    frames = (
+        hold(pose("lying"), 0, 1.2) + hold(pose("propped"), 1.2, 0.2) + hold(pose("lying"), 1.4, 3)
+    )
+
+    assert [b.start for b in run(BehaviorDetector([]), frames)] == [1.4]
+    assert run(BehaviorDetector([]), hold(pose("propped"), 0, 3)) == []
 
 
 def test_continuing_fall_repeats_every_interval() -> None:
