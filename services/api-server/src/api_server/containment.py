@@ -1,6 +1,7 @@
 """手动回滚（FR-405、TK-052）：校验执行处于已生效状态后，向 playbook-executor 发布回滚请求并写审计。
 
 回滚由 executor 执行，结果经 WS executions 频道推送；本接口只受理，返回当前执行状态。
+审计与发布在同一事务内：先写审计再发布，发布失败时审计随事务回滚，写审计失败时不发布（G-13）。
 """
 
 import uuid
@@ -32,20 +33,6 @@ async def rollback_execution(
     if execution.state != "contained":
         raise HTTPException(409, f"处置执行处于 {execution.state}，无需回滚")
     request_id = request.state.request_id
-    try:
-        await request.app.state.bus.js_publish(
-            ROLLBACK_SUBJECT,
-            PlaybookRollbackV1(
-                schema_version="1.0.0",
-                event_id=uuid.uuid4(),
-                ts=datetime.now(UTC),
-                execution_id=execution_id,
-                actor=principal.username,
-                request_id=request_id,
-            ),
-        )
-    except (nats.errors.Error, TimeoutError) as e:
-        raise HTTPException(503, "处置执行器暂不可达，请稍后重试") from e
     async with request.app.state.engine.begin() as conn:
         await record(
             conn,
@@ -56,6 +43,20 @@ async def rollback_execution(
             after=None,
             request_id=request_id,
         )
+        try:
+            await request.app.state.bus.js_publish(
+                ROLLBACK_SUBJECT,
+                PlaybookRollbackV1(
+                    schema_version="1.0.0",
+                    event_id=uuid.uuid4(),
+                    ts=datetime.now(UTC),
+                    execution_id=execution_id,
+                    actor=principal.username,
+                    request_id=request_id,
+                ),
+            )
+        except (nats.errors.Error, TimeoutError) as e:
+            raise HTTPException(503, "处置执行器暂不可达，请稍后重试") from e
     return PlaybookExecution.model_validate(
         execution.model_dump(mode="json", exclude={"schema_version", "event_id", "ts"})
     )

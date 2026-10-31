@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 
 import nats
@@ -10,7 +10,9 @@ import nats.js.errors
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
+from api_server import containment
 from api_server.app import create_app
 from api_server.audit import audit_log
 from api_server.config import ApiConfig
@@ -82,11 +84,8 @@ def test_unknown_or_finished_execution_rejected(
     assert r.status_code == status
 
 
-def test_rollback_request_published_and_audited(
-    client: TestClient, password: str, db: tuple[ApiConfig, ApiConfig], nats_url: str
-) -> None:
-    command_stream(nats_url, present=True)
-    login(client, "operator", password)
+def published(nats_url: str, post: Callable[[], None]) -> list[PlaybookRollbackV1]:
+    """调用 post 期间收到的回滚请求。"""
     received: list[PlaybookRollbackV1] = []
 
     async def listen() -> None:
@@ -96,36 +95,75 @@ def test_rollback_request_published_and_audited(
             received.append(event)
 
         await bus.subscribe(SUBJECT, PlaybookRollbackV1, on_request)
-        await asyncio.to_thread(lambda: responses.append(post()))
+        await asyncio.to_thread(post)
         await asyncio.sleep(0.3)
         await bus.close()
 
-    def post() -> int:
-        return client.post("/api/executions/exe-api/rollback", headers=RID).status_code
-
-    responses: list[int] = []
     asyncio.run(listen())
+    return received
 
-    assert responses == [200]
-    assert [(r.execution_id, r.actor, r.request_id) for r in received] == [
-        ("exe-api", "operator", "req-rollback")
-    ]
 
-    async def audited() -> list[tuple[str, str, str]]:
-        async with transaction(db[1]) as conn:
+def audited(config: ApiConfig, request_id: str) -> list[tuple[str, str, str]]:
+    async def query() -> list[tuple[str, str, str]]:
+        async with transaction(config) as conn:
             rows = await conn.execute(
                 select(audit_log.c.actor, audit_log.c.action, audit_log.c.target).where(
-                    audit_log.c.request_id == "req-rollback",
+                    audit_log.c.request_id == request_id,
                     audit_log.c.action == "playbook.rollback_requested",
                 )
             )
             return [tuple(r) for r in rows]
 
-    assert asyncio.run(audited()) == [("operator", "playbook.rollback_requested", "172.30.0.100")]
+    return asyncio.run(query())
 
 
-def test_executor_unreachable_reported(client: TestClient, password: str, nats_url: str) -> None:
-    """命令流尚未由 playbook-executor 创建：提示稍后重试，不写审计。"""
+def test_rollback_request_published_and_audited(
+    client: TestClient, password: str, db: tuple[ApiConfig, ApiConfig], nats_url: str
+) -> None:
+    command_stream(nats_url, present=True)
+    login(client, "operator", password)
+    responses: list[int] = []
+
+    def post() -> None:
+        responses.append(client.post("/api/executions/exe-api/rollback", headers=RID).status_code)
+
+    received = published(nats_url, post)
+    assert responses == [200]
+    assert [(r.execution_id, r.actor, r.request_id) for r in received] == [
+        ("exe-api", "operator", "req-rollback")
+    ]
+    assert audited(db[1], "req-rollback") == [
+        ("operator", "playbook.rollback_requested", "172.30.0.100")
+    ]
+
+
+def test_audit_failure_not_published(
+    client: TestClient, password: str, nats_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-13：写审计失败（如数据库断开）时不发布回滚请求，避免没有审计的解封。"""
+    command_stream(nats_url, present=True)
+    login(client, "operator", password)
+
+    async def broken(*args: object, **kwargs: object) -> None:
+        raise OperationalError("insert", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(containment, "record", broken)
+
+    responses: list[int] = []
+
+    def post() -> None:
+        responses.append(client.post("/api/executions/exe-api/rollback", headers=RID).status_code)
+
+    assert published(nats_url, post) == []
+    assert responses == [500]
+
+
+def test_executor_unreachable_reported(
+    client: TestClient, password: str, db: tuple[ApiConfig, ApiConfig], nats_url: str
+) -> None:
+    """命令流尚未由 playbook-executor 创建：提示稍后重试，审计随事务回滚。"""
     command_stream(nats_url, present=False)
     login(client, "operator", password)
-    assert client.post("/api/executions/exe-api/rollback", headers=RID).status_code == 503
+    headers = {"X-Request-ID": "req-unreachable"}
+    assert client.post("/api/executions/exe-api/rollback", headers=headers).status_code == 503
+    assert audited(db[1], "req-unreachable") == []
