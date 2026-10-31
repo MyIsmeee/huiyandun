@@ -14,6 +14,10 @@ WINDOW = timedelta(hours=24)
 MAX_ALERTS, MAX_INCIDENTS, MAX_EXECUTIONS = 200, 50, 50
 
 
+def _recent(event: EventBase) -> bool:
+    return event.ts >= datetime.now(UTC) - WINDOW
+
+
 class History:
     def __init__(self) -> None:
         self._alerts: deque[EventBase] = deque(maxlen=MAX_ALERTS)
@@ -32,12 +36,14 @@ class History:
         self._integrity.append(event)
 
     def incident(self, incident_id: str) -> CorrelatorIncidentV1 | None:
-        """关联事件的最新状态；超出保留范围时为 None。"""
-        return next((i for i in reversed(self._incidents) if i.id == incident_id), None)
+        """关联事件的最新状态；超过 24 小时或超出条数上限时为 None。"""
+        latest = next((i for i in reversed(self._incidents) if i.id == incident_id), None)
+        return latest if latest and _recent(latest) else None
 
     def event(self, event_id: UUID) -> EventBase | None:
-        """命中路径中的告警、行为或画面完整性事件；超出保留范围或未收到时为 None。"""
-        return next((e for e in (*self._alerts, *self._integrity) if e.event_id == event_id), None)
+        """命中路径中的告警、行为或画面完整性事件；超过 24 小时、超出条数上限或未收到时为 None。"""
+        events = (*self._alerts, *self._integrity)
+        return next((e for e in events if e.event_id == event_id and _recent(e)), None)
 
     def executions_of(self, incident_id: str) -> list[PlaybookExecutionV1]:
         return [e for e in self._executions.values() if e.incident_id == incident_id]

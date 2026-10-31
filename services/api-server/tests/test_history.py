@@ -6,6 +6,7 @@ from typing import Any
 
 from api_server import history as history_module
 from api_server.history import History
+from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 
@@ -62,3 +63,28 @@ def test_older_than_window_not_replayed() -> None:
     history.add_alert(behavior(now - timedelta(hours=1)))
 
     assert len(history.snapshot()) == 1
+
+
+def test_lookup_ignores_older_than_window() -> None:
+    """TK-070：报告只引用近 24 小时的事件，与"已超过 24 小时为 404"一致。"""
+    now = datetime.now(UTC)
+    old, recent = behavior(now - timedelta(hours=25)), behavior(now - timedelta(hours=1))
+    history = History()
+    history.add_alert(old)
+    history.add_alert(recent)
+
+    assert history.event(old.event_id) is None
+    assert history.event(recent.event_id) == recent
+
+    incident = CorrelatorIncidentV1.model_validate(
+        {
+            "schema_version": "1.2.0", "event_id": str(uuid.uuid4()),
+            "ts": (now - timedelta(hours=25)).isoformat(), "id": "inc-old",
+            "rule_id": "HYD-X-0001", "rule_version": "1.0.0", "mode": "enforce", "title": "t",
+            "severity": "critical", "device_ids": [], "source_ip": None, "techniques": [],
+            "tactics": [], "evidence_refs": [], "hit_path": [], "requires_confirmation": False,
+            "status": "open", "created_at": (now - timedelta(hours=25)).isoformat(),
+        }
+    )  # fmt: skip
+    history.add_incident(incident)
+    assert history.incident("inc-old") is None
