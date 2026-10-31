@@ -102,15 +102,22 @@ describe("告警的接收", () => {
 
 describe("AlertList", () => {
   it("无告警时显示空态与最后更新时间", () => {
-    render(<AlertList lastFrameAt={null} />);
+    render(<AlertList stale={false} lastFrameAt={null} />);
     expect(screen.getByText("暂无告警")).toBeTruthy();
+  });
+
+  it("断线时保留断开前的告警并标注数据非实时（UP-3、V-U3）", () => {
+    receive(frame("alerts", alert(1)), 0);
+    render(<AlertList stale lastFrameAt={0} />);
+    expect(screen.getByText(/数据非实时/)).toBeTruthy();
+    expect(screen.getByText("告警 1")).toBeTruthy();
   });
 
   it("关联事件置顶并显示处置状态（D-077）", () => {
     receive(frame("alerts", alert(1)), 0);
     receive(frame("incidents", incident), 0);
     receive(frame("executions", execution("contained")), 0);
-    render(<AlertList lastFrameAt={0} />);
+    render(<AlertList stale={false} lastFrameAt={0} />);
 
     const pinned = screen.getByRole("list", { name: "关联事件" });
     expect(within(pinned).getByText("摄像头疑似被入侵且画面遭篡改")).toBeTruthy();
@@ -122,7 +129,7 @@ describe("AlertList", () => {
     receive(frame("alerts", alert(1, "rule")), 0);
     receive(frame("alerts", alert(2, "model")), 0);
     receive(frame("alerts", fall(3)), 0);
-    render(<AlertList lastFrameAt={0} />);
+    render(<AlertList stale={false} lastFrameAt={0} />);
 
     const items = within(screen.getByRole("list", { name: "单条告警" })).getAllByRole("listitem");
     const item = (i: number) => {
@@ -146,7 +153,7 @@ describe("AlertList", () => {
   it("单击选中对应设备，选中设备的条目高亮（V-I3）", () => {
     receive(frame("alerts", alert(1)), 0);
     receive(frame("alerts", fall(2)), 0);
-    render(<AlertList lastFrameAt={0} />);
+    render(<AlertList stale={false} lastFrameAt={0} />);
 
     fireEvent.click(screen.getByText("告警 1"));
     expect(useSelection.getState().deviceId).toBe("cam-02");

@@ -114,7 +114,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         {target && <TargetPanel target={target} stale={offline} onClose={deselect} />}
         <aside aria-label="告警" className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
           <h2 className="border-b border-line px-4 py-3 font-semibold">告警</h2>
-          <AlertList lastFrameAt={lastFrameAt} />
+          <AlertList stale={offline} lastFrameAt={lastFrameAt} />
         </aside>
       </div>
 

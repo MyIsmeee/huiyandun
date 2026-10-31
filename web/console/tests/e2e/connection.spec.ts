@@ -52,7 +52,8 @@ test("断线时提示数据非实时，并自动重连", async ({ page }) => {
   await sockets[0]?.close({ code: 1011 });
 
   await expect(status(page)).toHaveText("断线 · 重连中");
-  await expect(page.getByText("数据非实时 · 最后更新 14:30:00")).toBeVisible();
+  await expect(page.getByLabel("场景").getByText("数据非实时 · 最后更新 14:30:00")).toBeVisible();
+  await expect(page.getByLabel("告警").getByText("数据非实时 · 最后更新 14:30:00")).toBeVisible();
   await expectNoOverflow(page);
   await expect(page).toHaveScreenshot("offline.png");
 
