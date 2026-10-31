@@ -19,6 +19,10 @@ FORGET_S = 10.0  # 轨迹消失超过此时长即丢弃其判定状态
 KEYPOINT_MIN = 0.3  # 关键点置信度低于此值视为不可见
 FALL_TORSO_DEG = 60.0  # 躯干（髋→肩）与竖直向上方向的夹角下限
 FALL_HIP_RATIO = 0.5  # 髋部高出腿部最低点的距离 / 躯干长度 的上限：髋部接近地面
+# 已发出跌倒事件后改用更宽的门限（回差）：倒地者在门限附近的逐帧抖动不中断，一次跌倒不拆成多条事件
+# （#134）；站起（躯干接近竖直或髋部抬高）仍立即中断。发出前仍按进入门限，不因回差延长可疑姿态而误报
+FALL_EXIT_TORSO_DEG = 45.0
+FALL_EXIT_HIP_RATIO = 0.75
 
 SHOULDERS, HIPS, LEGS, ANKLES = (5, 6), (11, 12), (13, 14, 15, 16), (15, 16)
 
@@ -38,8 +42,11 @@ def _visible(scores: np.ndarray, idx: tuple[int, ...]) -> list[int]:
     return [i for i in idx if scores[i] >= KEYPOINT_MIN]
 
 
-def fall_frame(points: np.ndarray, scores: np.ndarray) -> tuple[bool, float] | None:
-    """躯干倾角与髋部高度（FR-103）。返回（是否满足, 所用关键点置信度均值）；不可见为 None。"""
+def fall_frame(
+    points: np.ndarray, scores: np.ndarray, falling: bool = False
+) -> tuple[bool, float] | None:
+    """躯干倾角与髋部高度（FR-103）。返回（是否满足, 所用关键点置信度均值）；不可见为 None。
+    falling 为该轨迹已发出跌倒事件，按退出门限判定。"""
     shoulders, hips, legs = (_visible(scores, idx) for idx in (SHOULDERS, HIPS, LEGS))
     if not shoulders or not hips or not legs:
         return None
@@ -51,7 +58,10 @@ def fall_frame(points: np.ndarray, scores: np.ndarray) -> tuple[bool, float] | N
     tilt = math.degrees(math.atan2(abs(dx), -dy))  # 0° 为直立，180° 为倒立
     hip_height = (points[legs, 1].max() - hip[1]) / torso
     score = float(scores[shoulders + hips + legs].mean())
-    return tilt > FALL_TORSO_DEG and hip_height < FALL_HIP_RATIO, score
+    tilt_min, hip_max = (
+        (FALL_EXIT_TORSO_DEG, FALL_EXIT_HIP_RATIO) if falling else (FALL_TORSO_DEG, FALL_HIP_RATIO)
+    )
+    return tilt > tilt_min and hip_height < hip_max, score
 
 
 @dataclass
@@ -130,7 +140,7 @@ class BehaviorDetector:
         for track_id, points, kp_scores in zip(track_ids, keypoints, scores, strict=True):
             track = self._tracks.setdefault(int(track_id), _Track(seen=now))
             track.seen = now
-            fall = fall_frame(points, kp_scores)
+            fall = fall_frame(points, kp_scores, falling=track.fall.emitted is not None)
             ok, score = fall if fall is not None else (None, 0.0)
             if (hit := track.fall.update(ok, score, now)) is not None:
                 found.append(Behavior(int(track_id), "fall", hit[1], hit[0], now))

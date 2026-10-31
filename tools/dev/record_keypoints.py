@@ -39,7 +39,7 @@ def main() -> None:
         if t < sampled / FPS:
             continue
         sampled += 1
-        tracked = camera.track(frame, t)
+        tracked, _ = camera.track(frame, t)
         for i in range(len(tracked)):
             rows["t"].append(t)
             rows["track_id"].append(tracked.tracker_id[i])

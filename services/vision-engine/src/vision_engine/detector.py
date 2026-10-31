@@ -15,6 +15,10 @@ MIN_SCORE = 0.3  # 低分框交给 ByteTrack 第二阶段关联，不直接建�
 # 横躺在画面中的人（如倒地者）正向推理的置信度常低于 MIN_SCORE；另以左右各旋转 90° 的画面推理，
 # 使横躺者在旋转后直立，三次结果合并后统一 NMS（TK-022）。推理耗时约为单次的 3 倍
 ROTATIONS = (cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE)
+# 横躺者在另一方向的推理中常被检出为把他整个框住的松散框，与紧框的 IoU 远低于 NMS_IOU（#134 实测约 0.3）。
+# 不同方向的两个框，较小者被较大者覆盖达此比例即视为同一人，只留高分者；同一方向内远处的人被近处的人框住
+# 属正常，不在此列
+CONTAINED = 0.8
 
 type Candidates = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
@@ -54,17 +58,36 @@ class PoseDetector:
         boxes, scores, points, point_scores = (
             np.concatenate(c) for c in zip(*candidates, strict=True)
         )
+        passes = np.repeat(np.arange(len(candidates)), [len(c[1]) for c in candidates])
         dx, dy = offset
         boxes = boxes + (dx, dy, dx, dy)
         _, keep = multiclass_nms(boxes, scores[:, None], nms_thr=NMS_IOU, score_thr=MIN_SCORE)
         if keep is None:
             return sv.Detections.empty()
-        keep = np.asarray(keep)
+        keep = _drop_contained(boxes, scores, passes, np.asarray(keep))
         return sv.Detections(
             xyxy=boxes[keep],
             confidence=scores[keep],
             data={"keypoints": points[keep] + (dx, dy), "keypoint_scores": point_scores[keep]},
         )
+
+
+def _drop_contained(
+    boxes: np.ndarray, scores: np.ndarray, passes: np.ndarray, keep: np.ndarray
+) -> np.ndarray:
+    """按分数从高到低，去掉被另一方向的已保留框覆盖（交集 / 较小框面积 ≥ CONTAINED）的框。"""
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    kept: list[int] = []
+    for i in keep[np.argsort(-scores[keep])]:
+        others = [j for j in kept if passes[j] != passes[i]]
+        if others:
+            lo = np.maximum(boxes[others, :2], boxes[i, :2])
+            hi = np.minimum(boxes[others, 2:], boxes[i, 2:])
+            inter = np.prod(np.clip(hi - lo, 0, None), axis=1)
+            if (inter / np.minimum(areas[others], areas[i]) >= CONTAINED).any():
+                continue
+        kept.append(int(i))
+    return np.array(kept, dtype=int)
 
 
 # RF-DETR（REUSE-22）的 COCO 类别号 → 契约 object_class；人员由 RTMO 检出（含骨骼），这里只取车辆

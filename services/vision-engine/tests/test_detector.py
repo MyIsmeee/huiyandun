@@ -163,3 +163,44 @@ def test_no_vehicles_returns_empty() -> None:
     detections = vehicles([(0.5, 0.5, 0.2, 0.2, 0, 0.9)])(np.zeros((100, 100, 3), np.uint8))
 
     assert len(detections) == 0
+
+
+class PassSession(FakeSession):
+    """每次推理（0 原画面、1 逆时针、2 顺时针）各自返回 dets_by_call 中的框。"""
+
+    def __init__(self, dets_by_call: list[list[list[float]]]) -> None:
+        super().__init__([d for dets in dets_by_call for d in dets])
+        self.counts = [len(dets) for dets in dets_by_call]
+
+    def run(self, names: list[str], feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        call = self.calls
+        self.calls += 1
+        start = sum(self.counts[:call])
+        end = start + self.counts[call]
+        return [self.dets[:, start:end], self.keypoints[:, start:end]]
+
+
+def test_contained_box_from_other_rotation_suppressed() -> None:
+    """#134：横躺者在另一旋转方向被检出为把他整个框住的松散框（与紧框 IoU 只有 0.32，NMS 合不掉），
+    视为同一人，只保留高分者，否则同一倒地者产生两条轨迹。"""
+    upright = [[100, 100, 200, 300, 0.74]]  # 整帧 [200, 200, 400, 600]
+    loose = [[75, 339.5, 350, 564.5, 0.51]]  # 逆时针画面中，换算回整帧为 [150, 150, 600, 700]
+    pose = PoseDetector(
+        get_example("sigmoid.onnx"), cast(ort.InferenceSession, PassSession([upright, loose, []]))
+    )
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8))
+
+    assert result.xyxy.tolist() == [[200, 200, 400, 600]]
+
+
+def test_contained_box_from_same_pass_kept() -> None:
+    """同一方向推理中，远处的人被近处的人的框包住（人群中常见），仍是两个人。"""
+    people = [[100, 100, 300, 300, 0.9], [150, 150, 200, 250, 0.8]]
+    pose = PoseDetector(
+        get_example("sigmoid.onnx"), cast(ort.InferenceSession, PassSession([people, [], []]))
+    )
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8))
+
+    assert len(result) == 2
