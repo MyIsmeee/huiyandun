@@ -52,6 +52,8 @@ ENDPOINTS = [
     ("post", "/api/llm/providers/{id}/test", "admin"),
     ("get", "/api/llm/providers/{id}/models", "admin"),
     ("put", "/api/llm/providers/order", "admin"),
+    ("post", "/api/llm/models", "admin"),
+    ("get", "/api/llm/settings", "admin"),
     ("put", "/api/llm/settings", "admin"),
     ("get", "/api/egress/stats", "viewer"),
     ("get", "/api/audit-logs", "auditor"),
@@ -237,8 +239,8 @@ def test_provider_response_never_carries_api_key() -> None:
     schemas = SPEC["components"]["schemas"]
 
     assert "api_key" not in LlmProvider.model_fields
-    assert schemas["LlmProviderCreate"]["properties"]["api_key"]["writeOnly"] is True
-    assert schemas["LlmProviderUpdate"]["properties"]["api_key"]["writeOnly"] is True
+    for name in ("LlmProviderCreate", "LlmProviderUpdate", "ModelDiscovery"):
+        assert schemas[name]["properties"]["api_key"]["writeOnly"] is True
 
 
 @pytest.mark.parametrize("model", [LlmProviderCreate, LlmProviderUpdate])
@@ -269,7 +271,10 @@ def test_provider_create_allows_missing_api_key_and_defaults_timeout() -> None:
 @pytest.mark.parametrize(
     ("model", "data"),
     [
-        (ProviderCheck, {"check": "latency", "ok": True, "latency_ms": 5, "reason": None}),
+        (
+            ProviderCheck,
+            {"check": "latency", "ok": True, "latency_ms": 5, "reason": None, "hint": None},
+        ),
         (EgressStats, {"window_s": 300, "count": 0, "targets": []}),
         (WsFrame, {"channel": "metrics", "data": {}}),
         (
