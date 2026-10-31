@@ -17,6 +17,7 @@ import supervision as sv
 
 from py_common.bus import Bus
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine import pipeline as pipeline_module
 from vision_engine.detector import PoseDetector, VehicleDetector
@@ -24,6 +25,7 @@ from vision_engine.geometry import GroundMapping
 from vision_engine.pipeline import (
     BEHAVIOR_SUBJECT,
     FPS,
+    INTEGRITY_SUBJECT,
     TRACK_SUBJECT,
     VEHICLE_ID_BASE,
     CameraPipeline,
@@ -179,6 +181,48 @@ def test_static_scene_without_tracks_skips_detection() -> None:
     assert fake.calls == 1  # 只有首帧整帧推理
 
 
+def test_frozen_picture_reported_once_as_freeze() -> None:
+    """D-080：定格画面没有运动、门控跳过推理，冻结仍须判定（FR-301、C-CV-09）。"""
+    camera, _ = pipeline(MAPPING, person=False)
+    still = frame(0)
+
+    events = [e for i in range(FPS * 8) for e in camera.process(still, timestamp=i / FPS)]
+
+    assert [(type(e), e.camera_id, e.type, e.source, e.confidence) for e in events] == [
+        (VisionIntegrityV1, "cam-01", "freeze", "rule", 1.0)
+    ]
+
+
+class StillReader:
+    """每次取用都有新帧，但画面不变：推流源被换成定格帧。"""
+
+    def __init__(self) -> None:
+        self.seq = 0
+
+    def latest(self) -> tuple[int, np.ndarray]:
+        self.seq += 1
+        return self.seq, frame(0)
+
+
+class RecordingBus:
+    def __init__(self) -> None:
+        self.published: list[tuple[str, object]] = []
+
+    async def js_publish(self, subject: str, event: object) -> None:
+        self.published.append((subject, event))
+
+
+def test_freeze_published_to_integrity_subject() -> None:
+    camera, _ = pipeline(MAPPING, person=False)
+    bus = RecordingBus()
+    run = run_camera(camera, cast(FrameReader, StillReader()), cast(Bus, bus), lambda: None)
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(run, 6))
+
+    assert [(s, type(e)) for s, e in bus.published] == [(INTEGRITY_SUBJECT, VisionIntegrityV1)]
+
+
 def test_pyav_and_matplotlib_not_installed() -> None:
     """REUSE-07：PyAV 自带 GPL 的 x264 / x265（G-08）；跟踪在两者缺席时可用由上面的用例验证。"""
     assert importlib.util.find_spec("av") is None
@@ -249,7 +293,7 @@ def test_behavior_publish_failure_is_logged_and_detection_continues(
         run_for(camera, bus, 3.5)
 
     assert [b.behavior for b in bus.behaviors] == ["fall"]
-    failed = [r for r in caplog.records if r.getMessage() == "vision.behavior_publish_failed"]
+    failed = [r for r in caplog.records if r.getMessage() == "vision.event_publish_failed"]
     assert len(failed) == 1
     assert bus.events[-1].ts > bus.behaviors[0].ts
 
