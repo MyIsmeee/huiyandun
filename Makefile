@@ -90,4 +90,10 @@ test-rules:
 todo = @echo "$@：由 $(1) 实现" >&2; exit 1
 
 llm-check: ; $(call todo,TK-060)
-demo-run: ; $(call todo,TK-100)
+
+# 执行演示剧本（DM-11）：先等全部服务 healthy；FROM_STEP=<N> 从第 N 步续跑（HYD-DEP-005 §5.3）
+SCENARIO ?= main
+demo-run:
+	tools/dev/wait-healthy.sh $(COMPOSE)
+	uv run python tools/dev/scenario_runner.py demo/scenarios/$(SCENARIO).yaml \
+		$(if $(FROM_STEP),--from-step $(FROM_STEP)) -- $(COMPOSE)

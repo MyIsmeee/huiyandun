@@ -19,11 +19,21 @@ attack_blocked, load, matches, parse_at = (
     runner.parse_at,
 )
 
+ROOT = Path(__file__).resolve().parents[3]
+
 
 def write(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "s.yaml"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def test_main_scenario_loads() -> None:
+    scenario = load(ROOT / "demo/scenarios/main.yaml")
+
+    assert scenario.ttl_s == 150  # FR-404
+    assert [s.at_s for s in scenario.steps] == sorted(s.at_s for s in scenario.steps)
+    assert scenario.steps[-1].at_s + scenario.steps[-1].expect["within_s"] <= 6 * 60  # DM-13
 
 
 @pytest.mark.parametrize(("text", "seconds"), [("0:00", 0), ("1:20", 80), ("12:05", 725)])
