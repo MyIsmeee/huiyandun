@@ -1,9 +1,11 @@
-"""llm-gateway 内部接口（FR-602、V-M6、TK-060、D-084）：模型列表与失败解释。
+"""llm-gateway 内部接口（FR-602、V-M6、TK-060、D-084）：模型列表、失败解释、测试连接。
 
 以 httpx2 MockTransport 回放录制的响应模拟供应商，用例不访问真实端点。
 """
 
+import json
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx2
 import pytest
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from llm_gateway.app import GatewayConfig, create_app
 
+PROMPTS = Path(__file__).resolve().parents[3] / "prompts"
 KEY = "sk-not-a-real-key-7f3a"
 BASE = "http://192.168.1.50:8888/v1"
 MODELS = {"object": "list", "data": [{"id": "qwen3-8b"}, {"id": "deepseek-chat"}]}
@@ -54,7 +57,7 @@ class Provider:
         return (self.models if request.url.path.endswith("/models") else self.chat)(request)
 
     def post(self, path: str, **target: object) -> httpx2.Response:
-        app = create_app(GatewayConfig(), transport=httpx2.MockTransport(self))
+        app = create_app(GatewayConfig(prompts_dir=PROMPTS), transport=httpx2.MockTransport(self))
         body = {"base_url": BASE, "api_key": KEY, "model": "qwen3-8b", "timeout_s": 5} | target
         with TestClient(app) as c:
             return c.post(path, json=body)
@@ -150,3 +153,87 @@ def test_cross_host_redirect_not_followed(provider: Provider) -> None:
 def test_non_openai_response_explained(provider: Provider) -> None:
     provider.models = lambda _: httpx2.Response(200, json={"hello": "world"})
     assert message(provider).startswith("返回的不是 OpenAI 兼容格式；")
+
+
+# 测试连接：分项结果、健康分档、结构化输出探测
+
+
+def checks(response: httpx2.Response) -> dict[str, dict]:
+    return {c["check"]: c for c in response.json()["result"]["checks"]}
+
+
+def test_all_checks_pass_and_json_schema_detected(provider: Provider) -> None:
+    r = provider.post("/internal/probe")
+    result = r.json()["result"]
+    assert result["health"] == "ok"
+    assert all(c["ok"] for c in result["checks"])
+    assert checks(r)["connectivity"]["latency_ms"] is not None
+    assert r.json()["structured_output"] == "json_schema"
+    assert json.loads(provider.seen[1].content)["response_format"]["type"] == "json_schema"
+    assert provider.KEY not in r.text
+
+
+def test_connectivity_failure_skips_rest(provider: Provider) -> None:
+    provider.models = lambda _: httpx2.Response(401)
+    r = provider.post("/internal/probe")
+    assert r.json()["result"]["health"] == "failed"
+    assert "API Key 无效" in checks(r)["connectivity"]["reason"]
+    assert checks(r)["model"]["reason"].startswith("未检查")
+    assert r.json()["structured_output"] is None
+
+
+def test_missing_v1_returned_as_suggested_base_url(provider: Provider) -> None:
+    provider.models = lambda r: (
+        httpx2.Response(200, json={"data": []})
+        if r.url.path == "/v1/models"
+        else httpx2.Response(404)
+    )
+    r = provider.post("/internal/probe", base_url="http://192.168.1.50:8888")
+    assert r.json()["result"]["suggested_base_url"] == "http://192.168.1.50:8888/v1"
+
+
+def test_unknown_model_suggests_close_names(provider: Provider) -> None:
+    r = provider.post("/internal/probe", model="Qwen3-8B-Instruct")
+    model = checks(r)["model"]
+    assert model["ok"] is False
+    assert r.json()["result"]["suggested_models"][0] == "qwen3-8b"
+    assert "可改选：qwen3-8b" in model["hint"]
+    assert r.json()["result"]["health"] == "failed"
+
+
+def test_json_schema_rejected_falls_back_to_json_object(provider: Provider) -> None:
+    def chat(request: httpx2.Request) -> httpx2.Response:
+        if json.loads(request.content)["response_format"]["type"] == "json_schema":
+            return httpx2.Response(400, json={"error": "response_format not supported"})
+        return provider.completion('{"ok": true}')
+
+    provider.chat = chat
+    r = provider.post("/internal/probe")
+    assert checks(r)["structured_output"]["ok"] is True
+    assert r.json()["structured_output"] == "json_object"
+
+
+def test_no_structured_output_still_healthy(provider: Provider) -> None:
+    """不支持结构化输出：该项不通过并说明仍可用，不影响健康分档。"""
+    provider.chat = lambda _: provider.completion("好的，这是结果：ok")
+    r = provider.post("/internal/probe")
+    structured = checks(r)["structured_output"]
+    assert structured["ok"] is False and "仍可使用" in structured["hint"]
+    assert r.json()["structured_output"] == "none"
+    assert r.json()["result"]["health"] == "ok"
+
+
+def test_think_segment_stripped_before_validation(provider: Provider) -> None:
+    """C-LLM-12：推理模型先输出 <think> 段。"""
+    provider.chat = lambda _: provider.completion('<think>先想想</think>\n{"ok": true}')
+    assert provider.post("/internal/probe").json()["structured_output"] == "json_schema"
+
+
+def test_structured_output_timeout_keeps_capability_unknown(provider: Provider) -> None:
+    def slow(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ReadTimeout("timed out", request=request)
+
+    provider.chat = slow
+    r = provider.post("/internal/probe")
+    assert checks(r)["structured_output"]["reason"] == "5 秒内无响应"
+    assert r.json()["structured_output"] is None
