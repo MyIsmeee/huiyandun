@@ -33,7 +33,10 @@ export function App() {
   // WS 被拒时核对会话：失效回到登录页；服务不可达时留在主界面，由连接状态提示断线（V-U3）
   const recheck = useCallback(() => {
     api.getSite().catch((e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) setGate({ kind: "login" });
+      if (e instanceof ApiError && e.status === 401) {
+        useSession.setState({ role: null });
+        setGate({ kind: "login" });
+      }
     });
   }, []);
   // 请求 ID（crypto.randomUUID）与 Secure 会话 Cookie 都要求安全上下文：http 访问时直接说明，不发请求

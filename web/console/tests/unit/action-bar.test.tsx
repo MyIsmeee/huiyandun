@@ -98,6 +98,18 @@ describe("ActionBar", () => {
     expect(screen.getByText("解封失败：privileged-helper 不可达，将于到期时自动解除")).toBeTruthy();
   });
 
+  it("连续两次解封失败且原因相同：第二次的结果推送后即可再点", async () => {
+    vi.spyOn(api, "rollback").mockResolvedValue(execution());
+    const failed = execution({ reason: "解封失败：privileged-helper 不可达，将于到期时自动解除" });
+    push(failed);
+    show("operator");
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "立即解封" })));
+    push({ ...failed });
+    expect(screen.getByRole("button", { name: "立即解封" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("执行器推送已解除后按钮消失", async () => {
     vi.spyOn(api, "rollback").mockResolvedValue(execution());
     push(execution());

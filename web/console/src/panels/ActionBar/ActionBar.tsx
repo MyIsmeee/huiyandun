@@ -53,11 +53,10 @@ function remaining(expiresAt: string, now: number): string {
 export function ActionBar(props: { deviceId: string }) {
   const execution = useDeviceExecution(props.deviceId);
   const role = useSession((s) => s.role);
-  // 请求记在发起时的执行与其原因上：受理后保持不可点，直到执行器推送结果（解封后按钮消失；解封失败时原因更新，
-  // 可再次解封，D-075）；换了一个执行（如回滚后再次封禁）即不再显示上一次的结果
+  // 请求记在发起时收到的那条执行推送上：受理后保持不可点，直到执行器推送新结果（每次推送都是新对象；解封后按钮
+  // 消失，解封失败时可再次解封，D-075，原因与上次相同也能识别）；换了一个执行即不再显示上一次的结果
   const [request, setRequest] = useState<{
-    id: string;
-    reason: string | null;
+    execution: Execution;
     status: "pending" | "failed";
     message?: string;
   } | null>(null);
@@ -69,22 +68,22 @@ export function ActionBar(props: { deviceId: string }) {
     return () => clearInterval(timer);
   }, [contained]);
   if (!execution) return null;
-  const current = request?.id === execution.id && request.reason === execution.reason ? request : null;
+  const current = request?.execution === execution ? request : null;
 
   // 已处置时另有拦截证据；原因（如解封失败，D-075）在前
   const details = [execution.reason, contained ? execution.verify_result?.reason : null].filter(Boolean);
-  async function rollback(id: string, reason: string | null) {
-    setRequest({ id, reason, status: "pending" });
+  async function rollback(target: Execution) {
+    setRequest({ execution: target, status: "pending" });
     try {
-      await api.rollback(id);
+      await api.rollback(target.id);
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "无法连接服务器，请重试";
-      setRequest({ id, reason, status: "failed", message });
+      setRequest({ execution: target, status: "failed", message });
       return;
     }
     setTimeout(() => {
       setRequest((r) =>
-        r?.id === id && r.reason === reason && r.status === "pending"
+        r?.execution === target && r.status === "pending"
           ? { ...r, status: "failed", message: "未收到执行结果，请重试" }
           : r,
       );
@@ -109,7 +108,7 @@ export function ActionBar(props: { deviceId: string }) {
       {contained && canContain(role) && (
         <button
           type="button"
-          onClick={() => void rollback(execution.id, execution.reason)}
+          onClick={() => void rollback(execution)}
           disabled={current?.status === "pending"}
           className="h-9 self-start rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40"
         >
