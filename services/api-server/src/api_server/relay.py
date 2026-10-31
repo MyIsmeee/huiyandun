@@ -19,6 +19,7 @@ from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorInci
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 
@@ -64,10 +65,14 @@ async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]
 
 async def follow(bus: Bus, hub: Hub, devices: Devices, history: History) -> None:
     """从 JetStream 重放近 24 小时并持续接收（D-077）：告警与行为事件只记入历史（推送沿用 start 的转发）；
-    关联事件与处置执行记入历史并推送，执行同时更新设备的处置状态（04 §5.2）。"""
+    画面完整性事件只记入历史，供报告查找（TK-070）；关联事件与处置执行记入历史并推送，执行同时更新设备的
+    处置状态（04 §5.2）。"""
 
     async def on_alert(event: EventBase) -> None:
         history.add_alert(event)
+
+    async def on_integrity(event: EventBase) -> None:
+        history.add_integrity(event)
 
     async def on_incident(event: CorrelatorIncidentV1) -> None:
         history.add_incident(event)
@@ -83,6 +88,7 @@ async def follow(bus: Bus, hub: Hub, devices: Devices, history: History) -> None
     await asyncio.gather(
         _subscribe(bus, "hyd.security.alert.v1", SecurityAlertV1, on_alert, since),
         _subscribe(bus, "hyd.vision.behavior.v1", VisionBehaviorV1, on_alert, since),
+        _subscribe(bus, "hyd.vision.integrity.v1", VisionIntegrityV1, on_integrity, since),
         _subscribe(bus, "hyd.correlator.incident.v1", CorrelatorIncidentV1, on_incident, since),
         _subscribe(bus, "hyd.playbook.execution.v1", PlaybookExecutionV1, on_execution, since),
     )
