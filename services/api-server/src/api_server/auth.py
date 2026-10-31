@@ -18,7 +18,7 @@ from sqlalchemy import Column, DateTime, LargeBinary, MetaData, Table, Text, del
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.exceptions import HTTPException
 
-from py_contracts.api import LoginRequest, LoginResponse
+from py_contracts.api import LoginRequest, LoginResponse, Session
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +145,14 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Log
     )
     log.info("auth.login", extra={"username": body.username})
     return LoginResponse.model_validate({"role": row.role, "expires_at": expires_at})
+
+
+@router.get("/session")
+async def session(principal: Annotated[Principal, Depends(authenticate)]) -> Session:
+    """页面刷新后据此决定渲染哪些操作（C-FE-07）。"""
+    return Session.model_validate(
+        {"username": principal.username, "role": principal.role, "expires_at": principal.expires_at}
+    )
 
 
 @router.post("/logout", status_code=204)
