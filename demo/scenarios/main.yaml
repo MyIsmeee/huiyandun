@@ -1,0 +1,48 @@
+# 主剧本（HYD-DEP-005 §4.4、DM-11）：make demo-run SCENARIO=main 由 tools/dev/scenario_runner.py 执行。
+# at 为距开场的 分:秒；expect 的窗口为 [at, at + within_s]，match 为事件字段（数组字段取包含）。
+# 当前只含已具备的主链路（D-060、D-080）：低速攻击、画面重放、AI 值班员、供应商、零出站、存证
+# 随 TK-115、114、116、060、090、080 完成时追加。连续执行时，上一轮结束后至少等 1 分钟再开始：
+# 同一规则与设备的关联事件 5 分钟内去重（D-067）
+id: main
+overrides: { playbook_ttl_s: 150 }  # FR-404
+steps:
+  - name: 常态运行，目标随画面移动
+    at: "0:00"
+    expect: { subject: hyd.vision.track.v1, match: { camera_id: cam-01 }, within_s: 15 }
+  - name: 素材中有人翻越 cam-02 院墙（climb-1 约 0:12）
+    at: "0:00"
+    expect: { subject: hyd.vision.behavior.v1, match: { camera_id: cam-02, behavior: climb }, within_s: 30 }
+  - name: 素材中有人跌倒（fall-2 约 0:30）
+    at: "0:20"
+    expect: { subject: hyd.vision.behavior.v1, match: { camera_id: cam-01, behavior: fall }, within_s: 30 }
+  # rtsp-target 每次拒绝凭据后停顿约 2 s，第 5 次尝试触发规则，实测 12～15 s 告警
+  - name: attack-sim 对 cam-02 连续认证尝试
+    at: "1:00"
+    do: { action: start_attack, target: cam-02 }
+    expect:
+      subject: hyd.security.alert.v1
+      match: { device_id: cam-02, rule_id: HYD-NET-0001, source: rule }
+      within_s: 20
+  # 截取当前帧约 2 s、切换后约 2 s 解码恢复，再经 5 s 判定（FR-301）
+  - name: 攻击者把 cam-02 画面换成定格帧
+    at: "1:20"
+    do: { action: freeze_camera, camera: cam-02 }
+    expect: { subject: hyd.vision.integrity.v1, match: { camera_id: cam-02, type: freeze }, within_s: 15 }
+  - name: 爆破与画面冻结关联为 critical 事件
+    at: "1:20"
+    expect: { subject: hyd.correlator.incident.v1, match: { rule_id: HYD-X-0001, device_ids: cam-02 }, within_s: 20 }
+  - name: 自动封禁攻击源并校验生效（关联事件后 ≤ 15 s，SC-04）
+    at: "1:20"
+    expect: { subject: hyd.playbook.execution.v1, match: { device_ids: cam-02, state: contained }, within_s: 30 }
+  - name: attack-sim 再次攻击，连接实际失败
+    at: "1:50"
+    do: { action: start_attack, target: cam-02 }
+    expect: { attack: blocked }
+  - name: 恢复 cam-02 画面
+    at: "2:10"
+    do: { action: restore_camera, camera: cam-02 }
+    note: 在详情面板选中 cam-02，点"生成报告"并打开查看
+  # 封禁约 1:30 生效，150 s 后到期；执行器按墙上时钟计时，WSL 校时会使到期时刻前后偏移十余秒
+  - name: TTL 150 s 到期，封禁自动撤销
+    at: "3:30"
+    expect: { subject: hyd.playbook.execution.v1, match: { device_ids: cam-02, state: rolled_back }, within_s: 60 }

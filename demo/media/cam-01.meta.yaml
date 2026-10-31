@@ -3,9 +3,10 @@ source: bilibili 公开视频
 license: 开发、调试与测试用，不入库、不对外分发
 anonymization: 去除音轨；界面中人体默认模糊（FR-106）
 # 原始片段放在 src/；首尾片段不同，循环衔接处不重复画面（FR-302）
+# 可检出的跌倒（fall-2）排在第 2 段，主剧本约 0:30 出现；fall-1 为俯拍瘫坐，二维骨骼无法区分
 segments:
-  - { file: fall-1.mp4, title: 摔倒素材1（网络监控素材） }
   - { file: actions-1.mp4, title: 跳、跑、走、下蹲识别素材 }
-  - { file: crowd-1.mp4, title: 随机监控素材，人流量识别等 }
   - { file: fall-2.mp4, title: 摔倒素材2（网络监控素材） }
+  - { file: crowd-1.mp4, title: 随机监控素材，人流量识别等 }
+  - { file: fall-1.mp4, title: 摔倒素材1（网络监控素材） }
   - { file: moto-fire-1.mp4, title: 室内摩托起火素材 }

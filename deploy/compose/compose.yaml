@@ -315,7 +315,7 @@ services:
       retries: 10
 
   # 受控攻击模拟（DP-09、C-SEC-11）：只对 rtsp-target 发 RTSP 认证重试，触发 HYD-NET-0001。
-  # 一次性执行后退出（scenario-runner 在主剧本 1:20 再次启动）；只接入 attack-net，网络层只够得到
+  # 一次性执行后退出（scenario-runner 在主剧本 1:00 与 1:50 再次启动）；只接入 attack-net，网络层只够得到
   # rtsp-target，碰不到 go2rtc 等。源地址在白名单（172.30.0.0/28）之外，后续处置才能真正封禁它。
   # 行为参数登记于 demo/scenarios/attack-sim.yaml
   attack-sim:
@@ -334,6 +334,20 @@ services:
     networks:
       attack-net:
         ipv4_address: 172.30.0.100
+    read_only: true
+    cap_drop: [ALL]
+
+  # 剧本观测端（TK-100）：只在 make demo-run 时由 docker compose run 启动，订阅事件逐行写到标准输出，
+  # 供宿主机上的 tools/dev/scenario_runner.py 断言；剧本结束即退出。复用 correlator 镜像（事件总线客户端），
+  # 只接入 core-net
+  scenario-runner:
+    image: huiyandun/correlator:local
+    build: { context: ../.., dockerfile: services/correlator/Dockerfile }
+    profiles: [runner]
+    labels: { hyd.oneshot: "true" }
+    entrypoint: ["python3", "/opt/hyd/scenario_observer.py"]
+    volumes: ["../../tools/dev/scenario_observer.py:/opt/hyd/scenario_observer.py:ro"]
+    networks: [core-net]
     read_only: true
     cap_drop: [ALL]
 
