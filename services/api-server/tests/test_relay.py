@@ -19,6 +19,7 @@ from api_server.config import ApiConfig
 from py_common.bus import Bus
 from py_contracts.api import Device, WsFrame
 from py_contracts.events.event_base_schema import EventBase
+from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
@@ -210,3 +211,66 @@ def test_new_connection_receives_latest_scene_of_each_camera(
     scenes = {s.camera_id: s for s in (VisionSceneV1.model_validate(f.data) for f in frames[2:])}
     assert scenes["cam-01"] == latest
     assert scenes["cam-02"].surfaces[0].class_ == "floor"
+
+
+EXECUTION = "hyd.playbook.execution.v1"
+
+
+def execution(state: str) -> PlaybookExecutionV1:
+    return PlaybookExecutionV1.model_validate(
+        common()
+        | {
+            "schema_version": "1.1.0", "id": "exe-relay", "playbook_id": "isolate-attacker",
+            "playbook_version": "1.0.0", "incident_id": "inc-1", "device_ids": ["cam-02"],
+            "target": "172.30.1.20", "state": state, "reason": None, "ttl_s": 150,
+            "expires_at": None, "verify_result": None,
+        }
+    )  # fmt: skip
+
+
+def js_publish(nats_url: str, subject: str, event: EventBase) -> None:
+    async def main() -> None:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        try:
+            await bus.ensure_stream("HYD_PLAYBOOK", [EXECUTION], 3600)
+            await bus.js_publish(subject, event)
+        finally:
+            await bus.close()
+
+    asyncio.run(main())
+
+
+@pytest.fixture
+def playbook_stream(nats_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """执行记录的流在应用启动前已存在，跟随订阅立即建立。"""
+    monkeypatch.setattr(relay, "RESUBSCRIBE_S", 0.05)
+
+    async def main() -> None:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        try:
+            await bus.ensure_stream("HYD_PLAYBOOK", [EXECUTION], 3600)
+        finally:
+            await bus.close()
+
+    asyncio.run(main())
+
+
+def test_execution_pushed_then_device_contained_and_replayed(
+    playbook_stream: None, client: TestClient, ws_connect: Connect, nats_url: str
+) -> None:
+    """TK-052：执行状态经 executions 频道推送，随后推送处置状态的设备；新连接补推执行的最新状态。"""
+    with ws_connect() as ws:
+        js_publish(nats_url, EXECUTION, execution("contained"))
+        frame = next_frame(client, ws)
+        assert frame.channel == "executions" and frame.data["state"] == "contained"
+        assert device_state(next_frame(client, ws)) == ("devices", "cam-02", "contained", None)
+
+    with client.websocket_connect(WS_URL) as ws:
+        frames = []
+        while (frame := next_frame(client, ws)) != SENTINEL:
+            frames.append(frame)
+
+    replayed = [f for f in frames if f.channel == "executions" and f.data["id"] == "exe-relay"]
+    assert [f.data["state"] for f in replayed] == ["contained"]
+    devices = {f.data["id"]: f.data["state"] for f in frames if f.channel == "devices"}
+    assert devices["cam-02"] == "contained"

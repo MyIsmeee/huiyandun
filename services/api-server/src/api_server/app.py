@@ -20,6 +20,7 @@ from api_server import audit, auth, executions, relay, site, video, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
+from api_server.history import History
 from py_common.bus import Bus
 from py_common.log import bind_request_id
 
@@ -99,6 +100,9 @@ def create_app(config: ApiConfig) -> FastAPI:
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
             asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
+            asyncio.create_task(
+                relay.follow(bus, app.state.hub, app.state.devices, app.state.history)
+            ),
         ]
         try:
             await relay.start(bus, app.state.hub, app.state.devices, app.state.scenes)
@@ -122,6 +126,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.hub = ws.Hub()
     app.state.devices = Devices(app.state.site.devices)
     app.state.scenes = {}
+    app.state.history = History()
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(site.router)

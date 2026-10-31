@@ -12,9 +12,11 @@ from starlette.testclient import WebSocketTestSession
 from api_server.auth import ROLES, hash_password, users
 from api_server.config import ApiConfig
 from api_server.db import transaction
+from py_contracts.api import WsFrame
 
 PASSWORD = "correct-horse-1"
 WS_URL = "wss://testserver/ws"  # Secure Cookie 只随加密连接发送
+DRAINED = WsFrame(channel="system", data={"type": "drained"})
 
 
 @pytest.fixture(scope="session")
@@ -37,13 +39,17 @@ def password(db: tuple[ApiConfig, ApiConfig]) -> str:
 
 @pytest.fixture
 def ws_connect(client: TestClient) -> Callable[[], AbstractContextManager[WebSocketTestSession]]:
-    """连接 /ws 并读过连接建立时补推的设备状态，用例从其后的帧开始断言；client 为用例所在文件的夹具。"""
+    """连接 /ws 并读过连接建立时补推的全部帧（设备、场景、近 24 小时历史），用例从其后的帧开始断言；
+    client 为用例所在文件的夹具。"""
 
     @contextmanager
     def connect() -> Iterator[WebSocketTestSession]:
         with client.websocket_connect(WS_URL) as ws:
-            for _ in client.app.state.site.devices:
-                assert ws.receive_json()["channel"] == "devices"
+            assert ws.receive_json()["channel"] == "devices"  # 补推已开始
+            # 广播一帧标记：排在补推之后，读到它即读完补推
+            client.app.state.hub.broadcast(DRAINED)
+            while ws.receive_json() != DRAINED.model_dump(mode="json"):
+                pass
             yield ws
 
     return connect
