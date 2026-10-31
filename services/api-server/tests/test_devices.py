@@ -131,11 +131,11 @@ def test_snapshot_pushes_devices_then_behaviors_in_physical_alert(devices: Devic
     assert [f.channel for f in devices.snapshot()] == ["devices", "devices"]
 
 
-def execution(state: str, device_id: str = "cam-01") -> PlaybookExecutionV1:
+def execution(state: str, device_id: str = "cam-01", id: str = "exe-1") -> PlaybookExecutionV1:
     return PlaybookExecutionV1.model_validate(
         {
             "schema_version": "1.1.0", "event_id": str(uuid.uuid4()),
-            "ts": datetime.now(UTC).isoformat(), "id": "exe-1", "playbook_id": "isolate-attacker",
+            "ts": datetime.now(UTC).isoformat(), "id": id, "playbook_id": "isolate-attacker",
             "playbook_version": "1.0.0", "incident_id": "inc-1", "device_ids": [device_id],
             "target": "172.30.1.20", "state": state, "reason": None, "ttl_s": 150,
             "expires_at": None, "verify_result": None,
@@ -169,6 +169,18 @@ def test_notify_only_shown_during_cyber_alert(devices: Devices) -> None:
     devices.on_alert(alert(), 0)
     assert [d.state for d in devices.on_execution(execution("notify_only"), 1)] == ["notify_only"]
     assert [d.state for d in devices.expire(CYBER_HOLD_S + 1)] == ["normal"]
+
+
+@pytest.mark.parametrize("state", ["pending", "skipped", "failed", "executing"])
+def test_later_execution_keeps_contained(devices: Devices, state: str) -> None:
+    """同一设备已有生效的封禁时又来一个执行（待确认、互斥跳过、失败、执行中）：仍显示已处置，直到该封禁回滚。"""
+    devices.on_alert(alert(), 0)
+    devices.on_execution(execution("contained"), 1)
+    assert devices.on_execution(execution(state, id="exe-2"), 2) == []
+    assert states(devices)["cam-01"] == ("contained", "high")
+    assert [d.state for d in devices.on_execution(execution("rolled_back"), 3)] == (
+        ["pending_action"] if state == "executing" else ["cyber_alert"]
+    )
 
 
 def test_execution_for_unknown_device_ignored(devices: Devices) -> None:

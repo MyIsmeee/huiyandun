@@ -4,7 +4,7 @@
 接入。时刻 now 为单调时钟秒数，只用于计时。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from py_contracts.api import Device, WsFrame
@@ -17,13 +17,15 @@ CYBER_HOLD_S = 300  # 最后一次网络告警后保持网络攻击的时长，�
 
 type Severity = Literal["critical", "high", "medium", "low"]
 type Override = Literal["pending_action", "contained", "notify_only"]
-# 处置执行对告警态的覆盖（04 §5.2）；回滚、失败、过期、跳过与等待确认不覆盖，回到按告警计算的状态
+# 处置执行对告警态的覆盖（04 §5.2）；回滚、失败、过期、跳过与等待确认不覆盖，回到按告警计算的状态。
+# 同一设备有多个执行时按先后排列的优先级取最高的：仍被封禁的攻击源不因后来的执行显示为未处置
 OVERRIDE: dict[str, Override] = {
     "executing": "pending_action",
     "verifying": "pending_action",
     "contained": "contained",
     "notify_only": "notify_only",
 }
+PRIORITY: tuple[Override, ...] = ("contained", "pending_action", "notify_only")
 RANK: tuple[Severity, ...] = ("low", "medium", "high", "critical")
 
 
@@ -35,7 +37,7 @@ class _Entry:
     cyber_until: float = float("-inf")
     severity: Severity | None = None
     behavior: VisionBehaviorV1 | None = None  # 物理告警期间最近一次行为事件
-    override: Override | None = None  # 最近一次处置执行对告警态的覆盖
+    overrides: dict[str, Override] = field(default_factory=dict)  # 执行 ID → 仍有效的覆盖
 
 
 class Devices:
@@ -70,7 +72,11 @@ class Devices:
             entry = self._entries.get(device_id)
             if entry is None:
                 continue
-            entry.override = OVERRIDE.get(execution.state)
+            override = OVERRIDE.get(execution.state)
+            if override is None:
+                entry.overrides.pop(execution.id, None)
+            else:
+                entry.overrides[execution.id] = override
             device = self._update(entry, now)
             if device is not None:
                 changed.append(device)
@@ -108,10 +114,9 @@ class Devices:
         else:
             state = entry.initial.state
         # 处置中、已处置覆盖告警态；只通知只在网络攻击期间显示"已通知 · 待联动"（V-T1）
-        if entry.override in ("pending_action", "contained") or (
-            entry.override == "notify_only" and cyber
-        ):
-            state = entry.override
+        override = min(entry.overrides.values(), key=PRIORITY.index, default=None)
+        if override in ("pending_action", "contained") or (override == "notify_only" and cyber):
+            state = override
         device = entry.initial.model_copy(update={"state": state, "alert_severity": entry.severity})
         if device == entry.current:
             return None
