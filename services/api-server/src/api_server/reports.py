@@ -6,15 +6,16 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Column, DateTime, MetaData, Table, Text, insert, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
 from api_server.audit import record
 from api_server.auth import Principal, require
 from api_server.history import History
+from api_server.report_view import render
 from py_contracts.api import Report, ReportFacts, Site
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
@@ -28,6 +29,10 @@ KINDS = {
     VisionIntegrityV1: "integrity",
 }
 ENVELOPE = {"schema_version", "event_id", "ts"}  # 事件公共字段，实体不含
+# 导出的网页只用内联样式，不加载脚本与任何外部资源（G-05）；事件内容即使逃过转义也无法执行
+EXPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'"
+MEDIA_TYPE = {"html": "text/html; charset=utf-8", "md": "text/markdown; charset=utf-8"}
+DISPOSITION = {"html": "inline", "md": "attachment"}
 
 # 表结构由迁移 0004 定义
 report_table = Table(
@@ -119,8 +124,7 @@ async def create_report(
     return report
 
 
-@router.get("/reports/{report_id}", dependencies=[Depends(require("viewer"))])
-async def get_report(report_id: str, request: Request) -> Report:
+async def _load(request: Request, report_id: str) -> Report:
     async with request.app.state.engine.connect() as conn:
         row = (
             (await conn.execute(select(report_table).where(report_table.c.id == report_id)))
@@ -130,6 +134,29 @@ async def get_report(report_id: str, request: Request) -> Report:
     if row is None:
         raise HTTPException(404, "报告不存在")
     return Report.model_validate(dict(row))
+
+
+@router.get("/reports/{report_id}", dependencies=[Depends(require("viewer"))])
+async def get_report(report_id: str, request: Request) -> Report:
+    return await _load(request, report_id)
+
+
+@router.get("/reports/{report_id}/export", dependencies=[Depends(require("viewer"))])
+async def export_report(
+    report_id: str,
+    request: Request,
+    fmt: Annotated[Literal["html", "md"], Query(alias="format")],
+) -> Response:
+    """未复核时带"未复核草稿"水印（FR-504、V-AI4、D-078）。"""
+    report = await _load(request, report_id)
+    return Response(
+        render(report, fmt),
+        media_type=MEDIA_TYPE[fmt],
+        headers={
+            "Content-Disposition": f'{DISPOSITION[fmt]}; filename="report-{report.id}.{fmt}"',
+            "Content-Security-Policy": EXPORT_CSP,
+        },
+    )
 
 
 @router.post("/reports/{report_id}/review")
