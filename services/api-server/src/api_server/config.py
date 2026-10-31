@@ -43,3 +43,7 @@ class ApiConfig(DbConfig):
         Path("/run/secrets/llm_key_secret"),
         description="加密供应商 API Key 的 32 字节密钥（base64），不入库（C-ST-03、G-14）",
     )
+    llm_gateway_url: str = Field(
+        "http://llm-gateway:8100",
+        description="llm-gateway 内部接口地址；测试连接与模型列表经它访问供应商（C-LLM-01）",
+    )

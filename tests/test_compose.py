@@ -252,6 +252,12 @@ def test_only_audit_service_holds_audit_password() -> None:
     assert holders == {"audit-service", "postgres"}
 
 
+def test_only_api_server_holds_llm_key() -> None:
+    """C-ST-03：API Key 由 api-server 加解密，llm-gateway 只收到转交的明文、不持有密钥。"""
+    holders = {n for n, s in SERVICES.items() if "llm_key_secret" in s.get("secrets", [])}
+    assert holders == {"api-server"}
+
+
 @pytest.mark.parametrize("script", sorted((ROOT / "deploy/compose/postgres-init").glob("*.sh")))
 def test_init_script_executable(script: Path) -> None:
     """不可执行的 .sh 会被 postgres 镜像 source 进自身启动流程，脚本的 set -eu 随之生效。"""

@@ -1,11 +1,13 @@
-"""模型供应商管理（FR-601、FR-603～FR-605、TK-060）：角色、公网默认停用、网络位置、Key 加密、排序与审计。"""
+"""模型供应商管理（FR-601～FR-605、TK-060）：角色、公网默认停用、网络位置、Key 加密、排序、审计、测试连接。"""
 
 import asyncio
 import base64
+import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -258,3 +260,101 @@ def test_reorder_rejects_mismatched_set(client: TestClient, ids: list[str] | Non
     a = create(client, LAN)["id"]
     body = {"provider_ids": [a, a] if ids is None else ids}
     assert client.put("/api/llm/providers/order", json=body, headers=headers()).status_code == 400
+
+
+# 测试连接与模型列表：转交 llm-gateway（FR-602、C-LLM-01）
+
+PASSED = {
+    "checks": [
+        {"check": c, "ok": True, "latency_ms": 12, "reason": None, "hint": None}
+        for c in ("connectivity", "model", "structured_output")
+    ],
+    "health": "ok",
+    "tested_at": "2026-11-01T08:00:00Z",
+    "suggested_base_url": None,
+    "suggested_models": [],
+}
+
+
+def gateway(client: TestClient, handler: Callable[[httpx2.Request], httpx2.Response]) -> list:
+    """以假网关替换真实连接，返回其收到的请求。"""
+    seen: list[httpx2.Request] = []
+
+    def record(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return handler(request)
+
+    state = client.app.state
+    state.llm_gateway = httpx2.AsyncClient(
+        base_url=state.config.llm_gateway_url, transport=httpx2.MockTransport(record)
+    )
+    return seen
+
+
+def test_probe_forwards_decrypted_key_and_stores_result(client: TestClient, db: tuple) -> None:
+    pid = create(client, LAN, api_key=KEY, timeout_s=7)["id"]
+    seen = gateway(
+        client,
+        lambda _: httpx2.Response(200, json={"result": PASSED, "structured_output": "json_object"}),
+    )
+    r = client.post(f"/api/llm/providers/{pid}/test", headers=headers())
+    assert r.status_code == 200 and r.json()["health"] == "ok"
+    [request] = seen
+    assert request.url.path == "/internal/probe"
+    assert json.loads(request.content) == {
+        "base_url": LAN["base_url"], "api_key": KEY, "model": "m", "timeout_s": 7
+    }  # fmt: skip
+    [provider] = client.get("/api/llm/providers").json()["items"]
+    assert provider["structured_output"] == "json_object"
+    assert provider["last_test"]["health"] == "ok"
+    assert KEY not in r.text
+
+
+def test_probe_without_capability_keeps_previous(client: TestClient, db: tuple) -> None:
+    """结构化输出未探测到（如超时）时不覆盖已知能力。"""
+    pid = create(client, LAN)["id"]
+    reply = {"result": PASSED, "structured_output": "json_schema"}
+    gateway(client, lambda _: httpx2.Response(200, json=reply))
+    client.post(f"/api/llm/providers/{pid}/test", headers=headers())
+    gateway(client, lambda _: httpx2.Response(200, json=reply | {"structured_output": None}))
+    client.post(f"/api/llm/providers/{pid}/test", headers=headers())
+    assert stored(db[1], pid)["structured_output"] == "json_schema"
+
+
+def test_gateway_unreachable_is_502(client: TestClient) -> None:
+    pid = create(client, LAN)["id"]
+
+    def down(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("refused", request=request)
+
+    gateway(client, down)
+    r = client.post(f"/api/llm/providers/{pid}/test", headers=headers())
+    assert (r.status_code, r.json()["message"]) == (502, "模型网关暂不可达")
+    assert client.post("/api/llm/providers/missing/test", headers=headers()).status_code == 404
+
+
+def test_model_list_passes_hint_through(client: TestClient) -> None:
+    pid = create(client, LAN)["id"]
+    gateway(client, lambda _: httpx2.Response(502, json={"message": "API Key 无效；重新填写 Key"}))
+    r = client.get(f"/api/llm/providers/{pid}/models")
+    assert (r.status_code, r.json()["message"]) == (502, "API Key 无效；重新填写 Key")
+
+
+def test_discover_models_before_saving(client: TestClient) -> None:
+    """D-084：保存前凭地址与 Key 拉取模型列表，地址先纠正，不写入任何内容。"""
+    seen = gateway(client, lambda _: httpx2.Response(200, json={"models": ["qwen3-8b"]}))
+    body = {"base_url": "http://192.168.1.50:8888/v1/models", "api_key": KEY}
+    r = client.post("/api/llm/models", json=body, headers=headers())
+    assert r.json() == {"models": ["qwen3-8b"]}
+    sent = json.loads(seen[0].content)
+    assert (sent["base_url"], sent["api_key"]) == (LAN["base_url"], KEY)
+    assert client.get("/api/llm/providers").json()["items"] == []
+
+
+def test_undecryptable_key_asks_to_reenter(client: TestClient, tmp_path: Path) -> None:
+    pid = create(client, LAN, api_key=KEY)["id"]
+    other = tmp_path / "rotated"
+    other.write_text(base64.b64encode(os.urandom(32)).decode())
+    client.app.state.config = client.app.state.config.model_copy(update={"llm_key_file": other})
+    r = client.post(f"/api/llm/providers/{pid}/test", headers=headers())
+    assert r.status_code == 400 and "重新填写 Key" in r.json()["message"]

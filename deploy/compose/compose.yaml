@@ -54,7 +54,7 @@ services:
     image: huiyandun/api-server:local
     build: { context: ../.., dockerfile: services/api-server/Dockerfile }
     profiles: [core]
-    secrets: [db_app_password]
+    secrets: [db_app_password, llm_key_secret]  # 后者加密供应商 API Key（C-ST-03）
     volumes: ["../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro"]  # 站点配置（FR-901）
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -434,3 +434,5 @@ secrets:
     file: .secrets/executor_signing_key
   helper_public_key:
     file: .secrets/helper_public_key
+  llm_key_secret:
+    file: .secrets/llm_key_secret

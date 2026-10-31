@@ -16,7 +16,19 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api_server import audit, auth, containment, executions, llm, relay, reports, site, video, ws
+from api_server import (
+    audit,
+    auth,
+    containment,
+    executions,
+    llm,
+    llm_probe,
+    relay,
+    reports,
+    site,
+    video,
+    ws,
+)
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
@@ -97,6 +109,8 @@ def create_app(config: ApiConfig) -> FastAPI:
         app.state.go2rtc = httpx2.AsyncClient(
             base_url=config.go2rtc_url, timeout=config.go2rtc_timeout_s
         )
+        # 超时按供应商配置逐次给出（llm_probe.forward）
+        app.state.llm_gateway = httpx2.AsyncClient(base_url=config.llm_gateway_url)
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
@@ -115,6 +129,7 @@ def create_app(config: ApiConfig) -> FastAPI:
                     await task
             await bus.close()
             await app.state.go2rtc.aclose()
+            await app.state.llm_gateway.aclose()
             await app.state.engine.dispose()
 
     # 关闭自带文档页：其页面从公网 CDN 加载脚本（G-05）
@@ -132,6 +147,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(audit.router)
     app.include_router(containment.router)
     app.include_router(llm.router)
+    app.include_router(llm_probe.router)
     app.include_router(reports.router)
     app.include_router(site.router)
     app.include_router(ws.router)
