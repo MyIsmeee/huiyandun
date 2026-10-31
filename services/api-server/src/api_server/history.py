@@ -1,11 +1,13 @@
 """近 24 小时的告警、关联事件与处置执行（D-077）：只保存在内存中，启动时从 JetStream 重放；连接建立时补推，
-页面刷新后告警列表不丢。"""
+页面刷新后告警列表不丢。画面完整性事件只供报告按命中路径查找（TK-070），不补推。"""
 
 from collections import OrderedDict, deque
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from py_contracts.api import WsFrame
 from py_contracts.events.event_base_schema import EventBase
+from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 
 WINDOW = timedelta(hours=24)
@@ -15,15 +17,30 @@ MAX_ALERTS, MAX_INCIDENTS, MAX_EXECUTIONS = 200, 50, 50
 class History:
     def __init__(self) -> None:
         self._alerts: deque[EventBase] = deque(maxlen=MAX_ALERTS)
-        self._incidents: deque[EventBase] = deque(maxlen=MAX_INCIDENTS)
+        self._incidents: deque[CorrelatorIncidentV1] = deque(maxlen=MAX_INCIDENTS)
+        self._integrity: deque[EventBase] = deque(maxlen=MAX_ALERTS)
         self._executions: OrderedDict[str, PlaybookExecutionV1] = OrderedDict()
 
     def add_alert(self, event: EventBase) -> None:
         """网络告警或行为事件。"""
         self._alerts.append(event)
 
-    def add_incident(self, event: EventBase) -> None:
+    def add_incident(self, event: CorrelatorIncidentV1) -> None:
         self._incidents.append(event)
+
+    def add_integrity(self, event: EventBase) -> None:
+        self._integrity.append(event)
+
+    def incident(self, incident_id: str) -> CorrelatorIncidentV1 | None:
+        """关联事件的最新状态；超出保留范围时为 None。"""
+        return next((i for i in reversed(self._incidents) if i.id == incident_id), None)
+
+    def event(self, event_id: UUID) -> EventBase | None:
+        """命中路径中的告警、行为或画面完整性事件；超出保留范围或未收到时为 None。"""
+        return next((e for e in (*self._alerts, *self._integrity) if e.event_id == event_id), None)
+
+    def executions_of(self, incident_id: str) -> list[PlaybookExecutionV1]:
+        return [e for e in self._executions.values() if e.incident_id == incident_id]
 
     def add_execution(self, execution: PlaybookExecutionV1) -> None:
         """每个执行只保留最新状态。"""

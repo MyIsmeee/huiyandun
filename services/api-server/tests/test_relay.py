@@ -1,6 +1,7 @@
 """NATS 事件转发到 WS /ws 各频道，设备状态变化推送与连接补推（#54）。"""
 
 import asyncio
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
@@ -22,6 +23,7 @@ from py_contracts.events.event_base_schema import EventBase
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 
@@ -274,3 +276,32 @@ def test_execution_pushed_then_device_contained_and_replayed(
     assert [f.data["state"] for f in replayed] == ["contained"]
     devices = {f.data["id"]: f.data["state"] for f in frames if f.channel == "devices"}
     assert devices["cam-02"] == "contained"
+
+
+INTEGRITY = "hyd.vision.integrity.v1"
+
+
+def test_integrity_followed_into_history(
+    db: tuple[ApiConfig, ApiConfig], nats_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TK-070：画面完整性事件从 JetStream 重放记入历史，供报告按命中路径查找。"""
+    monkeypatch.setattr(relay, "RESUBSCRIBE_S", 0.05)
+    event = VisionIntegrityV1(
+        **common(), camera_id="cam-02", type="freeze", duration_s=4.0, source="rule",
+        confidence=1.0, detail=None,
+    )  # fmt: skip
+
+    async def main() -> None:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        try:
+            await bus.ensure_stream("HYD_VISION", [BEHAVIOR, INTEGRITY], 3600)
+            await bus.js_publish(INTEGRITY, event)
+        finally:
+            await bus.close()
+
+    asyncio.run(main())
+    with TestClient(create_app(db[1]), base_url="https://testserver") as c:
+        deadline = time.monotonic() + 3
+        while c.app.state.history.event(event.event_id) is None:
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
