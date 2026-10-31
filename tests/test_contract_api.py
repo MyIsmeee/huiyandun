@@ -42,6 +42,7 @@ ENDPOINTS = [
     ("post", "/api/incidents/{id}/reports", "operator"),
     ("get", "/api/reports/{id}", "viewer"),
     ("post", "/api/reports/{id}/review", "operator"),
+    ("get", "/api/reports/{id}/export", "viewer"),
     ("post", "/api/executions/{id}/rollback", "operator"),
     ("post", "/api/incidents/{id}/evidence/export", "operator"),
     ("get", "/api/llm/providers", "admin"),
@@ -92,6 +93,7 @@ def test_write_operation_requires_request_id(method: str, path: str, op: dict) -
 def test_operation_with_input_declares_bad_request(method: str, path: str, op: dict) -> None:
     refs = {p.get("$ref") for p in op.get("parameters", [])}
     has_query = bool(refs & {"#/components/parameters/Limit", "#/components/parameters/Before"})
+    has_query |= any(p.get("in") == "query" for p in op.get("parameters", []))
 
     assert ("400" in op["responses"]) == (method in WRITE_METHODS or has_query)
 
@@ -193,20 +195,37 @@ def test_login_response_role_is_enumerated() -> None:
         LoginResponse.model_validate({"role": "root", "expires_at": "2026-10-26T08:00:00Z"})
 
 
+def report_sample() -> dict:
+    """模板报告：事实区只含关联事件，命中路径中的事件均已超出保留（证据缺失）。"""
+    incident = {
+        "id": "inc-0001", "rule_id": "HYD-X-0001", "rule_version": "1.0.0", "mode": "enforce",
+        "title": "摄像头疑似被入侵且画面遭篡改", "severity": "critical", "device_ids": [],
+        "source_ip": None, "techniques": ["T1110"], "tactics": [], "evidence_refs": [],
+        "hit_path": ["00000000-0000-4000-8000-000000000001"], "requires_confirmation": False,
+        "status": "open", "created_at": "2026-10-26T08:00:00Z",
+    }  # fmt: skip
+    missing = {"event_id": incident["hit_path"][0], "kind": None, "event": None}
+    facts = {"incident": incident, "devices": [], "timeline": [missing], "executions": []}
+    return {
+        "id": "rep-01", "incident_id": "inc-0001", "facts": facts, "source": "template",
+        "degraded_reason": "未启用任何模型供应商", "created_at": "2026-10-26T08:00:05Z",
+    } | dict.fromkeys(["ai", "provider_id", "reviewed_by", "reviewed_at"])  # fmt: skip
+
+
 def test_template_report_has_null_ai() -> None:
-    report = {"id": "rep-01", "incident_id": "inc-0001", "facts": {"rule_id": "HYD-X-0001"}}
-    nulls = dict.fromkeys(["ai", "provider_id", "reviewed_by", "reviewed_at"])
+    report = Report.model_validate(report_sample())
 
-    assert Report.model_validate(report | nulls | {"source": "template"}).ai is None
+    assert report.ai is None
+    assert report.facts.timeline[0].event is None
 
 
-def test_report_rejects_unknown_source() -> None:
-    report = {"id": "rep-01", "incident_id": "inc-0001", "facts": {}, "source": "manual"}
-
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("source", "manual"), ("facts", {"rule_id": "HYD-X-0001"})],
+)
+def test_report_rejects_invalid_value(field: str, value: object) -> None:
     with pytest.raises(ValidationError):
-        Report.model_validate(
-            report | dict.fromkeys(["ai", "provider_id", "reviewed_by", "reviewed_at"])
-        )
+        Report.model_validate(report_sample() | {field: value})
 
 
 def test_incident_list_reuses_incident_entity() -> None:

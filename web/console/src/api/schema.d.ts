@@ -221,6 +221,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reports/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 导出报告文件；未复核时带"未复核草稿"水印（FR-504、V-AI4、D-078） */
+        get: operations["exportReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/executions/{id}/rollback": {
         parameters: {
             query?: never;
@@ -476,15 +493,41 @@ export interface components {
         Report: {
             id: string;
             incident_id: string;
-            /** @description 事实区，全部来自结构化数据（V-AI1） */
-            facts: Record<string, never>;
+            facts: components["schemas"]["ReportFacts"];
             /** @description AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定 */
             ai: Record<string, never> | null;
             /** @enum {unknown} */
             source: "llm" | "template";
             provider_id: string | null;
+            /** @description 模板报告的原因，如"未启用任何模型供应商"（FR-502、V-AI5）；source 为 llm 时为 null */
+            degraded_reason: string | null;
             reviewed_by: string | null;
             reviewed_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description 事实区，全部来自结构化数据，不经过 LLM（V-AI1） */
+        ReportFacts: {
+            incident: components["schemas"]["incident.schema"];
+            /** @description 关联事件涉及的设备，取自站点登记 */
+            devices: components["schemas"]["ReportDevice"][];
+            /** @description 按 hit_path 顺序的命中事件 */
+            timeline: components["schemas"]["ReportTimelineEntry"][];
+            /** @description 该关联事件的处置执行，各自的最新状态 */
+            executions: components["schemas"]["playbook_execution.schema"][];
+        };
+        ReportDevice: {
+            id: string;
+            /** @enum {unknown} */
+            type: "camera" | "nvr" | "switch";
+            ip: string;
+        };
+        /** @description kind 与 event 为 null 表示证据缺失：事件已超出 24 小时保留或未收到 */
+        ReportTimelineEntry: {
+            /** Format: uuid */
+            event_id: string;
+            kind: ("security_alert" | "behavior" | "integrity") | null;
+            event: components["schemas"]["hyd.security.alert.v1.schema"] | components["schemas"]["hyd.vision.behavior.v1.schema"] | components["schemas"]["hyd.vision.integrity.v1.schema"] | null;
         };
         /**
          * @description 选择后由前端填入地址模板与默认端口（HYD-ARCH-001 §5.3）
@@ -617,6 +660,7 @@ export interface components {
         VisionScene: components["schemas"]["hyd.vision.scene.v1.schema"];
         VisionBehavior: components["schemas"]["hyd.vision.behavior.v1.schema"];
         SecurityAlert: components["schemas"]["hyd.security.alert.v1.schema"];
+        VisionIntegrity: components["schemas"]["hyd.vision.integrity.v1.schema"];
         /**
          * Incident
          * @description 关联事件实体（HYD-PLAN-007 §1），事件与 API 共用
@@ -679,6 +723,91 @@ export interface components {
             location: "internal" | "public";
         };
         /**
+         * EventBase
+         * @description 所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
+         */
+        "event_base.schema": {
+            /** @description 语义化版本，主版本与文件名中的 v1 一致 */
+            schema_version: string;
+            /** Format: uuid */
+            event_id: string;
+            /**
+             * Format: date-time
+             * @description UTC，RFC 3339，毫秒精度
+             */
+            ts: string;
+        };
+        /**
+         * SecurityAlertV1
+         * @description 网络告警：归一化后的 Suricata 告警或设备行为模型告警（生产者 correlator）
+         */
+        "hyd.security.alert.v1.schema": {
+            rule_id: string;
+            rule_version: string;
+            /**
+             * @description monitor 只显示、不参与关联与处置：自研规则取其 hyd_mode，外部规则一律 monitor（C-SEC-04、C-RU-05、D-068）
+             * @enum {unknown}
+             */
+            mode: "monitor" | "enforce";
+            /** @description 如 auth_bruteforce */
+            category: string;
+            /**
+             * @description 告警等级（V-S4）
+             * @enum {unknown}
+             */
+            severity: "critical" | "high" | "medium" | "low";
+            src_ip: string;
+            dst_ip: string;
+            /** @description 目标 IP 未登记为设备时为 null，告警仍然产生（FR-203） */
+            device_id: string | null;
+            technique: string;
+            evidence_ref: string;
+            /**
+             * @description 置信度来源（C-SEC-09）：签名规则或设备行为模型
+             * @enum {unknown}
+             */
+            source: "rule" | "model";
+            /** @description 可信度；rule 来源为 1.0 */
+            confidence: number;
+            /** @description 可读说明：规则为签名描述，模型为偏离最大的特征及倍数 */
+            summary: string;
+        } & components["schemas"]["event_base.schema"];
+        /**
+         * VisionBehaviorV1
+         * @description 骨骼行为事件（生产者 vision-engine）
+         */
+        "hyd.vision.behavior.v1.schema": {
+            camera_id: string;
+            track_id: number;
+            /** @enum {unknown} */
+            behavior: "fall" | "climb";
+            confidence_avg: number;
+            duration_s: number;
+            /** Format: date-time */
+            ts_start: string;
+            /** Format: date-time */
+            ts_end: string;
+        } & components["schemas"]["event_base.schema"];
+        /**
+         * VisionIntegrityV1
+         * @description 画面完整性异常（生产者 vision-engine）
+         */
+        "hyd.vision.integrity.v1.schema": {
+            camera_id: string;
+            /** @enum {unknown} */
+            type: "freeze" | "replay" | "occlusion" | "shift" | "stream_lost";
+            duration_s: number;
+            /**
+             * @description freeze、stream_lost 为确定性判定（rule）；replay、shift、occlusion 为视觉模型判定（model）
+             * @enum {unknown}
+             */
+            source: "rule" | "model";
+            /** @description 可信度；rule 来源为 1.0 */
+            confidence: number;
+            /** @description 可读说明，如重放匹配到的历史时刻 */
+            detail: string | null;
+        } & components["schemas"]["event_base.schema"];
+        /**
          * PlaybookExecution
          * @description 处置执行实体（HYD-PLAN-007 §1），事件与 API 共用
          */
@@ -706,21 +835,6 @@ export interface components {
                 passed: boolean;
                 reason: string | null;
             } | null;
-        };
-        /**
-         * EventBase
-         * @description 所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
-         */
-        "event_base.schema": {
-            /** @description 语义化版本，主版本与文件名中的 v1 一致 */
-            schema_version: string;
-            /** Format: uuid */
-            event_id: string;
-            /**
-             * Format: date-time
-             * @description UTC，RFC 3339，毫秒精度
-             */
-            ts: string;
         };
         /**
          * InvestigationFrame
@@ -860,57 +974,6 @@ export interface components {
          * @description 摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
          */
         "hyd.vision.scene.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["scene_frame.schema"];
-        /**
-         * VisionBehaviorV1
-         * @description 骨骼行为事件（生产者 vision-engine）
-         */
-        "hyd.vision.behavior.v1.schema": {
-            camera_id: string;
-            track_id: number;
-            /** @enum {unknown} */
-            behavior: "fall" | "climb";
-            confidence_avg: number;
-            duration_s: number;
-            /** Format: date-time */
-            ts_start: string;
-            /** Format: date-time */
-            ts_end: string;
-        } & components["schemas"]["event_base.schema"];
-        /**
-         * SecurityAlertV1
-         * @description 网络告警：归一化后的 Suricata 告警或设备行为模型告警（生产者 correlator）
-         */
-        "hyd.security.alert.v1.schema": {
-            rule_id: string;
-            rule_version: string;
-            /**
-             * @description monitor 只显示、不参与关联与处置：自研规则取其 hyd_mode，外部规则一律 monitor（C-SEC-04、C-RU-05、D-068）
-             * @enum {unknown}
-             */
-            mode: "monitor" | "enforce";
-            /** @description 如 auth_bruteforce */
-            category: string;
-            /**
-             * @description 告警等级（V-S4）
-             * @enum {unknown}
-             */
-            severity: "critical" | "high" | "medium" | "low";
-            src_ip: string;
-            dst_ip: string;
-            /** @description 目标 IP 未登记为设备时为 null，告警仍然产生（FR-203） */
-            device_id: string | null;
-            technique: string;
-            evidence_ref: string;
-            /**
-             * @description 置信度来源（C-SEC-09）：签名规则或设备行为模型
-             * @enum {unknown}
-             */
-            source: "rule" | "model";
-            /** @description 可信度；rule 来源为 1.0 */
-            confidence: number;
-            /** @description 可读说明：规则为签名描述，模型为偏离最大的特征及倍数 */
-            summary: string;
-        } & components["schemas"]["event_base.schema"];
     };
     responses: {
         /** @description 缺少 X-Request-ID 或参数不合法 */
@@ -1306,6 +1369,37 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    exportReport: {
+        parameters: {
+            query: {
+                /** @description html 为自带样式的单个网页（inline，可打印为 PDF）；md 为 Markdown 附件 */
+                format: "html" | "md";
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 报告文件 */
+            200: {
+                headers: {
+                    /** @description html 为 inline，md 为 attachment；文件名 report-<id>.html 或 .md */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                    "text/markdown": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };
     };

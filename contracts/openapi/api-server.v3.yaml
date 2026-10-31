@@ -208,6 +208,31 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/reports/{id}/export:
+    get:
+      operationId: exportReport
+      description: 导出报告文件；未复核时带"未复核草稿"水印（FR-504、V-AI4、D-078）
+      x-min-role: viewer
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - name: format
+          in: query
+          required: true
+          description: html 为自带样式的单个网页（inline，可打印为 PDF）；md 为 Markdown 附件
+          schema: { enum: [html, md] }
+      responses:
+        "200":
+          description: 报告文件
+          headers:
+            Content-Disposition:
+              description: html 为 inline，md 为 attachment；文件名 report-<id>.html 或 .md
+              schema: { type: string }
+          content:
+            text/html: { schema: { type: string } }
+            text/markdown: { schema: { type: string } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/executions/{id}/rollback:
     post:
       operationId: rollbackExecution
@@ -578,18 +603,61 @@ components:
         items: { type: array, items: { $ref: "../events/incident.schema.json" } }
     Report:
       type: object
-      required: [id, incident_id, facts, ai, source, provider_id, reviewed_by, reviewed_at]
+      required: [id, incident_id, facts, ai, source, provider_id, degraded_reason, reviewed_by, reviewed_at, created_at]
       properties:
         id: { type: string }
         incident_id: { type: string }
-        facts: { type: object, description: 事实区，全部来自结构化数据（V-AI1） }
+        facts: { $ref: "#/components/schemas/ReportFacts" }
         ai:
           anyOf: [{ type: object }, { type: "null" }]
           description: AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定
         source: { enum: [llm, template] }
         provider_id: { anyOf: [{ type: string }, { type: "null" }] }
+        degraded_reason:
+          anyOf: [{ type: string }, { type: "null" }]
+          description: 模板报告的原因，如"未启用任何模型供应商"（FR-502、V-AI5）；source 为 llm 时为 null
         reviewed_by: { anyOf: [{ type: string }, { type: "null" }] }
         reviewed_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        created_at: { type: string, format: date-time }
+    ReportFacts:
+      type: object
+      description: 事实区，全部来自结构化数据，不经过 LLM（V-AI1）
+      required: [incident, devices, timeline, executions]
+      properties:
+        incident: { $ref: "../events/incident.schema.json" }
+        devices:
+          type: array
+          description: 关联事件涉及的设备，取自站点登记
+          items: { $ref: "#/components/schemas/ReportDevice" }
+        timeline:
+          type: array
+          description: 按 hit_path 顺序的命中事件
+          items: { $ref: "#/components/schemas/ReportTimelineEntry" }
+        executions:
+          type: array
+          description: 该关联事件的处置执行，各自的最新状态
+          items: { $ref: "../events/playbook_execution.schema.json" }
+    ReportDevice:
+      type: object
+      required: [id, type, ip]
+      properties:
+        id: { type: string }
+        type: { enum: [camera, nvr, switch] }
+        ip:
+          anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
+    ReportTimelineEntry:
+      type: object
+      description: kind 与 event 为 null 表示证据缺失：事件已超出 24 小时保留或未收到
+      required: [event_id, kind, event]
+      properties:
+        event_id: { type: string, format: uuid }
+        kind: { anyOf: [{ enum: [security_alert, behavior, integrity] }, { type: "null" }] }
+        event:
+          anyOf:
+            - { $ref: "#/components/schemas/SecurityAlert" }
+            - { $ref: "#/components/schemas/VisionBehavior" }
+            - { $ref: "#/components/schemas/VisionIntegrity" }
+            - { type: "null" }
     Preset:
       description: 选择后由前端填入地址模板与默认端口（HYD-ARCH-001 §5.3）
       enum: [llama_cpp, ollama, lm_studio, vllm, deepseek, bailian, kimi, zhipu, siliconflow, custom]
@@ -752,3 +820,4 @@ components:
     VisionScene: { $ref: "../events/hyd.vision.scene.v1.schema.json" }
     VisionBehavior: { $ref: "../events/hyd.vision.behavior.v1.schema.json" }
     SecurityAlert: { $ref: "../events/hyd.security.alert.v1.schema.json" }
+    VisionIntegrity: { $ref: "../events/hyd.vision.integrity.v1.schema.json" }
