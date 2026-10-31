@@ -12,7 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 PLACEHOLDERS = {
     "llm-check": "TK-060",
-    "demo-run": "TK-100",
 }
 
 
