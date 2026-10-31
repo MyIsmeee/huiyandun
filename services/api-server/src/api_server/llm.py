@@ -190,7 +190,7 @@ async def create_provider(
         "network": network,
         "network_overridden": network != auto,
         "structured_output": None,
-        "timeout_s": body.timeout_s,
+        "timeout_s": body.timeout_s or 60,  # 显式传 null 时取契约默认值
         "enabled": network == "internal",  # 公网新增即停用（G-02）
         "last_test": None,
         "created_at": now,
