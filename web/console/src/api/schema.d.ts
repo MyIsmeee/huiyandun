@@ -1051,6 +1051,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description 已开启全局禁止公网供应商，不向公网地址发送任何请求（D-085） */
+        PublicBlocked: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description 依赖的内部服务不可用或超时（如 go2rtc、llm-gateway），或模型供应商返回错误 */
         BadGateway: {
             headers: {
@@ -1666,6 +1675,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["PublicBlocked"];
             502: components["responses"]["BadGateway"];
         };
     };
@@ -1692,6 +1702,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["PublicBlocked"];
             502: components["responses"]["BadGateway"];
         };
     };
@@ -1723,6 +1734,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["PublicBlocked"];
             502: components["responses"]["BadGateway"];
         };
     };

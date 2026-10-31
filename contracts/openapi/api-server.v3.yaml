@@ -370,6 +370,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/PublicBlocked" }
         "502": { $ref: "#/components/responses/BadGateway" }
   /api/llm/providers/{id}/models:
     get:
@@ -387,6 +388,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/PublicBlocked" }
         "502": { $ref: "#/components/responses/BadGateway" }
   /api/llm/models:
     post:
@@ -409,6 +411,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/PublicBlocked" }
         "502": { $ref: "#/components/responses/BadGateway" }
   /api/llm/providers/order:
     put:
@@ -518,6 +521,9 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     NotFound:
       description: 资源不存在
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    PublicBlocked:
+      description: 已开启全局禁止公网供应商，不向公网地址发送任何请求（D-085）
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     BadGateway:
       description: 依赖的内部服务不可用或超时（如 go2rtc、llm-gateway），或模型供应商返回错误
