@@ -358,3 +358,32 @@ def test_undecryptable_key_asks_to_reenter(client: TestClient, tmp_path: Path) -
     client.app.state.config = client.app.state.config.model_copy(update={"llm_key_file": other})
     r = client.post(f"/api/llm/providers/{pid}/test", headers=headers())
     assert r.status_code == 400 and "重新填写 Key" in r.json()["message"]
+
+
+def test_discover_models_null_timeout_uses_default(client: TestClient) -> None:
+    seen = gateway(client, lambda _: httpx2.Response(200, json={"models": []}))
+    body = {"base_url": LAN["base_url"], "timeout_s": None}
+    assert client.post("/api/llm/models", json=body, headers=headers()).status_code == 200
+    assert json.loads(seen[0].content)["timeout_s"] == 60
+
+
+def test_gateway_error_other_than_502(client: TestClient) -> None:
+    pid = create(client, LAN)["id"]
+    gateway(client, lambda _: httpx2.Response(500, text="boom"))
+    r = client.post(f"/api/llm/providers/{pid}/test", headers=headers())
+    assert (r.status_code, r.json()["message"]) == (502, "模型网关出错")
+
+
+def test_block_public_stops_probing_public_addresses(client: TestClient) -> None:
+    """D-085：开启全局禁止公网时，对公网地址的测试连接与模型列表都不发请求；内网不受影响。"""
+    cloud = create(client, CLOUD)["id"]
+    lan = create(client, LAN)["id"]
+    client.put("/api/llm/settings", json={"block_public": True}, headers=headers())
+    seen = gateway(client, lambda _: httpx2.Response(200, json={"models": ["m"]}))
+
+    assert client.post(f"/api/llm/providers/{cloud}/test", headers=headers()).status_code == 409
+    assert client.get(f"/api/llm/providers/{cloud}/models").status_code == 409
+    body = {"base_url": CLOUD["base_url"]}
+    assert client.post("/api/llm/models", json=body, headers=headers()).status_code == 409
+    assert seen == []
+    assert client.get(f"/api/llm/providers/{lan}/models").status_code == 200
