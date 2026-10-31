@@ -59,7 +59,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       nats: { condition: service_healthy }  # 订阅事件转发到 WS 各频道
-    networks: [core-net, video-net]
+    networks: [core-net, video-net, llm-net]  # 经 llm-net 调 llm-gateway 的内部接口
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 5s
@@ -80,6 +80,23 @@ services:
       timeout: 30s
       start_period: 30s
       start_interval: 2s
+
+  # LLM 接入网关（HYD-ARCH-001 §5）：唯一访问模型供应商的组件（C-LLM-01）。内部接口只经 llm-net 给
+  # api-server；不接入 core-net，其他服务无法借它出网。经 llm-egress 访问使用方配置的供应商地址（DP-05 例外）
+  llm-gateway:
+    image: huiyandun/llm-gateway:local
+    build: { context: ../.., dockerfile: services/llm-gateway/Dockerfile }
+    profiles: [core]
+    extra_hosts: ["host.docker.internal:host-gateway"]  # 供应商在宿主上时填此名（DP-07）
+    networks: [llm-net, llm-egress]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # 关联引擎（HYD-ARCH-001 §6）：归一化 suricata 的 EVE 告警，发布 hyd.security.alert.v1（TK-032）。
   # EVE 来自解析不可信流量的探针，只读挂载、按模型校验；读取位置存于持久卷，重启后续读
@@ -387,6 +404,12 @@ networks:
   edge-net:
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
+  # api-server 经此调用 llm-gateway 的内部接口；只有这两个服务接入
+  llm-net:
+    internal: true
+    driver_opts: { com.docker.network.bridge.gateway_mode_ipv4: isolated }
+  # llm-gateway 访问供应商的出站网络（DP-05 例外）：只有 llm-gateway 接入
+  llm-egress: {}
 
 volumes:
   pgdata:
