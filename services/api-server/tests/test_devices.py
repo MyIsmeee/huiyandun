@@ -169,6 +169,9 @@ def test_notify_only_shown_during_cyber_alert(devices: Devices) -> None:
     devices.on_alert(alert(), 0)
     assert [d.state for d in devices.on_execution(execution("notify_only"), 1)] == ["notify_only"]
     assert [d.state for d in devices.expire(CYBER_HOLD_S + 1)] == ["normal"]
+    # 之后的网络告警没有形成关联事件、也没有通知：显示网络攻击，不沿用上一次的只通知
+    devices.on_alert(alert(), CYBER_HOLD_S + 2)
+    assert states(devices)["cam-01"] == ("cyber_alert", "high")
 
 
 @pytest.mark.parametrize("state", ["pending", "skipped", "failed", "executing"])

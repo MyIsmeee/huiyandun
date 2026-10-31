@@ -105,6 +105,8 @@ class Devices:
             entry.behavior = None
         if not cyber:
             entry.severity = None
+            # 只通知是执行的终态，不会再有更新：随所属的这次网络攻击结束，不沿用到之后的告警
+            entry.overrides = {k: v for k, v in entry.overrides.items() if v != "notify_only"}
         if physical and cyber:
             state = "both"
         elif cyber:
