@@ -315,7 +315,7 @@ paths:
   /api/llm/providers/{id}:
     patch:
       operationId: updateProvider
-      description: 启用公网供应商前由前端弹出确认；全局禁止公网时不可启用（FR-604）
+      description: 启用公网供应商前由前端弹出确认；全局禁止公网时不可启用（FR-604）；由内网改为公网时停用，除非同一请求 enabled 为 true
       x-min-role: admin
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -335,6 +335,11 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 全局禁止公网供应商时不可启用公网供应商
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     delete:
       operationId: deleteProvider
       x-min-role: admin
@@ -350,7 +355,7 @@ paths:
   /api/llm/providers/{id}/test:
     post:
       operationId: testProvider
-      description: 依次检查连通与延迟、模型是否存在、结构化输出能力（FR-602）
+      description: 依次检查连通与延迟、模型是否存在、结构化输出能力（FR-602）；结果写入供应商 last_test，探测到的能力写入 structured_output
       x-min-role: admin
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -365,10 +370,11 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/BadGateway" }
   /api/llm/providers/{id}/models:
     get:
       operationId: listProviderModels
-      description: 调用供应商 GET /models（V-M6）
+      description: 调用供应商 GET /models（V-M6）；供应商出错时 502，消息为"原因；改法"
       x-min-role: admin
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -381,6 +387,29 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/BadGateway" }
+  /api/llm/models:
+    post:
+      operationId: discoverModels
+      description: 保存前凭地址与 Key 获取模型列表：新建时先填地址与 Key，再从列表选模型（D-084）；不保存任何内容
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelDiscovery" }
+      responses:
+        "200":
+          description: 模型列表
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/BadGateway" }
   /api/llm/providers/order:
     put:
       operationId: reorderProviders
@@ -399,6 +428,17 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/llm/settings:
+    get:
+      operationId: getLlmSettings
+      x-min-role: admin
+      responses:
+        "200":
+          description: 当前设置
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LlmSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     put:
       operationId: updateLlmSettings
       description: block_public 开启时所有公网供应商强制停用（FR-604）
@@ -480,7 +520,7 @@ components:
       description: 资源不存在
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     BadGateway:
-      description: 依赖的内部服务不可用或超时（如 go2rtc）
+      description: 依赖的内部服务不可用或超时（如 go2rtc、llm-gateway），或模型供应商返回错误
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
@@ -680,6 +720,7 @@ components:
         - timeout_s
         - enabled
         - order
+        - last_test
       properties:
         id: { type: string }
         name: { type: string }
@@ -695,6 +736,9 @@ components:
         timeout_s: { type: integer, minimum: 1 }
         enabled: { type: boolean }
         order: { type: integer, minimum: 0 }
+        last_test:
+          anyOf: [{ $ref: "#/components/schemas/ProviderTestResult" }, { type: "null" }]
+          description: 最近一次测试连接的结果，卡片据此显示健康分档与延迟（D-084）；未测试时为 null
     LlmProviderList:
       type: object
       required: [items]
@@ -724,17 +768,37 @@ components:
         enabled: { type: boolean }
     ProviderTestResult:
       type: object
-      required: [checks]
+      required: [checks, health, tested_at, suggested_base_url, suggested_models]
       properties:
         checks: { type: array, items: { $ref: "#/components/schemas/ProviderCheck" } }
+        health:
+          enum: [ok, slow, failed]
+          description: 连通或模型不通过为 failed；连通延迟超过 3000 ms 为 slow；结构化输出不影响分档（D-084）
+        tested_at: { type: string, format: date-time }
+        suggested_base_url:
+          anyOf: [{ type: string }, { type: "null" }]
+          description: 原地址的 /models 返回 404、补上 /v1 后可用时给出，由管理员采用
+        suggested_models:
+          type: array
+          items: { type: string }
+          maxItems: 3
+          description: 配置的模型不在列表中时，名称最相近的候选
     ProviderCheck:
       type: object
-      required: [check, ok, latency_ms, reason]
+      required: [check, ok, latency_ms, reason, hint]
       properties:
         check: { enum: [connectivity, model, structured_output] }
         ok: { type: boolean }
         latency_ms: { anyOf: [{ type: integer, minimum: 0 }, { type: "null" }] }
         reason: { anyOf: [{ type: string }, { type: "null" }] }
+        hint: { anyOf: [{ type: string }, { type: "null" }], description: 白话改法 }
+    ModelDiscovery:
+      type: object
+      required: [base_url]
+      properties:
+        base_url: { type: string }
+        api_key: { type: string, format: password, writeOnly: true }
+        timeout_s: { type: integer, minimum: 1, default: 60 }
     ModelList:
       type: object
       required: [models]

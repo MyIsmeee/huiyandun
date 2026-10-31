@@ -247,38 +247,6 @@ class ApiKeyLast4(RootModel[str]):
     root: str = Field(..., max_length=4)
 
 
-class LlmProvider(ContractModel):
-    """
-    不含 API Key，只返回末 4 位（C-LLM-15）
-    """
-
-    id: str
-    name: str
-    preset: Preset
-    base_url: str
-    """
-    OpenAI 兼容 base URL
-    """
-    api_key_last4: ApiKeyLast4 | None
-    model: str
-    network: Network
-    network_overridden: bool
-    """
-    管理员改判过网络位置
-    """
-    structured_output: Literal["json_schema", "json_object", "none"] | None
-    """
-    由测试连接探测；未测试时为 null
-    """
-    timeout_s: int = Field(..., ge=1)
-    enabled: bool
-    order: int = Field(..., ge=0)
-
-
-class LlmProviderList(ContractModel):
-    items: list[LlmProvider]
-
-
 class LlmProviderCreate(ContractModel):
     name: str
     preset: Preset
@@ -313,6 +281,16 @@ class ProviderCheck(ContractModel):
     ok: bool
     latency_ms: LatencyMs | None
     reason: str | None
+    hint: str | None
+    """
+    白话改法
+    """
+
+
+class ModelDiscovery(ContractModel):
+    base_url: str
+    api_key: SecretStr | None = None
+    timeout_s: int | None = Field(60, ge=1)
 
 
 class ModelList(ContractModel):
@@ -633,6 +611,19 @@ class IncidentList(ContractModel):
 
 class ProviderTestResult(ContractModel):
     checks: list[ProviderCheck]
+    health: Literal["ok", "slow", "failed"]
+    """
+    连通或模型不通过为 failed；连通延迟超过 3000 ms 为 slow；结构化输出不影响分档（D-084）
+    """
+    tested_at: AwareDatetime
+    suggested_base_url: str | None
+    """
+    原地址的 /models 返回 404、补上 /v1 后可用时给出，由管理员采用
+    """
+    suggested_models: list[str] = Field(..., max_length=3)
+    """
+    配置的模型不在列表中时，名称最相近的候选
+    """
 
 
 class EgressStats(ContractModel):
@@ -738,6 +729,42 @@ class ReportTimelineEntry(ContractModel):
     event_id: UUID
     kind: Literal["security_alert", "behavior", "integrity"] | None
     event: SecurityAlert | VisionBehavior | VisionIntegrity | None
+
+
+class LlmProvider(ContractModel):
+    """
+    不含 API Key，只返回末 4 位（C-LLM-15）
+    """
+
+    id: str
+    name: str
+    preset: Preset
+    base_url: str
+    """
+    OpenAI 兼容 base URL
+    """
+    api_key_last4: ApiKeyLast4 | None
+    model: str
+    network: Network
+    network_overridden: bool
+    """
+    管理员改判过网络位置
+    """
+    structured_output: Literal["json_schema", "json_object", "none"] | None
+    """
+    由测试连接探测；未测试时为 null
+    """
+    timeout_s: int = Field(..., ge=1)
+    enabled: bool
+    order: int = Field(..., ge=0)
+    last_test: ProviderTestResult | None
+    """
+    最近一次测试连接的结果，卡片据此显示健康分档与延迟（D-084）；未测试时为 null
+    """
+
+
+class LlmProviderList(ContractModel):
+    items: list[LlmProvider]
 
 
 class AiInvestigationV1(EventBase, InvestigationFrame):

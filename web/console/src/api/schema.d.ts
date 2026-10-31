@@ -303,7 +303,7 @@ export interface paths {
         delete: operations["deleteProvider"];
         options?: never;
         head?: never;
-        /** @description 启用公网供应商前由前端弹出确认；全局禁止公网时不可启用（FR-604） */
+        /** @description 启用公网供应商前由前端弹出确认；全局禁止公网时不可启用（FR-604）；由内网改为公网时停用，除非同一请求 enabled 为 true */
         patch: operations["updateProvider"];
         trace?: never;
     };
@@ -316,7 +316,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 依次检查连通与延迟、模型是否存在、结构化输出能力（FR-602） */
+        /** @description 依次检查连通与延迟、模型是否存在、结构化输出能力（FR-602）；结果写入供应商 last_test，探测到的能力写入 structured_output */
         post: operations["testProvider"];
         delete?: never;
         options?: never;
@@ -331,10 +331,27 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 调用供应商 GET /models（V-M6） */
+        /** @description 调用供应商 GET /models（V-M6）；供应商出错时 502，消息为"原因；改法" */
         get: operations["listProviderModels"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 保存前凭地址与 Key 获取模型列表：新建时先填地址与 Key，再从列表选模型（D-084）；不保存任何内容 */
+        post: operations["discoverModels"];
         delete?: never;
         options?: never;
         head?: never;
@@ -365,7 +382,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["getLlmSettings"];
         /** @description block_public 开启时所有公网供应商强制停用（FR-604） */
         put: operations["updateLlmSettings"];
         post?: never;
@@ -556,6 +573,8 @@ export interface components {
             timeout_s: number;
             enabled: boolean;
             order: number;
+            /** @description 最近一次测试连接的结果，卡片据此显示健康分档与延迟（D-084）；未测试时为 null */
+            last_test: components["schemas"]["ProviderTestResult"] | null;
         };
         LlmProviderList: {
             items: components["schemas"]["LlmProvider"][];
@@ -587,6 +606,17 @@ export interface components {
         };
         ProviderTestResult: {
             checks: components["schemas"]["ProviderCheck"][];
+            /**
+             * @description 连通或模型不通过为 failed；连通延迟超过 3000 ms 为 slow；结构化输出不影响分档（D-084）
+             * @enum {unknown}
+             */
+            health: "ok" | "slow" | "failed";
+            /** Format: date-time */
+            tested_at: string;
+            /** @description 原地址的 /models 返回 404、补上 /v1 后可用时给出，由管理员采用 */
+            suggested_base_url: string | null;
+            /** @description 配置的模型不在列表中时，名称最相近的候选 */
+            suggested_models: string[];
         };
         ProviderCheck: {
             /** @enum {unknown} */
@@ -594,6 +624,15 @@ export interface components {
             ok: boolean;
             latency_ms: number | null;
             reason: string | null;
+            /** @description 白话改法 */
+            hint: string | null;
+        };
+        ModelDiscovery: {
+            base_url: string;
+            /** Format: password */
+            api_key?: string;
+            /** @default 60 */
+            timeout_s: number;
         };
         ModelList: {
             models: string[];
@@ -1012,7 +1051,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description 依赖的内部服务不可用或超时（如 go2rtc） */
+        /** @description 依赖的内部服务不可用或超时（如 go2rtc、llm-gateway），或模型供应商返回错误 */
         BadGateway: {
             headers: {
                 [name: string]: unknown;
@@ -1589,6 +1628,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description 全局禁止公网供应商时不可启用公网供应商 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     testProvider: {
@@ -1618,6 +1666,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
         };
     };
     listProviderModels: {
@@ -1643,6 +1692,38 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    discoverModels: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelDiscovery"];
+            };
+        };
+        responses: {
+            /** @description 模型列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            502: components["responses"]["BadGateway"];
         };
     };
     reorderProviders: {
@@ -1669,6 +1750,28 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getLlmSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前设置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmSettings"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
