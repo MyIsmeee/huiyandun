@@ -1,5 +1,5 @@
 # attack-sim 的受控行为定义（DP-09）：攻击方只对自建目标 rtsp-target 发 RTSP 认证重试。
-# scenario-runner（TK-100）据此在主剧本 1:20 启动 attack-sim；compose 的 environment 为默认值，二者一致
+# scenario-runner（TK-100）在主剧本 1:00 与 1:50 启动 attack-sim；compose 的 environment 为默认值，二者一致
 target: rtsp-target          # 只允许的目标，与 compose 的 attack-sim 服务名一致
 port: 8554                   # 目标 RTSP 端口
 path: cam                    # 目标 RTSP 路径
