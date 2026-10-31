@@ -39,3 +39,7 @@ class ApiConfig(DbConfig):
     go2rtc_timeout_s: float = Field(
         5.0, gt=0, le=60, description="转发 WebRTC 信令的超时，单位秒（CD-04）"
     )
+    llm_key_file: Path = Field(
+        Path("/run/secrets/llm_key_secret"),
+        description="加密供应商 API Key 的 32 字节密钥（base64），不入库（C-ST-03、G-14）",
+    )
