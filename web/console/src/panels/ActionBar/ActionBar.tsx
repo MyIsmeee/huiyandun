@@ -17,7 +17,10 @@ const STATE: Record<Execution["state"], string> = {
   expired: "未确认 · 已过期",
 };
 
-/** 仍有效的执行按优先级显示：已处置 > 处置中 > 只通知（与 api-server 设备状态一致）；其余同级 */
+/**
+ * 执行按优先级显示：已处置 > 处置中 > 只通知，其余同级（与 api-server 设备状态的优先级相同）。设备状态在攻击结束后
+ * 不再显示只通知，处置栏仍显示它，与已解除一样属于上一次执行的结果
+ */
 const PRIORITY: Partial<Record<Execution["state"], number>> = {
   contained: 0,
   executing: 1,
