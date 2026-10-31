@@ -71,13 +71,20 @@ def test_doctor_image_registered() -> None:
 
 
 EDGE = "edge-net"
+EGRESS = "llm-egress"
 EXPOSED = {"web-console", "go2rtc"}
+INTERNAL_NETWORKS = [n for n in COMPOSE["networks"] if n not in (EDGE, EGRESS)]
 
 
-@pytest.mark.parametrize("name", [n for n in COMPOSE["networks"] if n != EDGE])
+@pytest.mark.parametrize("name", INTERNAL_NETWORKS)
 def test_network_internal(name: str) -> None:
-    """DP-05：例外（llm-gateway 出站）在对应服务加入时再声明。"""
+    """DP-05：例外为开放端口的 edge-net 与 llm-gateway 出站的 llm-egress。"""
     assert COMPOSE["networks"][name].get("internal") is True
+
+
+def test_only_llm_gateway_reaches_outside() -> None:
+    """DP-05、C-LLM-01：只有 llm-gateway 接入出站网络。"""
+    assert {n for n, s in SERVICES.items() if EGRESS in s.get("networks", [])} == {"llm-gateway"}
 
 
 def test_edge_network_blocks_egress() -> None:
@@ -171,7 +178,7 @@ def test_tap_network_holds_only_sensors() -> None:
     )
 
 
-@pytest.mark.parametrize("name", [n for n in COMPOSE["networks"] if n != EDGE])
+@pytest.mark.parametrize("name", INTERNAL_NETWORKS)
 def test_network_unreachable_from_host(name: str) -> None:
     """内部网络不给宿主分配地址：宿主上的进程访问不到其中的服务。"""
     options = COMPOSE["networks"][name]["driver_opts"]

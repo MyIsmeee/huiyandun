@@ -1,0 +1,25 @@
+[project]
+name = "llm-gateway"
+version = "0.0.0"
+description = "LLM 接入网关：唯一访问模型供应商的组件（HYD-ARCH-001 §5、C-LLM-01）"
+requires-python = "==3.12.*"
+dependencies = [
+    "fastapi>=0.162.0,<0.163",
+    "httpx2>=2.16.0,<3",
+    "openai>=3.42.0,<4",  # 只用官方 SDK，base_url 取自供应商配置（01 §5.2）
+    "py-common",
+    "py-contracts",
+    "pydantic>=2.14,<3",
+    "uvicorn>=0.54.0,<0.55",
+]
+
+[project.scripts]
+hyd-llm-gateway = "llm_gateway.app:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+py-common = { workspace = true }
+py-contracts = { workspace = true }
