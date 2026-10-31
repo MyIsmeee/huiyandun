@@ -1,4 +1,4 @@
-"""模型供应商管理（FR-601～FR-605、TK-060）：增删改、网络位置判定、API Key 加密。
+"""模型供应商管理（FR-601～FR-605、TK-060）：增删改、排序、全局禁止公网。
 
 API Key 只写不读：库中只存 AES-256-GCM 密文与末 4 位，响应与审计只含末 4 位（C-ST-03、C-LLM-15）。
 公网供应商新增即停用，由内网改为公网时停用，全局禁止公网时不可启用（G-02、FR-604）。
@@ -42,6 +42,8 @@ from py_contracts.api import (
     LlmProviderCreate,
     LlmProviderList,
     LlmProviderUpdate,
+    LlmSettings,
+    ProviderOrder,
 )
 
 # C-LLM-13：回环、私有网段、链路本地为内网，其余（含所有域名）为公网
@@ -295,3 +297,62 @@ async def delete_provider(provider_id: str, request: Request, principal: Admin) 
             request_id=request.state.request_id,
         )
     return Response(status_code=204)
+
+
+@router.put("/providers/order", status_code=204)
+async def reorder_providers(body: ProviderOrder, request: Request, principal: Admin) -> Response:
+    async with request.app.state.engine.begin() as conn:
+        current = (
+            await conn.scalars(
+                select(providers.c.id).order_by(providers.c.position).with_for_update()
+            )
+        ).all()
+        if len(body.provider_ids) != len(current) or set(body.provider_ids) != set(current):
+            raise HTTPException(400, "provider_ids 须恰好包含全部供应商，且不重复")
+        for position, provider_id in enumerate(body.provider_ids):
+            await conn.execute(
+                update(providers).where(providers.c.id == provider_id).values(position=position)
+            )
+        await record(
+            conn,
+            actor=principal.username,
+            action="llm.providers_reordered",
+            target="llm_providers",
+            before={"provider_ids": list(current)},
+            after={"provider_ids": body.provider_ids},
+            request_id=request.state.request_id,
+        )
+    return Response(status_code=204)
+
+
+@router.get("/settings", dependencies=[Depends(require("admin"))])
+async def get_settings(request: Request) -> LlmSettings:
+    async with request.app.state.engine.connect() as conn:
+        return LlmSettings(block_public=await block_public(conn))
+
+
+@router.put("/settings")
+async def update_settings(body: LlmSettings, request: Request, principal: Admin) -> LlmSettings:
+    async with request.app.state.engine.begin() as conn:
+        before = await block_public(conn)
+        await conn.execute(update(settings).values(block_public=body.block_public))
+        disabled: list[str] = []
+        if body.block_public:
+            disabled = list(
+                await conn.scalars(
+                    update(providers)
+                    .where(providers.c.network == "public", providers.c.enabled)
+                    .values(enabled=False, updated_at=datetime.now(UTC))
+                    .returning(providers.c.id)
+                )
+            )
+        await record(
+            conn,
+            actor=principal.username,
+            action="llm.settings_updated",
+            target="llm_settings",
+            before={"block_public": before},
+            after={"block_public": body.block_public, "disabled_provider_ids": disabled},
+            request_id=request.state.request_id,
+        )
+    return body
