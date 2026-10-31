@@ -93,6 +93,19 @@ def test_unauthorized_explained(provider: Provider) -> None:
     assert provider.KEY not in text
 
 
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (429, "请求过于频繁或额度不足（HTTP 429）；稍后重试，或检查账户余额"),
+        (503, "供应商服务异常（HTTP 503）；稍后重试"),
+        (400, "请求被拒绝（HTTP 400）；核对地址与模型名"),
+    ],
+)
+def test_other_status_explained(provider: Provider, status: int, expected: str) -> None:
+    provider.models = lambda _: httpx2.Response(status, json={"error": "x"})
+    assert message(provider) == expected
+
+
 def test_timeout_explained(provider: Provider) -> None:
     def slow(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ReadTimeout("timed out", request=request)

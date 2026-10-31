@@ -87,6 +87,14 @@ def test_only_llm_gateway_reaches_outside() -> None:
     assert {n for n, s in SERVICES.items() if EGRESS in s.get("networks", [])} == {"llm-gateway"}
 
 
+def test_llm_gateway_reachable_only_by_api_server() -> None:
+    """DP-05：网关的内部接口不鉴权、按请求访问地址；只有 api-server 够得到它，其他服务无法借它出网。"""
+    gateway_nets = set(SERVICES["llm-gateway"]["networks"]) - {EGRESS}
+    assert gateway_nets == {"llm-net"}
+    peers = {n for n, s in SERVICES.items() if gateway_nets & set(s.get("networks", []))}
+    assert peers == {"api-server", "llm-gateway"}
+
+
 def test_edge_network_blocks_egress() -> None:
     """DP-05、G-05：开放端口需要非 internal 网络；关闭 IP 伪装后容器仍无法出站。"""
     options = COMPOSE["networks"][EDGE]["driver_opts"]

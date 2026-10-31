@@ -1,4 +1,4 @@
-"""llm-gateway 内部接口：只在 core-net，供 api-server 调用，不经 web-console 代理（C-LLM-01）。
+"""llm-gateway 内部接口：只在 llm-net，供 api-server 调用，不经 web-console 代理（C-LLM-01）。
 
 请求体含已解密的 Key，不写日志（C-LLM-15）。
 """
@@ -16,7 +16,7 @@ from py_contracts.api import ModelList
 
 
 class GatewayConfig(ServiceConfig):
-    port: int = Field(8100, ge=1, le=65535, description="内部 HTTP 监听端口，只在 core-net")
+    port: int = Field(8100, ge=1, le=65535, description="内部 HTTP 监听端口，只在 llm-net")
 
 
 def create_app(
