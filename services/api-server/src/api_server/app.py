@@ -16,7 +16,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from api_server import audit, auth, containment, executions, relay, reports, site, video, ws
+from api_server import audit, auth, containment, executions, llm, relay, reports, site, video, ws
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
@@ -131,6 +131,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(containment.router)
+    app.include_router(llm.router)
     app.include_router(reports.router)
     app.include_router(site.router)
     app.include_router(ws.router)

@@ -1,20 +1,48 @@
-"""模型供应商管理（FR-601～FR-605、TK-060）：表定义、网络位置判定、地址纠正与 API Key 加密。
+"""模型供应商管理（FR-601～FR-605、TK-060）：增删改、网络位置判定、API Key 加密。
 
 API Key 只写不读：库中只存 AES-256-GCM 密文与末 4 位，响应与审计只含末 4 位（C-ST-03、C-LLM-15）。
+公网供应商新增即停用，由内网改为公网时停用，全局禁止公网时不可启用（G-02、FR-604）。
+每项变更与审计同一事务写入（G-13）。
 """
 
 import base64
 import os
+import uuid
+from datetime import UTC, datetime
 from functools import cache
 from ipaddress import ip_address, ip_network
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import HTTPException
-from sqlalchemy import Boolean, Column, DateTime, Integer, LargeBinary, MetaData, Table, Text
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    LargeBinary,
+    MetaData,
+    Table,
+    Text,
+    delete,
+    func,
+    insert,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from api_server.audit import record
+from api_server.auth import Principal, require
+from py_contracts.api import (
+    LlmProvider,
+    LlmProviderCreate,
+    LlmProviderList,
+    LlmProviderUpdate,
+)
 
 # C-LLM-13：回环、私有网段、链路本地为内网，其余（含所有域名）为公网
 INTERNAL_NETWORKS = [
@@ -100,3 +128,170 @@ def key_columns(key_file: Path, api_key: str) -> dict[str, Any]:
     if not api_key:
         return {"api_key_enc": None, "api_key_last4": None}
     return {"api_key_enc": seal(key_file, api_key), "api_key_last4": api_key[-4:]}
+
+
+def view(row: Any) -> LlmProvider:
+    return LlmProvider.model_validate(
+        {name: row[name] for name in LlmProvider.model_fields if name != "order"}
+        | {"order": row["position"]}
+    )
+
+
+def audit_view(provider: LlmProvider) -> dict[str, Any]:
+    return provider.model_dump(mode="json", exclude={"last_test"})
+
+
+async def block_public(conn: AsyncConnection) -> bool:
+    return bool(await conn.scalar(select(settings.c.block_public)))
+
+
+async def locked(conn: AsyncConnection, provider_id: str) -> Any:
+    row = (
+        (
+            await conn.execute(
+                select(providers).where(providers.c.id == provider_id).with_for_update()
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(404, "供应商不存在")
+    return row
+
+
+router = APIRouter(prefix="/api/llm")
+Admin = Annotated[Principal, Depends(require("admin"))]
+
+
+@router.get("/providers", dependencies=[Depends(require("admin"))])
+async def list_providers(request: Request) -> LlmProviderList:
+    async with request.app.state.engine.connect() as conn:
+        rows = (await conn.execute(select(providers).order_by(providers.c.position))).mappings()
+        return LlmProviderList(items=[view(r) for r in rows])
+
+
+@router.post("/providers", status_code=201)
+async def create_provider(
+    body: LlmProviderCreate, request: Request, principal: Admin
+) -> LlmProvider:
+    base_url = normalize(body.base_url)
+    auto = classify(base_url)
+    network = body.network.root if body.network else auto
+    now = datetime.now(UTC)
+    values = {
+        "id": f"llm-{uuid.uuid4().hex[:12]}",
+        "name": body.name,
+        "preset": body.preset.root,
+        "base_url": base_url,
+        "model": body.model,
+        "network": network,
+        "network_overridden": network != auto,
+        "structured_output": None,
+        "timeout_s": body.timeout_s,
+        "enabled": network == "internal",  # 公网新增即停用（G-02）
+        "last_test": None,
+        "created_at": now,
+        "updated_at": now,
+    } | key_columns(
+        request.app.state.config.llm_key_file,
+        body.api_key.get_secret_value() if body.api_key else "",
+    )
+    async with request.app.state.engine.begin() as conn:
+        values["position"] = await conn.scalar(
+            select(func.coalesce(func.max(providers.c.position) + 1, 0))
+        )
+        await conn.execute(insert(providers).values(values))
+        provider = view(values)
+        await record(
+            conn,
+            actor=principal.username,
+            action="llm.provider_created",
+            target=provider.id,
+            before=None,
+            after=audit_view(provider),
+            request_id=request.state.request_id,
+        )
+    return provider
+
+
+@router.patch("/providers/{provider_id}")
+async def update_provider(
+    provider_id: str, body: LlmProviderUpdate, request: Request, principal: Admin
+) -> LlmProvider:
+    changes = body.model_dump(mode="json", exclude_unset=True, exclude_none=True)
+    async with request.app.state.engine.begin() as conn:
+        row = await locked(conn, provider_id)
+        values: dict[str, Any] = {
+            k: changes[k] for k in ("name", "preset", "model", "timeout_s") if k in changes
+        }
+        base_url = normalize(changes["base_url"]) if "base_url" in changes else row["base_url"]
+        auto = classify(base_url)
+        if "network" in changes:
+            network, overridden = changes["network"], changes["network"] != auto
+        elif "base_url" in changes:
+            network, overridden = auto, False
+        else:
+            network, overridden = row["network"], row["network_overridden"]
+        enabled = changes.get("enabled", row["enabled"])
+        # 由内网改为公网时停用，除非本次请求经前端确认后显式启用（G-02）
+        if (
+            network == "public"
+            and row["network"] == "internal"
+            and changes.get("enabled") is not True
+        ):
+            enabled = False
+        if network == "public" and enabled and await block_public(conn):
+            raise HTTPException(409, "已开启全局禁止公网供应商，不能启用公网供应商")
+        if body.api_key is not None:
+            values |= key_columns(
+                request.app.state.config.llm_key_file, body.api_key.get_secret_value()
+            )
+        # 地址、Key、模型变了，上次测试结果与探测到的能力不再可信
+        if (
+            base_url != row["base_url"]
+            or "api_key_enc" in values
+            or values.get("model", row["model"]) != row["model"]
+        ):
+            values |= {"last_test": None, "structured_output": None}
+        values |= {
+            "base_url": base_url,
+            "network": network,
+            "network_overridden": overridden,
+            "enabled": enabled,
+            "updated_at": datetime.now(UTC),
+        }
+        await conn.execute(update(providers).where(providers.c.id == provider_id).values(values))
+        before, after = view(row), view(dict(row) | values)
+        await record(
+            conn,
+            actor=principal.username,
+            action="llm.provider_updated",
+            target=provider_id,
+            before=audit_view(before),
+            after=audit_view(after),
+            request_id=request.state.request_id,
+        )
+    return after
+
+
+@router.delete("/providers/{provider_id}", status_code=204)
+async def delete_provider(provider_id: str, request: Request, principal: Admin) -> Response:
+    async with request.app.state.engine.begin() as conn:
+        row = await locked(conn, provider_id)
+        await conn.execute(delete(providers).where(providers.c.id == provider_id))
+        await conn.execute(
+            update(providers)
+            .where(providers.c.position > row["position"])
+            .values(position=providers.c.position - 1)
+        )
+        await record(
+            conn,
+            actor=principal.username,
+            action="llm.provider_deleted",
+            target=provider_id,
+            before=audit_view(view(row)),
+            after=None,
+            request_id=request.state.request_id,
+        )
+    return Response(status_code=204)
