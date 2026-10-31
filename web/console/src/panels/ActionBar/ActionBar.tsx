@@ -17,9 +17,28 @@ const STATE: Record<Execution["state"], string> = {
   expired: "未确认 · 已过期",
 };
 
-/** 设备当前的处置：最近更新的、涉及该设备的执行 */
+/** 仍有效的执行按优先级显示：已处置 > 处置中 > 只通知（与 api-server 设备状态一致）；其余同级 */
+const PRIORITY: Partial<Record<Execution["state"], number>> = {
+  contained: 0,
+  executing: 1,
+  verifying: 1,
+  notify_only: 2,
+};
+const priority = (e: Execution) => PRIORITY[e.state] ?? 3;
+
+/** 受理后等待执行器推送结果的时长：执行器停机时回滚请求可能丢失，到时恢复可点 */
+export const RESULT_TIMEOUT_MS = 30_000;
+
+/**
+ * 设备当前的处置：涉及该设备的执行中优先级最高的，同级取最近更新的。仍被封禁的攻击源不因后来的执行
+ * （待确认、互斥跳过）显示为未处置、丢失解封按钮
+ */
 export function useDeviceExecution(deviceId: string): Execution | undefined {
-  return useLive((s) => Object.values(s.executions).filter((e) => e.device_ids.includes(deviceId)).at(-1));
+  return useLive((s) =>
+    Object.values(s.executions)
+      .filter((e) => e.device_ids.includes(deviceId))
+      .reduce<Execution | undefined>((best, e) => (best && priority(best) < priority(e) ? best : e), undefined),
+  );
 }
 
 function remaining(expiresAt: string, now: number): string {
@@ -61,7 +80,15 @@ export function ActionBar(props: { deviceId: string }) {
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "无法连接服务器，请重试";
       setRequest({ id, reason, status: "failed", message });
+      return;
     }
+    setTimeout(() => {
+      setRequest((r) =>
+        r?.id === id && r.reason === reason && r.status === "pending"
+          ? { ...r, status: "failed", message: "未收到执行结果，请重试" }
+          : r,
+      );
+    }, RESULT_TIMEOUT_MS);
   }
 
   return (

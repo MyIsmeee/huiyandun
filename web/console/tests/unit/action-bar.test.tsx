@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../src/api/schema";
 import { ApiError, api } from "../../src/lib/api";
-import { ActionBar } from "../../src/panels/ActionBar/ActionBar";
+import { ActionBar, RESULT_TIMEOUT_MS } from "../../src/panels/ActionBar/ActionBar";
 import { receive, useLive } from "../../src/store/live";
 import { type Role, useSession } from "../../src/store/session";
 
@@ -109,6 +109,28 @@ describe("ActionBar", () => {
     expect(screen.getByText("已解除")).toBeTruthy();
     expect(screen.getByText("由 operator 手动回滚")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /解封/ })).toBeNull();
+  });
+
+  it("同一设备已处置期间又来待确认或跳过的执行：仍显示已处置与解封按钮", () => {
+    push(execution());
+    push(execution({ id: "exe-2", state: "pending", expires_at: null, verify_result: null }));
+    push(execution({ id: "exe-3", state: "skipped", reason: "互斥：同一目标已有执行", verify_result: null }));
+    show("operator");
+
+    expect(screen.getByText("已处置")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "立即解封" })).toBeTruthy();
+  });
+
+  it("受理后超时未收到执行结果：恢复可点并提示", async () => {
+    vi.spyOn(api, "rollback").mockResolvedValue(execution());
+    push(execution());
+    show("operator");
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "立即解封" })));
+    act(() => vi.advanceTimersByTime(RESULT_TIMEOUT_MS));
+
+    expect(screen.getByRole("alert").textContent).toContain("未收到执行结果，请重试");
+    expect(screen.getByRole("button", { name: "立即解封" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("请求被拒时显示原因，可重试", async () => {

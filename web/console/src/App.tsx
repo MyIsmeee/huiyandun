@@ -9,7 +9,7 @@ type Gate = { kind: "checking" | "login" | "unreachable" } | { kind: "ready"; si
 export function App() {
   const [gate, setGate] = useState<Gate>({ kind: "checking" });
 
-  // 没有"当前会话"接口：以 viewer 即可访问的 GET /api/site 探测是否已登录
+  // 以 viewer 即可访问的 GET /api/site 探测是否已登录；未登录或不可达时清空角色，换账户登录后不沿用上一个角色
   const probe = useCallback(
     () =>
       api.getSite().then(
@@ -21,8 +21,10 @@ export function App() {
             () => useSession.setState({ role: null }),
           );
         },
-        (e: unknown) =>
-          setGate({ kind: e instanceof ApiError && e.status === 401 ? "login" : "unreachable" }),
+        (e: unknown) => {
+          useSession.setState({ role: null });
+          setGate({ kind: e instanceof ApiError && e.status === 401 ? "login" : "unreachable" });
+        },
       ),
     [],
   );

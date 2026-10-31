@@ -88,5 +88,16 @@ for (const theme of ["light", "dark"] as const) {
     await expect(bar).toContainText("剩余 2:10");
     await expectNoOverflow(page);
     await expect(bar).toHaveScreenshot(`action-bar-${theme}.png`);
+
+    // 错误态：解封请求被拒，显示原因，按钮恢复可点
+    await page.route("/api/executions/exe-1/rollback", (route) =>
+      route.fulfill({ status: 503, json: { code: "unavailable", message: "处置执行器暂不可达，请稍后重试", request_id: "req-1" } }),
+    );
+    await bar.getByRole("button", { name: "立即解封" }).click();
+    await page.clock.runFor(100);
+    await expect(bar.getByRole("alert")).toContainText("处置执行器暂不可达");
+    await expect(bar).toContainText("剩余 2:10");
+    await expectNoOverflow(page);
+    await expect(bar).toHaveScreenshot(`action-bar-failed-${theme}.png`);
   });
 }
