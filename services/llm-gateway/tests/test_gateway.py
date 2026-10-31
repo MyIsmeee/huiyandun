@@ -11,6 +11,7 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
+from llm_gateway import probe
 from llm_gateway.app import GatewayConfig, create_app
 
 PROMPTS = Path(__file__).resolve().parents[3] / "prompts"
@@ -237,3 +238,20 @@ def test_structured_output_timeout_keeps_capability_unknown(provider: Provider) 
     r = provider.post("/internal/probe")
     assert checks(r)["structured_output"]["reason"] == "5 秒内无响应"
     assert r.json()["structured_output"] is None
+
+
+def test_slow_connectivity_is_slow_tier(
+    provider: Provider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-084：连通延迟超过阈值为 slow（阈值调为 -1 ms，任何延迟都算慢）。"""
+    monkeypatch.setattr(probe, "SLOW_MS", -1)
+    assert provider.post("/internal/probe").json()["result"]["health"] == "slow"
+
+
+def test_empty_choices_treated_as_unsupported(provider: Provider) -> None:
+    """供应商返回空 choices：按输出不合格处理，继续试下一种格式，不报 500。"""
+    empty = provider.completion("")
+    body = json.loads(empty.content) | {"choices": []}
+    provider.chat = lambda _: httpx2.Response(200, json=body)
+    r = provider.post("/internal/probe")
+    assert r.status_code == 200 and r.json()["structured_output"] == "none"

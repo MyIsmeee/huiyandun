@@ -61,11 +61,10 @@ async def _structured_output(
                     response_format=response_format,
                     temperature=0,
                 )
-                ProbeReply.model_validate_json(
-                    strip_reasoning(completion.choices[0].message.content or "")
-                )
+                content = completion.choices[0].message.content if completion.choices else None
+                ProbeReply.model_validate_json(strip_reasoning(content or ""))
             except (BadRequestError, UnprocessableEntityError, ValidationError):
-                continue  # 不支持该格式，或输出不合 Schema：试下一种
+                continue  # 不支持该格式，或输出为空、不合 Schema：试下一种
             except (APIConnectionError, APIStatusError) as e:
                 failure = explain(e, target)
                 return _check("structured_output", False, None, failure.reason, failure.hint), None
