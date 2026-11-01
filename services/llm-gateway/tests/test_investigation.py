@@ -55,6 +55,8 @@ def test_caller_deadline_caps_task_deadline() -> None:
         "skipped",
         "超出 0.1 秒总时限",
     )
+    tiny = investigate(p, provider("a"), provider("b"), data={}, deadline_s=0.04)
+    assert tiny.attempts[1].reason == "超出 0.1 秒总时限"  # 不显示"超出 0 秒"
 
 
 def test_untraced_against_evidence_not_model_turns() -> None:

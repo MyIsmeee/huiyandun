@@ -238,7 +238,10 @@ class Chain:
 
     async def invoke(self, req: Invocation) -> InvokeResult:
         seconds = min(self.tasks[req.task].deadline_s, req.deadline_s or float("inf"))
-        deadline, limit = time.monotonic() + seconds, f"超出 {round(seconds, 1):g} 秒总时限"
+        deadline, limit = (
+            time.monotonic() + seconds,
+            f"超出 {max(round(seconds, 1), 0.1):g} 秒总时限",
+        )
         attempts: list[Attempt] = []
         for provider in req.providers:
             pseudonyms = Pseudonyms() if provider.network == "public" else None
