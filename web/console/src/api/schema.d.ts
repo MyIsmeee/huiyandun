@@ -585,6 +585,12 @@ export interface components {
             order: number;
             /** @description 最近一次测试连接的结果，卡片据此显示健康分档与延迟（D-084）；未测试时为 null */
             last_test: components["schemas"]["ProviderTestResult"] | null;
+            usage_today: components["schemas"]["ProviderUsage"];
+        };
+        /** @description 当日（UTC）实际发出的调用次数与 Token，取自响应 usage 字段（D-084） */
+        ProviderUsage: {
+            calls: number;
+            tokens: number;
         };
         LlmProviderList: {
             items: components["schemas"]["LlmProvider"][];

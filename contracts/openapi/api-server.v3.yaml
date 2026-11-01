@@ -743,6 +743,7 @@ components:
         - enabled
         - order
         - last_test
+        - usage_today
       properties:
         id: { type: string }
         name: { type: string }
@@ -761,6 +762,14 @@ components:
         last_test:
           anyOf: [{ $ref: "#/components/schemas/ProviderTestResult" }, { type: "null" }]
           description: 最近一次测试连接的结果，卡片据此显示健康分档与延迟（D-084）；未测试时为 null
+        usage_today: { $ref: "#/components/schemas/ProviderUsage" }
+    ProviderUsage:
+      type: object
+      description: 当日（UTC）实际发出的调用次数与 Token，取自响应 usage 字段（D-084）
+      required: [calls, tokens]
+      properties:
+        calls: { type: integer, minimum: 0 }
+        tokens: { type: integer, minimum: 0 }
     LlmProviderList:
       type: object
       required: [items]

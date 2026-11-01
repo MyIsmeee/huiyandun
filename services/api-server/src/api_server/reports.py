@@ -1,7 +1,7 @@
 """溯源报告（FR-501～FR-504、TK-070）：事实区全部取自近 24 小时历史中的结构化事件，不经过 LLM（V-AI1）。
 
-供应商调用链（TK-062）接入前只有模板路径：AI 区为空并注明原因（FR-502、C-LLM-09）。
-生成与复核各写一条审计，与报告的写入同一事务（G-13、AI-M-05）。
+AI 区经 llm-gateway 按供应商顺序生成（TK-062）；无输出时 AI 区为空并注明原因，由模板叙述（FR-502、C-LLM-09）。
+生成与复核各写一条审计，调用模型另写 llm.invoked，与报告的写入同一事务（G-13、AI-M-05）。
 """
 
 import uuid
@@ -15,14 +15,14 @@ from sqlalchemy.dialects.postgresql import JSONB
 from api_server.audit import record
 from api_server.auth import Principal, require
 from api_server.history import History
+from api_server.llm_chain import invoke, record_invocation
 from api_server.report_view import render
-from py_contracts.api import Report, ReportFacts, Site
+from py_contracts.api import Report, ReportAi, ReportFacts, Site
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
-DEGRADED_REASON = "未启用任何模型供应商"
 KINDS = {
     SecurityAlertV1: "security_alert",
     VisionBehaviorV1: "behavior",
@@ -93,14 +93,27 @@ async def create_report(
     incident = state.history.incident(incident_id)
     if incident is None:
         raise HTTPException(404, "关联事件不存在或已超过 24 小时")
+    report_facts = facts(incident, state.history, state.site)
+    outcome = await invoke(request, "incident_report", report_facts.model_dump(mode="json"))
+    ai, provider = None, outcome.provider
+    if outcome.output is not None:
+        ai = ReportAi.model_validate(
+            {
+                "content": outcome.output,
+                "unverified": outcome.unverified,
+                "provider_name": provider["name"],
+                "model": provider["model"],
+                "network": provider["network"],
+            }
+        )
     report = Report(
         id=str(uuid.uuid4()),
         incident_id=incident_id,
-        facts=facts(incident, state.history, state.site),
-        ai=None,
-        source="template",
-        provider_id=None,
-        degraded_reason=DEGRADED_REASON,
+        facts=report_facts,
+        ai=ai,
+        source="llm" if ai else "template",
+        provider_id=provider["id"] if ai else None,
+        degraded_reason=outcome.reason,
         reviewed_by=None,
         reviewed_at=None,
         created_at=datetime.now(UTC),
@@ -108,9 +121,20 @@ async def create_report(
     async with state.engine.begin() as conn:
         await conn.execute(
             insert(report_table).values(
-                report.model_dump(exclude={"facts"})
-                | {"facts": report.facts.model_dump(mode="json")}
+                report.model_dump(exclude={"facts", "ai"})
+                | {
+                    "facts": report.facts.model_dump(mode="json"),
+                    "ai": report.ai.model_dump(mode="json") if report.ai else None,
+                }
             )
+        )
+        await record_invocation(
+            conn,
+            outcome,
+            actor=principal.username,
+            target=incident_id,
+            details={"task": "incident_report", "report_id": report.id},
+            request_id=request.state.request_id,
         )
         await record(
             conn,

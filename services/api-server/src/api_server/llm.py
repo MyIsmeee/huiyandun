@@ -18,8 +18,10 @@ from urllib.parse import urlsplit
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Integer,
     LargeBinary,
@@ -85,6 +87,10 @@ providers = Table(
     Column("last_test", JSONB(none_as_null=True)),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
+    # 迁移 0006：当日用量（D-084），由调用链累计
+    Column("usage_day", Date),
+    Column("usage_calls", Integer),
+    Column("usage_tokens", BigInteger),
 )
 settings = Table("llm_settings", metadata, Column("block_public", Boolean))
 
@@ -133,14 +139,21 @@ def key_columns(key_file: Path, api_key: str) -> dict[str, Any]:
 
 
 def view(row: Any) -> LlmProvider:
+    """用量只算当日（UTC），跨日后为 0；新建时尚无用量列。"""
+    today = row.get("usage_day") == datetime.now(UTC).date()
+    usage = {"calls": row["usage_calls"], "tokens": row["usage_tokens"]} if today else None
     return LlmProvider.model_validate(
-        {name: row[name] for name in LlmProvider.model_fields if name != "order"}
-        | {"order": row["position"]}
+        {
+            name: row[name]
+            for name in LlmProvider.model_fields
+            if name not in ("order", "usage_today")
+        }
+        | {"order": row["position"], "usage_today": usage or {"calls": 0, "tokens": 0}}
     )
 
 
 def audit_view(provider: LlmProvider) -> dict[str, Any]:
-    return provider.model_dump(mode="json", exclude={"last_test"})
+    return provider.model_dump(mode="json", exclude={"last_test", "usage_today"})
 
 
 async def block_public(conn: AsyncConnection) -> bool:

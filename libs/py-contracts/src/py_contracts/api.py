@@ -278,6 +278,15 @@ class ApiKeyLast4(RootModel[str]):
     root: str = Field(..., max_length=4)
 
 
+class ProviderUsage(ContractModel):
+    """
+    当日（UTC）实际发出的调用次数与 Token，取自响应 usage 字段（D-084）
+    """
+
+    calls: int = Field(..., ge=0)
+    tokens: int = Field(..., ge=0)
+
+
 class LlmProviderCreate(ContractModel):
     name: str
     preset: Preset
@@ -825,6 +834,7 @@ class LlmProvider(ContractModel):
     """
     最近一次测试连接的结果，卡片据此显示健康分档与延迟（D-084）；未测试时为 null
     """
+    usage_today: ProviderUsage
 
 
 class LlmProviderList(ContractModel):
