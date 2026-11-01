@@ -13,6 +13,8 @@
   .meta, .note, .missing { color: #59636e; }
   .meta, .note { font-size: 13px; }
   .missing { font-style: italic; }
+  .ai-label { position: sticky; top: 0; z-index: 1; margin: 0 0 8px; padding: 4px 0; background: #fff; }
+  .unverified { color: #59636e; text-decoration: underline dashed; text-underline-offset: 3px; cursor: help; }
   section { margin-top: 20px; padding: 16px 20px; border: 1px solid #d1d9e0; border-radius: 12px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { padding: 6px 8px; border-bottom: 1px solid #eaeef2; text-align: left; vertical-align: top; }
@@ -31,7 +33,7 @@
 {% endif %}
 <header>
   <h1>溯源报告：{{ title }}</h1>
-  <p class="meta">报告编号 {{ report.id }} · 生成于 {{ created_at }} · {{ "模板生成" if report.source == "template" else "模型生成" }} ·
+  <p class="meta">报告编号 {{ report.id }} · 生成于 {{ created_at }} · {{ "模板生成" if report.source == "template" else "模型生成：" ~ ai.by }} ·
   {% if report.reviewed_by %}已复核：{{ report.reviewed_by }} 于 {{ reviewed_at }}{% else %}未复核草稿{% endif %}</p>
 </header>
 
@@ -66,10 +68,24 @@
 
 <section aria-label="AI 分析区">
   <h2>AI 分析区</h2>
-  {% if report.source == "template" %}
-  <p class="note">模型不可用，以下为规则模板生成（原因：{{ report.degraded_reason }}）</p>
+  {% if ai %}
+  <p class="note ai-label">AI 生成 · 需人工复核 · 由 {{ ai.by }} 生成{% if ai.has_unverified %} · 虚线下划线为未能在证据中溯源的实体{% endif %}</p>
+  <h3>摘要</h3>
+  <p>{{ ai.summary }}</p>
+  {% for title, items in [("攻击链", ai.attack_chain), ("影响", ai.impact), ("建议（仅作文字建议，系统不会据此执行任何操作）", ai.recommendations)] %}
+  <h3>{{ title }}</h3>
+  {% if items %}
+  <ul>{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="note">无</p>
   {% endif %}
+  {% endfor %}
+  <h3>可信度</h3>
+  <p>{{ ai.confidence }}</p>
+  {% else %}
+  <p class="note">模型不可用，以下为规则模板生成（原因：{{ report.degraded_reason }}）</p>
   <p>{{ narrative }}</p>
+  {% endif %}
 </section>
 </body>
 </html>

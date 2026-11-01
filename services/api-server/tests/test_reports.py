@@ -274,7 +274,7 @@ def attempt(pid: str, outcome: str, reason: str | None = None, tokens: int = 0) 
     }  # fmt: skip
 
 
-def add_provider(client: TestClient, password: str, name: str = "家用 5070") -> str:
+def add_provider(client: TestClient, password: str, name: str = "本地 llama.cpp") -> str:
     login(client, "admin", password)
     body = {"name": name, "preset": "llama_cpp", "base_url": "http://192.168.1.50:8888/v1",
             "model": "qwen3-8b", "api_key": KEY}  # fmt: skip
@@ -340,7 +340,7 @@ def test_llm_report(client: TestClient, password: str, db: tuple[ApiConfig, ApiC
     assert (report.source, report.provider_id, report.degraded_reason) == ("llm", pid, None)
     assert report.ai is not None and report.ai.content.model_dump(mode="json") == AI
     assert (report.ai.unverified, report.ai.provider_name, report.ai.model) == (
-        ["10.9.9.9"], "家用 5070", "qwen3-8b"
+        ["10.9.9.9"], "本地 llama.cpp", "qwen3-8b"
     )  # fmt: skip
     assert client.get(f"/api/reports/{report.id}").json()["ai"] == r.json()["ai"]
     [body] = seen
@@ -374,7 +374,7 @@ def test_all_providers_failed_falls_back_within_3s(
     assert time.monotonic() - started < 3
     assert (report.source, report.ai, report.provider_id) == ("template", None, None)
     assert report.degraded_reason == (
-        "全部模型供应商不可用：家用 5070（API Key 无效或无权限（HTTP 401））；"
+        "全部模型供应商不可用：本地 llama.cpp（API Key 无效或无权限（HTTP 401））；"
         "DeepSeek 备用（连续失败 4 次，暂停调用至 08:01:00 UTC）"
     )
     assert set(actions(db[1], headers["X-Request-ID"])) == {"report.created", "llm.invoked"}
@@ -406,4 +406,41 @@ def test_undecryptable_key_is_not_forwarded(
     seen = gateway(client, lambda _: httpx2.Response(500))
     report = generate_with(client, rid())
     assert seen == []
-    assert report.degraded_reason == "全部模型供应商不可用：家用 5070（已存的 Key 无法解密）"
+    assert report.degraded_reason == "全部模型供应商不可用：本地 llama.cpp（已存的 Key 无法解密）"
+
+
+def llm_report(client: TestClient, password: str, ai: dict, unverified: list[str]) -> Report:
+    pid = add_provider(client, password)
+    reply = {"output": ai, "unverified": unverified, "provider_id": pid,
+             "attempts": [attempt(pid, "ok", None, 30)]}  # fmt: skip
+    gateway(client, lambda _: httpx2.Response(200, json=reply))
+    return generate_with(client, rid())
+
+
+def test_export_ai_section_marks_unverified(client: TestClient, password: str) -> None:
+    """V-AI1～V-AI3：AI 区注明需人工复核与供应商，未溯源实体弱化标记；模型文字同样转义。"""
+    ai = AI | {"summary": f"10.9.9.9 与 cam-0 对 cam-02 发起攻击 {MARKUP}"}
+    report = llm_report(client, password, ai, ["10.9.9.9", "cam-0"])
+
+    html = export(client, report.id, "html").text
+    assert "模型生成：本地 llama.cpp（qwen3-8b，内网）" in html
+    assert "AI 生成 · 需人工复核" in html and "模型不可用" not in html
+    span = '<span class="unverified" title="该实体未能在证据中溯源">{}</span>'
+    assert span.format("10.9.9.9") in html and span.format("cam-0") in html
+    assert span.format("cam-02") not in html and "cam-02 发起攻击" in html
+    assert "Credential Access · T1110：RTSP 认证爆破（证据：eve:1）" in html
+    assert "修改默认口令：爆破针对弱口令" in html and "可信度" in html
+    assert MARKUP not in html and "&lt;script&gt;" in html
+
+    md = export(client, report.id, "md").text
+    assert "10.9.9.9（未溯源） 与 cam-0（未溯源） 对 cam-02 发起攻击" in md
+    assert r"\<script\>" in md
+
+
+def test_export_markdown_flattens_model_newlines(client: TestClient, password: str) -> None:
+    """模型文字中的换行改为空格，不能在新行伪造标题或"已复核"字样（TK-070 复核建议）。"""
+    ai = AI | {"summary": "攻击已处置\n\n# 已复核：admin\n- 复核状态：已复核"}
+    report = llm_report(client, password, ai, [])
+    md = export(client, report.id, "md").text
+    assert "攻击已处置 # 已复核：admin - 复核状态：已复核" in md
+    assert not any(line.startswith(("# 已复核", "- 复核状态：已复核")) for line in md.splitlines())

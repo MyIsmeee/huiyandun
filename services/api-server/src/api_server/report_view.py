@@ -1,7 +1,8 @@
 """报告导出（FR-504、D-078）：网页与 Markdown 共用同一份展示内容，只在版式上不同。
 
-全部文字只由事实区字段填充（C-LLM-09）；事件内容来自外部输入：网页模板开启自动转义，Markdown 的输出值
-对标记字符加反斜杠，查看器不会把其中的 HTML 当作标记渲染。
+事实区与模板叙述只由事实区字段填充（C-LLM-09）；AI 区为模型输出（V-AI1）。事件内容与模型输出都不可信：
+网页模板开启自动转义；Markdown 的输出值换行改为空格（防止在新行伪造标题或"已复核"字样）、标记字符加反斜杠，
+查看器不会把其中的 HTML 当作标记渲染。未溯源实体在网页中弱化并加虚线下划线，在 Markdown 中其后注明（V-AI3）。
 """
 
 import re
@@ -9,8 +10,9 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from jinja2 import Environment, PackageLoader
+from markupsafe import Markup, escape
 
-from py_contracts.api import Report, ReportFacts, ReportTimelineEntry
+from py_contracts.api import Report, ReportAi, ReportFacts, ReportTimelineEntry
 
 SEVERITY = {"critical": "严重", "high": "高", "medium": "中", "low": "低"}
 MODE = {"enforce": "执行", "monitor": "仅监测"}
@@ -37,11 +39,60 @@ EXECUTION = {
     "expired": "未确认 · 已过期",
 }
 
+CONFIDENCE = {"low": "低", "medium": "中", "high": "高"}
+NETWORK = {"internal": "内网", "public": "公网·已脱敏"}
+UNVERIFIED_HTML = Markup('<span class="unverified" title="该实体未能在证据中溯源">{}</span>')
+
 MD_SPECIAL = re.compile(r"([\\`*_<>\[\]])")
+NEWLINES = re.compile(r"\s*[\r\n]+\s*")
 
 
 def _md_escape(value: object) -> object:
-    return MD_SPECIAL.sub(r"\\\1", value) if isinstance(value, str) else value
+    """Markup 为已按 Markdown 处理过的 AI 区文字（见 _marked），不再处理。"""
+    if isinstance(value, Markup) or not isinstance(value, str):
+        return value
+    return MD_SPECIAL.sub(r"\\\1", NEWLINES.sub(" ", value))
+
+
+def _marked(text: str, unverified: list[str], fmt: Literal["html", "md"]) -> Markup:
+    """把未溯源实体切出来单独标记；实体边界与网关的事实回溯一致，cam-0 不会标到 cam-02 上。"""
+    pieces: list[tuple[str, bool]] = [(text, False)]
+    if unverified:
+        alternatives = "|".join(re.escape(u) for u in sorted(unverified, key=len, reverse=True))
+        pattern = re.compile(rf"(?<![A-Za-z0-9_.\-])(?:{alternatives})(?![A-Za-z0-9_\-]|\.\d)")
+        pieces, pos = [], 0
+        for m in pattern.finditer(text):
+            pieces += [(text[pos : m.start()], False), (m.group(), True)]
+            pos = m.end()
+        pieces.append((text[pos:], False))
+    if fmt == "html":
+        return Markup("").join(
+            UNVERIFIED_HTML.format(p) if flag else escape(p) for p, flag in pieces
+        )
+    return Markup("".join(f"{_md_escape(p)}{'（未溯源）' if flag else ''}" for p, flag in pieces))
+
+
+def _ai(ai: ReportAi, fmt: Literal["html", "md"]) -> dict[str, Any]:
+    c, u = ai.content, ai.unverified
+    return {
+        "by": f"{ai.provider_name}（{ai.model}，{NETWORK[ai.network.root]}）",
+        "summary": _marked(c.summary, u, fmt),
+        "attack_chain": [
+            _marked(
+                f"{s.tactic} · {s.technique_id}：{s.description}"
+                f"（证据：{'、'.join(r.root for r in s.evidence_refs) or '无'}）",
+                u,
+                fmt,
+            )
+            for s in c.attack_chain
+        ],
+        "impact": [_marked(f"{i.device_id}：{i.description}", u, fmt) for i in c.impact],
+        "recommendations": [
+            _marked(f"{r.action}：{r.rationale}", u, fmt) for r in c.recommendations
+        ],
+        "confidence": CONFIDENCE[c.confidence],
+        "has_unverified": bool(u),
+    }
 
 
 loader = PackageLoader("api_server", "templates")
@@ -137,5 +188,6 @@ def render(report: Report, fmt: Literal["html", "md"]) -> str:
             evidence_refs=i.evidence_refs,
             executions=executions,
             narrative=_narrative(facts, executions),
+            ai=_ai(report.ai, fmt) if report.ai else None,
         )
     )
