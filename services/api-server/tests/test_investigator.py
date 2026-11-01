@@ -360,3 +360,17 @@ def test_worker_survives_database_down_at_start() -> None:
         return alive
 
     assert asyncio.run(main())
+
+
+def test_unexpected_error_ends_investigation_as_failed(client: TestClient, password: str) -> None:
+    """调查中途意外出错：补发失败帧并结束记录，面板不会一直显示进行中（FR-1105）。"""
+    pid = add_provider(client, password)
+    turns(client, pid, [tool("list_alerts", {"ip": ATTACKER})])
+
+    async def broken(*_: Any) -> Any:
+        raise RuntimeError("工具内部缺陷")
+
+    client.app.state.tools.run = broken
+    submit(client, incident("inc-broken"))
+    record = finished(client, "inc-broken")
+    assert record.error == "调查出错，详见服务日志" and record.verdict is None

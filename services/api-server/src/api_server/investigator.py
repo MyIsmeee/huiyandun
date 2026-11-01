@@ -78,10 +78,15 @@ class Investigator:
             log.warning("ai.interrupt_mark_failed", extra={"error": repr(e)})
         while True:
             incident = await self._queue.get()
+            run = _Run(self._state, incident)
             try:
-                await _Run(self._state, incident).execute()
+                await run.execute()
             except Exception:  # 单个事件出错（如数据库超时）不中断后续调查
                 log.exception("ai.investigation_error", extra={"incident_id": incident.id})
+                try:  # 尽量补发失败帧并结束记录，面板不会一直显示进行中（FR-1105）
+                    await run.fail("调查出错，详见服务日志")
+                except (SQLAlchemyError, OSError) as e:
+                    log.warning("ai.fail_mark_failed", extra={"error": repr(e)})
 
 
 class _Run:
@@ -146,6 +151,9 @@ class _Run:
                 summary = "重复查询，已提示换个查询或给出判定"
                 return ToolResult(self._shown[n]["args_summary"], {"error": error}, summary)
         return await self._state.tools.run(tool, args)
+
+    async def fail(self, error: str) -> None:
+        await self._emit("failed", None, error=error)
 
     async def _emit(
         self,
