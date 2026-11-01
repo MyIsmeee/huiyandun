@@ -43,12 +43,14 @@ def test_turn_without_required_field_is_retried_then_fails_over() -> None:
 
 
 def test_caller_deadline_caps_task_deadline() -> None:
+    """调用方传的剩余时间带小数，提示取 1 位小数（值守人员可见）。"""
+
     async def slow(_: httpx2.Request) -> httpx2.Response:
         await asyncio.sleep(0.2)
         return httpx2.Response(500)
 
     p = Providers(a=slow, b=ok(VERDICT))
-    result = investigate(p, provider("a"), provider("b"), data={}, deadline_s=0.1)
+    result = investigate(p, provider("a"), provider("b"), data={}, deadline_s=0.1234)
     assert (result.attempts[1].outcome, result.attempts[1].reason) == (
         "skipped",
         "超出 0.1 秒总时限",
