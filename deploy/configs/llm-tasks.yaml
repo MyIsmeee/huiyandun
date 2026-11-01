@@ -6,3 +6,9 @@ incident_report:
   temperature: 0.2
   deadline_s: 60             # 全部供应商尝试的总时限（SC-05）
   terminal: template-only    # 全部失败时由报告服务落模板报告，字段全部来自结构化事件（C-LLM-09）
+incident_investigation:      # AI 安全值班员（US-11）：每次调用为一轮，轮数上限 8 由 api-server 执行
+  schema: contracts/llm/incident_investigation.v1.schema.json
+  prompt: incident_investigation/v1.md
+  temperature: 0.1
+  deadline_s: 60             # 单轮上限；调用方另传本次调查剩余时间，取较小者（SC-08）
+  terminal: rule-only        # 全部失败时只显示规则结论，界面注明"AI 研判不可用"（FR-1105）

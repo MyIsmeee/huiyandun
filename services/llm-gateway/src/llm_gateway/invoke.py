@@ -13,17 +13,25 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from string import Template
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import httpx2
 import yaml
 from openai import APIConnectionError, APIResponseValidationError, APIStatusError
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from llm_gateway.connect import Target, client, explain
 from llm_gateway.probe import strip_reasoning
 from llm_gateway.redact import Pseudonyms, untraced
+from py_contracts.llm.incident_investigation_v1_schema import IncidentInvestigationTurn
 from py_contracts.llm.incident_report_v1_schema import IncidentReport
 
 log = logging.getLogger(__name__)
@@ -31,8 +39,23 @@ log = logging.getLogger(__name__)
 FAILURES, COOLDOWN = 4, timedelta(seconds=60)
 CONNECT_S = 2.0  # 连不上即转下一家，全部不可用时尽快落模板（FR-502）
 NOT_COMPATIBLE = "返回的不是 OpenAI 兼容格式"
+
+
+class InvestigationTurn(IncidentInvestigationTurn):
+    """契约中 tool、args、verdict 可为 null：按 action 要求对应字段非空，否则按不符合格式重试（07 §6）。"""
+
+    @model_validator(mode="after")
+    def _required(self) -> Self:
+        if self.action == "tool" and (self.tool is None or self.args is None):
+            raise ValueError("action=tool 时须给出 tool 与 args")
+        if self.action == "verdict" and self.verdict is None:
+            raise ValueError("action=verdict 时须给出 verdict")
+        return self
+
+
 SCHEMAS: dict[str, type[BaseModel]] = {
     "contracts/llm/incident_report.v1.schema.json": IncidentReport,
+    "contracts/llm/incident_investigation.v1.schema.json": InvestigationTurn,
 }
 
 
@@ -72,12 +95,18 @@ class Provider(Target):
 
 
 class Invocation(BaseModel):
-    """data 为结构化证据，只有 JSON：契约中没有图像、视频帧、pcap（C-LLM-04）。"""
+    """data 为结构化证据，只有 JSON：契约中没有图像、视频帧、pcap（C-LLM-04）。
+
+    deadline_s：调用方剩余的时间，与任务总时限取较小者。evidence：事实回溯的依据，缺省为 data；值班员只传
+    事件与工具结果，模型此前给出的参数不算出处（FR-1103）。
+    """
 
     model_config = ConfigDict(extra="forbid")
     task: str
     data: dict[str, Any]
     providers: list[Provider]
+    deadline_s: float | None = Field(None, gt=0)
+    evidence: dict[str, Any] | None = None
 
 
 class Attempt(BaseModel):
@@ -161,6 +190,7 @@ class Chain:
         provider: Provider,
         messages: list[ChatCompletionMessageParam],
         deadline: float,
+        limit: str,
         restore: Callable[[Any], Any],
     ) -> tuple[dict[str, Any], int]:
         """restore 把公网供应商输出中的假名换回原值；校验的是还原后的输出，即实际存下的内容（G-12）。"""
@@ -177,7 +207,7 @@ class Chain:
             for _ in range(2):  # 校验失败重试 1 次（C-LLM-05）
                 remaining = min(provider.timeout_s, deadline - time.monotonic())
                 if remaining <= 0:
-                    raise CallFailed(f"超出 {task.deadline_s:g} 秒总时限", tokens)
+                    raise CallFailed(limit, tokens)
                 try:
                     completion = await c.chat.completions.create(
                         model=provider.model,
@@ -207,14 +237,14 @@ class Chain:
         raise CallFailed("输出两次不符合格式", tokens)
 
     async def invoke(self, req: Invocation) -> InvokeResult:
-        task = self.tasks[req.task]
-        deadline = time.monotonic() + task.deadline_s
+        seconds = min(self.tasks[req.task].deadline_s, req.deadline_s or float("inf"))
+        deadline, limit = time.monotonic() + seconds, f"超出 {seconds:g} 秒总时限"
         attempts: list[Attempt] = []
         for provider in req.providers:
             pseudonyms = Pseudonyms() if provider.network == "public" else None
             skipped = None
             if deadline <= time.monotonic():
-                skipped = f"超出 {task.deadline_s:g} 秒总时限"
+                skipped = limit
             elif (until := self.breaker.blocked_until(provider.id)) is not None:
                 skipped = f"连续失败 {FAILURES} 次，暂停调用至 {until:%H:%M:%S} UTC"
             if skipped:
@@ -229,6 +259,7 @@ class Chain:
                     provider,
                     messages,
                     deadline,
+                    limit,
                     pseudonyms.restore if pseudonyms else _same,
                 )
             except CallFailed as f:
@@ -247,7 +278,7 @@ class Chain:
             )
             return InvokeResult(
                 output=output,
-                unverified=untraced(output, req.data, self._techniques),
+                unverified=untraced(output, req.evidence or req.data, self._techniques),
                 provider_id=provider.id,
                 attempts=attempts,
             )
