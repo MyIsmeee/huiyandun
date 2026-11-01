@@ -58,6 +58,9 @@ export const api = {
   /** 手动回滚（FR-405）：受理后返回当前执行状态，结果经 executions 频道推送 */
   rollback: (executionId: string) =>
     request<Schemas["playbook_execution.schema"]>("POST", `/api/executions/${encodeURIComponent(executionId)}/rollback`),
+  /** AI 安全值班员的调查记录（FR-1102）；尚未开始调查时为 404 */
+  getInvestigation: (incidentId: string) =>
+    request<Schemas["Investigation"]>("GET", `/api/incidents/${encodeURIComponent(incidentId)}/investigation`),
   /** 生成溯源报告（FR-501）：没有可用供应商时为模板报告 */
   createReport: (incidentId: string) =>
     request<Schemas["Report"]>(

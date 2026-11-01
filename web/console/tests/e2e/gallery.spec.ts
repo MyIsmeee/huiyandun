@@ -9,6 +9,8 @@ const COMPONENTS = {
   DetailPanel: ["device", "disconnected"],
   // 数据只来自推送，无加载与错误态：连接中与连不上由顶栏连接状态表示，断线后保留内容并标注
   AlertList: ["normal", "empty", "disconnected"],
+  // 正常态为公网供应商调查中，running 为内网供应商；空态为尚未开始调查，错误态为读取失败
+  AiInvestigation: ["normal", "running", "unavailable", "empty", "loading", "error", "disconnected"],
   // 报告不随推送变化，无断线态；空态为尚未生成
   ReportBar: ["empty", "loading", "normal", "reviewed", "error"],
 };

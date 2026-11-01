@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Site } from "../../../src/lib/api";
+import {
+  AiInvestigationView,
+  type Investigation,
+  type InvestigationLoad,
+} from "../../../src/panels/AiInvestigation/AiInvestigation";
 import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
@@ -107,6 +112,36 @@ const reportBar = (report: Report | null, request: ReportRequest) => (
   </div>
 );
 
+const STEPS = [
+  { tool: "list_alerts", args_summary: "ip=172.30.0.100", result_summary: "近 10 分钟 37 条告警，最近：RTSP 认证爆破 172.30.0.100 → 172.30.0.12", reason: "先看攻击源近期的告警" },
+  { tool: "query_sessions", args_summary: "ip=172.30.0.100", result_summary: "近 10 分钟 41 个会话，对端 1 个：172.30.0.12:8554 41 次", reason: "核对与摄像头之间的会话" },
+  { tool: "list_frame_events", args_summary: "camera_id=cam-02", result_summary: "近 10 分钟 1 条画面事件：freeze（规则，可信度 1.0）", reason: "看画面是否同时异常" },
+]; // prettier-ignore
+const STARTED = "2026-10-27T06:29:41Z";
+const INVESTIGATION: Investigation = {
+  incident_id: INCIDENT.id, steps: STEPS, error: null,
+  verdict: null,
+  provider: { name: "DeepSeek", location: "public" }, started_at: STARTED, finished_at: null,
+}; // prettier-ignore
+const RUNNING: Investigation = {
+  ...INVESTIGATION, steps: STEPS.slice(0, 2),
+  provider: { name: "本地 Qwen", location: "internal" },
+}; // prettier-ignore
+const FAILED: Investigation = {
+  ...INVESTIGATION, steps: [], provider: null, error: "未启用任何模型供应商", finished_at: "2026-10-27T06:30:14Z",
+}; // prettier-ignore
+const NOW = Date.parse(STARTED) + 18_000;
+const aiPanel = (load: InvestigationLoad, stale = false) => (
+  <div className="w-80 p-3">
+    <AiInvestigationView
+      incident={{ ...INCIDENT, requires_confirmation: true }}
+      load={load}
+      stale={stale}
+      now={NOW}
+    />
+  </div>
+);
+
 // 组件各状态的展示页：/tests/e2e/gallery/?component=<组件>，每个状态一个 [data-state]
 const GALLERY: Record<string, Record<string, ReactNode>> = {
   KpiTile: {
@@ -133,6 +168,15 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     normal: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale={false} lastFrameAt={LAST_FRAME} />),
     empty: alertList(<AlertListView alerts={[]} incidents={[]} executions={{}} stale={false} lastFrameAt={LAST_FRAME} />),
     disconnected: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale lastFrameAt={LAST_FRAME} />),
+  },
+  AiInvestigation: {
+    normal: aiPanel({ status: "ready", investigation: INVESTIGATION }),
+    running: aiPanel({ status: "ready", investigation: RUNNING }),
+    unavailable: aiPanel({ status: "ready", investigation: FAILED }),
+    empty: aiPanel({ status: "none" }),
+    loading: aiPanel({ status: "loading" }),
+    error: aiPanel({ status: "failed" }),
+    disconnected: aiPanel({ status: "ready", investigation: RUNNING }, true),
   },
   ReportBar: {
     empty: reportBar(null, { status: "idle" }),
