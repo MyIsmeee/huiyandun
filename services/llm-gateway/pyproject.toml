@@ -10,6 +10,7 @@ dependencies = [
     "py-common",
     "py-contracts",
     "pydantic>=2.14,<3",
+    "pyyaml>=6.0.3,<7",
     "uvicorn>=0.54.0,<0.55",
 ]
 

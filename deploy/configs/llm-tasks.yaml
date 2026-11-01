@@ -1,0 +1,8 @@
+# LLM 任务定义（HYD-ARCH-001 §5.3）：随代码版本化，不在界面开放
+# schema 对应 py-contracts 生成的 Pydantic 模型，本地校验（C-LLM-05、G-12）；prompt 为 prompts/ 下的模板（C-LLM-07）
+incident_report:
+  schema: contracts/llm/incident_report.v1.schema.json
+  prompt: incident_report/v1.md
+  temperature: 0.2
+  deadline_s: 60             # 全部供应商尝试的总时限（SC-05）
+  terminal: template-only    # 全部失败时由报告服务落模板报告，字段全部来自结构化事件（C-LLM-09）

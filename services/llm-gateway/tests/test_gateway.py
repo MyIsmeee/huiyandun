@@ -14,7 +14,12 @@ from fastapi.testclient import TestClient
 from llm_gateway import probe
 from llm_gateway.app import GatewayConfig, create_app
 
-PROMPTS = Path(__file__).resolve().parents[3] / "prompts"
+ROOT = Path(__file__).resolve().parents[3]
+CONFIG = GatewayConfig(
+    prompts_dir=ROOT / "prompts",
+    tasks_file=ROOT / "deploy/configs/llm-tasks.yaml",
+    attack_file=ROOT / "rules/attack/techniques.json",
+)
 KEY = "sk-not-a-real-key-7f3a"
 BASE = "http://192.168.1.50:8888/v1"
 MODELS = {"object": "list", "data": [{"id": "qwen3-8b"}, {"id": "deepseek-chat"}]}
@@ -58,7 +63,7 @@ class Provider:
         return (self.models if request.url.path.endswith("/models") else self.chat)(request)
 
     def post(self, path: str, **target: object) -> httpx2.Response:
-        app = create_app(GatewayConfig(prompts_dir=PROMPTS), transport=httpx2.MockTransport(self))
+        app = create_app(CONFIG, transport=httpx2.MockTransport(self))
         body = {"base_url": BASE, "api_key": KEY, "model": "qwen3-8b", "timeout_s": 5} | target
         with TestClient(app) as c:
             return c.post(path, json=body)

@@ -659,6 +659,7 @@ dependencies = [
     { name = "py-common" },
     { name = "py-contracts" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "uvicorn" },
 ]
 
@@ -670,6 +671,7 @@ requires-dist = [
     { name = "py-common", editable = "libs/py-common" },
     { name = "py-contracts", editable = "libs/py-contracts" },
     { name = "pydantic", specifier = ">=2.14,<3" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "uvicorn", specifier = ">=0.54.0,<0.55" },
 ]
 
