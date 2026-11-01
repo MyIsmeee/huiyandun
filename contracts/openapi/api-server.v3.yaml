@@ -655,7 +655,8 @@ components:
         incident_id: { type: string }
         facts: { $ref: "#/components/schemas/ReportFacts" }
         ai:
-          anyOf: [{ $ref: "#/components/schemas/ReportAi" }, { type: "null" }]
+          # 保留原有的 object 分支、以 allOf 收窄为 ReportAi：只是收窄原先的任意对象，不算新增 anyOf 分支（CI-08）
+          anyOf: [{ type: object, allOf: [{ $ref: "#/components/schemas/ReportAi" }] }, { type: "null" }]
           description: AI 区；模板模式下为 null
         source: { enum: [llm, template] }
         provider_id: { anyOf: [{ type: string }, { type: "null" }] }
