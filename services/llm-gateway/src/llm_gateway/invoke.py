@@ -192,13 +192,15 @@ class Chain:
                     raise CallFailed(NOT_COMPATIBLE, tokens) from e
                 if not isinstance(completion, ChatCompletion):  # 非 JSON 的 200，SDK 原样返回文本
                     raise CallFailed(NOT_COMPATIBLE, tokens)
-                tokens += completion.usage.total_tokens if completion.usage else 0
-                content = completion.choices[0].message.content if completion.choices else None
+                try:  # SDK 不严格校验响应结构：JSON 字段对不上时取值即抛异常
+                    tokens += getattr(completion.usage, "total_tokens", None) or 0
+                    message = completion.choices[0].message if completion.choices else None
+                    text = strip_reasoning(getattr(message, "content", None) or "")
+                except (AttributeError, TypeError, IndexError) as e:
+                    raise CallFailed(NOT_COMPATIBLE, tokens) from e
                 try:
                     # 假名换回原值后可能超出长度上限，按不合格式重试
-                    reply = model.model_validate(
-                        restore(json.loads(strip_reasoning(content or "")))
-                    )
+                    reply = model.model_validate(restore(json.loads(text)))
                 except (ValueError, ValidationError):
                     continue
                 return reply.model_dump(mode="json"), tokens

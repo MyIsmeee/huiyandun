@@ -149,11 +149,29 @@ def test_non_json_200_fails_over() -> None:
     """供应商返回 200 但响应体不是 JSON（如代理登录页）时转下一家，不报 500（FR-502）。"""
     html = httpx2.Response(200, text="<html>登录</html>", headers={"content-type": "text/html"})
     broken = httpx2.Response(200, text="{not json", headers={"content-type": "application/json"})
-    p = Providers(a=lambda _: html, b=lambda _: broken, c=ok())
-    result = p.invoke(provider("a"), provider("b"), provider("c"))
-    assert result.provider_id == "c"
-    reasons = [a.reason for a in result.attempts[:2]]
-    assert reasons == ["返回的不是 OpenAI 兼容格式"] * 2
+    # 能解析为 JSON、结构却对不上：旧版 completions 格式、空 choice、choices 不是数组、content 不是文本
+    shapes = [
+        {"choices": [{"text": "旧版 completions"}]},
+        {"choices": [{}]},
+        {"choices": "x"},
+        {"choices": [{"message": {"role": "assistant", "content": 123}}]},
+    ]
+    bad = [lambda _: html, lambda _: broken] + [
+        (lambda body: lambda _: httpx2.Response(200, json=body))(b) for b in shapes
+    ]
+    handlers = {f"p{i}": h for i, h in enumerate(bad)}
+    p = Providers(**handlers, ok=ok())
+    result = p.invoke(*(provider(pid) for pid in handlers), provider("ok"))
+    assert result.provider_id == "ok"
+    assert all(a.outcome == "failed" for a in result.attempts[:-1])
+    assert [a.reason for a in result.attempts[:2]] == ["返回的不是 OpenAI 兼容格式"] * 2
+
+
+def test_null_usage_counts_as_zero_tokens() -> None:
+    body = json.loads(completion(json.dumps(REAL, ensure_ascii=False)).content)
+    body["usage"]["total_tokens"] = None
+    result = Providers(a=lambda _: httpx2.Response(200, json=body)).invoke(provider("a"))
+    assert result.provider_id == "a" and result.attempts[0].tokens == 0
 
 
 def test_restored_output_over_limit_is_retried_then_fails_over() -> None:
