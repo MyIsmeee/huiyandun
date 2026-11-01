@@ -41,6 +41,17 @@ def test_same_value_gets_same_pseudonym_and_prefix_is_not_cut() -> None:
     assert p.restore(out) == {"device_id": "cam-1", "a": "10.0.0.1 与 10.0.0.12，cam-1、cam-12"}
 
 
+def test_redact_covers_values_next_to_separators() -> None:
+    """紧挨 - _ 或字母的内网地址、紧挨分隔符的设备 ID 同样替换，不能原样发往公网（C-LLM-03）。"""
+    p = Pseudonyms()
+    text = "10.0.0.5-10.0.0.9，host_10.0.0.7，ip10.0.0.8，fe80::1-fe80::2，cam-02_backup、cam-02-1"
+    out = p.redact({"device_id": "cam-02", "a": text})
+    assert out["a"] == (
+        "HOST_001-HOST_002，host_HOST_003，ipHOST_004，HOST_005-HOST_006，DEV_001_backup、DEV_001-1"
+    )
+    assert p.restore(out)["a"] == text
+
+
 def test_restore_keeps_unknown_pseudonyms() -> None:
     p = Pseudonyms()
     p.redact(EVIDENCE)

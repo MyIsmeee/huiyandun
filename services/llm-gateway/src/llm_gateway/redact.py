@@ -22,7 +22,7 @@ PORT = re.compile(rf"(?:端口|port)\s*[:：]?\s*(\d{{1,5}})(?!\d)|{IPV4}:(\d{{1
 CVE = re.compile(r"CVE-\d{4}-\d{4,}")
 TECHNIQUE = re.compile(r"(?<![A-Za-z0-9])T\d{4}(?:\.\d{3})?(?!\.?\d)")
 DEVICE = re.compile(rf"{BEFORE}[a-z][a-z0-9]*-\d+{AFTER}")
-PSEUDONYM = re.compile(r"(?<![A-Za-z0-9_])(?:HOST|DEV)_\d{3,}(?![A-Za-z0-9_])")
+FAKE = re.compile(r"(?:HOST|DEV)_\d{3,}(?!\d)")  # 假名：不论前后紧挨什么都识别
 
 
 def _strings(value: Any, key: str = "") -> Iterator[tuple[str, str]]:
@@ -55,11 +55,11 @@ def _ips(text: str) -> Iterator[str]:
 
 
 def _replace(value: Any, table: dict[str, str]) -> Any:
+    """替换设备 ID：只排除拼在更长的字母数字串中的情况，紧挨 - _ . 等分隔符的照样替换。"""
     if not table:
         return value
-    # 长的先匹配：172.30.0.12 不会被 172.30.0.1 截断（边界也排除了这种情况）
     alternatives = "|".join(re.escape(k) for k in sorted(table, key=len, reverse=True))
-    pattern = re.compile(f"{BEFORE}(?:{alternatives}){AFTER}")
+    pattern = re.compile(f"(?<![A-Za-z0-9])(?:{alternatives})(?![A-Za-z0-9])")
     return _map_strings(value, lambda s: pattern.sub(lambda m: table[m.group()], s))
 
 
@@ -82,11 +82,17 @@ class Pseudonyms:
             for ip in _ips(text):
                 if ip_address(ip).is_private:  # 含回环、链路本地
                     self._add(ip, "HOST")
-        return _replace(data, self._fake)
+        # 地址用识别时的同一个正则替换：识别出的地址在任何位置都会被替换（C-LLM-03）
+        devices = {k: v for k, v in self._fake.items() if v.startswith("DEV_")}
+        return _map_strings(
+            _replace(data, devices),
+            lambda s: IP.sub(lambda m: self._fake.get(m.group(), m.group()), s),
+        )
 
     def restore(self, output: Any) -> Any:
         """模型编造的假名不在映射表中，原样保留，由回溯记为未溯源。"""
-        return _replace(output, {fake: real for real, fake in self._fake.items()})
+        real = {fake: value for value, fake in self._fake.items()}
+        return _map_strings(output, lambda s: FAKE.sub(lambda m: real.get(m.group(), m.group()), s))
 
 
 def _found(entity: str, context: str) -> bool:
@@ -131,5 +137,5 @@ def untraced(output: Any, data: Any, techniques: Iterable[str]) -> list[str]:
             if m.group() not in known_techniques and not _found(m.group(), context)
         ]
         found += [m.group() for m in DEVICE.finditer(text) if not _found(m.group(), context)]
-        found += PSEUDONYM.findall(text)
+        found += FAKE.findall(text)
     return list(dict.fromkeys(found))
