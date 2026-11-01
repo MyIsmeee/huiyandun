@@ -17,7 +17,9 @@ import { Fragment, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
 import { useConnection } from "../../store/connection";
-import { type Incident, useLive } from "../../store/live";
+import { type Execution, type Incident, useLive } from "../../store/live";
+import { canContain, useSession } from "../../store/session";
+import { RESULT_TIMEOUT_MS } from "../ActionBar/ActionBar";
 import { SEVERITY } from "../AlertList/AlertList";
 
 export type Investigation = components["schemas"]["Investigation"];
@@ -25,6 +27,7 @@ type Verdict = NonNullable<Investigation["verdict"]>;
 export type InvestigationLoad =
   | { status: keyof typeof NO_RECORD }
   | { status: "ready"; investigation: Investigation };
+export type ConfirmRequest = { status: "idle" | "pending" } | { status: "failed"; message: string };
 
 /** 工具类型图标（V-AI6）；未知工具（已被拒绝的调用）用通用图标 */
 const TOOL_ICON: Record<string, typeof Wrench> = {
@@ -40,11 +43,12 @@ const NO_RECORD = { loading: "读取调查记录…", none: "尚未开始调查"
 /**
  * AI 安全值班员面板（HYD-UIX-004 §6.2、§8 AiInvestigation）：所选设备最近一个关联事件的规则结论与 AI 研判，分区显示
  * （V-AI1、V-AI8）。调查记录读 GET 接口，每收到该事件的 ai 推送或推送连接恢复时重新读取（FR-1102）。
+ * 规则结论下方是"确认处置"：事件须人工确认、有待确认的执行且角色为 operator 及以上时渲染（V-AI9、C-FE-07）。
  */
 export function AiInvestigation(props: { deviceId: string; stale: boolean }) {
   const incident = useLive((s) => s.incidents.find((i) => i.device_ids.includes(props.deviceId)));
   if (!incident) return null;
-  // key：换了关联事件即不再显示上一个事件的调查
+  // key：换了关联事件即不再显示上一个事件的调查与确认结果
   return <AiInvestigationState key={incident.id} incident={incident} stale={props.stale} />;
 }
 
@@ -52,7 +56,13 @@ function AiInvestigationState(props: { incident: Incident; stale: boolean }) {
   const { incident, stale } = props;
   const seq = useLive((s) => s.aiSeq[incident.id]);
   const open = useConnection((s) => s.open);
+  const pending = useLive((s) =>
+    Object.values(s.executions).find((e) => e.incident_id === incident.id && e.state === "pending"),
+  );
+  const role = useSession((s) => s.role);
   const [load, setLoad] = useState<InvestigationLoad>({ status: "loading" });
+  // 请求记在发起时的那条执行推送上：执行器推送新状态（开始执行）后按钮消失；换了执行即不再显示上一次的结果
+  const [confirming, setConfirming] = useState<{ execution: Execution; request: ConfirmRequest } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -78,12 +88,41 @@ function AiInvestigationState(props: { incident: Incident; stale: boolean }) {
     return () => clearInterval(timer);
   }, [running, stale]);
 
+  async function confirm(execution: Execution) {
+    setConfirming({ execution, request: { status: "pending" } });
+    try {
+      await api.confirmContainment(incident.id);
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : "无法连接服务器，请重试";
+      setConfirming({ execution, request: { status: "failed", message } });
+      return;
+    }
+    // 执行器停机时确认可能丢失：到时恢复可点
+    setTimeout(() => {
+      setConfirming((c) =>
+        c?.execution === execution && c.request.status === "pending"
+          ? { execution, request: { status: "failed", message: "未收到执行结果，请重试" } }
+          : c,
+      );
+    }, RESULT_TIMEOUT_MS);
+  }
+
+  const confirmable = incident.requires_confirmation && pending !== undefined && canContain(role);
   return (
     <AiInvestigationView
       incident={incident}
       load={load}
       stale={stale}
       now={now}
+      confirm={
+        confirmable
+          ? {
+              execution: pending,
+              request: confirming?.execution === pending ? confirming.request : { status: "idle" },
+              onConfirm: () => void confirm(pending),
+            }
+          : null
+      }
     />
   );
 }
@@ -93,8 +132,9 @@ export function AiInvestigationView(props: {
   load: InvestigationLoad;
   stale: boolean;
   now: number;
+  confirm: { execution: Execution; request: ConfirmRequest; onConfirm: () => void } | null;
 }) {
-  const { incident, load, stale, now } = props;
+  const { incident, load, stale, now, confirm } = props;
   return (
     <section aria-label="AI 安全值班员" className="flex flex-col gap-3 rounded-xl border border-line p-3 text-sm">
       <section aria-label="规则结论" className="flex flex-col gap-2">
@@ -106,6 +146,26 @@ export function AiInvestigationView(props: {
           {incident.source_ip && <span className="tabular-nums"> · 来源 {incident.source_ip}</span>}
         </p>
         {incident.requires_confirmation && <p className="text-fg-2">含模型证据，处置须人工确认</p>}
+        {confirm && (
+          <>
+            <button
+              type="button"
+              onClick={confirm.onConfirm}
+              disabled={confirm.request.status === "pending"}
+              className="min-h-9 self-start rounded-2xl border border-line px-4 py-1.5 text-left transition-colors hover:bg-raised disabled:opacity-40"
+            >
+              {confirm.request.status === "pending"
+                ? "确认中…"
+                : `确认处置：${confirm.execution.playbook_id} 封禁 ${confirm.execution.target}`}
+            </button>
+            {confirm.request.status === "failed" && (
+              <p role="alert" className="flex items-start gap-1 text-fg-2">
+                <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+                <span className="min-w-0">{confirm.request.message}</span>
+              </p>
+            )}
+          </>
+        )}
       </section>
       <section aria-label="AI 研判" className={`flex flex-col gap-2 border-t border-line pt-3 ${stale ? "opacity-60" : ""}`}>
         <header className="sticky top-0 flex flex-wrap items-center gap-x-2 bg-panel">

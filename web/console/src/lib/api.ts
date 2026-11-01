@@ -61,6 +61,10 @@ export const api = {
   /** AI 安全值班员的调查记录（FR-1102）；尚未开始调查时为 404 */
   getInvestigation: (incidentId: string) =>
     request<Schemas["Investigation"]>("GET", `/api/incidents/${encodeURIComponent(incidentId)}/investigation`),
+  /** 确认处置（FR-407）：只提交关联事件 ID，受理后执行结果经 executions 频道推送 */
+  confirmContainment: async (incidentId: string) => {
+    await send("POST", `/api/incidents/${encodeURIComponent(incidentId)}/confirm-containment`);
+  },
   /** 生成溯源报告（FR-501）：没有可用供应商时为模板报告 */
   createReport: (incidentId: string) =>
     request<Schemas["Report"]>(
