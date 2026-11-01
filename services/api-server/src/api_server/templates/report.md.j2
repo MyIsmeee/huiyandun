@@ -6,7 +6,7 @@
 
 - 报告编号：{{ report.id }}
 - 生成时间：{{ created_at }}
-- 生成方式：{{ "模板生成" if report.source == "template" else "模型生成" }}
+- 生成方式：{{ "模板生成" if report.source == "template" else "模型生成：" ~ ai.by }}
 - 复核状态：{% if report.reviewed_by %}已复核：{{ report.reviewed_by }} 于 {{ reviewed_at }}{% else %}未复核草稿{% endif %}
 
 
@@ -42,11 +42,32 @@
 
 ## AI 分析区
 
-{% if report.source == "template" %}
+{% if ai %}
+> AI 生成 · 需人工复核 · 由 {{ ai.by }} 生成{% if ai.has_unverified %} · 标注“（未溯源）”的实体未能在证据中溯源{% endif %}
+
+
+### 摘要
+
+{{ ai.summary }}
+
+{% for title, items in [("攻击链", ai.attack_chain), ("影响", ai.impact), ("建议（仅作文字建议，系统不会据此执行任何操作）", ai.recommendations)] %}
+### {{ title }}
+
+{% for item in items %}
+- {{ item }}
+{% else %}
+无
+{% endfor %}
+
+{% endfor %}
+### 可信度
+
+{{ ai.confidence }}
+{% else %}
 > 模型不可用，以下为规则模板生成（原因：{{ report.degraded_reason }}）
 
-{% endif %}
 {{ narrative }}
+{% endif %}
 {% if not report.reviewed_by %}
 
 > **未复核草稿**：本报告未经人工复核，不得作为正式材料。
