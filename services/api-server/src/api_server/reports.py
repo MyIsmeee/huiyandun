@@ -94,7 +94,7 @@ async def create_report(
     if incident is None:
         raise HTTPException(404, "关联事件不存在或已超过 24 小时")
     report_facts = facts(incident, state.history, state.site)
-    outcome = await invoke(request, "incident_report", report_facts.model_dump(mode="json"))
+    outcome = await invoke(state, "incident_report", report_facts.model_dump(mode="json"))
     ai, provider = None, outcome.provider
     if outcome.output is not None:
         ai = ReportAi.model_validate(

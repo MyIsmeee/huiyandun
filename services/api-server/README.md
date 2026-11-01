@@ -9,6 +9,7 @@
 - WebSocket `/ws`：握手时校验会话 Cookie，向已登录客户端推送契约 `WsFrame`；会话到期、登出或客户端消费过慢时断开。数据源调用 `app.state.hub.broadcast()` 接入
 - 审计日志：`api_server.audit.record` 与业务变更在同一事务内写入；表只追加（G-13）
 - 站点：启动时导入 `HYD_SITE_FILE` 指向的 `site.yaml`（格式见 `contracts/config/site.schema.json`），只保存在内存中，经 `GET /api/site` 提供。不符合 Schema 时列出全部出错字段路径并拒绝启动（FR-903）；标定点少于 4 组的摄像头为 `uncalibrated`（FR-902）。Compose 挂载 `demo/scenarios/site.yaml`
+- AI 安全值班员（TK-116、D-087）：`high` 及以上的关联事件单并发排队调查，每轮经 llm-gateway（任务 `incident_investigation`）选择只读工具或给出判定，最多 8 轮、60 s；工具读内存历史、站点登记、Zeek `conn.log`（只读挂载）与 ATT&CK 精简表。每一帧写入 `ai_investigation` 并经 `/ws` 的 `ai` 频道推送，`GET /api/incidents/{id}/investigation` 返回记录；无可用供应商时推送失败原因。判定只作展示，不触发处置（G-03）
 
 ## 数据库账号
 

@@ -11,7 +11,6 @@ from typing import Any
 
 import httpx2
 from cryptography.exceptions import InvalidTag
-from fastapi import Request
 from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -45,8 +44,15 @@ def _skipped(provider_id: str, reason: str) -> dict[str, Any]:
     }
 
 
-async def invoke(request: Request, task: str, data: dict[str, Any]) -> Outcome:
-    state = request.app.state
+async def invoke(
+    state: Any,
+    task: str,
+    data: dict[str, Any],
+    *,
+    deadline_s: float | None = None,
+    evidence: dict[str, Any] | None = None,
+) -> Outcome:
+    """state 为 app.state；deadline_s 为调用方剩余时间，evidence 为事实回溯依据（缺省为 data）。"""
     async with state.engine.connect() as conn:
         rows = (
             (
@@ -81,10 +87,11 @@ async def invoke(request: Request, task: str, data: dict[str, Any]) -> Outcome:
             }
         )
     if targets:
-        body = {"task": task, "data": data, "providers": targets}
+        body = {"task": task, "data": data, "providers": targets, "deadline_s": deadline_s,
+                "evidence": evidence}  # fmt: skip
         try:
             res = await state.llm_gateway.post(
-                "/internal/invoke", json=body, timeout=DEADLINE_S + MARGIN_S
+                "/internal/invoke", json=body, timeout=(deadline_s or DEADLINE_S) + MARGIN_S
             )
             res.raise_for_status()
         except httpx2.HTTPError as e:
