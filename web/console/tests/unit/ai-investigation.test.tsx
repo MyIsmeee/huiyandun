@@ -41,6 +41,15 @@ const investigation = (changes: Partial<Investigation> = {}): Investigation => (
   finished_at: null,
   ...changes,
 });
+const VERDICT = {
+  is_attack: true,
+  confidence: 0.86,
+  techniques: ["T1110", "T1565"],
+  narrative: "172.30.0.100 对 cam-02 爆破后，10.9.9.9 冻结了画面",
+  recommendation: "隔离 10.9.9.9",
+  unverified: ["10.9.9.9", "T1565"],
+};
+
 const push = (channel: string, data: object) =>
   act(() => receive({ channel, data } as unknown as Frame, Date.now()));
 
@@ -63,14 +72,16 @@ describe("AiInvestigation", () => {
   });
 
   it("规则结论与 AI 研判分区显示，AI 区注明需人工复核（V-AI1、V-AI2、V-AI8）", async () => {
-    vi.spyOn(api, "getInvestigation").mockResolvedValue(investigation());
+    vi.spyOn(api, "getInvestigation").mockResolvedValue(investigation({ verdict: VERDICT, finished_at: new Date().toISOString() }));
     push("incidents", incident());
     show();
     const rule = screen.getByRole("region", { name: "规则结论" });
     expect(rule.textContent).toContain("摄像头疑似被入侵且画面遭篡改");
     const ai = screen.getByRole("region", { name: "AI 研判" });
     expect(ai.textContent).toContain("AI 生成 · 需人工复核");
-    expect(await screen.findByText("DeepSeek")).toBeTruthy();
+    expect(await screen.findByText("判定为攻击")).toBeTruthy();
+    expect(ai.textContent).toContain("86%");
+    expect(ai.textContent).toContain("DeepSeek");
     expect(ai.textContent).toContain("公网 · 已脱敏");
   });
 
@@ -111,5 +122,15 @@ describe("AiInvestigation", () => {
     push("incidents", incident());
     show();
     expect(await screen.findByText("无法读取调查记录")).toBeTruthy();
+  });
+
+  it("未溯源的实体弱化并说明（FR-1103、V-AI3）", async () => {
+    vi.spyOn(api, "getInvestigation").mockResolvedValue(investigation({ verdict: VERDICT, finished_at: new Date().toISOString() }));
+    push("incidents", incident());
+    show();
+    await screen.findByText("判定为攻击");
+    const marked = screen.getAllByTitle("该实体未能在证据中溯源").map((e) => e.textContent);
+    expect(marked).toEqual(["T1565", "10.9.9.9", "10.9.9.9"]);
+    expect(screen.queryAllByTitle("该实体未能在证据中溯源").some((e) => e.textContent === "172.30.0.100")).toBe(false);
   });
 });
