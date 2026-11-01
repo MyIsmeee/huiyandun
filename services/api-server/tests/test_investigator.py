@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx2
@@ -342,3 +343,20 @@ def test_incident_from_bus_is_investigated(
 
 def test_requires_login(client: TestClient) -> None:
     assert client.get("/api/incidents/inc-x/investigation").status_code == 401
+
+
+def test_worker_survives_database_down_at_start() -> None:
+    """启动时数据库不可达：标记中断失败只记日志，后台任务继续等待调查（CI 中曾因此整体退出）。"""
+
+    class Down:
+        def begin(self) -> None:
+            raise OSError("数据库不可达")
+
+    async def main() -> bool:
+        task = asyncio.create_task(investigator.Investigator(SimpleNamespace(engine=Down())).run())
+        await asyncio.sleep(0.05)
+        alive = not task.done()
+        task.cancel()
+        return alive
+
+    assert asyncio.run(main())

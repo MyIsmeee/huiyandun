@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import Column, DateTime, MetaData, Table, Text, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 
 from api_server import llm_chain
 from api_server.auth import require
@@ -66,12 +67,15 @@ class Investigator:
         self._queue.put_nowait(incident)
 
     async def run(self) -> None:
-        async with self._state.engine.begin() as conn:
-            await conn.execute(
-                update(investigation_table)
-                .where(investigation_table.c.finished_at.is_(None))
-                .values(error="服务重启，调查中断", finished_at=datetime.now(UTC))
-            )
+        try:  # 数据库暂不可达时只记日志：后台任务照常等待调查，未结束的记录留到下次启动再标记
+            async with self._state.engine.begin() as conn:
+                await conn.execute(
+                    update(investigation_table)
+                    .where(investigation_table.c.finished_at.is_(None))
+                    .values(error="服务重启，调查中断", finished_at=datetime.now(UTC))
+                )
+        except (SQLAlchemyError, OSError) as e:
+            log.warning("ai.interrupt_mark_failed", extra={"error": repr(e)})
         while True:
             incident = await self._queue.get()
             try:
