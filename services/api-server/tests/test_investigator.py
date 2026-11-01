@@ -7,7 +7,8 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,7 +28,7 @@ from api_server.config import ApiConfig
 from api_server.db import transaction
 from api_server.investigator import investigation_table
 from py_common.bus import Bus
-from py_contracts.api import Investigation
+from py_contracts.api import Investigation, WsFrame
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
@@ -346,20 +347,69 @@ def test_requires_login(client: TestClient) -> None:
 
 
 def test_worker_survives_database_down_at_start() -> None:
-    """启动时数据库不可达：标记中断失败只记日志，后台任务继续等待调查（CI 中曾因此整体退出）。"""
+    """启动时与调查开始时数据库都不可达：只记日志、不推送查不到记录的失败帧，后台任务继续等待调查
+    （CI 中曾因此整体退出）。"""
 
     class Down:
         def begin(self) -> None:
             raise OSError("数据库不可达")
 
+    frames: list[WsFrame] = []
+    state = SimpleNamespace(engine=Down(), hub=SimpleNamespace(broadcast=frames.append))
+
     async def main() -> bool:
-        task = asyncio.create_task(investigator.Investigator(SimpleNamespace(engine=Down())).run())
+        worker = investigator.Investigator(state)
+        task = asyncio.create_task(worker.run())
+        worker.submit(incident("inc-db-down"))
         await asyncio.sleep(0.05)
         alive = not task.done()
         task.cancel()
         return alive
 
     assert asyncio.run(main())
+    assert frames == []
+
+
+def test_worker_survives_failed_fail_frame() -> None:
+    """调查中途意外出错、补发失败帧时数据库也不可达：只记日志，后台任务照常处理下一个事件。"""
+
+    async def ok(*_: Any) -> Any:
+        return SimpleNamespace(rowcount=1)
+
+    class Flaky:
+        """前两次写库成功（启动时标记中断、第一个事件的插入），之后不可达。"""
+
+        def __init__(self) -> None:
+            self.begins = 0
+
+        @asynccontextmanager
+        async def begin(self) -> AsyncIterator[Any]:
+            self.begins += 1
+            if self.begins > 2:
+                raise OSError("数据库不可达")
+            yield SimpleNamespace(execute=ok)
+
+        @asynccontextmanager
+        async def connect(self) -> AsyncIterator[Any]:  # 调用链读供应商时出错
+            raise RuntimeError("内部缺陷")
+            yield
+
+    engine = Flaky()
+    state = SimpleNamespace(engine=engine, hub=SimpleNamespace(broadcast=lambda _: None))
+
+    async def main() -> bool:
+        worker = investigator.Investigator(state)
+        task = asyncio.create_task(worker.run())
+        worker.submit(incident("inc-broken-1"))
+        worker.submit(incident("inc-broken-2"))
+        await asyncio.sleep(0.05)
+        alive = not task.done()
+        task.cancel()
+        return alive
+
+    assert asyncio.run(main())
+    # 启动标记、事件 1 插入、事件 1 补发失败帧（不可达）、事件 2 插入（不可达）
+    assert engine.begins == 4
 
 
 def test_unexpected_error_ends_investigation_as_failed(client: TestClient, password: str) -> None:
