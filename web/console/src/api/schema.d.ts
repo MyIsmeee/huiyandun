@@ -990,7 +990,7 @@ export interface components {
         };
         /**
          * AiInvestigationV1
-         * @description AI 安全值班员调查流，字段即 InvestigationFrame（生产者 llm-gateway）
+         * @description AI 安全值班员调查流，字段即 InvestigationFrame（生产者 api-server，D-087）
          */
         "hyd.ai.investigation.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["investigation_frame.schema"];
         /**

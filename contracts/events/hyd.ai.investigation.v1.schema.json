@@ -1,5 +1,5 @@
 {
   "title": "AiInvestigationV1",
-  "description": "AI 安全值班员调查流，字段即 InvestigationFrame（生产者 llm-gateway）",
+  "description": "AI 安全值班员调查流，字段即 InvestigationFrame（生产者 api-server，D-087）",
   "allOf": [{ "$ref": "event_base.schema.json" }, { "$ref": "investigation_frame.schema.json" }]
 }

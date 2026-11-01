@@ -22,6 +22,7 @@ from api_server import (
     auth,
     containment,
     executions,
+    investigator,
     llm,
     llm_probe,
     relay,
@@ -117,8 +118,15 @@ def create_app(config: ApiConfig) -> FastAPI:
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
             asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
+            asyncio.create_task(app.state.investigator.run()),  # TK-116
             asyncio.create_task(
-                relay.follow(bus, app.state.hub, app.state.devices, app.state.history)
+                relay.follow(
+                    bus,
+                    app.state.hub,
+                    app.state.devices,
+                    app.state.history,
+                    app.state.investigator,
+                )
             ),
         ]
         try:
@@ -149,9 +157,11 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.tools = Tools(
         app.state.history, app.state.devices, config.conn_log_file, attack["techniques"]
     )
+    app.state.investigator = investigator.Investigator(app.state)
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(containment.router)
+    app.include_router(investigator.router)
     app.include_router(llm.router)
     app.include_router(llm_probe.router)
     app.include_router(reports.router)

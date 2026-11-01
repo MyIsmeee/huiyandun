@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from api_server.devices import Devices
 from api_server.history import WINDOW, History
+from api_server.investigator import Investigator
 from api_server.ws import Hub
 from py_common.bus import Bus
 from py_contracts.api import Device, WsFrame
@@ -63,10 +64,12 @@ async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]
     await bus.subscribe("hyd.security.alert.v1", SecurityAlertV1, on_alert)
 
 
-async def follow(bus: Bus, hub: Hub, devices: Devices, history: History) -> None:
+async def follow(
+    bus: Bus, hub: Hub, devices: Devices, history: History, investigator: Investigator
+) -> None:
     """从 JetStream 重放近 24 小时并持续接收（D-077）：告警与行为事件只记入历史（推送沿用 start 的转发）；
     画面完整性事件只记入历史，供报告查找（TK-070）；关联事件与处置执行记入历史并推送，执行同时更新设备的
-    处置状态（04 §5.2）。"""
+    处置状态（04 §5.2）；关联事件另提交值班员调查（TK-116）。"""
 
     async def on_alert(event: EventBase) -> None:
         history.add_alert(event)
@@ -77,6 +80,7 @@ async def follow(bus: Bus, hub: Hub, devices: Devices, history: History) -> None
     async def on_incident(event: CorrelatorIncidentV1) -> None:
         history.add_incident(event)
         hub.broadcast(_frame("incidents", event))
+        investigator.submit(event)
 
     async def on_execution(event: PlaybookExecutionV1) -> None:
         history.add_execution(event)

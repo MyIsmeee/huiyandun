@@ -843,7 +843,7 @@ class LlmProviderList(ContractModel):
 
 class AiInvestigationV1(EventBase, InvestigationFrame):
     """
-    AI 安全值班员调查流，字段即 InvestigationFrame（生产者 llm-gateway）
+    AI 安全值班员调查流，字段即 InvestigationFrame（生产者 api-server，D-087）
     """
 
 
