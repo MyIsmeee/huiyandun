@@ -17,8 +17,8 @@ from typing import Any, Literal
 
 import httpx2
 import yaml
-from openai import APIConnectionError, APIStatusError
-from openai.types.chat import ChatCompletionMessageParam
+from openai import APIConnectionError, APIResponseValidationError, APIStatusError
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from llm_gateway.connect import Target, client, explain
@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 FAILURES, COOLDOWN = 4, timedelta(seconds=60)
 CONNECT_S = 2.0  # 连不上即转下一家，全部不可用时尽快落模板（FR-502）
+NOT_COMPATIBLE = "返回的不是 OpenAI 兼容格式"
 SCHEMAS: dict[str, type[BaseModel]] = {
     "contracts/llm/incident_report.v1.schema.json": IncidentReport,
 }
@@ -160,7 +161,9 @@ class Chain:
         provider: Provider,
         messages: list[ChatCompletionMessageParam],
         deadline: float,
+        restore: Callable[[Any], Any],
     ) -> tuple[dict[str, Any], int]:
+        """restore 把公网供应商输出中的假名换回原值；校验的是还原后的输出，即实际存下的内容（G-12）。"""
         task = self.tasks[name]
         model = SCHEMAS[task.schema_]
         extra: dict[str, Any] = {}
@@ -185,11 +188,18 @@ class Chain:
                     )
                 except (APIConnectionError, APIStatusError) as e:
                     raise CallFailed(explain(e, provider).reason, tokens) from e
+                except (APIResponseValidationError, ValueError) as e:  # 200 但响应体不是 JSON
+                    raise CallFailed(NOT_COMPATIBLE, tokens) from e
+                if not isinstance(completion, ChatCompletion):  # 非 JSON 的 200，SDK 原样返回文本
+                    raise CallFailed(NOT_COMPATIBLE, tokens)
                 tokens += completion.usage.total_tokens if completion.usage else 0
                 content = completion.choices[0].message.content if completion.choices else None
                 try:
-                    reply = model.model_validate_json(strip_reasoning(content or ""))
-                except ValidationError:
+                    # 假名换回原值后可能超出长度上限，按不合格式重试
+                    reply = model.model_validate(
+                        restore(json.loads(strip_reasoning(content or "")))
+                    )
+                except (ValueError, ValidationError):
                     continue
                 return reply.model_dump(mode="json"), tokens
         raise CallFailed("输出两次不符合格式", tokens)
@@ -212,7 +222,13 @@ class Chain:
             messages = self._messages(req.task, data)
             started = time.monotonic()
             try:
-                output, tokens = await self._call(req.task, provider, messages, deadline)
+                output, tokens = await self._call(
+                    req.task,
+                    provider,
+                    messages,
+                    deadline,
+                    pseudonyms.restore if pseudonyms else _same,
+                )
             except CallFailed as f:
                 self.breaker.record(provider.id, ok=False)
                 latency = int((time.monotonic() - started) * 1000)
@@ -227,8 +243,6 @@ class Chain:
             attempts.append(
                 _attempt(req.task, provider, "ok", None, latency, tokens, bool(pseudonyms))
             )
-            if pseudonyms:
-                output = pseudonyms.restore(output)
             return InvokeResult(
                 output=output,
                 unverified=untraced(output, req.data, self._techniques),
@@ -236,6 +250,10 @@ class Chain:
                 attempts=attempts,
             )
         return InvokeResult(output=None, unverified=[], provider_id=None, attempts=attempts)
+
+
+def _same(value: Any) -> Any:
+    return value
 
 
 def _attempt(

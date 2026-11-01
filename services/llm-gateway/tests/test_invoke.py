@@ -145,6 +145,28 @@ def test_all_failed_returns_every_reason() -> None:
     assert result.attempts[1].tokens == 60  # 两次请求的用量都计入
 
 
+def test_non_json_200_fails_over() -> None:
+    """供应商返回 200 但响应体不是 JSON（如代理登录页）时转下一家，不报 500（FR-502）。"""
+    html = httpx2.Response(200, text="<html>登录</html>", headers={"content-type": "text/html"})
+    broken = httpx2.Response(200, text="{not json", headers={"content-type": "application/json"})
+    p = Providers(a=lambda _: html, b=lambda _: broken, c=ok())
+    result = p.invoke(provider("a"), provider("b"), provider("c"))
+    assert result.provider_id == "c"
+    reasons = [a.reason for a in result.attempts[:2]]
+    assert reasons == ["返回的不是 OpenAI 兼容格式"] * 2
+
+
+def test_restored_output_over_limit_is_retried_then_fails_over() -> None:
+    """公网输出的假名换回原值后超出 300 字，按不合格式处理，不让报告服务收到非法内容。"""
+    long = REPORT | {"summary": "HOST_001 " * 33}  # 297 字；还原为 172.30.0.100 后超出
+    p = Providers(a=ok(long), b=ok())
+    result = p.invoke(provider("a", network="public"), provider("b"))
+    assert [(a.outcome, a.reason) for a in result.attempts] == [
+        ("failed", "输出两次不符合格式"), ("ok", None)
+    ]  # fmt: skip
+    assert len(p.seen["a"]) == 2 and result.output == REAL
+
+
 def test_invalid_json_retried_once_on_same_provider() -> None:
     replies = iter([completion("{不是 JSON"), completion(json.dumps(REAL, ensure_ascii=False))])
     p = Providers(a=lambda _: next(replies))
