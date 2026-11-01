@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { Site } from "../../../src/lib/api";
 import {
   AiInvestigationView,
+  type ConfirmRequest,
   type Investigation,
   type InvestigationLoad,
 } from "../../../src/panels/AiInvestigation/AiInvestigation";
@@ -135,14 +136,16 @@ const RUNNING: Investigation = {
 const FAILED: Investigation = {
   ...INVESTIGATION, steps: [], verdict: null, provider: null, error: "未启用任何模型供应商",
 }; // prettier-ignore
+const PENDING = { ...EXECUTIONS["exe-1"], state: "pending", reason: "含模型证据，等待人工确认", expires_at: null, verify_result: null } as Execution; // prettier-ignore
 const NOW = Date.parse(STARTED) + 18_000;
-const aiPanel = (load: InvestigationLoad, stale = false) => (
+const aiPanel = (load: InvestigationLoad, options: { stale?: boolean; confirm?: ConfirmRequest } = {}) => (
   <div className="w-80 p-3">
     <AiInvestigationView
       incident={{ ...INCIDENT, requires_confirmation: true }}
       load={load}
-      stale={stale}
+      stale={options.stale ?? false}
       now={NOW}
+      confirm={options.confirm ? { execution: PENDING, request: options.confirm, onConfirm: () => {} } : null}
     />
   </div>
 );
@@ -175,13 +178,13 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     disconnected: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale lastFrameAt={LAST_FRAME} />),
   },
   AiInvestigation: {
-    normal: aiPanel({ status: "ready", investigation: INVESTIGATION }),
+    normal: aiPanel({ status: "ready", investigation: INVESTIGATION }, { confirm: { status: "idle" } }),
     running: aiPanel({ status: "ready", investigation: RUNNING }),
-    unavailable: aiPanel({ status: "ready", investigation: FAILED }),
+    unavailable: aiPanel({ status: "ready", investigation: FAILED }, { confirm: { status: "failed", message: "处置执行器暂不可达，请稍后重试" } }),
     empty: aiPanel({ status: "none" }),
     loading: aiPanel({ status: "loading" }),
     error: aiPanel({ status: "failed" }),
-    disconnected: aiPanel({ status: "ready", investigation: RUNNING }, true),
+    disconnected: aiPanel({ status: "ready", investigation: RUNNING }, { stale: true }),
   },
   ReportBar: {
     empty: reportBar(null, { status: "idle" }),
