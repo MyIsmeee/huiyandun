@@ -88,6 +88,11 @@ def test_fabricated_entities_are_flagged() -> None:
     ]
 
 
+def test_entity_next_to_separator_in_evidence_is_traced() -> None:
+    evidence = {"summary": "来自 host_10.0.0.7 与 cam-02_backup"}
+    assert untraced({"summary": "10.0.0.7 访问 cam-02"}, evidence, TECHNIQUES) == []
+
+
 def test_partial_match_is_not_traced() -> None:
     """cam-0 只是 cam-02 的一部分，不能算在证据中出现。"""
     assert untraced({"summary": "cam-0 与 172.30.0.1"}, EVIDENCE, TECHNIQUES) == [

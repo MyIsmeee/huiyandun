@@ -96,7 +96,9 @@ class Pseudonyms:
 
 
 def _found(entity: str, context: str) -> bool:
-    return re.search(f"{BEFORE}{re.escape(entity)}{AFTER}", context) is not None
+    """与脱敏替换同一边界：证据中写作 host_10.0.0.7 的地址同样算出现过；cam-0 仍不算 cam-02。"""
+    pattern = rf"(?<![A-Za-z0-9])(?<!\d\.){re.escape(entity)}(?![A-Za-z0-9])(?!\.\d)"
+    return re.search(pattern, context) is not None
 
 
 def _port(m: re.Match[str]) -> str:
