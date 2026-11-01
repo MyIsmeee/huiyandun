@@ -655,8 +655,9 @@ components:
         incident_id: { type: string }
         facts: { $ref: "#/components/schemas/ReportFacts" }
         ai:
-          anyOf: [{ type: object }, { type: "null" }]
-          description: AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定
+          # 保留原有的 object 分支、以 allOf 收窄为 ReportAi：只是收窄原先的任意对象，不算新增 anyOf 分支（CI-08）
+          anyOf: [{ type: object, allOf: [{ $ref: "#/components/schemas/ReportAi" }] }, { type: "null" }]
+          description: AI 区；模板模式下为 null
         source: { enum: [llm, template] }
         provider_id: { anyOf: [{ type: string }, { type: "null" }] }
         degraded_reason:
@@ -665,6 +666,21 @@ components:
         reviewed_by: { anyOf: [{ type: string }, { type: "null" }] }
         reviewed_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         created_at: { type: string, format: date-time }
+    ReportAi:
+      type: object
+      description: AI 区（V-AI1），与事实区物理分隔；供应商信息为生成时的快照
+      required: [content, unverified, provider_name, model, network]
+      properties:
+        content: { $ref: "../llm/incident_report.v1.schema.json" }
+        unverified:
+          type: array
+          items: { type: string }
+          description: 无法在证据或本地知识库中溯源的实体，保留并弱化显示（FR-503、C-LLM-06、V-AI3、D-086）
+        provider_name: { type: string }
+        model: { type: string }
+        network:
+          $ref: "#/components/schemas/Network"
+          description: public 表示发送前已脱敏（C-LLM-03）
     ReportFacts:
       type: object
       description: 事实区，全部来自结构化数据，不经过 LLM（V-AI1）

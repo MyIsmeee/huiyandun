@@ -139,6 +139,37 @@ class Incident(ContractModel):
     created_at: AwareDatetime
 
 
+class EvidenceRef(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
+    root: str = Field(..., max_length=100)
+
+
+class AttackStep(ContractModel):
+    tactic: str = Field(..., max_length=50)
+    technique_id: str = Field(..., pattern="^T[0-9]{4}([.][0-9]{3})?$")
+    """
+    参与事实回溯（C-LLM-06）
+    """
+    description: str = Field(..., max_length=300)
+    evidence_refs: list[EvidenceRef] = Field(..., max_length=10)
+    """
+    参与事实回溯（C-LLM-06）
+    """
+
+
+class Impact(ContractModel):
+    device_id: str = Field(..., max_length=100)
+    """
+    参与事实回溯（C-LLM-06）
+    """
+    description: str = Field(..., max_length=300)
+
+
+class Recommendation(ContractModel):
+    action: str = Field(..., max_length=200)
+    rationale: str = Field(..., max_length=300)
+
+
 class VerifyResult(ContractModel):
     """
     verify() 检查真实效果的结果（DP-10）；校验前为 null
@@ -609,6 +640,21 @@ class IncidentList(ContractModel):
     items: list[Incident]
 
 
+class IncidentReport(ContractModel):
+    """
+    溯源报告 AI 区（HYD-PLAN-007 §6、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
+    """
+
+    summary: str = Field(..., max_length=300)
+    attack_chain: list[AttackStep] = Field(..., max_length=10)
+    impact: list[Impact] = Field(..., max_length=10)
+    recommendations: list[Recommendation] = Field(..., max_length=10)
+    """
+    只作文字建议，不进入任何执行路径（G-03）
+    """
+    confidence: Literal["low", "medium", "high"]
+
+
 class ProviderTestResult(ContractModel):
     checks: list[ProviderCheck]
     health: Literal["ok", "slow", "failed"]
@@ -718,6 +764,24 @@ class Device(ContractModel):
     camera: CameraInfo | None
     """
     type 为 camera 时必有
+    """
+
+
+class ReportAi(ContractModel):
+    """
+    AI 区（V-AI1），与事实区物理分隔；供应商信息为生成时的快照
+    """
+
+    content: IncidentReport
+    unverified: list[str]
+    """
+    无法在证据或本地知识库中溯源的实体，保留并弱化显示（FR-503、C-LLM-06、V-AI3、D-086）
+    """
+    provider_name: str
+    model: str
+    network: Network
+    """
+    public 表示发送前已脱敏（C-LLM-03）
     """
 
 
@@ -882,9 +946,9 @@ class Report(ContractModel):
     id: str
     incident_id: str
     facts: ReportFacts
-    ai: dict[str, Any] | None
+    ai: ReportAi | None
     """
-    AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定
+    AI 区；模板模式下为 null
     """
     source: Literal["llm", "template"]
     provider_id: str | None

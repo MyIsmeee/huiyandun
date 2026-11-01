@@ -511,8 +511,8 @@ export interface components {
             id: string;
             incident_id: string;
             facts: components["schemas"]["ReportFacts"];
-            /** @description AI 区；模板模式下为 null。结构待 contracts/llm（§6）落地后绑定 */
-            ai: Record<string, never> | null;
+            /** @description AI 区；模板模式下为 null */
+            ai: components["schemas"]["ReportAi"] | null;
             /** @enum {unknown} */
             source: "llm" | "template";
             provider_id: string | null;
@@ -522,6 +522,16 @@ export interface components {
             reviewed_at: string | null;
             /** Format: date-time */
             created_at: string;
+        };
+        /** @description AI 区（V-AI1），与事实区物理分隔；供应商信息为生成时的快照 */
+        ReportAi: {
+            content: components["schemas"]["incident_report.v1.schema"];
+            /** @description 无法在证据或本地知识库中溯源的实体，保留并弱化显示（FR-503、C-LLM-06、V-AI3、D-086） */
+            unverified: string[];
+            provider_name: string;
+            model: string;
+            /** @description public 表示发送前已脱敏（C-LLM-03） */
+            network: components["schemas"]["Network"];
         };
         /** @description 事实区，全部来自结构化数据，不经过 LLM（V-AI1） */
         ReportFacts: {
@@ -874,6 +884,55 @@ export interface components {
                 passed: boolean;
                 reason: string | null;
             } | null;
+        };
+        AttackStep: {
+            tactic: string;
+            /** @description 参与事实回溯（C-LLM-06） */
+            technique_id: string;
+            description: string;
+            /** @description 参与事实回溯（C-LLM-06） */
+            evidence_refs: string[];
+        };
+        Impact: {
+            /** @description 参与事实回溯（C-LLM-06） */
+            device_id: string;
+            description: string;
+        };
+        Recommendation: {
+            action: string;
+            rationale: string;
+        };
+        /**
+         * IncidentReport
+         * @description 溯源报告 AI 区（HYD-PLAN-007 §6、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
+         */
+        "incident_report.v1.schema": {
+            summary: string;
+            attack_chain: components["schemas"]["AttackStep"][];
+            impact: components["schemas"]["Impact"][];
+            /** @description 只作文字建议，不进入任何执行路径（G-03） */
+            recommendations: components["schemas"]["Recommendation"][];
+            /** @enum {unknown} */
+            confidence: "low" | "medium" | "high";
+            $defs: {
+                AttackStep: {
+                    tactic: string;
+                    /** @description 参与事实回溯（C-LLM-06） */
+                    technique_id: string;
+                    description: string;
+                    /** @description 参与事实回溯（C-LLM-06） */
+                    evidence_refs: string[];
+                };
+                Impact: {
+                    /** @description 参与事实回溯（C-LLM-06） */
+                    device_id: string;
+                    description: string;
+                };
+                Recommendation: {
+                    action: string;
+                    rationale: string;
+                };
+            };
         };
         /**
          * InvestigationFrame

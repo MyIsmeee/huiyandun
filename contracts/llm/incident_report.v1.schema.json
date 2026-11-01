@@ -1,0 +1,59 @@
+{
+  "title": "IncidentReport",
+  "description": "溯源报告 AI 区（HYD-PLAN-007 §6、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM",
+  "type": "object",
+  "required": ["summary", "attack_chain", "impact", "recommendations", "confidence"],
+  "properties": {
+    "summary": { "type": "string", "maxLength": 300 },
+    "attack_chain": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/AttackStep" }
+    },
+    "impact": { "type": "array", "maxItems": 10, "items": { "$ref": "#/$defs/Impact" } },
+    "recommendations": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/Recommendation" },
+      "description": "只作文字建议，不进入任何执行路径（G-03）"
+    },
+    "confidence": { "enum": ["low", "medium", "high"] }
+  },
+  "$defs": {
+    "AttackStep": {
+      "type": "object",
+      "required": ["tactic", "technique_id", "description", "evidence_refs"],
+      "properties": {
+        "tactic": { "type": "string", "maxLength": 50 },
+        "technique_id": {
+          "type": "string",
+          "pattern": "^T[0-9]{4}([.][0-9]{3})?$",
+          "description": "参与事实回溯（C-LLM-06）"
+        },
+        "description": { "type": "string", "maxLength": 300 },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "string", "maxLength": 100 },
+          "description": "参与事实回溯（C-LLM-06）"
+        }
+      }
+    },
+    "Impact": {
+      "type": "object",
+      "required": ["device_id", "description"],
+      "properties": {
+        "device_id": { "type": "string", "maxLength": 100, "description": "参与事实回溯（C-LLM-06）" },
+        "description": { "type": "string", "maxLength": 300 }
+      }
+    },
+    "Recommendation": {
+      "type": "object",
+      "required": ["action", "rationale"],
+      "properties": {
+        "action": { "type": "string", "maxLength": 200 },
+        "rationale": { "type": "string", "maxLength": 300 }
+      }
+    }
+  }
+}
