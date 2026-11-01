@@ -9,6 +9,7 @@ export type SceneFrame = Schemas["VisionScene"];
 export type SecurityAlert = Schemas["SecurityAlert"];
 export type Incident = Schemas["incident.schema"];
 export type Execution = Schemas["playbook_execution.schema"];
+type AiFrame = Schemas["AiInvestigation"];
 /** 告警列表的单条告警：网络告警或行为事件（D-077） */
 export type Alert = SecurityAlert | Behavior;
 type Frame = Schemas["WsFrame"];
@@ -59,6 +60,8 @@ interface LiveState {
   incidents: Incident[];
   /** 处置执行的最新状态，键为执行 id；按最近更新排在最后 */
   executions: Record<string, Execution>;
+  /** 每个关联事件最近一帧调查流的 seq：面板据此重新读取调查记录（调查记录先落库后推送） */
+  aiSeq: Record<string, number>;
 }
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
@@ -70,6 +73,7 @@ export const useLive = create<LiveState>()(() => ({
   alerts: [],
   incidents: [],
   executions: {},
+  aiSeq: {},
 }));
 
 /** keep 为假时去掉 id 对应的项 */
@@ -121,6 +125,10 @@ export function receive(frame: Frame, now: number): void {
       const rest = Object.fromEntries(Object.entries(s.executions).filter(([id]) => id !== execution.id));
       return { executions: { ...rest, [execution.id]: execution } };
     });
+  }
+  if (frame.channel === "ai") {
+    const { incident_id, seq } = data as AiFrame;
+    useLive.setState((s) => ({ aiSeq: { ...s.aiSeq, [incident_id]: seq } }));
   }
 }
 
