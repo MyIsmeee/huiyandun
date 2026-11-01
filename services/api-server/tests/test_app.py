@@ -17,7 +17,8 @@ from api_server.config import ApiConfig
 from py_common.log import configure_logging
 from py_contracts.api import Error
 
-SITE = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
+ROOT = Path(__file__).resolve().parents[3]
+SITE, ATTACK = ROOT / "demo/scenarios/site.yaml", ROOT / "rules/attack/techniques.json"
 
 
 class Body(BaseModel):
@@ -27,7 +28,10 @@ class Body(BaseModel):
 @pytest.fixture
 def client(tmp_path: Path, nats_url: str) -> Iterator[TestClient]:
     (tmp_path / "pw").write_text("unused")
-    app = create_app(ApiConfig(db_password_file=tmp_path / "pw", site_file=SITE, nats_url=nats_url))
+    config = ApiConfig(
+        db_password_file=tmp_path / "pw", site_file=SITE, attack_file=ATTACK, nats_url=nats_url
+    )
+    app = create_app(config)
 
     @app.post("/t/write")
     async def write(body: Body) -> dict:

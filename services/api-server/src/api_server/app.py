@@ -1,6 +1,7 @@
 """FastAPI 应用：X-Request-ID 透传（C-BE-08）与统一错误格式（契约 Error）。"""
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -33,6 +34,7 @@ from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
 from api_server.history import History
+from api_server.investigation_tools import Tools
 from py_common.bus import Bus
 from py_common.log import bind_request_id
 
@@ -143,6 +145,10 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.devices = Devices(app.state.site.devices)
     app.state.scenes = {}
     app.state.history = History()
+    attack = json.loads(config.attack_file.read_text(encoding="utf-8"))
+    app.state.tools = Tools(
+        app.state.history, app.state.devices, config.conn_log_file, attack["techniques"]
+    )
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(containment.router)

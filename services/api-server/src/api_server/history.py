@@ -45,6 +45,10 @@ class History:
         events = (*self._alerts, *self._integrity)
         return next((e for e in events if e.event_id == event_id and _recent(e)), None)
 
+    def events_since(self, since: datetime) -> list[EventBase]:
+        """不早于 since 的告警、行为与画面完整性事件，供值班员工具查询（TK-116）。"""
+        return [e for e in (*self._alerts, *self._integrity) if e.ts >= since]
+
     def executions_of(self, incident_id: str) -> list[PlaybookExecutionV1]:
         return [e for e in self._executions.values() if e.incident_id == incident_id]
 

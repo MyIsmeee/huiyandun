@@ -47,3 +47,11 @@ class ApiConfig(DbConfig):
         "http://llm-gateway:8100",
         description="llm-gateway 内部接口地址；测试连接与模型列表经它访问供应商（C-LLM-01）",
     )
+    conn_log_file: Path = Field(
+        Path("/zeek/logs/conn.log"),
+        description="Zeek 会话日志（只读挂载），值班员工具 query_sessions 读取（TK-116）",
+    )
+    attack_file: Path = Field(
+        Path("/etc/hyd/attack.json"),
+        description="ATT&CK 精简查表 rules/attack/techniques.json，值班员工具 lookup_technique 读取",
+    )

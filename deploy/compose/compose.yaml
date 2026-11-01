@@ -55,7 +55,11 @@ services:
     build: { context: ../.., dockerfile: services/api-server/Dockerfile }
     profiles: [core]
     secrets: [db_app_password, llm_key_secret]  # 后者加密供应商 API Key（C-ST-03）
-    volumes: ["../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro"]  # 站点配置（FR-901）
+    volumes:
+      - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 站点配置（FR-901）
+      # 值班员只读工具（TK-116）：会话日志与 ATT&CK 精简表
+      - zeek-logs:/zeek/logs:ro
+      - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
       nats: { condition: service_healthy }  # 订阅事件转发到 WS 各频道
