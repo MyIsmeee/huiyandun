@@ -89,6 +89,9 @@ services:
     profiles: [core]
     extra_hosts: ["host.docker.internal:host-gateway"]  # 供应商在宿主上时填此名（DP-07）
     networks: [llm-net, llm-egress]
+    volumes:
+      - ../configs/llm-tasks.yaml:/etc/hyd/llm-tasks.yaml:ro
+      - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro  # 事实回溯的本地知识库（C-LLM-06）
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
