@@ -82,6 +82,10 @@ class Devices:
                 changed.append(device)
         return changed
 
+    def get(self, device_id: str) -> Device | None:
+        entry = self._entries.get(device_id)
+        return entry.current if entry else None
+
     def expire(self, now: float) -> list[Device]:
         """解除到期的告警态，返回状态变化的设备。"""
         changed = (self._update(entry, now) for entry in self._entries.values())

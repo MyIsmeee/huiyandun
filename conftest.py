@@ -20,6 +20,7 @@ from api_server.db import alembic_config, create_engine
 
 DEPLOY = Path(__file__).resolve().parent / "deploy/compose"
 SITE = Path(__file__).resolve().parent / "demo/scenarios/site.yaml"
+ATTACK = Path(__file__).resolve().parent / "rules/attack/techniques.json"
 
 
 def docker(*args: str, check: bool = True) -> str:
@@ -121,6 +122,7 @@ def db(db_secrets: dict[str, Path], nats_url: str) -> Iterator[tuple[ApiConfig, 
             "db_port": int(port),
             "db_timeout_s": 5,
             "site_file": SITE,
+            "attack_file": ATTACK,
             "nats_url": nats_url,
         }
         owner = ApiConfig.model_validate(
