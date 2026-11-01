@@ -9,9 +9,11 @@ import {
   Globe,
   House,
   Network,
+  ShieldAlert,
+  ShieldCheck,
   Wrench,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
 import { useConnection } from "../../store/connection";
@@ -19,6 +21,7 @@ import { type Incident, useLive } from "../../store/live";
 import { SEVERITY } from "../AlertList/AlertList";
 
 export type Investigation = components["schemas"]["Investigation"];
+type Verdict = NonNullable<Investigation["verdict"]>;
 export type InvestigationLoad =
   | { status: keyof typeof NO_RECORD }
   | { status: "ready"; investigation: Investigation };
@@ -31,6 +34,7 @@ const TOOL_ICON: Record<string, typeof Wrench> = {
   query_sessions: Network,
   lookup_technique: BookOpen,
 };
+const UNVERIFIED = "该实体未能在证据中溯源";
 const NO_RECORD = { loading: "读取调查记录…", none: "尚未开始调查", failed: "无法读取调查记录" } as const;
 
 /**
@@ -123,7 +127,7 @@ export function AiInvestigationView(props: {
 function InvestigationBody(props: { load: InvestigationLoad; now: number }) {
   const { load, now } = props;
   if (load.status !== "ready") return <p className="text-fg-3">{NO_RECORD[load.status]}</p>;
-  const { steps, error, provider, started_at, finished_at } = load.investigation;
+  const { steps, verdict, error, provider, started_at, finished_at } = load.investigation;
   return (
     <>
       {provider && (
@@ -164,6 +168,7 @@ function InvestigationBody(props: { load: InvestigationLoad; now: number }) {
           调查中 · 已用 {Math.max(0, Math.floor((now - Date.parse(started_at)) / 1000))} s
         </p>
       )}
+      {verdict && <VerdictCard verdict={verdict} />}
       {error && (
         <p className="flex items-start gap-1 text-fg-2">
           <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
@@ -171,5 +176,69 @@ function InvestigationBody(props: { load: InvestigationLoad; now: number }) {
         </p>
       )}
     </>
+  );
+}
+
+/** 判定卡（V-AI7）：是否攻击以图标形状 + 文字区分，可信度为百分比 + 环形刻度；只展示，不进入任何操作（G-03） */
+function VerdictCard({ verdict }: { verdict: Verdict }) {
+  const percent = Math.round(verdict.confidence * 100);
+  const Icon = verdict.is_attack ? ShieldAlert : ShieldCheck;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line p-3">
+      <p className="flex items-center gap-2">
+        <Icon aria-hidden className="size-5 shrink-0" />
+        <span className="font-semibold">{verdict.is_attack ? "判定为攻击" : "判定非攻击"}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-fg-2 tabular-nums">
+          <svg aria-hidden viewBox="0 0 20 20" className="size-5 -rotate-90">
+            <circle cx="10" cy="10" r="8" fill="none" strokeWidth="3" className="stroke-grid" />
+            <circle
+              cx="10"
+              cy="10"
+              r="8"
+              fill="none"
+              strokeWidth="3"
+              pathLength="100"
+              strokeDasharray={`${percent} 100`}
+              className="stroke-fg-2"
+            />
+          </svg>
+          可信度 {percent}%
+        </span>
+      </p>
+      {verdict.techniques.length > 0 && (
+        <p className="flex flex-wrap gap-1.5">
+          {verdict.techniques.map((t) => (
+            <span key={t} className="rounded-full border border-line px-2 font-mono text-xs">
+              <Marked text={t} unverified={verdict.unverified} />
+            </span>
+          ))}
+        </p>
+      )}
+      <p>
+        <Marked text={verdict.narrative} unverified={verdict.unverified} />
+      </p>
+      <p className="text-fg-2">
+        处置建议：
+        <Marked text={verdict.recommendation} unverified={verdict.unverified} />
+      </p>
+    </div>
+  );
+}
+
+/** 未溯源的实体弱化并加虚线下划线，悬停说明（V-AI3、FR-1103） */
+function Marked({ text, unverified }: { text: string; unverified: string[] }) {
+  // 长的在前：cam-02-1 与 cam-02 同时未溯源时按完整的 cam-02-1 标记
+  const entities = unverified.filter(Boolean).sort((a, b) => b.length - a.length);
+  if (entities.length === 0) return text;
+  const pattern = new RegExp(`(${entities.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+  return text.split(pattern).map((part, i) =>
+    // split 带捕获组：奇数位是匹配到的实体
+    i % 2 === 1 ? (
+      <span key={i} title={UNVERIFIED} className="text-fg-3 underline decoration-dashed underline-offset-4">
+        {part}
+      </span>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    ),
   );
 }

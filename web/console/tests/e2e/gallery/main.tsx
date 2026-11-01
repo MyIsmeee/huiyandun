@@ -120,15 +120,20 @@ const STEPS = [
 const STARTED = "2026-10-27T06:29:41Z";
 const INVESTIGATION: Investigation = {
   incident_id: INCIDENT.id, steps: STEPS, error: null,
-  verdict: null,
-  provider: { name: "DeepSeek", location: "public" }, started_at: STARTED, finished_at: null,
+  verdict: {
+    is_attack: true, confidence: 0.86, techniques: ["T1110", "T1565"],
+    narrative: "172.30.0.100 对 cam-02 发起 RTSP 认证爆破，随后画面冻结，10.9.9.9 疑似参与篡改。",
+    recommendation: "隔离 172.30.0.100，核查 cam-02 账户与固件。",
+    unverified: ["10.9.9.9", "T1565"],
+  },
+  provider: { name: "DeepSeek", location: "public" }, started_at: STARTED, finished_at: "2026-10-27T06:30:14Z",
 }; // prettier-ignore
 const RUNNING: Investigation = {
-  ...INVESTIGATION, steps: STEPS.slice(0, 2),
+  ...INVESTIGATION, steps: STEPS.slice(0, 2), verdict: null, finished_at: null,
   provider: { name: "本地 Qwen", location: "internal" },
 }; // prettier-ignore
 const FAILED: Investigation = {
-  ...INVESTIGATION, steps: [], provider: null, error: "未启用任何模型供应商", finished_at: "2026-10-27T06:30:14Z",
+  ...INVESTIGATION, steps: [], verdict: null, provider: null, error: "未启用任何模型供应商",
 }; // prettier-ignore
 const NOW = Date.parse(STARTED) + 18_000;
 const aiPanel = (load: InvestigationLoad, stale = false) => (
