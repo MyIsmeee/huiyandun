@@ -78,10 +78,17 @@ class Investigator:
             log.warning("ai.interrupt_mark_failed", extra={"error": repr(e)})
         while True:
             incident = await self._queue.get()
+            run = _Run(self._state, incident)
             try:
-                await _Run(self._state, incident).execute()
+                await run.execute()
             except Exception:  # 单个事件出错（如数据库超时）不中断后续调查
                 log.exception("ai.investigation_error", extra={"incident_id": incident.id})
+                if not run.started:  # 记录未建立：不推送接口查不到的失败帧
+                    continue
+                try:  # 尽量补发失败帧并结束记录，面板不会一直显示进行中（FR-1105）
+                    await run.fail("调查出错，详见服务日志")
+                except (SQLAlchemyError, OSError) as e:
+                    log.warning("ai.fail_mark_failed", extra={"error": repr(e)})
 
 
 class _Run:
@@ -94,6 +101,7 @@ class _Run:
         self._shown: list[dict[str, Any]] = []
         self._seq = self._round = 0
         self._provider: dict[str, str] | None = None
+        self.started = False  # 记录已建立
 
     async def execute(self) -> None:
         async with self._state.engine.begin() as conn:
@@ -104,6 +112,7 @@ class _Run:
             )
         if created.rowcount == 0:
             return
+        self.started = True
         deadline = time.monotonic() + DEADLINE_S
         for done in range(MAX_ROUNDS):
             self._round = done + 1
@@ -147,6 +156,9 @@ class _Run:
                 return ToolResult(self._shown[n]["args_summary"], {"error": error}, summary)
         return await self._state.tools.run(tool, args)
 
+    async def fail(self, error: str) -> None:
+        await self._emit("failed", None, error=error)
+
     async def _emit(
         self,
         kind: str,
@@ -171,7 +183,6 @@ class _Run:
                 "provider": self._provider,
             }  # fmt: skip
         )
-        self._seq += 1
         finished = kind != "step"
         async with self._state.engine.begin() as conn:
             await conn.execute(
@@ -194,6 +205,7 @@ class _Run:
                     details={"task": TASK, "round": self._round},
                     request_id=str(frame.event_id),
                 )
+        self._seq += 1  # 提交后才递增：回滚的帧不占序号，推送的 seq 连续
         self._state.hub.broadcast(WsFrame(channel="ai", data=frame.model_dump(mode="json")))
         if finished:
             log.info("ai.investigation_finished", extra={"incident_id": self._id, "kind": kind})
