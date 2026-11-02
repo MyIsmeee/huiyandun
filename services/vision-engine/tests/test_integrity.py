@@ -1,4 +1,5 @@
-"""画面可信度：冻结逐像素相同满 5 s 报一次、出现不同帧即重新计时（FR-301）；重放（FR-302）。"""
+"""画面可信度：冻结逐像素相同满 5 s 报一次、出现不同帧即重新计时（FR-301）；重放（FR-302）；
+挪位与遮挡（FR-308）。"""
 
 from types import SimpleNamespace
 from typing import cast
@@ -10,13 +11,18 @@ import pytest
 from vision_engine import integrity
 from vision_engine.integrity import (
     FREEZE_S,
+    REFERENCE_S,
     REPLAY_CHECKS,
     REPLAY_S,
     SAMPLE_FPS,
+    SHIFT_SIM,
+    VIEW_S,
     FrameEmbedder,
     FreezeDetector,
     Replay,
     ReplayDetector,
+    View,
+    ViewDetector,
     best_match,
 )
 
@@ -183,3 +189,61 @@ def test_embedder_returns_unit_cls_of_whole_frame() -> None:
 
     assert session.shape == (1, 3, 224, 224)  # 整帧缩放，不裁剪
     assert embedding[:2] == pytest.approx([0.6, 0.8]) and not embedding[2:].any()
+
+
+# 挪位与遮挡（FR-308）：参考画面取前 10 s；之后嵌入换成另一画面（另一随机种子）即为改变
+def calm(seconds: float, seed: int = 0) -> np.ndarray:
+    """运动成分小的画面：与自身均值的相似度约 0.97。"""
+    return scene(seconds, seed, motion=0.1)
+
+
+def textured(seed: int = 0) -> np.ndarray:
+    return np.random.default_rng(seed).integers(0, 255, (72, 128, 3), np.uint8)
+
+
+def views(embeddings: np.ndarray, frames: list[np.ndarray]) -> list[tuple[float, View]]:
+    detector = ViewDetector()
+    return [
+        (i / SAMPLE_FPS, found)
+        for i, (e, f) in enumerate(zip(embeddings, frames, strict=True))
+        if (found := detector.update(e, f, i / SAMPLE_FPS))
+    ]
+
+
+def test_camera_turned_away_reported_once_as_shift() -> None:
+    normal, turned = calm(REFERENCE_S + 5, seed=0), calm(20, seed=3)
+    embeddings = np.vstack([normal, turned])
+
+    [(at, view)] = views(embeddings, [textured()] * len(embeddings))
+
+    assert at == pytest.approx(REFERENCE_S + 5 + VIEW_S)  # 持续满 5 s
+    assert view.kind == "shift" and view.similarity < SHIFT_SIM
+    assert 0.5 <= view.confidence <= 1
+
+
+def test_live_scene_matches_reference() -> None:
+    embeddings = calm(60)
+
+    assert views(embeddings, [textured()] * len(embeddings)) == []
+
+
+def test_change_shorter_than_5_s_not_reported() -> None:
+    embeddings = np.vstack([calm(REFERENCE_S + 5), calm(4, seed=3), calm(10)])
+
+    assert views(embeddings, [textured()] * len(embeddings)) == []
+
+
+def test_covered_lens_reported_as_occlusion() -> None:
+    embeddings = np.vstack([calm(REFERENCE_S + 5), calm(10, seed=3)])
+    frames = [textured()] * int((REFERENCE_S + 5) * SAMPLE_FPS) + [still(20)] * 50
+
+    [(_, view)] = views(embeddings, frames)
+
+    assert view.kind == "occlusion"
+
+
+def test_shift_after_recovery_reported_again() -> None:
+    parts = [calm(REFERENCE_S + 5), calm(10, seed=3), calm(10), calm(10, seed=3)]
+    embeddings = np.vstack(parts)
+
+    assert len(views(embeddings, [textured()] * len(embeddings))) == 2

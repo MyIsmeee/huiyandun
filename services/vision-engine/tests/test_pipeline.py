@@ -22,7 +22,7 @@ from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine import pipeline as pipeline_module
 from vision_engine.detector import PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
-from vision_engine.integrity import FrameEmbedder, Replay, ReplayDetector
+from vision_engine.integrity import FrameEmbedder, Replay, ReplayDetector, View, ViewDetector
 from vision_engine.pipeline import (
     BEHAVIOR_SUBJECT,
     FPS,
@@ -221,6 +221,34 @@ def test_replay_reported_as_model_event_with_matched_time() -> None:
         "replay", "model", 0.8, 10,
     )  # fmt: skip
     assert replay.detail is not None and replay.detail.startswith("画面与 60 s 前（")
+
+
+class FakeView:
+    """第 2 次调用时判定为遮挡。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def update(self, embedding: np.ndarray, image: np.ndarray, timestamp: float) -> View | None:
+        self.calls += 1
+        return View("occlusion", similarity=0.3, confidence=1.0) if self.calls == 2 else None
+
+
+def test_occlusion_reported_with_similarity() -> None:
+    camera = CameraPipeline(
+        "cam-01", MAPPING, cast(PoseDetector, FakeDetector(person=False)),
+        embedder=cast(FrameEmbedder, lambda image: np.ones(384)),
+    )  # fmt: skip
+    camera._view = cast(ViewDetector, FakeView())
+
+    events = [e for i in range(3) for e in camera.process(frame(0), timestamp=i / FPS)]
+
+    [occlusion] = events
+    assert isinstance(occlusion, VisionIntegrityV1)
+    assert (occlusion.type, occlusion.source, occlusion.confidence, occlusion.duration_s) == (
+        "occlusion", "model", 1.0, 5,
+    )  # fmt: skip
+    assert occlusion.detail == "画面纹理消失，与参考画面的相似度降至 0.30"
 
 
 class StillReader:
