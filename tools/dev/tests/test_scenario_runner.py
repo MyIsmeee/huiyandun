@@ -1,6 +1,7 @@
 """scenario-runner（TK-100）：剧本解析与校验、事件匹配、攻击结果判定。不启动容器。"""
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -28,6 +29,58 @@ def write(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "s.yaml"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+class RecordingRunner(runner.Runner):
+    def __init__(self) -> None:
+        self.streams = {"cam-02": "cam-02"}
+        self.calls: list[tuple[str, ...]] = []
+
+    def compose(self, *args: str) -> str:
+        self.calls.append(args)
+        return ""
+
+
+def pushed(r: RecordingRunner) -> str:
+    """最后一次替换推流配置的 runOnInit。"""
+    return json.loads(r.calls[-1][r.calls[-1].index("--post-data") + 1])["runOnInit"]
+
+
+def test_replay_pushes_clip_from_2_minutes_ago() -> None:
+    r = RecordingRunner()
+
+    r.act({"action": "replay_camera", "camera": "cam-02"}, elapsed=150)
+
+    assert "-ss 30 " in pushed(r) and "/media/$MTX_PATH.mp4" in pushed(r)
+
+
+def test_restore_continues_from_current_position() -> None:
+    """从头播放会与 2 分钟前看到的画面重复，被判为重放（FR-302）。"""
+    r = RecordingRunner()
+
+    r.act({"action": "restore_camera", "camera": "cam-02"}, elapsed=185.4)
+
+    assert "-ss 185 " in pushed(r)
+
+
+def test_setup_starts_vision_after_media_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """视觉引擎停到素材从头播放之后才启动，只看到本轮素材（D-090）；就绪后素材再从头播放一次，开场取这次
+    推流就绪的时刻，引擎启动期间已在看画面（复核阻断 2）。"""
+    clock = iter(range(100))
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(clock))
+    r = RecordingRunner()
+
+    start = r.setup(ttl_s=None)
+
+    assert [(c[0], c[-1]) for c in r.calls] == [
+        ("stop", "vision-engine"),
+        ("restart", "mediamtx"),
+        ("up", "mediamtx"),
+        ("up", "vision-engine"),
+        ("restart", "mediamtx"),
+        ("up", "mediamtx"),
+    ]
+    assert start == 0  # 第二次推流就绪后读取的第一个时刻
 
 
 def test_main_scenario_loads() -> None:

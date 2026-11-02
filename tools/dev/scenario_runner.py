@@ -18,7 +18,12 @@ from typing import Any
 
 import yaml
 
-ACTIONS = {"start_attack": "target", "freeze_camera": "camera", "restore_camera": "camera"}
+ACTIONS = {
+    "start_attack": "target",
+    "freeze_camera": "camera",
+    "replay_camera": "camera",
+    "restore_camera": "camera",
+}
 STEP_KEYS = {"name", "at", "do", "expect", "note"}
 EVENT_EXPECT_KEYS = {"subject", "match", "within_s"}
 TIMEOUT_S = 120  # 单条 docker compose 命令的上限（CD-04）
@@ -28,6 +33,13 @@ FREEZE_CMD = (
     "-c:v libx264 -preset ultrafast -tune stillimage -x264-params keyint=1 -qp 20 -pix_fmt yuv420p "
     "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
 )
+# 从素材的指定秒数起循环推流，同 mediamtx.yml 的默认推流（直接复制编码，从最近的关键帧开始，误差 ≤ 2 s）
+STREAM_CMD = (
+    "ffmpeg -hide_banner -loglevel error -re -ss {offset:.0f} -stream_loop -1 -i /media/$MTX_PATH.mp4 "
+    "-c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
+)
+# 重放 2 分钟前的片段：须在 FR-302 的 30～180 s 内，且是视觉引擎看到过的画面（不落在冻结期间）
+REPLAY_BACK_S = 120
 MEDIAMTX_API = "http://127.0.0.1:9997/v3/config/paths/replace/"  # 只监听容器内
 
 
@@ -179,7 +191,8 @@ class Runner:
             timeout=TIMEOUT_S,
         ).stdout
 
-    def setup(self, ttl_s: int | None) -> None:
+    def setup(self, ttl_s: int | None) -> float:
+        """准备开场，返回开场时刻（素材 0:00）。"""
         if ttl_s is not None:
             # 只覆盖本次演示的 TTL（FR-404）；再次 make demo-up 即恢复 Playbook 的默认值
             with tempfile.NamedTemporaryFile("w", suffix=".yaml") as override:
@@ -195,11 +208,22 @@ class Runner:
                 self.compose(
                     "-f", override.name, "up", "-d", "--no-deps", "--wait", "playbook-executor"
                 )
-        # 各路素材从头播放，剧本时刻与素材时间线对齐；同时清除上次中断遗留的冻结
+        # 视觉引擎停到素材从头播放之后再启动：只看到本轮素材，参考画面取素材开头（D-090）；否则开场前看到的
+        # 旧画面会留在重放历史里，素材播到同一位置时被判为重放（TK-114）。同时清除上次中断遗留的冻结
+        self.compose("stop", "vision-engine")
+        self.restart_media()
+        self.compose("up", "-d", "--no-deps", "--wait", "vision-engine")
+        # 引擎就绪后素材再从头播放，剧本时刻与素材时间线对齐，开场的攀爬等画面不因引擎启动而错过。
+        # 启动期间看到的开头约 10 s 在 30 s 内重复出现，不足重放判定的最短间隔（FR-302）
+        self.restart_media()
+        return time.monotonic()
+
+    def restart_media(self) -> None:
         self.compose("restart", "mediamtx")
         self.compose("up", "-d", "--no-deps", "--wait", "mediamtx")
 
-    def act(self, do: dict[str, str]) -> str:
+    def act(self, do: dict[str, str], elapsed: float) -> str:
+        """elapsed 为距开场的秒数，即素材当前的播放进度（setup 重启推流）。"""
         action = do["action"]
         if action == "start_attack":
             # 攻击方只在 attack-net 内打 rtsp-target（DP-09）；输出供 expect.attack 判断
@@ -213,8 +237,12 @@ class Runner:
                 "-frames:v", "1", f"/tmp/freeze-{path}.png",
             )  # fmt: skip
             body = {"runOnInit": FREEZE_CMD.format(path=path)}
+        elif action == "replay_camera":
+            # 推流源切回此前片段（FR-302、D-065）
+            body = {"runOnInit": STREAM_CMD.format(offset=max(0.0, elapsed - REPLAY_BACK_S))}
         else:
-            body = {}  # 回到 mediamtx.yml 的默认推流
+            # 从当前进度续播：回到默认推流会从头播放，与此前看到的画面重复，被判为重放
+            body = {"runOnInit": STREAM_CMD.format(offset=elapsed)}
         self.compose(
             "exec", "-T", "mediamtx", "wget", "-q", "-O", "-",
             "--header", "Content-Type: application/json",
@@ -232,15 +260,15 @@ def run(scenario: Scenario, site_file: Path, compose: list[str], from_step: int)
     observer = Observer(compose, sorted({e["subject"] for e in expects}))
     failed = 0
     try:
-        runner.setup(scenario.ttl_s)
-        for i, at, step in timeline(scenario, from_step, time.monotonic()):
+        start = runner.setup(scenario.ttl_s)
+        for i, at, step in timeline(scenario, from_step, start):
             time.sleep(max(0.0, at - time.monotonic()))
             stamp = f"{step.at_s // 60}:{step.at_s % 60:02d}"
             print(f"[{i}/{len(scenario.steps)}] {stamp} {step.name}", flush=True)
             if step.note:
                 print(f"    提示：{step.note}", flush=True)
             try:
-                output = runner.act(step.do) if step.do else ""
+                output = runner.act(step.do, time.monotonic() - start) if step.do else ""
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                 # 记为本步失败并继续：后续的恢复画面等步骤照常执行，最后仍打印汇总
                 failed += 1

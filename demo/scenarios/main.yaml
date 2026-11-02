@@ -1,8 +1,8 @@
 # 主剧本（HYD-DEP-005 §4.4、DM-11）：make demo-run SCENARIO=main 由 tools/dev/scenario_runner.py 执行。
 # at 为距开场的 分:秒；expect 的窗口为 [at, at + within_s]，match 为事件字段（数组字段取包含）。
-# 当前只含已具备的主链路（D-060、D-080）：低速攻击、画面重放、AI 值班员、供应商、零出站、存证
-# 随 TK-115、114、116、060、090、080 完成时追加。连续执行时，上一轮结束后至少等 1 分钟再开始：
-# 同一规则与设备的关联事件 5 分钟内去重（D-067）
+# 当前只含已具备的主链路（D-060、D-080）与画面重放（TK-114）：低速攻击、AI 值班员、供应商、零出站、存证
+# 随 TK-115、116、060、090、080 完成时追加。连续执行时，上一轮结束后至少等 3 分钟再开始：
+# 同一规则与设备的关联事件 5 分钟内去重，攻击持续期间的命中（含第 10 步的重放）顺延去重期（D-067）
 id: main
 overrides: { playbook_ttl_s: 150 }  # FR-404
 steps:
@@ -38,10 +38,20 @@ steps:
     at: "1:50"
     do: { action: start_attack, target: cam-02 }
     expect: { attack: blocked }
-  - name: 恢复 cam-02 画面
+  - name: 恢复 cam-02 画面（从当前进度续播）
     at: "2:10"
     do: { action: restore_camera, camera: cam-02 }
     note: 在详情面板选中 cam-02，点"生成报告"并打开查看
+  # 推流源切回 2 分钟前的片段；判定须当前 10 s 全为重放内容，再连续 3 次匹配（实测 12～22 s）
+  # 关联事件 5 分钟内去重（D-067），本步只断言画面可信度模型的判定。本步不支持 FROM_STEP 续跑：
+  # 视觉引擎在开场重启，续跑时没见过 2 分钟前的画面
+  - name: 攻击者把 cam-02 画面换成此前录下的片段
+    at: "2:30"
+    do: { action: replay_camera, camera: cam-02 }
+    expect: { subject: hyd.vision.integrity.v1, match: { camera_id: cam-02, type: replay, source: model }, within_s: 30 }
+  - name: 恢复 cam-02 画面
+    at: "3:05"
+    do: { action: restore_camera, camera: cam-02 }
   # 封禁约 1:30 生效，150 s 后到期；执行器按墙上时钟计时，WSL 校时会使到期时刻前后偏移十余秒
   - name: TTL 150 s 到期，封禁自动撤销
     at: "3:30"
