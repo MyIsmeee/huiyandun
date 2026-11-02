@@ -499,7 +499,10 @@ def test_template_report_quotes_verdict(
     html = export(client, report.id, "html").text
     section = html[html.index("AI 分析区") :]
     assert section.index("AI 值班员判定") < section.index("模型不可用，以下为规则模板生成")
-    assert "AI 生成 · 需人工复核 · 由 DeepSeek（公网·已脱敏） 于" in section
+    # V-AI2：模板报告没有报告模型的说明，判定节的说明须滚动时停在顶端
+    assert (
+        '<p class="note ai-label">AI 生成 · 需人工复核 · 由 DeepSeek（公网·已脱敏） 于' in section
+    )
     assert "87%" in section and "T1110" in section and "确认封禁 172.30.0.100" in section
     span = '<span class="unverified" title="该实体未能在证据中溯源">{}</span>'
     assert span.format("10.9.9.9") in section and span.format("172.30.0.100") not in section
@@ -515,7 +518,13 @@ def test_llm_report_quotes_verdict(
     investigated(db, VERDICT, None)
     report = llm_report(client, password, AI, [])
     html = export(client, report.id, "html").text
-    assert report.source == "llm" and "AI 值班员判定" in html and "模型不可用" not in html
+    assert report.source == "llm" and "模型不可用" not in html
+    # 报告模型的说明紧贴摘要，不在判定之上，读者不会以为判定也是报告模型写的
+    section = html[html.index("AI 分析区") :]
+    label = section.index("由 本地 llama.cpp（qwen3-8b，内网） 生成")
+    assert section.index("AI 值班员判定") < label < section.index("摘要")
+    md = export(client, report.id, "md").text
+    assert md.index("### AI 值班员判定") < md.index("内网） 生成") < md.index("### 摘要")
 
 
 @pytest.mark.parametrize("error", [None, "8 轮内未给出判定"])
