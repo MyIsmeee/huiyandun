@@ -499,7 +499,10 @@ def test_template_report_quotes_verdict(
     html = export(client, report.id, "html").text
     section = html[html.index("AI 分析区") :]
     assert section.index("AI 值班员判定") < section.index("模型不可用，以下为规则模板生成")
-    assert "AI 生成 · 需人工复核 · 由 DeepSeek（公网·已脱敏） 于" in section
+    # V-AI2：模板报告没有报告模型的说明，判定节的说明须滚动时停在顶端
+    assert (
+        '<p class="note ai-label">AI 生成 · 需人工复核 · 由 DeepSeek（公网·已脱敏） 于' in section
+    )
     assert "87%" in section and "T1110" in section and "确认封禁 172.30.0.100" in section
     span = '<span class="unverified" title="该实体未能在证据中溯源">{}</span>'
     assert span.format("10.9.9.9") in section and span.format("172.30.0.100") not in section

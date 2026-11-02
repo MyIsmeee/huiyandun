@@ -70,7 +70,7 @@
   <h2>AI 分析区</h2>
   {% if verdict %}
   <h3>AI 值班员判定</h3>
-  <p class="note">AI 生成 · 需人工复核 · 由 {{ verdict.by }} 于 {{ verdict.at }} 判定{% if verdict.has_unverified %} · 虚线下划线为未能在证据中溯源的实体{% endif %}</p>
+  <p class="note ai-label">AI 生成 · 需人工复核 · 由 {{ verdict.by }} 于 {{ verdict.at }} 判定{% if verdict.has_unverified %} · 虚线下划线为未能在证据中溯源的实体{% endif %}</p>
   <table class="kv">
   {% for label, value in verdict.rows %}
     <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
