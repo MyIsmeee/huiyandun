@@ -41,3 +41,15 @@ models:
     card: cards/efficientvit-seg-l1.md
     purpose: vision-engine 场景语义分割，供实时感知大屏重建环境（REUSE-25）
     owner: MyIsmeee
+  - name: dinov2-small
+    version: dinov2-small@8b1f705a+hyd.1
+    task: embedding  # 整帧画面嵌入，只用于判定画面重放，不检测、不区分人员
+    file: dinov2_small.onnx
+    sha256: f22797eabf810a75e41de68d378541ebea372122b25c4ce3ef25ff618250c20a
+    # onnx-community 的 ONNX 导出（Hugging Face，固定到提交）；上游直接发布 .onnx，无压缩包
+    source: https://huggingface.co/onnx-community/dinov2-small/resolve/8b1f705a3a7f6f062f6bdd21986c1583d3ef105d/onnx/model.onnx
+    source_sha256: f22797eabf810a75e41de68d378541ebea372122b25c4ce3ef25ff618250c20a
+    license: Apache-2.0
+    card: cards/dinov2-small.md
+    purpose: vision-engine 画面可信度，判定画面重放（REUSE-23）
+    owner: MyIsmeee

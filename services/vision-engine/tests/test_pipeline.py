@@ -22,6 +22,7 @@ from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine import pipeline as pipeline_module
 from vision_engine.detector import PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
+from vision_engine.integrity import FrameEmbedder, Replay, ReplayDetector
 from vision_engine.pipeline import (
     BEHAVIOR_SUBJECT,
     FPS,
@@ -191,6 +192,35 @@ def test_frozen_picture_reported_once_as_freeze() -> None:
     assert [(type(e), e.camera_id, e.type, e.source, e.confidence) for e in events] == [
         (VisionIntegrityV1, "cam-01", "freeze", "rule", 1.0)
     ]
+
+
+class FakeReplay:
+    """第 3 次调用时判定为重放：与 60 s 前的片段重复。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def update(self, embedding: np.ndarray, timestamp: float) -> Replay | None:
+        self.calls += 1
+        return Replay(ago_s=60.0, confidence=0.8) if self.calls == 3 else None
+
+
+def test_replay_reported_as_model_event_with_matched_time() -> None:
+    """重放判定先于运动门控，每个检测帧都取嵌入（FR-302）。"""
+    camera = CameraPipeline(
+        "cam-01", MAPPING, cast(PoseDetector, FakeDetector(person=False)),
+        embedder=cast(FrameEmbedder, lambda image: np.ones(384)),
+    )  # fmt: skip
+    camera._replay = cast(ReplayDetector, FakeReplay())
+
+    events = [e for i in range(5) for e in camera.process(frame(0), timestamp=i / FPS)]
+
+    [replay] = events
+    assert isinstance(replay, VisionIntegrityV1)
+    assert (replay.type, replay.source, replay.confidence, replay.duration_s) == (
+        "replay", "model", 0.8, 10,
+    )  # fmt: skip
+    assert replay.detail is not None and replay.detail.startswith("画面与 60 s 前（")
 
 
 class StillReader:
