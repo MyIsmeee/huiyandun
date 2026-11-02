@@ -1,6 +1,6 @@
 """检测链路（TK-021、TK-022、TK-118）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
 hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 分割环境 → hyd.vision.scene.v1；
-画面冻结与重放 → hyd.vision.integrity.v1（D-080、TK-114）。
+画面冻结、重放、挪位与遮挡 → hyd.vision.integrity.v1（D-080、TK-114）。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
@@ -42,9 +42,11 @@ from vision_engine.geometry import GroundMapping
 from vision_engine.integrity import (
     FREEZE_S,
     REPLAY_S,
+    VIEW_S,
     FrameEmbedder,
     FreezeDetector,
     ReplayDetector,
+    ViewDetector,
 )
 from vision_engine.kinematics import Motion
 from vision_engine.motion import MotionGate
@@ -57,7 +59,7 @@ BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
 SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
-# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 目前有冻结与重放，其余类型由 TK-114 发布。
+# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 的 stream_lost 由 TK-114 发布。
 # 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
 STREAM = "HYD_VISION"
 STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, INTEGRITY_SUBJECT]
@@ -147,8 +149,9 @@ class CameraPipeline:
         self._vehicles = vehicles  # None 时只检测人员（如关键点录制工具）
         self._behaviors = BehaviorDetector(climb_lines or [])
         self._freeze = FreezeDetector()
-        self._embedder = embedder  # None 时不判定重放
+        self._embedder = embedder  # None 时不判定重放、挪位与遮挡
         self._replay = ReplayDetector()
+        self._view = ViewDetector()
         self._gate = MotionGate()
         self._tracker, self._vehicle_tracker = (
             ByteTrackTracker(
@@ -198,13 +201,23 @@ class CameraPipeline:
         integrity: list[VisionIntegrityV1] = []
         if self._freeze.update(frame, timestamp):
             integrity.append(self._integrity("freeze", FREEZE_S, "rule", 1.0, None))
-        replay = self._replay.update(self._embedder(frame), timestamp) if self._embedder else None
-        if replay is not None:
-            matched = datetime.now(UTC) - timedelta(seconds=replay.ago_s + REPLAY_S)
-            detail = f"画面与 {replay.ago_s:.0f} s 前（{matched:%H:%M:%S} UTC 起）的片段重复"
-            integrity.append(
-                self._integrity("replay", REPLAY_S, "model", replay.confidence, detail)
-            )
+        if self._embedder is not None:
+            embedding = self._embedder(frame)
+            replay = self._replay.update(embedding, timestamp)
+            if replay is not None:
+                matched = datetime.now(UTC) - timedelta(seconds=replay.ago_s + REPLAY_S)
+                detail = f"画面与 {replay.ago_s:.0f} s 前（{matched:%H:%M:%S} UTC 起）的片段重复"
+                integrity.append(
+                    self._integrity("replay", REPLAY_S, "model", replay.confidence, detail)
+                )
+            view = self._view.update(embedding, frame, timestamp)
+            if view is not None:
+                detail = f"与参考画面的相似度降至 {view.similarity:.2f}"
+                if view.kind == "occlusion":
+                    detail = f"画面纹理消失，{detail}"
+                integrity.append(
+                    self._integrity(view.kind, VIEW_S, "model", view.confidence, detail)
+                )
         tracked, vehicles = self.track(frame, timestamp)
         if not len(tracked) and not len(vehicles):
             return integrity
@@ -291,7 +304,7 @@ class CameraPipeline:
 
     def _integrity(
         self,
-        kind: Literal["freeze", "replay"],
+        kind: Literal["freeze", "replay", "shift", "occlusion"],
         duration_s: float,
         source: Literal["rule", "model"],
         confidence: float,
