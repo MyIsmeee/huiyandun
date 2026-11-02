@@ -1,6 +1,6 @@
 """检测链路（TK-021、TK-022、TK-118）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
 hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 分割环境 → hyd.vision.scene.v1；
-画面冻结、重放、挪位与遮挡 → hyd.vision.integrity.v1（D-080、TK-114）。
+画面冻结、重放、挪位、遮挡与断流 → hyd.vision.integrity.v1（D-080、TK-114）。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
@@ -59,7 +59,7 @@ BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
 SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
-# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 的 stream_lost 由 TK-114 发布。
+# 持久化的视觉事件（HYD-PLAN-007 §2）。
 # 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
 STREAM = "HYD_VISION"
 STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, INTEGRITY_SUBJECT]
@@ -69,6 +69,12 @@ INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（HYD-PLAN-007 v1
 TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（HYD-PLAN-007 v1.9）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
+# 检测循环 5 s 取不到新帧即为断流（FR-105 要求 10 s 内）：不依赖读帧线程何时发现连接断开（go2rtc 的源
+# 中断后实测约 15 s 才断开对外连接），推流源切换、重启时的瞬断也不算断流
+STREAM_LOST_S = 5.0
+# 启动时建连（超时 5 s）并等首个关键帧，再宽限 5 s：启动后 10 s 内取不到帧才按断流上报
+STARTUP_GRACE_S = 5.0
+STREAM_LOST_REPEAT_S = 30  # 断流期间每 30 s 重报 stream_lost，api-server 据此保持离线（D-092）
 STALL_S = 10.0  # 任一循环超过此时长未完成周期即视为停滞，与 compose 健康检查的阈值一致
 # 新轨迹须连续 2 帧、置信度 ≥ 0.5；RTMO 对远处行人的置信度多在 0.5～0.6（模型卡）
 TRACK_ACTIVATION = 0.5
@@ -125,7 +131,7 @@ class FrameReader(threading.Thread):
                 # 解码器异常按断流处理并重连，读帧线程不退出（#79）
                 log.exception("vision.reader_failed", extra={"camera_id": self._camera_id})
             if not lost:
-                # 不静默跳过（C-CV-09）；stream_lost 事件由 TK-114 发布
+                # 不静默跳过（C-CV-09）：stream_lost 事件由检测循环按取不到新帧的时长发布（FR-105）
                 log.warning("vision.stream_lost", extra={"camera_id": self._camera_id})
                 lost = True
             threading.Event().wait(RECONNECT_S)
@@ -152,6 +158,7 @@ class CameraPipeline:
         self._embedder = embedder  # None 时不判定重放、挪位与遮挡
         self._replay = ReplayDetector()
         self._view = ViewDetector()
+        self._lost_reported: float | None = None  # 本次断流最近一次上报的时刻
         self._gate = MotionGate()
         self._tracker, self._vehicle_tracker = (
             ByteTrackTracker(
@@ -302,9 +309,20 @@ class CameraPipeline:
             )
         return events
 
+    def stream_lost(self, last_frame: float, now: float) -> VisionIntegrityV1 | None:
+        """last_frame 为最近一次取到新帧的时刻：满 STREAM_LOST_S 没有新帧时上报，持续断流每
+        STREAM_LOST_REPEAT_S 重报（D-092）；duration_s 为没有新帧的时长。"""
+        if now - last_frame < STREAM_LOST_S:
+            self._lost_reported = None
+            return None
+        if self._lost_reported is not None and now - self._lost_reported < STREAM_LOST_REPEAT_S:
+            return None
+        self._lost_reported = now
+        return self._integrity("stream_lost", now - last_frame, "rule", 1.0, None)
+
     def _integrity(
         self,
-        kind: Literal["freeze", "replay", "shift", "occlusion"],
+        kind: Literal["freeze", "replay", "shift", "occlusion", "stream_lost"],
         duration_s: float,
         source: Literal["rule", "model"],
         confidence: float,
@@ -369,28 +387,34 @@ async def run_camera(
 ) -> None:
     loop = asyncio.get_running_loop()
     next_tick, last_seq = loop.time(), 0
+    last_frame = time.monotonic() + STARTUP_GRACE_S  # 启动后一直取不到帧同样按断流上报（C-CV-09）
     while True:
         next_tick = max(next_tick + 1 / FPS, loop.time())  # 处理超时后不补跑积压的周期
         await asyncio.sleep(next_tick - loop.time())
-        latest = reader.latest()
+        latest, now = reader.latest(), time.monotonic()
+        events: list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1] = []
         if latest is not None and latest[0] != last_seq:
             last_seq, frame = latest
-            events = await asyncio.to_thread(pipeline.process, frame, time.monotonic())
-            for event in events:
-                if isinstance(event, VisionTrackV1):
-                    await bus.publish(TRACK_SUBJECT, event)
-                    continue
-                subject = (
-                    INTEGRITY_SUBJECT if isinstance(event, VisionIntegrityV1) else BEHAVIOR_SUBJECT
+            last_frame = now
+            events = await asyncio.to_thread(pipeline.process, frame, now)
+        lost = pipeline.stream_lost(last_frame, now)
+        if lost is not None:
+            events.append(lost)
+        for event in events:
+            if isinstance(event, VisionTrackV1):
+                await bus.publish(TRACK_SUBJECT, event)
+                continue
+            subject = (
+                INTEGRITY_SUBJECT if isinstance(event, VisionIntegrityV1) else BEHAVIOR_SUBJECT
+            )
+            try:
+                await bus.js_publish(subject, event)
+            except (nats.errors.Error, TimeoutError):
+                # 记录后继续检测：持续满足的行为与断流 30 s 后重发（C-CV-09 不静默）；冻结等只报一次
+                log.exception(
+                    "vision.event_publish_failed",
+                    extra={"subject": subject, "event_id": str(event.event_id)},
                 )
-                try:
-                    await bus.js_publish(subject, event)
-                except (nats.errors.Error, TimeoutError):
-                    # 记录后继续检测：持续满足的行为 30 s 后重发（C-CV-09 不静默）；冻结只报一次
-                    log.exception(
-                        "vision.event_publish_failed",
-                        extra={"subject": subject, "event_id": str(event.event_id)},
-                    )
         beat()
 
 

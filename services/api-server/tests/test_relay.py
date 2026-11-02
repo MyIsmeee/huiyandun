@@ -161,6 +161,20 @@ def test_behavior_and_alert_push_device_after_event(
         assert device_state(next_frame(client, ws)) == ("devices", "cam-02", "cyber_alert", "high")
 
 
+def test_stream_lost_pushes_offline_device(
+    client: TestClient, ws_connect: Connect, nats_url: str
+) -> None:
+    """FR-105：断流事件不进告警频道，只把设备置为离线。"""
+    event = VisionIntegrityV1(
+        **common(), camera_id="cam-01", type="stream_lost", duration_s=5.0, source="rule",
+        confidence=1.0, detail=None,
+    )  # fmt: skip
+    with ws_connect() as ws:
+        publish(nats_url, "hyd.vision.integrity.v1", event)
+
+        assert device_state(next_frame(client, ws)) == ("devices", "cam-01", "offline", None)
+
+
 def test_new_connection_receives_current_state_first(
     client: TestClient, ws_connect: Connect, nats_url: str
 ) -> None:

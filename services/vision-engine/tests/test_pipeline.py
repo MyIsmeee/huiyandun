@@ -281,6 +281,77 @@ def test_freeze_published_to_integrity_subject() -> None:
     assert [(s, type(e)) for s, e in bus.published] == [(INTEGRITY_SUBJECT, VisionIntegrityV1)]
 
 
+def test_stream_lost_reported_at_once_and_every_30_s() -> None:
+    """FR-105、D-092：5 s 没有新帧即上报，持续断流每 30 s 重报，api-server 据此保持离线。"""
+    camera, _ = pipeline(MAPPING)
+
+    reported = [
+        (now, e.duration_s)
+        for now in range(95, 170)
+        if (e := camera.stream_lost(last_frame=95, now=now)) is not None
+    ]
+
+    assert reported == [(100, 5), (130, 35), (160, 65)]
+    first = camera.stream_lost(last_frame=95, now=200)
+    assert first is not None and (first.type, first.source, first.confidence) == (
+        "stream_lost", "rule", 1.0,
+    )  # fmt: skip
+
+
+def test_brief_outage_not_reported() -> None:
+    """推流源切换、重启时的瞬断不算断流。"""
+    camera, _ = pipeline(MAPPING)
+
+    assert camera.stream_lost(last_frame=100, now=104.9) is None
+    assert camera.stream_lost(last_frame=105, now=105) is None
+
+
+def test_new_outage_after_restore_reported_again() -> None:
+    camera, _ = pipeline(MAPPING)
+    camera.stream_lost(last_frame=95, now=100)
+
+    assert camera.stream_lost(last_frame=101, now=101) is None  # 恢复取到新帧
+    assert camera.stream_lost(last_frame=101, now=106) is not None
+
+
+class LostReader:
+    """断流：一直没有帧。"""
+
+    def latest(self) -> None:
+        return None
+
+
+def test_stream_lost_published_to_integrity_subject(monkeypatch: pytest.MonkeyPatch) -> None:
+    """启动后一直取不到帧同样上报（C-CV-09）。"""
+    monkeypatch.setattr(pipeline_module, "STREAM_LOST_S", 0.5)
+    monkeypatch.setattr(pipeline_module, "STARTUP_GRACE_S", 0.0)
+    camera, _ = pipeline(MAPPING)
+    bus = RecordingBus()
+    run = run_camera(camera, cast(FrameReader, LostReader()), cast(Bus, bus), lambda: None)
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(run, 1))
+
+    [(subject, event)] = bus.published
+    assert subject == INTEGRITY_SUBJECT
+    assert isinstance(event, VisionIntegrityV1) and event.type == "stream_lost"
+    assert event.duration_s == pytest.approx(0.5, abs=0.25)
+
+
+def test_startup_grace_before_first_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """启动时建连与等首个关键帧可达数秒，宽限期内取不到帧不算断流。"""
+    monkeypatch.setattr(pipeline_module, "STREAM_LOST_S", 0.3)
+    monkeypatch.setattr(pipeline_module, "STARTUP_GRACE_S", 5.0)
+    camera, _ = pipeline(MAPPING)
+    bus = RecordingBus()
+    run = run_camera(camera, cast(FrameReader, LostReader()), cast(Bus, bus), lambda: None)
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(run, 1))
+
+    assert bus.published == []
+
+
 def test_pyav_and_matplotlib_not_installed() -> None:
     """REUSE-07：PyAV 自带 GPL 的 x264 / x265（G-08）；跟踪在两者缺席时可用由上面的用例验证。"""
     assert importlib.util.find_spec("av") is None

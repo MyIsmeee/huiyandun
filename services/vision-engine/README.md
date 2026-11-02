@@ -22,7 +22,7 @@
     - 冻结（`source=rule`）：相邻帧逐像素相同满 5 s 报一次，出现不同帧即重新计时（FR-301）
     - 重放（`source=model`）：DINOv2-small（REUSE-23，`HYD_INTEGRITY_MODEL_FILE` 未配置时不判定）每个检测帧取一次整帧嵌入，只在内存中保留 190 s。每秒以最近 10 s 与距今 30～180 s 的各段比较：两段各自去掉均值与线性趋势后求相关系数，连续 3 次匹配同一历史时刻且 ≥ 0.35 即报一次，`detail` 写匹配到的时刻；连续 10 次不匹配后再匹配重新上报。当前 10 s 内有画面切换（相邻嵌入相似度 < 0.5）时不判定。静止画面只剩噪声，不判重放（FR-302）
     - 挪位与遮挡（`source=model`）：每路启动后前 10 s 的嵌入均值为参考画面，只在内存中，断流重连不重记（D-090）。与参考画面的相似度 < 0.9 持续 5 s 即报一次：画面边缘像素占比 < 0.5%（纹理消失）为 `occlusion`，否则为 `shift`；恢复相似或类别改变即重新计时（FR-308）。调试素材剪接处画面整体改变，按挪位上报，每路每轮循环 1～2 次（D-091）
-  - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`（`stream_lost` 事件由 TK-114 发布）
+  - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`；检测循环 5 s 取不到新帧即发布 `stream_lost`（启动后首帧宽限至 10 s）（不依赖读帧线程何时发现连接断开；推流源切换、重启时的瞬断不算）（`source=rule`，`duration_s` 为已断流时长），持续断流每 30 s 重报，api-server 据此保持设备离线（FR-105、D-092）
   - 各路隔离（#79）：单路检测或场景循环抛出异常时记录 `vision.loop_failed`，2 s 后只重试该路；读帧异常记录 `vision.reader_failed` 后按断流重连
   - 健康检查：按路判断，检测与场景循环每完成一个周期、读帧线程每次建连与每读到一帧登记一次；全部在 10 s 内有登记时每秒更新 `HYD_HEARTBEAT_FILE`。任一路停滞（卡住或线程意外退出）即记录 `vision.stalled` 并退出进程，由 Compose `restart: unless-stopped` 拉起
 - 场景感知（`scene.py`，FR-108）：已标定摄像头每秒 1 次取最新帧，EfficientViT-Seg L1 ADE20K（REUSE-25，`HYD_SCENE_MODEL_FILE` 未配置时不输出场景）输出 64×64 格，150 类按随代码版本化的映射表归并为渲染类别（地面 road / sidewalk / floor / grass / earth，立面 wall / building / fence / railing / board（黑板），物体 table / chair / cabinet / sofa / bed / furniture / street_furniture，植被 tree / plant）；人员与车辆不在场景中

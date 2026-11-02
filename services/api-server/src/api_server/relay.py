@@ -58,10 +58,16 @@ async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]
         hub.broadcast(_frame("alerts", event))
         _push(hub, devices.on_alert(event, time.monotonic()))
 
+    async def on_integrity(event: VisionIntegrityV1) -> None:
+        if event.type == "stream_lost":
+            _push(hub, devices.on_stream_lost(event, time.monotonic()))
+
     await bus.subscribe("hyd.vision.track.v1", VisionTrackV1, on_track)
     await bus.subscribe("hyd.vision.scene.v1", VisionSceneV1, on_scene)
     await bus.subscribe("hyd.vision.behavior.v1", VisionBehaviorV1, on_behavior)
     await bus.subscribe("hyd.security.alert.v1", SecurityAlertV1, on_alert)
+    # 只用核心订阅更新离线：JetStream 重放的历史断流不应把设备置为离线
+    await bus.subscribe("hyd.vision.integrity.v1", VisionIntegrityV1, on_integrity)
 
 
 async def follow(
