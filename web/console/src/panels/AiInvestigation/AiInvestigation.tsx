@@ -287,10 +287,11 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
 
 /** 未溯源的实体弱化并加虚线下划线，悬停说明（V-AI3、FR-1103） */
 function Marked({ text, unverified }: { text: string; unverified: string[] }) {
-  // 长的在前：cam-02-1 与 cam-02 同时未溯源时按完整的 cam-02-1 标记
-  const entities = unverified.filter(Boolean).sort((a, b) => b.length - a.length);
+  const entities = unverified.filter(Boolean);
   if (entities.length === 0) return text;
-  const pattern = new RegExp(`(${entities.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+  // 只匹配完整的实体：前后不紧接字母数字，也不以 . 或 - 连着字母数字（cam-02 不标 cam-02-1，10.9.9.9 不标 10.9.9.90）
+  const alternatives = entities.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const pattern = new RegExp(`(?<![A-Za-z0-9]|[A-Za-z0-9][.-])(${alternatives})(?![A-Za-z0-9]|[.-][A-Za-z0-9])`);
   return text.split(pattern).map((part, i) =>
     // split 带捕获组：奇数位是匹配到的实体
     i % 2 === 1 ? (

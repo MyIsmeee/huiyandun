@@ -150,6 +150,22 @@ describe("AiInvestigation", () => {
     expect(screen.queryAllByTitle("该实体未能在证据中溯源").some((e) => e.textContent === "172.30.0.100")).toBe(false);
   });
 
+  it("只标记完整的实体，不标记更长实体中的片段", async () => {
+    const verdict = {
+      ...VERDICT,
+      techniques: ["T1110.001"],
+      narrative: "cam-02-1 与 cam-02 相连，10.9.9.90 访问过 10.9.9.9。",
+      recommendation: "核查 xcam-02",
+      unverified: ["cam-02", "10.9.9.9", "T1110"],
+    };
+    vi.spyOn(api, "getInvestigation").mockResolvedValue(investigation({ verdict, finished_at: new Date().toISOString() }));
+    push("incidents", incident());
+    show();
+    await screen.findByText("判定为攻击");
+    const marked = screen.getAllByTitle("该实体未能在证据中溯源").map((e) => e.textContent);
+    expect(marked).toEqual(["cam-02", "10.9.9.9"]);
+  });
+
   it.each([
     ["viewer", false],
     ["auditor", false],
