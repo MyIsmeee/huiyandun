@@ -1,6 +1,7 @@
 """溯源报告（FR-501～FR-504、TK-070）：事实区全部取自近 24 小时历史中的结构化事件，不经过 LLM（V-AI1）。
 
 AI 区经 llm-gateway 按供应商顺序生成（TK-062）；无输出时 AI 区为空并注明原因，由模板叙述（FR-502、C-LLM-09）。
+值班员已给出的判定快照进报告，模型与模板报告都引用（D-089），不交给报告模型：判定中编造的实体不能因此变成有出处。
 生成与复核各写一条审计，调用模型另写 llm.invoked，与报告的写入同一事务（G-13、AI-M-05）。
 """
 
@@ -15,9 +16,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from api_server.audit import record
 from api_server.auth import Principal, require
 from api_server.history import History
+from api_server.investigator import investigation_table
 from api_server.llm_chain import invoke, record_invocation
 from api_server.report_view import render
-from py_contracts.api import Report, ReportAi, ReportFacts, Site
+from py_contracts.api import Report, ReportAi, ReportFacts, ReportInvestigation, Site
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
@@ -42,6 +44,7 @@ report_table = Table(
     Column("incident_id", Text),
     Column("facts", JSONB),
     Column("ai", JSONB(none_as_null=True)),
+    Column("investigation", JSONB(none_as_null=True)),
     Column("source", Text),
     Column("provider_id", Text),
     Column("degraded_reason", Text),
@@ -83,6 +86,24 @@ def facts(incident: CorrelatorIncidentV1, history: History, site: Site) -> Repor
     )
 
 
+async def verdict(request: Request, incident_id: str) -> ReportInvestigation | None:
+    """调查进行中、失败或未调查时为 None。"""
+    t = investigation_table.c
+    async with request.app.state.engine.connect() as conn:
+        row = (
+            (
+                await conn.execute(
+                    select(t.verdict, t.provider, t.finished_at).where(
+                        t.incident_id == incident_id, t.verdict.is_not(None)
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
+    return ReportInvestigation.model_validate(dict(row)) if row else None
+
+
 @router.post("/incidents/{incident_id}/reports", status_code=201)
 async def create_report(
     incident_id: str,
@@ -111,6 +132,7 @@ async def create_report(
         incident_id=incident_id,
         facts=report_facts,
         ai=ai,
+        investigation=await verdict(request, incident_id),
         source="llm" if ai else "template",
         provider_id=provider["id"] if ai else None,
         degraded_reason=outcome.reason,
@@ -121,10 +143,13 @@ async def create_report(
     async with state.engine.begin() as conn:
         await conn.execute(
             insert(report_table).values(
-                report.model_dump(exclude={"facts", "ai"})
+                report.model_dump(exclude={"facts", "ai", "investigation"})
                 | {
                     "facts": report.facts.model_dump(mode="json"),
                     "ai": report.ai.model_dump(mode="json") if report.ai else None,
+                    "investigation": report.investigation.model_dump(mode="json")
+                    if report.investigation
+                    else None,
                 }
             )
         )

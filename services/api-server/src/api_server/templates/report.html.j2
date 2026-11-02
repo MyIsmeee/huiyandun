@@ -70,6 +70,17 @@
   <h2>AI 分析区</h2>
   {% if ai %}
   <p class="note ai-label">AI 生成 · 需人工复核 · 由 {{ ai.by }} 生成{% if ai.has_unverified %} · 虚线下划线为未能在证据中溯源的实体{% endif %}</p>
+  {% endif %}
+  {% if verdict %}
+  <h3>AI 值班员判定</h3>
+  <p class="note">AI 生成 · 需人工复核 · 由 {{ verdict.by }} 于 {{ verdict.at }} 判定{% if verdict.has_unverified %} · 虚线下划线为未能在调查结果中溯源的实体{% endif %}</p>
+  <table class="kv">
+  {% for label, value in verdict.rows %}
+    <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+  {% endfor %}
+  </table>
+  {% endif %}
+  {% if ai %}
   <h3>摘要</h3>
   <p>{{ ai.summary }}</p>
   {% for title, items in [("攻击链", ai.attack_chain), ("影响", ai.impact), ("建议（仅作文字建议，系统不会据此执行任何操作）", ai.recommendations)] %}

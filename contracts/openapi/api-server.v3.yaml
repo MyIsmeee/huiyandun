@@ -649,7 +649,7 @@ components:
         items: { type: array, items: { $ref: "../events/incident.schema.json" } }
     Report:
       type: object
-      required: [id, incident_id, facts, ai, source, provider_id, degraded_reason, reviewed_by, reviewed_at, created_at]
+      required: [id, incident_id, facts, ai, investigation, source, provider_id, degraded_reason, reviewed_by, reviewed_at, created_at]
       properties:
         id: { type: string }
         incident_id: { type: string }
@@ -658,6 +658,9 @@ components:
           # 保留原有的 object 分支、以 allOf 收窄为 ReportAi：只是收窄原先的任意对象，不算新增 anyOf 分支（CI-08）
           anyOf: [{ type: object, allOf: [{ $ref: "#/components/schemas/ReportAi" }] }, { type: "null" }]
           description: AI 区；模板模式下为 null
+        investigation:
+          anyOf: [{ $ref: "#/components/schemas/ReportInvestigation" }, { type: "null" }]
+          description: AI 区引用的值班员判定，模型与模板报告都有（D-089）；生成时调查尚未给出判定为 null
         source: { enum: [llm, template] }
         provider_id: { anyOf: [{ type: string }, { type: "null" }] }
         degraded_reason:
@@ -681,6 +684,17 @@ components:
         network:
           $ref: "#/components/schemas/Network"
           description: public 表示发送前已脱敏（C-LLM-03）
+    ReportInvestigation:
+      type: object
+      description: 生成报告时值班员判定的快照（FR-1106）
+      required: [verdict, provider, finished_at]
+      properties:
+        verdict: { $ref: "../events/investigation_frame.schema.json#/$defs/InvestigationVerdict" }
+        provider:
+          anyOf:
+            - { $ref: "../events/investigation_frame.schema.json#/$defs/InvestigationProvider" }
+            - { type: "null" }
+        finished_at: { type: string, format: date-time }
     ReportFacts:
       type: object
       description: 事实区，全部来自结构化数据，不经过 LLM（V-AI1）

@@ -104,7 +104,7 @@ const alertList = (node: ReactNode) => <div className="flex h-80 w-80 flex-col">
 const REPORT: Report = {
   id: "rep-1", incident_id: INCIDENT.id,
   facts: { incident: INCIDENT, devices: [], timeline: [], executions: [] },
-  ai: null, source: "template", provider_id: null, degraded_reason: "未启用任何模型供应商",
+  ai: null, investigation: null, source: "template", provider_id: null, degraded_reason: "未启用任何模型供应商",
   reviewed_by: null, reviewed_at: null, created_at: "2026-10-27T06:30:00Z",
 }; // prettier-ignore
 const reportBar = (report: Report | null, request: ReportRequest) => (
