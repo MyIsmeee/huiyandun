@@ -287,7 +287,8 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
 
 /** 未溯源的实体弱化并加虚线下划线，悬停说明（V-AI3、FR-1103） */
 function Marked({ text, unverified }: { text: string; unverified: string[] }) {
-  const entities = unverified.filter(Boolean);
+  // 长的在前：10.9.9.9 与 10.9.9.9:443 同时未溯源时整段标记（冒号不算实体的延续）
+  const entities = unverified.filter(Boolean).sort((a, b) => b.length - a.length);
   if (entities.length === 0) return text;
   // 只匹配完整的实体：前后不紧接字母数字，也不以 . 或 - 连着字母数字（cam-02 不标 cam-02-1，10.9.9.9 不标 10.9.9.90）
   const alternatives = entities.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");

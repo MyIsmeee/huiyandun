@@ -166,6 +166,22 @@ describe("AiInvestigation", () => {
     expect(marked).toEqual(["cam-02", "10.9.9.9"]);
   });
 
+  it("长短实体重叠时按较长者整段标记", async () => {
+    // 网关先列 IP、后列端口实体，短的在前
+    const verdict = {
+      ...VERDICT,
+      techniques: [],
+      narrative: "攻击源为 10.9.9.9:443",
+      recommendation: "核查攻击源",
+      unverified: ["10.9.9.9", "10.9.9.9:443"],
+    };
+    vi.spyOn(api, "getInvestigation").mockResolvedValue(investigation({ verdict, finished_at: new Date().toISOString() }));
+    push("incidents", incident());
+    show();
+    await screen.findByText("判定为攻击");
+    expect(screen.getAllByTitle("该实体未能在证据中溯源").map((e) => e.textContent)).toEqual(["10.9.9.9:443"]);
+  });
+
   it.each([
     ["viewer", false],
     ["auditor", false],
