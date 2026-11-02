@@ -9,7 +9,7 @@
   - `uncertainty_m` = 标定点重投影误差的均方根 + 脚点上下偏移人体框高度 5% 在地面上的较大偏移（C-CV-06）。恰好 4 组标定点时前者为 0
   - 脚点或偏移点位于地平线以上时不输出坐标
 - 推理会话（`runtime.py`）：从本地模型文件创建 ONNX Runtime 会话（C-RU-06）
-  - `HYD_DEVICE` 无默认值，须显式声明。`cuda` 时设置显存上限：`HYD_GPU_MEM_LIMIT_MB` 是整个服务的上限，由加载的模型平分（RTMO、RF-DETR、EfficientViT-Seg 各三分之一），总占用不超过该值（C-HW-12），并断言 `CUDAExecutionProvider` 实际生效，回退 CPU 即报错退出（C-CV-11）；`cpu` 为 D0-min 的 CPU 模式（DP-06）
+  - `HYD_DEVICE` 无默认值，须显式声明。`cuda` 时设置显存上限：`HYD_GPU_MEM_LIMIT_MB` 是整个服务的上限，由加载的模型平分（RTMO、RF-DETR、EfficientViT-Seg、DINOv2 各四分之一），总占用不超过该值（C-HW-12），并断言 `CUDAExecutionProvider` 实际生效，回退 CPU 即报错退出（C-CV-11）；`cpu` 为 D0-min 的 CPU 模式（DP-06）
 - 检测（`detector.py`）：rtmlib RTMO 单阶段输出人体框与 COCO 17 关键点（REUSE-05），结果换算回整帧坐标；置信度低于 0.3 的框丢弃
 - 车辆检测（`detector.py` 的 `VehicleDetector`）：RF-DETR-S（REUSE-22）经 rtmlib 推理（`HYD_VEHICLE_MODEL_FILE` 未配置时只检测人员），只取自行车、轿车、摩托车、公交、货车，置信度低于 0.3 的框丢弃；后处理自行完成，以保留 ByteTrack 需要的置信度
 - 运动估计（`kinematics.py`）：由最近 1 s 的实测平面坐标计算朝向与速度；起步不足 3 帧为 null，低于 0.3 m/s 视为静止、不输出朝向；不预测未来位置（FR-102）
@@ -18,6 +18,9 @@
   - 跟踪：Roboflow trackers 的 ByteTrack，只用框的运动，不用外观特征（G-04、REUSE-07）；新轨迹须连续 2 帧、置信度 ≥ 0.5
   - 人员与车辆分别跟踪（骑车人与车框重叠，混合跟踪会互换编号）；车辆轨迹编号加 1 000 000，类别取轨迹内多数，避免两轮车在自行车与摩托车之间闪烁
   - 已标定摄像头的每条已确认轨迹每帧发布一条 `hyd.vision.track.v1`（核心 NATS，不持久化），含类别、朝向、速度、画面归一化框与骨骼（车辆无骨骼）；脚点取框底边中点；未标定摄像头照常检测跟踪，但不发布坐标（FR-902）
+  - 画面可信度（`integrity.py`，C-CV-09）：判定先于运动门控（定格画面没有运动，门控会跳过推理），结果发布为 `hyd.vision.integrity.v1`（JetStream）
+    - 冻结（`source=rule`）：相邻帧逐像素相同满 5 s 报一次，出现不同帧即重新计时（FR-301）
+    - 重放（`source=model`）：DINOv2-small（REUSE-23，`HYD_INTEGRITY_MODEL_FILE` 未配置时不判定）每个检测帧取一次整帧嵌入，只在内存中保留 190 s。每秒以最近 10 s 与距今 30～180 s 的各段比较：两段各自去掉均值与线性趋势后求相关系数，连续 3 次匹配同一历史时刻且 ≥ 0.35 即报一次，`detail` 写匹配到的时刻；连续 10 次不匹配后再匹配重新上报。当前 10 s 内有画面切换（相邻嵌入相似度 < 0.5）时不判定。静止画面只剩噪声，不判重放（FR-302）
   - 断流时记录 `vision.stream_lost` 并每 2 s 重连，恢复时记录 `vision.stream_restored`（`stream_lost` 事件由 TK-114 发布）
   - 各路隔离（#79）：单路检测或场景循环抛出异常时记录 `vision.loop_failed`，2 s 后只重试该路；读帧异常记录 `vision.reader_failed` 后按断流重连
   - 健康检查：按路判断，检测与场景循环每完成一个周期、读帧线程每次建连与每读到一帧登记一次；全部在 10 s 内有登记时每秒更新 `HYD_HEARTBEAT_FILE`。任一路停滞（卡住或线程意外退出）即记录 `vision.stalled` 并退出进程，由 Compose `restart: unless-stopped` 拉起
@@ -33,7 +36,7 @@
 
 ```sh
 hyd-vision      # 常驻检测（镜像默认命令）；启动时同样断言推理设备
-hyd-gpu-check   # 按 HYD_DEVICE 加载全部模型（RTMO、RF-DETR、EfficientViT-Seg）并断言推理设备；cuda 未生效时以 1 退出
+hyd-gpu-check   # 按 HYD_DEVICE 加载全部模型（RTMO、RF-DETR、EfficientViT-Seg、DINOv2）并断言推理设备；cuda 未生效时以 1 退出
 ```
 
 `make doctor` 以 `compose.gpu.yaml`（`HYD_DEVICE=cuda`）运行 `hyd-gpu-check`。`make demo-up` 默认加载 `compose.gpu.yaml`，无 GPU 时须显式 `GPU=0`。

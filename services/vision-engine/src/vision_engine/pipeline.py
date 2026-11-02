@@ -1,6 +1,6 @@
 """检测链路（TK-021、TK-022、TK-118）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
 hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 分割环境 → hyd.vision.scene.v1；
-画面冻结 → hyd.vision.integrity.v1（D-080）。
+画面冻结与重放 → hyd.vision.integrity.v1（D-080、TK-114）。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
+from typing import Literal
 
 import cv2
 import nats
@@ -38,7 +39,13 @@ from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine.behavior import BehaviorDetector
 from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector
 from vision_engine.geometry import GroundMapping
-from vision_engine.integrity import FREEZE_S, FreezeDetector
+from vision_engine.integrity import (
+    FREEZE_S,
+    REPLAY_S,
+    FrameEmbedder,
+    FreezeDetector,
+    ReplayDetector,
+)
 from vision_engine.kinematics import Motion
 from vision_engine.motion import MotionGate
 from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
@@ -50,7 +57,7 @@ BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
 SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
-# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 目前只有冻结，其余类型由 TK-114 发布。
+# 持久化的视觉事件（HYD-PLAN-007 §2）；integrity 目前有冻结与重放，其余类型由 TK-114 发布。
 # 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
 STREAM = "HYD_VISION"
 STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, INTEGRITY_SUBJECT]
@@ -132,6 +139,7 @@ class CameraPipeline:
         detector: PoseDetector,
         climb_lines: list[list[float]] | None = None,
         vehicles: VehicleDetector | None = None,
+        embedder: FrameEmbedder | None = None,
     ) -> None:
         self._camera_id = camera_id
         self._mapping = mapping
@@ -139,6 +147,8 @@ class CameraPipeline:
         self._vehicles = vehicles  # None 时只检测人员（如关键点录制工具）
         self._behaviors = BehaviorDetector(climb_lines or [])
         self._freeze = FreezeDetector()
+        self._embedder = embedder  # None 时不判定重放
+        self._replay = ReplayDetector()
         self._gate = MotionGate()
         self._tracker, self._vehicle_tracker = (
             ByteTrackTracker(
@@ -184,24 +194,17 @@ class CameraPipeline:
     def process(
         self, frame: np.ndarray, timestamp: float
     ) -> list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1]:
-        # 冻结判定先于运动门控：定格画面没有运动，门控会跳过推理（C-CV-09）
-        integrity = (
-            [
-                VisionIntegrityV1(
-                    schema_version=INTEGRITY_SCHEMA_VERSION,
-                    event_id=uuid.uuid4(),
-                    ts=datetime.now(UTC),
-                    camera_id=self._camera_id,
-                    type="freeze",
-                    duration_s=FREEZE_S,
-                    source="rule",
-                    confidence=1.0,
-                    detail=None,
-                )
-            ]
-            if self._freeze.update(frame, timestamp)
-            else []
-        )
+        # 画面可信度判定先于运动门控：定格画面没有运动，门控会跳过推理（C-CV-09）
+        integrity: list[VisionIntegrityV1] = []
+        if self._freeze.update(frame, timestamp):
+            integrity.append(self._integrity("freeze", FREEZE_S, "rule", 1.0, None))
+        replay = self._replay.update(self._embedder(frame), timestamp) if self._embedder else None
+        if replay is not None:
+            matched = datetime.now(UTC) - timedelta(seconds=replay.ago_s + REPLAY_S)
+            detail = f"画面与 {replay.ago_s:.0f} s 前（{matched:%H:%M:%S} UTC 起）的片段重复"
+            integrity.append(
+                self._integrity("replay", REPLAY_S, "model", replay.confidence, detail)
+            )
         tracked, vehicles = self.track(frame, timestamp)
         if not len(tracked) and not len(vehicles):
             return integrity
@@ -285,6 +288,26 @@ class CameraPipeline:
                 )
             )
         return events
+
+    def _integrity(
+        self,
+        kind: Literal["freeze", "replay"],
+        duration_s: float,
+        source: Literal["rule", "model"],
+        confidence: float,
+        detail: str | None,
+    ) -> VisionIntegrityV1:
+        return VisionIntegrityV1(
+            schema_version=INTEGRITY_SCHEMA_VERSION,
+            event_id=uuid.uuid4(),
+            ts=datetime.now(UTC),
+            camera_id=self._camera_id,
+            type=kind,
+            duration_s=duration_s,
+            source=source,
+            confidence=confidence,
+            detail=detail,
+        )
 
 
 class Health:
@@ -394,10 +417,17 @@ async def serve(config: VisionConfig) -> None:
         if config.scene_model_file
         else None
     )
+    embedder = (
+        FrameEmbedder(create_session(config, config.integrity_model_file, models))
+        if config.integrity_model_file
+        else None
+    )
     if vehicles is None:
         log.warning("vision.vehicles_disabled")  # 未配置 HYD_VEHICLE_MODEL_FILE
     if segmenter is None:
         log.warning("vision.scene_disabled")  # 未配置 HYD_SCENE_MODEL_FILE
+    if embedder is None:
+        log.warning("vision.replay_disabled")  # 未配置 HYD_INTEGRITY_MODEL_FILE
     site = SiteConfig.model_validate(yaml.safe_load(config.site_file.read_text(encoding="utf-8")))
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
@@ -422,7 +452,9 @@ async def serve(config: VisionConfig) -> None:
                     f"{camera['id']}/scene", partial(run_scene, perception, reader, bus), health
                 )
             )
-        detection = CameraPipeline(camera["id"], mapping, detector, camera["climb_lines"], vehicles)
+        detection = CameraPipeline(
+            camera["id"], mapping, detector, camera["climb_lines"], vehicles, embedder
+        )
         runs.append(
             supervise(f"{camera['id']}/detect", partial(run_camera, detection, reader, bus), health)
         )

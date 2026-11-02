@@ -162,6 +162,14 @@ def test_segmentation_task_allowed(models: Path) -> None:
     assert run("verify", models).returncode == 0
 
 
+def test_embedding_task_allowed(models: Path) -> None:
+    """整帧画面嵌入（画面可信度，REUSE-23）在白名单内。"""
+    run("fetch", models)
+    update(models, task="embedding")
+
+    assert run("verify", models).returncode == 0
+
+
 CONVERT = """# /// script
 # requires-python = ">=3.12"
 # dependencies = []
