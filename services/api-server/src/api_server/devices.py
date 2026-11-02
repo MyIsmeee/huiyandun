@@ -1,7 +1,7 @@
 """设备状态（HYD-UIX-004 §5.2）：由行为事件与网络告警计算，只保存在内存中，重启后回到初始状态。
 
-本模块实现告警态的进入与按时解除，以及处置执行对告警态的覆盖（TK-052）；offline 由 stream_lost（TK-114）
-接入。时刻 now 为单调时钟秒数，只用于计时。
+本模块实现告警态的进入与按时解除，处置执行对告警态的覆盖（TK-052），以及断流时的离线（FR-105）。
+时刻 now 为单调时钟秒数，只用于计时。
 """
 
 from dataclasses import dataclass, field
@@ -11,9 +11,12 @@ from py_contracts.api import Device, WsFrame
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
 PHYSICAL_HOLD_S = 60  # 最后一次行为事件后保持物理告警的时长
 CYBER_HOLD_S = 300  # 最后一次网络告警后保持网络攻击的时长，与 FR-303 的关联窗口一致
+# 最后一次 stream_lost 后保持离线的时长：视觉引擎在断流期间每 30 s 重报（D-092）
+OFFLINE_HOLD_S = 35
 
 type Severity = Literal["critical", "high", "medium", "low"]
 type Override = Literal["pending_action", "contained", "notify_only"]
@@ -35,6 +38,7 @@ class _Entry:
     current: Device
     physical_until: float = float("-inf")
     cyber_until: float = float("-inf")
+    offline_until: float = float("-inf")
     severity: Severity | None = None
     behavior: VisionBehaviorV1 | None = None  # 物理告警期间最近一次行为事件
     overrides: dict[str, Override] = field(default_factory=dict)  # 执行 ID → 仍有效的覆盖
@@ -63,6 +67,14 @@ class Devices:
             event.severity if active is None else max(active, event.severity, key=RANK.index)
         )
         entry.cyber_until = now + CYBER_HOLD_S
+        return self._update(entry, now)
+
+    def on_stream_lost(self, event: VisionIntegrityV1, now: float) -> Device | None:
+        """视频流中断：置为离线，OFFLINE_HOLD_S 内未再收到即恢复（FR-105）。"""
+        entry = self._entries.get(event.camera_id)
+        if entry is None:
+            return None
+        entry.offline_until = now + OFFLINE_HOLD_S
         return self._update(entry, now)
 
     def on_execution(self, execution: PlaybookExecutionV1, now: float) -> list[Device]:
@@ -119,6 +131,8 @@ class Devices:
             state = "physical_alert"
         else:
             state = entry.initial.state
+        if now < entry.offline_until:
+            state = "offline"  # 看不到画面时不显示告警态；处置状态仍照常覆盖
         # 处置中、已处置覆盖告警态；只通知只在网络攻击期间显示"已通知 · 待联动"（V-T1）
         override = min(entry.overrides.values(), key=PRIORITY.index, default=None)
         if override in ("pending_action", "contained") or (override == "notify_only" and cyber):

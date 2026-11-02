@@ -7,10 +7,11 @@ from pathlib import Path
 import pytest
 
 from api_server import site
-from api_server.devices import CYBER_HOLD_S, PHYSICAL_HOLD_S, Devices
+from api_server.devices import CYBER_HOLD_S, OFFLINE_HOLD_S, PHYSICAL_HOLD_S, Devices
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
 SITE = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
 
@@ -30,6 +31,13 @@ def alert(severity: str = "high", device_id: str | None = "cam-01") -> SecurityA
         severity=severity, src_ip="172.30.1.20", dst_ip="172.30.0.11", device_id=device_id,
         technique="T1110", evidence_ref="eve:1", source="rule", confidence=1.0,
         summary="HYD-NET-0001 RTSP authentication brute force",
+    )  # fmt: skip
+
+
+def stream_lost(camera_id: str = "cam-01") -> VisionIntegrityV1:
+    return VisionIntegrityV1(
+        schema_version="1.1.0", event_id=uuid.uuid4(), ts=datetime.now(UTC), camera_id=camera_id,
+        type="stream_lost", duration_s=5.0, source="rule", confidence=1.0, detail=None,
     )  # fmt: skip
 
 
@@ -109,6 +117,25 @@ def test_both_then_physical_expires_to_cyber(devices: Devices) -> None:
     assert both is not None and (both.state, both.alert_severity) == ("both", "high")
     [cyber] = devices.expire(PHYSICAL_HOLD_S)
     assert (cyber.state, cyber.alert_severity) == ("cyber_alert", "high")
+
+
+def test_stream_lost_sets_offline_until_reports_stop(devices: Devices) -> None:
+    """FR-105、D-092：断流期间视觉引擎每 30 s 重报，最后一次后 OFFLINE_HOLD_S 恢复。"""
+    changed = devices.on_stream_lost(stream_lost(), now=0)
+
+    assert changed is not None and changed.state == "offline"
+    assert devices.on_stream_lost(stream_lost(), now=30) is None
+    assert devices.expire(OFFLINE_HOLD_S) == []
+    assert [d.state for d in devices.expire(30 + OFFLINE_HOLD_S)] == ["normal"]
+
+
+def test_offline_hides_alert_but_not_containment(devices: Devices) -> None:
+    devices.on_behavior(behavior(), now=0)
+    devices.on_stream_lost(stream_lost(), now=1)
+
+    assert states(devices)["cam-01"] == ("offline", None)
+    devices.on_execution(execution("contained"), now=2)
+    assert states(devices)["cam-01"] == ("contained", None)
 
 
 def test_unregistered_targets_change_nothing(devices: Devices) -> None:
