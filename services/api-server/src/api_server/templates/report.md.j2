@@ -46,6 +46,19 @@
 > AI 生成 · 需人工复核 · 由 {{ ai.by }} 生成{% if ai.has_unverified %} · 标注“（未溯源）”的实体未能在证据中溯源{% endif %}
 
 
+{% endif %}
+{% if verdict %}
+### AI 值班员判定
+
+> AI 生成 · 需人工复核 · 由 {{ verdict.by }} 于 {{ verdict.at }} 判定{% if verdict.has_unverified %} · 标注“（未溯源）”的实体未能在调查结果中溯源{% endif %}
+
+
+{% for label, value in verdict.rows %}
+- {{ label }}：{{ value }}
+{% endfor %}
+
+{% endif %}
+{% if ai %}
 ### 摘要
 
 {{ ai.summary }}

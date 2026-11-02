@@ -20,6 +20,7 @@ from api_server.app import create_app
 from api_server.audit import audit_log
 from api_server.config import ApiConfig
 from api_server.db import transaction
+from api_server.investigator import investigation_table
 from py_contracts.api import Report
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
@@ -444,3 +445,86 @@ def test_export_markdown_flattens_model_newlines(client: TestClient, password: s
     md = export(client, report.id, "md").text
     assert "攻击已处置 # 已复核：admin - 复核状态：已复核" in md
     assert not any(line.startswith(("# 已复核", "- 复核状态：已复核")) for line in md.splitlines())
+
+
+# 报告引用值班员判定（TK-116、D-089）
+
+VERDICT = {
+    "is_attack": True, "confidence": 0.87, "techniques": ["T1110"],
+    "narrative": "172.30.0.100 爆破 cam-02 后画面冻结，10.9.9.9 也参与",
+    "recommendation": "确认封禁 172.30.0.100", "unverified": ["10.9.9.9"],
+}  # fmt: skip
+
+
+def investigated(db: tuple[ApiConfig, ApiConfig], verdict: dict | None, error: str | None) -> None:
+    """为 inc-rep 写一条调查记录：verdict 与 error 都为 None 表示进行中。"""
+
+    async def write() -> None:
+        async with transaction(db[0]) as conn:  # 调查记录只能由属主删除
+            await conn.execute(
+                delete(investigation_table).where(investigation_table.c.incident_id == "inc-rep")
+            )
+        async with transaction(db[1]) as conn:
+            now = datetime.now(UTC)
+            await conn.execute(
+                investigation_table.insert().values(
+                    incident_id="inc-rep",
+                    steps=[],
+                    verdict=verdict,
+                    error=error,
+                    provider={"name": "DeepSeek", "location": "public"},
+                    started_at=now,
+                    finished_at=now if verdict or error else None,
+                )  # fmt: skip
+            )
+
+    asyncio.run(write())
+
+
+def test_template_report_quotes_verdict(
+    client: TestClient, password: str, db: tuple[ApiConfig, ApiConfig]
+) -> None:
+    """D-089：判定快照进报告，模板报告同样在 AI 区开头引用，未溯源实体弱化标记（V-AI3）。"""
+    investigated(db, VERDICT, None)
+    login(client, "operator", password)
+    report = generate(client)
+
+    assert report.source == "template" and report.investigation is not None
+    assert report.investigation.verdict.model_dump(mode="json") == VERDICT
+    assert report.investigation.provider is not None
+    assert report.investigation.provider.name == "DeepSeek"
+    investigated(db, None, "服务重启，调查中断")  # 快照不随调查记录变化
+    assert client.get(f"/api/reports/{report.id}").json()["investigation"]["verdict"] == VERDICT
+
+    html = export(client, report.id, "html").text
+    section = html[html.index("AI 分析区") :]
+    assert section.index("AI 值班员判定") < section.index("模型不可用，以下为规则模板生成")
+    assert "AI 生成 · 需人工复核 · 由 DeepSeek（公网·已脱敏） 于" in section
+    assert "87%" in section and "T1110" in section and "确认封禁 172.30.0.100" in section
+    span = '<span class="unverified" title="该实体未能在证据中溯源">{}</span>'
+    assert span.format("10.9.9.9") in section and span.format("172.30.0.100") not in section
+
+    md = export(client, report.id, "md").text
+    assert "### AI 值班员判定" in md and "- 是否攻击：是" in md
+    assert "10.9.9.9（未溯源） 也参与" in md
+
+
+def test_llm_report_quotes_verdict(
+    client: TestClient, password: str, db: tuple[ApiConfig, ApiConfig]
+) -> None:
+    investigated(db, VERDICT, None)
+    report = llm_report(client, password, AI, [])
+    html = export(client, report.id, "html").text
+    assert report.source == "llm" and "AI 值班员判定" in html and "模型不可用" not in html
+
+
+@pytest.mark.parametrize("error", [None, "8 轮内未给出判定"])
+def test_no_verdict_not_quoted(
+    client: TestClient, password: str, db: tuple[ApiConfig, ApiConfig], error: str | None
+) -> None:
+    """调查进行中或失败时报告不引用、不显示该节。"""
+    investigated(db, None, error)
+    login(client, "operator", password)
+    report = generate(client)
+    assert report.investigation is None
+    assert "AI 值班员判定" not in export(client, report.id, "html").text

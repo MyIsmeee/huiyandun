@@ -31,6 +31,7 @@ const report = (changes: Partial<Report> = {}): Report => ({
   incident_id: "inc-1",
   facts: { incident: incident("inc-1"), devices: [], timeline: [], executions: [] },
   ai: null,
+  investigation: null,
   source: "template",
   provider_id: null,
   degraded_reason: "未启用任何模型供应商",

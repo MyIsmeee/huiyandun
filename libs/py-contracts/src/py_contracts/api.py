@@ -170,6 +170,29 @@ class Recommendation(ContractModel):
     rationale: str = Field(..., max_length=300)
 
 
+class InvestigationVerdict(ContractModel):
+    is_attack: bool
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    techniques: list[Technique]
+    narrative: str
+    recommendation: str
+    """
+    只作文字建议，不进入任何执行路径（G-03）
+    """
+    unverified: list[str]
+    """
+    无法在工具结果中溯源的实体（C-LLM-06）
+    """
+
+
+class InvestigationProvider(ContractModel):
+    name: str
+    location: Literal["internal", "public"]
+    """
+    网络位置（C-LLM-13）；public 表示发送内容已脱敏
+    """
+
+
 class VerifyResult(ContractModel):
     """
     verify() 检查真实效果的结果（DP-10）；校验前为 null
@@ -403,14 +426,6 @@ class EventBase(ContractModel):
     """
 
 
-class InvestigationProvider(ContractModel):
-    name: str
-    location: Literal["internal", "public"]
-    """
-    网络位置（C-LLM-13）；public 表示发送内容已脱敏
-    """
-
-
 class InvestigationStep(ContractModel):
     tool: str
     """
@@ -424,21 +439,6 @@ class InvestigationStep(ContractModel):
     reason: str
     """
     模型给出的本步理由
-    """
-
-
-class InvestigationVerdict(ContractModel):
-    is_attack: bool
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    techniques: list[Technique]
-    narrative: str
-    recommendation: str
-    """
-    只作文字建议，不进入任何执行路径（G-03）
-    """
-    unverified: list[str]
-    """
-    无法在工具结果中溯源的实体（C-LLM-06）
     """
 
 
@@ -662,6 +662,16 @@ class IncidentReport(ContractModel):
     只作文字建议，不进入任何执行路径（G-03）
     """
     confidence: Literal["low", "medium", "high"]
+
+
+class ReportInvestigation(ContractModel):
+    """
+    生成报告时值班员判定的快照（FR-1106）
+    """
+
+    verdict: InvestigationVerdict
+    provider: InvestigationProvider | None
+    finished_at: AwareDatetime
 
 
 class ProviderTestResult(ContractModel):
@@ -959,6 +969,10 @@ class Report(ContractModel):
     ai: ReportAi | None
     """
     AI 区；模板模式下为 null
+    """
+    investigation: ReportInvestigation | None
+    """
+    AI 区引用的值班员判定，模型与模板报告都有（D-089）；生成时调查尚未给出判定为 null
     """
     source: Literal["llm", "template"]
     provider_id: str | None

@@ -513,6 +513,8 @@ export interface components {
             facts: components["schemas"]["ReportFacts"];
             /** @description AI 区；模板模式下为 null */
             ai: components["schemas"]["ReportAi"] | null;
+            /** @description AI 区引用的值班员判定，模型与模板报告都有（D-089）；生成时调查尚未给出判定为 null */
+            investigation: components["schemas"]["ReportInvestigation"] | null;
             /** @enum {unknown} */
             source: "llm" | "template";
             provider_id: string | null;
@@ -532,6 +534,13 @@ export interface components {
             model: string;
             /** @description public 表示发送前已脱敏（C-LLM-03） */
             network: components["schemas"]["Network"];
+        };
+        /** @description 生成报告时值班员判定的快照（FR-1106） */
+        ReportInvestigation: {
+            verdict: components["schemas"]["InvestigationVerdict"];
+            provider: components["schemas"]["InvestigationProvider"] | null;
+            /** Format: date-time */
+            finished_at: string;
         };
         /** @description 事实区，全部来自结构化数据，不经过 LLM（V-AI1） */
         ReportFacts: {
