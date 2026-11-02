@@ -515,7 +515,13 @@ def test_llm_report_quotes_verdict(
     investigated(db, VERDICT, None)
     report = llm_report(client, password, AI, [])
     html = export(client, report.id, "html").text
-    assert report.source == "llm" and "AI 值班员判定" in html and "模型不可用" not in html
+    assert report.source == "llm" and "模型不可用" not in html
+    # 报告模型的说明紧贴摘要，不在判定之上，读者不会以为判定也是报告模型写的
+    section = html[html.index("AI 分析区") :]
+    label = section.index("由 本地 llama.cpp（qwen3-8b，内网） 生成")
+    assert section.index("AI 值班员判定") < label < section.index("摘要")
+    md = export(client, report.id, "md").text
+    assert md.index("### AI 值班员判定") < md.index("内网） 生成") < md.index("### 摘要")
 
 
 @pytest.mark.parametrize("error", [None, "8 轮内未给出判定"])
