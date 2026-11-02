@@ -12,7 +12,13 @@ from typing import Any, Literal
 from jinja2 import Environment, PackageLoader
 from markupsafe import Markup, escape
 
-from py_contracts.api import Report, ReportAi, ReportFacts, ReportTimelineEntry
+from py_contracts.api import (
+    Report,
+    ReportAi,
+    ReportFacts,
+    ReportInvestigation,
+    ReportTimelineEntry,
+)
 
 SEVERITY = {"critical": "严重", "high": "高", "medium": "中", "low": "低"}
 MODE = {"enforce": "执行", "monitor": "仅监测"}
@@ -91,6 +97,23 @@ def _ai(ai: ReportAi, fmt: Literal["html", "md"]) -> dict[str, Any]:
             _marked(f"{r.action}：{r.rationale}", u, fmt) for r in c.recommendations
         ],
         "confidence": CONFIDENCE[c.confidence],
+        "has_unverified": bool(u),
+    }
+
+
+def _verdict(investigation: ReportInvestigation, fmt: Literal["html", "md"]) -> dict[str, Any]:
+    """AI 区开头引用的值班员判定（D-089），未溯源实体按工具结果回溯，与面板判定卡一致。"""
+    v, p, u = investigation.verdict, investigation.provider, investigation.verdict.unverified
+    return {
+        "by": f"{p.name}（{NETWORK[p.location]}）" if p else "未知供应商",
+        "at": utc(investigation.finished_at),
+        "rows": [
+            ("是否攻击", "是" if v.is_attack else "否"),
+            ("可信度", f"{round(v.confidence * 100)}%"),
+            ("ATT&CK 手法", _marked("、".join(t.root for t in v.techniques) or "无", u, fmt)),
+            ("叙述", _marked(v.narrative, u, fmt)),
+            ("建议（仅作文字建议，系统不会据此执行任何操作）", _marked(v.recommendation, u, fmt)),
+        ],
         "has_unverified": bool(u),
     }
 
@@ -189,5 +212,6 @@ def render(report: Report, fmt: Literal["html", "md"]) -> str:
             executions=executions,
             narrative=_narrative(facts, executions),
             ai=_ai(report.ai, fmt) if report.ai else None,
+            verdict=_verdict(report.investigation, fmt) if report.investigation else None,
         )
     )

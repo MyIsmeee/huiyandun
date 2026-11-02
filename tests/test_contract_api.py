@@ -211,7 +211,7 @@ def report_sample() -> dict:
     return {
         "id": "rep-01", "incident_id": "inc-0001", "facts": facts, "source": "template",
         "degraded_reason": "未启用任何模型供应商", "created_at": "2026-10-26T08:00:05Z",
-    } | dict.fromkeys(["ai", "provider_id", "reviewed_by", "reviewed_at"])  # fmt: skip
+    } | dict.fromkeys(["ai", "investigation", "provider_id", "reviewed_by", "reviewed_at"])  # fmt: skip
 
 
 def test_template_report_has_null_ai() -> None:
