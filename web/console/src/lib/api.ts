@@ -78,6 +78,8 @@ export const api = {
     request<Schemas["Report"]>("POST", `/api/reports/${encodeURIComponent(reportId)}/review`),
   /** 模型供应商（FR-601～604），只有 admin 可用；顺序即故障转移顺序 */
   listProviders: () => request<Schemas["LlmProviderList"]>("GET", "/api/llm/providers"),
+  createProvider: (body: Schemas["LlmProviderCreate"]) =>
+    request<Schemas["LlmProvider"]>("POST", "/api/llm/providers", body),
   updateProvider: (id: string, body: Schemas["LlmProviderUpdate"]) =>
     request<Schemas["LlmProvider"]>("PATCH", `/api/llm/providers/${encodeURIComponent(id)}`, body),
   deleteProvider: (id: string) => request<undefined>("DELETE", `/api/llm/providers/${encodeURIComponent(id)}`),

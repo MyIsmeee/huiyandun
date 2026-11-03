@@ -136,6 +136,15 @@ describe("ProviderPage", () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith("p-1"));
   });
 
+  it("添加与编辑打开对话框，编辑时带出该供应商（FR-601）", async () => {
+    render(<ProviderPage onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "添加" }));
+    expect(screen.getByRole("dialog", { name: "添加供应商" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    fireEvent.click(within(card("DeepSeek 官方")).getByRole("button", { name: "编辑" }));
+    expect((screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement).value).toBe("DeepSeek 官方");
+  });
+
   it("服务端拒绝变更时显示原因", async () => {
     vi.spyOn(api, "updateProvider").mockRejectedValue(new ApiError(404, "供应商不存在"));
     render(<ProviderPage onClose={() => {}} />);

@@ -11,6 +11,7 @@ import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
+import { type EditorForm, type Pending, ProviderEditorView } from "../../../src/panels/ProviderEditor/ProviderEditor";
 import { type Provider, type ProviderLoad, ProviderListView } from "../../../src/panels/ProviderList/ProviderList";
 import { type Report, ReportBarView, type ReportRequest } from "../../../src/panels/ReportBar/ReportBar";
 import { planView } from "../../../src/scene/layout";
@@ -139,7 +140,17 @@ const providerList = (load: ProviderLoad) => (
     <ProviderListView
       load={load} busy={false} testing={null} notice={null} confirm={null}
       onClose={() => {}} onRetry={() => {}} onBlockPublic={() => {}} onToggle={() => {}} onTest={() => {}}
-      onDelete={() => {}} onReorder={() => {}} onConfirm={() => {}} onCancel={() => {}}
+      onDelete={() => {}} onReorder={() => {}} onConfirm={() => {}} onCancel={() => {}} onAdd={() => {}} onEdit={() => {}}
+    />
+  </div>
+); // prettier-ignore
+const EDIT_FORM: EditorForm = { ...LOCAL_PROVIDER, api_key: "", network: "auto" };
+// 对话框为 fixed 定位：transform 使其以外框为定位基准，截图只含对话框
+const providerEditor = (form: EditorForm, provider: Provider | null, pending: Pending, message: string | null) => (
+  <div className="h-[34rem] w-[40rem] [transform:translateZ(0)]">
+    <ProviderEditorView
+      form={form} provider={provider} pending={pending} message={message}
+      onChange={() => {}} onPreset={() => {}} onSave={() => {}} onClose={() => {}}
     />
   </div>
 ); // prettier-ignore
@@ -231,6 +242,12 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     empty: providerList({ status: "ready", providers: [], blockPublic: false }),
     loading: providerList({ status: "loading" }),
     error: providerList({ status: "failed", message: "无法连接服务器，请重试" }),
+  },
+  ProviderEditor: {
+    new: providerEditor({ ...EDIT_FORM, name: "llama.cpp", base_url: "http://127.0.0.1:8080/v1", model: "" }, null, null, null),
+    edit: providerEditor(EDIT_FORM, { ...LOCAL_PROVIDER, api_key_last4: "3f9a" }, null, null),
+    saving: providerEditor(EDIT_FORM, LOCAL_PROVIDER, "save", null),
+    error: providerEditor(EDIT_FORM, LOCAL_PROVIDER, null, "地址须为 http:// 或 https:// 开头的 OpenAI 兼容地址"),
   },
 };
 
