@@ -91,7 +91,7 @@ def tools(history: History, tmp_path: Path) -> Tools:
         )
         + "\n"
     )
-    return Tools(history, Devices(load(SITE).devices), log, TECHNIQUES)
+    return Tools(history, Devices(load(SITE).devices), log, TECHNIQUES, tmp_path / "behavior.json")
 
 
 def run(tools: Tools, tool: str, args: dict[str, Any]) -> investigation_tools.ToolResult:
@@ -152,9 +152,43 @@ def test_query_sessions_aggregates_by_peer(tools: Tools) -> None:
 
 
 def test_query_sessions_without_log(history: History, tmp_path: Path) -> None:
-    tools = Tools(history, Devices(load(SITE).devices), tmp_path / "missing.log", TECHNIQUES)
+    tools = Tools(
+        history, Devices(load(SITE).devices), tmp_path / "missing.log", TECHNIQUES, tmp_path / "b"
+    )
     r = run(tools, "query_sessions", {"ip": ATTACKER})
     assert r.data == {"available": False} and r.summary == "会话日志不可用"
+
+
+def test_get_baseline(tools: Tools, tmp_path: Path) -> None:
+    """读 correlator 存盘的行为模型状态（TK-115）：学习进度、见过的访问方、各特征均值与标准差。"""
+    assert run(tools, "get_baseline", {"device_id": "cam-02"}).summary == "行为基线不可用"
+    state = {
+        "window_s": 30,
+        "learn_windows": 20,
+        "devices": {
+            "cam-02": {
+                "learned": 40,
+                "seen": ["172.30.0.13"],
+                "history": [],
+                "baseline": {"会话数": {"mean": 2.1, "std": 0.6}},
+            },
+            "cam-01": {"learned": 3, "seen": [], "history": [], "baseline": {}},
+        },
+    }
+    (tmp_path / "behavior.json").write_text(json.dumps(state), encoding="utf-8")
+    r = run(tools, "get_baseline", {"device_id": "cam-02"})
+    assert r.data == {
+        "window_s": 30,
+        "learned_windows": 40,
+        "learning": False,
+        "known_peers_total": 1,
+        "known_peers": ["172.30.0.13"],
+        "features": {"会话数": {"mean": 2.1, "std": 0.6}},
+    }
+    assert r.summary == "已学 40 个窗口（每窗口 30 s），见过的访问方 1 个：172.30.0.13"
+    learning = run(tools, "get_baseline", {"device_id": "cam-01"})
+    assert learning.summary == "基线学习中 3/20，见过的访问方 0 个"
+    assert run(tools, "get_baseline", {"device_id": "cam-99"}).data == {"found": False}
 
 
 def test_lookup_technique(tools: Tools) -> None:
