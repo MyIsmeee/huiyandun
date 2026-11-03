@@ -1,5 +1,6 @@
-# 自建 RTSP 测试目标（DP-09、C-SEC-11）：读取需鉴权，但不配置任何可用账号——对每次尝试都回 401，
-# 这正是 HYD-NET-0001 的触发条件。配置中不含任何口令或摘要（G-14）。无真实码流，目标只负责拒绝认证
+# 自建 RTSP 测试目标（DP-09、C-SEC-11）：读取需鉴权，但不配置任何账号口令——攻击方的每次尝试都回 401，
+# 这正是 HYD-NET-0001 的触发条件。配置中不含任何口令或摘要（G-14）。合法录像机 nvr-sim 按来源地址放行
+# （TK-115），拉取本机生成的测试图案码流，形成设备行为基线
 logLevel: info
 
 # 只开 RTSP；API 只供容器内健康检查
@@ -11,11 +12,20 @@ webrtc: false
 srt: false
 rtspTransports: [tcp]
 
-# 唯一授权项是容器内健康检查访问 API；RTSP 读取无任何账号可用，远端一律 401
+# 容器内：健康检查访问 API、测试图案推流；远端只有 nvr-sim 的地址可读，其余一律 401
 authInternalUsers:
   - user: any
     ips: ["127.0.0.1", "::1"]
-    permissions: [{ action: api }]
+    permissions: [{ action: api }, { action: publish, path: cam }]
+  - user: any
+    ips: ["172.30.0.13"]  # nvr-sim，与 compose 一致
+    permissions: [{ action: read, path: cam }]
 
 paths:
   cam:
+    # 测试图案（ffmpeg 内置生成，不含任何素材）；$RTSP_PORT、$MTX_PATH 由 mediamtx 展开
+    runOnInit: >-
+      ffmpeg -hide_banner -loglevel error -re -f lavfi -i testsrc2=size=640x360:rate=10
+      -c:v libx264 -preset ultrafast -tune zerolatency -g 20 -pix_fmt yuv420p
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+    runOnInitRestart: yes

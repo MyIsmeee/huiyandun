@@ -20,12 +20,13 @@ import yaml
 
 ACTIONS = {
     "start_attack": "target",
+    "start_slow_attack": "target",
     "freeze_camera": "camera",
     "replay_camera": "camera",
     "restore_camera": "camera",
 }
 STEP_KEYS = {"name", "at", "do", "expect", "note"}
-EVENT_EXPECT_KEYS = {"subject", "match", "within_s"}
+EVENT_EXPECT_KEYS = {"subject", "match", "within_s", "absent"}
 TIMEOUT_S = 120  # 单条 docker compose 命令的上限（CD-04）
 # 定格帧推流：H.264 全帧内编码、固定量化，解码后逐帧相同（D-080）；$RTSP_PORT、$MTX_PATH 由 mediamtx 展开
 FREEZE_CMD = (
@@ -41,6 +42,7 @@ STREAM_CMD = (
 # 重放 2 分钟前的片段：须在 FR-302 的 30～180 s 内，且是视觉引擎看到过的画面（不落在冻结期间）
 REPLAY_BACK_S = 120
 MEDIAMTX_API = "http://127.0.0.1:9997/v3/config/paths/replace/"  # 只监听容器内
+BEHAVIOR_STATE = "/var/lib/correlator/behavior.json"  # 行为模型存盘状态，与 correlator 的配置一致
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,8 @@ def load(path: Path) -> Scenario:
             _check_keys(where, expect, EVENT_EXPECT_KEYS)
             if not {"subject", "within_s"} <= set(expect):
                 raise ValueError(f"{where}：expect 须有 subject 与 within_s")
+            if expect.get("absent", True) is not True:
+                raise ValueError(f"{where}：expect.absent 只能为 true")
         if expect is not None and expect.get("attack", "blocked") != "blocked":
             raise ValueError(f"{where}：expect.attack 只能为 blocked")
         if expect is not None and "attack" in expect and (do or {}).get("action") != "start_attack":
@@ -180,6 +184,8 @@ class Runner:
         self._compose = compose
         site = yaml.safe_load(site_file.read_text(encoding="utf-8"))
         self.streams = {c["id"]: c["stream"] for c in site["cameras"]}
+        attack = yaml.safe_load((site_file.parent / "attack-sim.yaml").read_text(encoding="utf-8"))
+        self.slow = attack["slow"]
 
     def compose(self, *args: str) -> str:
         return subprocess.run(
@@ -208,6 +214,14 @@ class Runner:
                 self.compose(
                     "-f", override.name, "up", "-d", "--no-deps", "--wait", "playbook-executor"
                 )
+        # 行为模型从预先学好的基线快照开始（TK-115）：上一轮的攻击不留在状态里，全新环境也不必等学习期。
+        # 先停下再删，避免窗口结束时又写回状态
+        self.compose("stop", "correlator")
+        self.compose(
+            "run", "--rm", "--no-deps", "-T", "--entrypoint", "rm", "correlator", "-f",
+            BEHAVIOR_STATE,
+        )  # fmt: skip
+        self.compose("up", "-d", "--no-deps", "--wait", "correlator")
         # 视觉引擎停到素材从头播放之后再启动：只看到本轮素材，参考画面取素材开头（D-090）；否则开场前看到的
         # 旧画面会留在重放历史里，素材播到同一位置时被判为重放（TK-114）。同时清除上次中断遗留的冻结
         self.compose("stop", "vision-engine")
@@ -228,6 +242,14 @@ class Runner:
         if action == "start_attack":
             # 攻击方只在 attack-net 内打 rtsp-target（DP-09）；输出供 expect.attack 判断
             return self.compose("run", "--rm", "--no-deps", "-T", "attack-sim")
+        if action == "start_slow_attack":
+            # 低速模式：低于 HYD-NET-0001 阈值（FR-205），参数登记于 attack-sim.yaml
+            return self.compose(
+                "run", "--rm", "--no-deps", "-T",
+                "-e", f"HYD_ATTEMPTS={self.slow['attempts']}",
+                "-e", f"HYD_INTERVAL_S={self.slow['interval_s']}",
+                "attack-sim",
+            )  # fmt: skip
         path = self.streams[do["camera"]]
         if action == "freeze_camera":
             # 定格帧取自同一路当前画面（FR-307）
@@ -287,10 +309,14 @@ def run(scenario: Scenario, site_file: Path, compose: list[str], from_step: int)
                     at,
                     at + step.expect["within_s"],
                 )
-                ok = hit is not None
-                waited = (
-                    f"{hit - at:.1f} s 收到" if hit else f"{step.expect['within_s']} s 内未收到"
-                )
+                if step.expect.get("absent"):
+                    ok = hit is None
+                    waited = f"{hit - at:.1f} s 收到，不应出现" if hit else "未出现"
+                else:
+                    ok = hit is not None
+                    waited = (
+                        f"{hit - at:.1f} s 收到" if hit else f"{step.expect['within_s']} s 内未收到"
+                    )
                 detail = f"{step.expect['subject']} {waited}"
             failed += not ok
             print(f"    {'通过' if ok else '失败'}：{detail}", flush=True)

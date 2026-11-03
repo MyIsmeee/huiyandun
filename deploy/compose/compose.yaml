@@ -119,6 +119,10 @@ services:
       - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 设备登记表（FR-203）
       - ../../rules/correlator:/etc/hyd/rules:ro  # 关联规则（HYD-PLAN-007 §4）
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro  # ATT&CK 精简查表（D-070）
+      # 由 nvr-sim 正常流量学好的基线快照：没有存盘状态时加载（剧本开场会清除状态，见 100-demo-run.md）
+      - ../../demo/scenarios/behavior-baseline.json:/etc/hyd/behavior-baseline.json:ro
+    environment:
+      HYD_BEHAVIOR_BASELINE_FILE: /etc/hyd/behavior-baseline.json
     depends_on: { nats: { condition: service_healthy } }
     networks: [core-net]
     restart: unless-stopped  # 进程退出后自动拉起：告警归一化与关联不因一次错误停止
@@ -357,12 +361,43 @@ services:
       HYD_USER: admin
       HYD_PASSWORD: wrong-password
       HYD_ATTEMPTS: "6"
+      HYD_INTERVAL_S: "0"  # 低速模式由 scenario-runner 改为 20（每分钟 3 次）
     depends_on: { rtsp-target: { condition: service_healthy } }
     networks:
       attack-net:
         ipv4_address: 172.30.0.100
     read_only: true
     cap_drop: [ALL]
+
+  # 合法录像机（TK-115、FR-205）：每 15 s 向 rtsp-target 拉流 5 s，形成设备行为基线。rtsp-target 按来源地址
+  # 放行它，不用口令（G-14）；地址在白名单（172.30.0.0/28）内，不会被封禁。复用 mediamtx 镜像中的 ffmpeg，
+  # 不监听任何端口，attack-sim 在网络层够得到它也无从下手
+  nvr-sim:
+    image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
+    profiles: [demo]
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        while :; do ffmpeg -hide_banner -loglevel error -rtsp_transport tcp
+        -i rtsp://rtsp-target:8554/cam -t 5 -c copy -f null - && touch /tmp/pulled; sleep 10; done
+    user: "65534:65534"
+    depends_on: { rtsp-target: { condition: service_healthy } }
+    networks:
+      attack-net:
+        ipv4_address: 172.30.0.13
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      # 最近 1 分钟内成功拉过流
+      test: ["CMD-SHELL", "find /tmp/pulled -mmin -1 | grep -q ."]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+      start_interval: 5s
 
   # 剧本观测端（TK-100）：只在 make demo-run 时由 docker compose run 启动，订阅事件逐行写到标准输出，
   # 供宿主机上的 tools/dev/scenario_runner.py 断言；剧本结束即退出。复用 correlator 镜像（事件总线客户端），

@@ -1,7 +1,7 @@
 # 主剧本（HYD-DEP-005 §4.4、DM-11）：make demo-run SCENARIO=main 由 tools/dev/scenario_runner.py 执行。
 # at 为距开场的 分:秒；expect 的窗口为 [at, at + within_s]，match 为事件字段（数组字段取包含）。
-# 当前只含已具备的主链路（D-060、D-080）与画面重放（TK-114）：低速攻击、AI 值班员、供应商、零出站、存证
-# 随 TK-115、116、060、090、080 完成时追加。连续执行时，上一轮结束后至少等 3 分钟再开始：
+# 当前只含已具备的主链路（D-060、D-080）、画面重放（TK-114）与低速攻击（TK-115，放在末尾，不改动前面各步的
+# 时刻）：AI 值班员、供应商、零出站、存证随 TK-116、060、090、080 完成时追加。开场行为模型加载基线快照。连续执行时，上一轮结束后至少等 3 分钟再开始：
 # 同一规则与设备的关联事件 5 分钟内去重，攻击持续期间的命中（含第 10 步的重放）顺延去重期（D-067）
 id: main
 overrides: { playbook_ttl_s: 150 }  # FR-404
@@ -56,3 +56,19 @@ steps:
   - name: TTL 150 s 到期，封禁自动撤销
     at: "3:30"
     expect: { subject: hyd.playbook.execution.v1, match: { device_ids: cam-02, state: rolled_back }, within_s: 60 }
+  # 封禁撤销后（上一步等到撤销才结束）再试：4 次、每 20 s 一次，任意 60 s 内至多 3 次，低于 HYD-NET-0001 的
+  # 5 次/60 s；行为模型连续两个 30 s 窗口偏离才告警，实测见 109-model-driven-security.md §3.3 B
+  - name: attack-sim 低速尝试，行为模型发现陌生访问方
+    at: "4:00"
+    do: { action: start_slow_attack, target: cam-02 }
+    expect:
+      subject: hyd.security.alert.v1
+      match: { device_id: cam-02, category: behavior_anomaly, source: model }
+      within_s: 115
+  - name: 低速尝试低于规则阈值，规则不告警
+    at: "4:00"
+    expect:
+      subject: hyd.security.alert.v1
+      match: { device_id: cam-02, rule_id: HYD-NET-0001 }
+      within_s: 115
+      absent: true
