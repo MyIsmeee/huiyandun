@@ -1,8 +1,9 @@
-import { ArrowLeft, Check, Circle, CircleAlert, CircleDot, Clock, Globe, GripVertical, House, Minus, X } from "lucide-react";
+import { ArrowLeft, Check, Circle, CircleAlert, CircleDot, Clock, Globe, GripVertical, House, Minus, Plus, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
 import { formatTime } from "../ConnectionStatus/ConnectionStatus";
+import { ProviderEditor } from "../ProviderEditor/ProviderEditor";
 
 export type Provider = components["schemas"]["LlmProvider"];
 export type ProviderLoad =
@@ -26,6 +27,8 @@ export function ProviderPage(props: { onClose: () => void }) {
   const [testing, setTesting] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  // provider 为 null 即新建
+  const [editing, setEditing] = useState<{ provider: Provider | null } | null>(null);
 
   const reload = useCallback(
     () =>
@@ -85,6 +88,13 @@ export function ProviderPage(props: { onClose: () => void }) {
         );
       }}
       onCancel={() => setConfirm(null)}
+      onAdd={() => setEditing({ provider: null })}
+      onEdit={(p) => setEditing({ provider: p })}
+      editor={
+        editing && (
+          <ProviderEditor provider={editing.provider} onClose={() => setEditing(null)} onSaved={() => void reload()} />
+        )
+      }
     />
   );
 }
@@ -104,6 +114,9 @@ export function ProviderListView(props: {
   onReorder: (ids: string[]) => void;
   onConfirm: (confirm: Confirm) => void;
   onCancel: () => void;
+  onAdd: () => void;
+  onEdit: (provider: Provider) => void;
+  editor?: ReactNode;
 }) {
   const { load, busy, notice, confirm } = props;
   return (
@@ -124,6 +137,10 @@ export function ProviderListView(props: {
             className="ml-auto"
           />
         )}
+        <button type="button" onClick={props.onAdd} className={`${button} flex items-center gap-1`}>
+          <Plus aria-hidden className="size-4" />
+          添加
+        </button>
       </header>
       <p className="text-fg-2">按顺序调用，前一个失败自动使用下一个。拖动 ⠿ 调整顺序。</p>
       {notice && <Notice>{notice}</Notice>}
@@ -161,6 +178,7 @@ export function ProviderListView(props: {
           </div>
         </div>
       )}
+      {props.editor}
     </section>
   );
 }
@@ -234,6 +252,9 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
                   className={button}
                 >
                   {testing === p.id ? "测试中…" : "测试"}
+                </button>
+                <button type="button" onClick={() => props.onEdit(p)} className={button}>
+                  编辑
                 </button>
                 <button type="button" onClick={() => props.onDelete(p)} disabled={busy} className={button}>
                   删除

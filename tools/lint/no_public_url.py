@@ -46,6 +46,15 @@ INERT_TEXT = (
     "https://github.com/pmndrs/react-three-fiber/issues`",
     "https://opencollective.com/react-three-fiber`",
 )
+# 模型供应商页预设的公网供应商地址（01 §5.3、D-096）：只作为表单默认值填入，浏览器不访问；
+# 只有管理员保存并确认启用后由 llm-gateway 调用（G-02）。按地址前缀放行，同一主机的其他路径照常报告
+PROVIDER_PRESETS = (
+    "https://api.deepseek.com/v1",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "https://api.moonshot.cn/v1",
+    "https://open.bigmodel.cn/api/paas/v4",
+    "https://api.siliconflow.cn/v1",
+)
 # 不会解析到公网的保留域名：RFC 2606、RFC 6761、ICANN .internal、mDNS .local
 RESERVED_SUFFIXES = (".localhost", ".local", ".internal", ".test", ".example", ".invalid")
 EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")
@@ -117,7 +126,7 @@ def main(args: list[str]) -> int:
         hit
         for path in (paths if args else git_files())
         if path.is_file() and not any(fnmatch(path.as_posix(), e) for e in EXCLUDED)
-        for hit in scan(path, NAMESPACES + INERT_TEXT if args else NAMESPACES)
+        for hit in scan(path, NAMESPACES + PROVIDER_PRESETS + (INERT_TEXT if args else ()))
     ]
     for hit in hits:
         print(hit)
