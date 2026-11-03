@@ -13,6 +13,8 @@ const COMPONENTS = {
   AiInvestigation: ["normal", "running", "unavailable", "empty", "loading", "error", "disconnected"],
   // 报告不随推送变化，无断线态；空态为尚未生成
   ReportBar: ["empty", "loading", "normal", "reviewed", "error"],
+  // 只经 REST 读取、不随推送变化，无断线态；failing 为含失败项，blocked 为全局禁止公网
+  ProviderList: ["normal", "failing", "blocked", "empty", "loading", "error"],
 };
 
 for (const [component, states] of Object.entries(COMPONENTS)) {

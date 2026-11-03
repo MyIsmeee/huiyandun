@@ -1,14 +1,16 @@
-import { CircleAlert, Clock, LogOut, ShieldCheck } from "lucide-react";
+import { Bot, CircleAlert, Clock, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Site } from "../../lib/api";
 import { SceneViewport } from "../../scene/SceneViewport";
 import { connect, useConnection } from "../../store/connection";
 import { useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
+import { canManageProviders, useSession } from "../../store/session";
 import { AlertList } from "../AlertList/AlertList";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
 import { type KpiData, KpiTile } from "../KpiTile/KpiTile";
+import { ProviderPage } from "../ProviderList/ProviderList";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
 // 指标尚无数据来源，由后续任务接入
@@ -30,6 +32,8 @@ const KPIS = [
 export function Shell(props: { site: Site; onLogout: () => Promise<void>; onRejected: () => void }) {
   const { site, onLogout, onRejected } = props;
   const [logout, setLogout] = useState<"idle" | "pending" | "failed">("idle");
+  const [providers, setProviders] = useState(false);
+  const admin = canManageProviders(useSession((s) => s.role));
   const { open, connecting, lastFrameAt } = useConnection();
   const offline = !open && !connecting;
   useEffect(() => connect(onRejected), [onRejected]);
@@ -72,6 +76,15 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
             </p>
           )}
           <ThemeToggle />
+          {admin && (
+            <button
+              onClick={() => setProviders(true)}
+              className="flex h-9 items-center gap-2 rounded-full border border-line px-3 text-sm text-fg-2 transition-colors hover:bg-raised hover:text-fg"
+            >
+              <Bot aria-hidden className="size-4" />
+              模型供应商
+            </button>
+          )}
           <button
             onClick={handleLogout}
             disabled={logout === "pending"}
@@ -122,6 +135,13 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         <h2 className="font-semibold">攻击链</h2>
         <p className="m-auto text-sm text-fg-3">无活跃攻击链</p>
       </section>
+
+      {/* 盖在主界面之上而不替换它：场景与推送保持运行，返回时无需重新加载 */}
+      {admin && providers && (
+        <div className="fixed inset-0 z-10 overflow-auto bg-page">
+          <ProviderPage onClose={() => setProviders(false)} />
+        </div>
+      )}
     </div>
   );
 }

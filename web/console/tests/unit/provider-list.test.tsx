@@ -83,12 +83,14 @@ describe("ProviderPage", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("全局禁止公网时公网卡片置灰并注明原因，不可启用（V-M2）", async () => {
+  it("全局禁止公网时公网卡片置灰并注明原因，不可启用、不可测试（V-M2、D-085）", async () => {
     serve([LOCAL, PUBLIC], true);
     render(<ProviderPage onClose={() => {}} />);
-    const remote = within(await screen.findByText("DeepSeek 官方").then((e) => e.closest("li") as HTMLElement));
+    await screen.findByText("DeepSeek 官方");
+    const remote = within(card("DeepSeek 官方"));
     expect(remote.getByText("已全局禁止公网供应商")).toBeTruthy();
     expect((remote.getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
+    expect((remote.getByRole("button", { name: "测试" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("switch", { name: "禁止公网供应商" }).getAttribute("aria-checked")).toBe("true");
   });
 
@@ -98,6 +100,40 @@ describe("ProviderPage", () => {
     fireEvent.click(await screen.findByRole("switch", { name: "禁止公网供应商" }));
     await waitFor(() => expect(api.listProviders).toHaveBeenCalledTimes(2));
     expect(settings).toHaveBeenCalledWith({ block_public: true });
+  });
+
+  it("拖到另一张卡上即占据它的位置，提交全部顺序（FR-603）", async () => {
+    const reorder = vi.spyOn(api, "reorderProviders").mockResolvedValue(undefined);
+    render(<ProviderPage onClose={() => {}} />);
+    await screen.findByText("供应商 p-1");
+    fireEvent.dragStart(card("DeepSeek 官方"));
+    fireEvent.drop(card("供应商 p-1"));
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith(["p-2", "p-1"]));
+  });
+
+  it("测试连接期间按钮显示测试中，完成后重新读取（FR-602）", async () => {
+    let finish = () => {};
+    const test = vi.spyOn(api, "testProvider").mockReturnValue(
+      new Promise((resolve) => (finish = () => resolve(LOCAL.last_test as TestResult))),
+    );
+    render(<ProviderPage onClose={() => {}} />);
+    await screen.findByText("供应商 p-1");
+    fireEvent.click(within(card("供应商 p-1")).getByRole("button", { name: "测试" }));
+    expect(screen.getByRole("button", { name: "测试中…" })).toBeTruthy();
+    finish();
+    await waitFor(() => expect(api.listProviders).toHaveBeenCalledTimes(2));
+    expect(test).toHaveBeenCalledWith(expect.objectContaining({ id: "p-1", timeout_s: 60 }));
+  });
+
+  it("删除须确认（FR-601）", async () => {
+    const remove = vi.spyOn(api, "deleteProvider").mockResolvedValue(undefined);
+    render(<ProviderPage onClose={() => {}} />);
+    await screen.findByText("供应商 p-1");
+    fireEvent.click(within(card("供应商 p-1")).getByRole("button", { name: "删除" }));
+    expect(screen.getByRole("dialog", { name: "删除供应商" }).textContent).toContain("删除供应商“供应商 p-1”？");
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("p-1"));
   });
 
   it("服务端拒绝变更时显示原因", async () => {

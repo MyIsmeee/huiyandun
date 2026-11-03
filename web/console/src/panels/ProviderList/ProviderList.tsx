@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Circle, CircleAlert, CircleDot, Clock, Globe, House, Minus, X } from "lucide-react";
+import { ArrowLeft, Check, Circle, CircleAlert, CircleDot, Clock, Globe, GripVertical, House, Minus, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -9,7 +9,7 @@ export type ProviderLoad =
   | { status: "loading" }
   | { status: "failed"; message: string }
   | { status: "ready"; providers: Provider[]; blockPublic: boolean };
-export type Confirm = { kind: "enable"; provider: Provider };
+export type Confirm = { kind: "enable" | "delete"; provider: Provider };
 
 const errorMessage = (e: unknown) => (e instanceof ApiError ? e.message : "无法连接服务器，请重试");
 const host = (url: string) => (URL.canParse(url) ? new URL(url).host : url);
@@ -18,11 +18,12 @@ const button = "h-8 rounded-full border border-line px-3 transition-colors hover
 
 /**
  * 模型供应商页（04 §7.1），只对 admin 渲染入口（C-FE-07）。每次变更后重新读取列表：
- * 启用、全局禁止公网的结果以服务端为准（如开启禁止公网时服务端同时停用全部公网供应商）。
+ * 启用、排序、全局禁止公网的结果以服务端为准（如开启禁止公网时服务端同时停用全部公网供应商）。
  */
 export function ProviderPage(props: { onClose: () => void }) {
   const [load, setLoad] = useState<ProviderLoad>({ status: "loading" });
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
@@ -38,8 +39,7 @@ export function ProviderPage(props: { onClose: () => void }) {
     void reload();
   }, [reload]);
 
-  async function change(action: () => Promise<unknown>) {
-    setBusy(true);
+  async function run(action: () => Promise<unknown>) {
     setNotice(null);
     try {
       await action();
@@ -47,13 +47,23 @@ export function ProviderPage(props: { onClose: () => void }) {
       setNotice(errorMessage(e));
     }
     await reload();
+  }
+  async function change(action: () => Promise<unknown>) {
+    setBusy(true);
+    await run(action);
     setBusy(false);
+  }
+  async function test(provider: Provider) {
+    setTesting(provider.id);
+    await run(() => api.testProvider(provider));
+    setTesting(null);
   }
 
   return (
     <ProviderListView
       load={load}
       busy={busy}
+      testing={testing}
       notice={notice}
       confirm={confirm}
       onClose={props.onClose}
@@ -65,9 +75,14 @@ export function ProviderPage(props: { onClose: () => void }) {
           ? setConfirm({ kind: "enable", provider: p })
           : void change(() => api.updateProvider(p.id, { enabled: !p.enabled }))
       }
+      onTest={(p) => void test(p)}
+      onDelete={(p) => setConfirm({ kind: "delete", provider: p })}
+      onReorder={(ids) => void change(() => api.reorderProviders(ids))}
       onConfirm={(c) => {
         setConfirm(null);
-        void change(() => api.updateProvider(c.provider.id, { enabled: true }));
+        void change(() =>
+          c.kind === "enable" ? api.updateProvider(c.provider.id, { enabled: true }) : api.deleteProvider(c.provider.id),
+        );
       }}
       onCancel={() => setConfirm(null)}
     />
@@ -77,12 +92,16 @@ export function ProviderPage(props: { onClose: () => void }) {
 export function ProviderListView(props: {
   load: ProviderLoad;
   busy: boolean;
+  testing: string | null;
   notice: string | null;
   confirm: Confirm | null;
   onClose: () => void;
   onRetry: () => void;
   onBlockPublic: (on: boolean) => void;
   onToggle: (provider: Provider) => void;
+  onTest: (provider: Provider) => void;
+  onDelete: (provider: Provider) => void;
+  onReorder: (ids: string[]) => void;
   onConfirm: (confirm: Confirm) => void;
   onCancel: () => void;
 }) {
@@ -106,7 +125,7 @@ export function ProviderListView(props: {
           />
         )}
       </header>
-      <p className="text-fg-2">按顺序调用，前一个失败自动使用下一个。</p>
+      <p className="text-fg-2">按顺序调用，前一个失败自动使用下一个。拖动 ⠿ 调整顺序。</p>
       {notice && <Notice>{notice}</Notice>}
       {load.status === "loading" && <p className="text-fg-3">读取中…</p>}
       {load.status === "failed" && (
@@ -123,18 +142,20 @@ export function ProviderListView(props: {
           <div
             role="dialog"
             aria-modal
-            aria-label="启用公网供应商"
+            aria-label={confirm.kind === "enable" ? "启用公网供应商" : "删除供应商"}
             className="flex w-96 flex-col gap-4 rounded-2xl border border-line bg-panel p-4"
           >
             <p>
-              {`启用公网供应商“${confirm.provider.name}”？日志与告警内容将脱敏后发送至 ${host(confirm.provider.base_url)}；视频、图片、流量包不会发送。`}
+              {confirm.kind === "enable"
+                ? `启用公网供应商“${confirm.provider.name}”？日志与告警内容将脱敏后发送至 ${host(confirm.provider.base_url)}；视频、图片、流量包不会发送。`
+                : `删除供应商“${confirm.provider.name}”？`}
             </p>
             <p className="flex justify-end gap-2">
               <button type="button" onClick={props.onCancel} className={button}>
                 取消
               </button>
               <button type="button" onClick={() => props.onConfirm(confirm)} className={button}>
-                确认启用
+                {confirm.kind === "enable" ? "确认启用" : "确认删除"}
               </button>
             </p>
           </div>
@@ -145,7 +166,22 @@ export function ProviderListView(props: {
 }
 
 function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Provider[]; blockPublic: boolean }) {
-  const { providers, blockPublic, busy } = props;
+  const { providers, blockPublic, busy, testing } = props;
+  const [dragged, setDragged] = useState<string | null>(null);
+
+  // 拖到某张卡上即占据它的位置（V-M1）
+  function drop(target: string) {
+    setDragged(null);
+    if (dragged === null || dragged === target) return;
+    const ids = providers.map((p) => p.id).filter((id) => id !== dragged);
+    ids.splice(
+      providers.findIndex((p) => p.id === target),
+      0,
+      dragged,
+    );
+    props.onReorder(ids);
+  }
+
   return (
     <ol aria-label="供应商" className="flex flex-col gap-2">
       {providers.length === 0 && <li className="text-fg-3">尚未添加供应商，报告使用规则模板生成</li>}
@@ -154,9 +190,14 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
         return (
           <li
             key={p.id}
+            draggable={!busy}
+            onDragStart={() => setDragged(p.id)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => drop(p.id)}
             className={`flex flex-col gap-1 rounded-xl border border-line bg-panel p-3 ${blocked ? "opacity-50" : ""}`}
           >
             <div className="flex items-center gap-2">
+              <GripVertical aria-hidden className="size-4 shrink-0 cursor-grab text-fg-3" />
               <span className="w-4 tabular-nums text-fg-3">{i + 1}</span>
               <span className="min-w-0 truncate font-medium" title={p.name}>
                 {p.name}
@@ -185,6 +226,19 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
                 {p.structured_output && ` · 结构化输出 ${p.structured_output === "none" ? "无" : p.structured_output}`}
               </span>
               {blocked && <span>已全局禁止公网供应商</span>}
+              <span className="ml-auto flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => props.onTest(p)}
+                  disabled={testing !== null || blocked}
+                  className={button}
+                >
+                  {testing === p.id ? "测试中…" : "测试"}
+                </button>
+                <button type="button" onClick={() => props.onDelete(p)} disabled={busy} className={button}>
+                  删除
+                </button>
+              </span>
             </div>
           </li>
         );
