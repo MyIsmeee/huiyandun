@@ -45,8 +45,15 @@ export async function mockSocket(page: Page): Promise<WebSocketRoute[]> {
   return sockets;
 }
 
+/** 顶栏模型状态（V-M8）：第一家供应商生效 */
+export async function mockLlmStatus(page: Page): Promise<void> {
+  const status = { state: "normal", provider_name: "本地 llama.cpp", reason: null };
+  await page.route("/api/llm/status", (route) => route.fulfill({ json: status }));
+}
+
 export async function signedIn(page: Page): Promise<WebSocketRoute[]> {
   await page.route("/api/site", (route) => route.fulfill({ json: SITE }));
+  await mockLlmStatus(page);
   return mockSocket(page);
 }
 
@@ -87,6 +94,7 @@ export const camera = (state: string, id = "cam-01") => ({
 /** 以给定设备打开主界面，返回模拟的 WS 服务端一侧 */
 export async function open(page: Page, devices: object[]) {
   await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices } }));
+  await mockLlmStatus(page);
   const sockets = await mockSocket(page);
   await page.goto("/");
   // 先等场景代码与车辆模型加载完：加载按真实时间进行，期间 sceneSettled 逐帧推进的模拟时钟会随加载快慢漂移

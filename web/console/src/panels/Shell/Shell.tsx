@@ -10,6 +10,7 @@ import { AlertList } from "../AlertList/AlertList";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
 import { type KpiData, KpiTile } from "../KpiTile/KpiTile";
+import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { ProviderPage } from "../ProviderList/ProviderList";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
@@ -68,6 +69,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         </span>
         <span className="rounded-full border border-line px-3 py-1 text-sm text-fg-2">{site.name}</span>
         <div className="ml-auto flex items-center gap-2">
+          <LlmStatusBadge />
           <ConnectionStatus />
           {logout === "failed" && (
             <p role="alert" className="flex items-center gap-1 text-sm">

@@ -10,6 +10,7 @@ import {
 import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
+import { LlmStatusBadgeView } from "../../../src/panels/LlmStatusBadge/LlmStatusBadge";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
 import { type EditorForm, type Pending, ProviderEditorView, type TestResult } from "../../../src/panels/ProviderEditor/ProviderEditor";
 import { type Provider, type ProviderLoad, ProviderListView } from "../../../src/panels/ProviderList/ProviderList";
@@ -242,6 +243,13 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     normal: reportBar(REPORT, { status: "idle" }),
     reviewed: reportBar({ ...REPORT, reviewed_by: "operator" }, { status: "idle" }),
     error: reportBar(REPORT, { status: "failed", message: "报告已由 admin 复核" }),
+  },
+  LlmStatusBadge: {
+    normal: <LlmStatusBadgeView load={{ status: "ready", data: { state: "normal", provider_name: "本地 llama.cpp", reason: null } }} />,
+    failover: <LlmStatusBadgeView load={{ status: "ready", data: { state: "failover", provider_name: "DeepSeek 备用", reason: null } }} />,
+    template: <LlmStatusBadgeView load={{ status: "ready", data: { state: "template", provider_name: null, reason: "未启用任何模型供应商" } }} />,
+    loading: <LlmStatusBadgeView load={{ status: "loading" }} />,
+    error: <LlmStatusBadgeView load={{ status: "error" }} />,
   },
   ProviderList: {
     normal: providerList({ status: "ready", providers: PROVIDERS, blockPublic: false }),
