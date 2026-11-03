@@ -34,6 +34,7 @@ def write(tmp_path: Path, text: str) -> Path:
 class RecordingRunner(runner.Runner):
     def __init__(self) -> None:
         self.streams = {"cam-02": "cam-02"}
+        self.slow = {"attempts": 4, "interval_s": 20}
         self.calls: list[tuple[str, ...]] = []
 
     def compose(self, *args: str) -> str:
@@ -63,6 +64,16 @@ def test_restore_continues_from_current_position() -> None:
     assert "-ss 185 " in pushed(r)
 
 
+def test_slow_attack_overrides_attempts_and_interval() -> None:
+    r = RecordingRunner()
+
+    r.act({"action": "start_slow_attack", "target": "cam-02"}, elapsed=240)
+
+    [call] = r.calls
+    assert call[0] == "run" and call[-1] == "attack-sim"
+    assert "HYD_ATTEMPTS=4" in call and "HYD_INTERVAL_S=20" in call
+
+
 def test_setup_starts_vision_after_media_restart(monkeypatch: pytest.MonkeyPatch) -> None:
     """视觉引擎停到素材从头播放之后才启动，只看到本轮素材（D-090）；就绪后素材再从头播放一次，开场取这次
     推流就绪的时刻，引擎启动期间已在看画面（复核阻断 2）。"""
@@ -73,6 +84,10 @@ def test_setup_starts_vision_after_media_restart(monkeypatch: pytest.MonkeyPatch
     start = r.setup(ttl_s=None)
 
     assert [(c[0], c[-1]) for c in r.calls] == [
+        # 行为模型从基线快照开始：停下、删除存盘状态、再启动（TK-115）
+        ("stop", "correlator"),
+        ("run", runner.BEHAVIOR_STATE),
+        ("up", "correlator"),
         ("stop", "vision-engine"),
         ("restart", "mediamtx"),
         ("up", "mediamtx"),
@@ -112,6 +127,7 @@ def test_parse_at_rejects_malformed(text: str) -> None:
         ('{ name: x, at: "0:10", expect: { subject: a, within_s: 5, mtach: {} } }', "未知字段"),
         ('{ name: x, at: "0:10", expect: { attack: allowed } }', "只能为 blocked"),
         ('{ name: x, at: "0:10", expect: { attack: blocked } }', "须与 start_attack 同一步"),
+        ('{ name: x, at: "0:10", expect: { subject: a, within_s: 5, absent: no } }', "只能为 true"),
         ('{ name: x, at: "0:10", wait: 3 }', "未知字段"),
     ],
 )

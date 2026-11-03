@@ -7,6 +7,7 @@ import base64
 import os
 import socket
 import sys
+import time
 
 
 def describe(host: str, port: int, url: str, cseq: int, authorization: str) -> str:
@@ -36,12 +37,16 @@ def main() -> int:
     user = os.environ.get("HYD_USER", "admin")
     guess = os.environ.get("HYD_PASSWORD", "wrong-password")
     attempts = int(os.environ.get("HYD_ATTEMPTS", "6"))
+    # 两次尝试之间的停顿：低速模式每 20 s 一次，低于 HYD-NET-0001 的阈值（FR-205）
+    interval = float(os.environ.get("HYD_INTERVAL_S", "0"))
 
     url = f"rtsp://{host}:{port}/{path}"
     authorization = "Basic " + base64.b64encode(f"{user}:{guess}".encode()).decode("ascii")
 
     denied = 0
     for cseq in range(1, attempts + 1):
+        if cseq > 1:
+            time.sleep(interval)
         try:
             status = describe(host, port, url, cseq, authorization)
         except OSError as exc:  # 连接被拒/超时：目标已被封禁或不可达

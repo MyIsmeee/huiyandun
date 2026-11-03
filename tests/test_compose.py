@@ -209,13 +209,16 @@ def test_capture_tap_mirrors_attack_bridge_into_tap_net() -> None:
 ATTACK_NET = "attack-net"
 ATTACK_SIM = "attack-sim"
 RTSP_TARGET = "rtsp-target"
+NVR_SIM = "nvr-sim"
 
 
 def test_attack_sim_reaches_only_rtsp_target() -> None:
-    """DP-09、C-SEC-11：attack-sim 只接入 attack-net，网络里只有它和 rtsp-target；该网络内部隔离、
-    宿主不可达，attack-sim 在网络层碰不到 go2rtc 等其他服务。"""
+    """DP-09、C-SEC-11：attack-sim 只接入 attack-net，网络里只有它、rtsp-target 与不监听端口的合法录像机
+    nvr-sim（TK-115）；该网络内部隔离、宿主不可达，attack-sim 在网络层碰不到 go2rtc 等其他服务。"""
     members = {n for n, s in SERVICES.items() if ATTACK_NET in set(s.get("networks", []))}
-    assert members == {ATTACK_SIM, RTSP_TARGET}
+    assert members == {ATTACK_SIM, RTSP_TARGET, NVR_SIM}
+    assert set(SERVICES[NVR_SIM]["networks"]) == {ATTACK_NET}
+    assert "ports" not in SERVICES[NVR_SIM] and "expose" not in SERVICES[NVR_SIM]
     assert set(SERVICES[ATTACK_SIM]["networks"]) == {ATTACK_NET}
     net = COMPOSE["networks"][ATTACK_NET]
     assert net["internal"] is True
@@ -244,6 +247,24 @@ def test_attack_sim_behavior_registered_in_scenarios() -> None:
     params = yaml.safe_load((ROOT / "demo/scenarios/attack-sim.yaml").read_text(encoding="utf-8"))
     assert params["target"] == RTSP_TARGET
     assert params["attempts"] >= 5  # 60 s 内 ≥5 次 RTSP 认证失败才触发 HYD-NET-0001
+    # 低速模式（FR-205）：任意 60 s 内不足 5 次；尝试跨越 60 s 以上，连续两个 30 s 窗口都有尝试
+    slow = params["slow"]
+    assert 60 // slow["interval_s"] + 1 < 5
+    assert (slow["attempts"] - 1) * slow["interval_s"] >= 60
+    assert slow["interval_s"] < 30
+
+
+def test_nvr_sim_is_whitelisted_and_allowed_by_address() -> None:
+    """合法录像机在白名单网段内、不会被封禁；rtsp-target 按它的地址放行，配置里没有口令（G-14）。"""
+    site = yaml.safe_load((ROOT / "demo/scenarios/site.yaml").read_text(encoding="utf-8"))
+    nvr = SERVICES[NVR_SIM]["networks"][ATTACK_NET]["ipv4_address"]
+    assert any(ipaddress.ip_address(nvr) in ipaddress.ip_network(w) for w in site["whitelist"])
+    target = yaml.safe_load((ROOT / "deploy/compose/rtsp-target.yml").read_text(encoding="utf-8"))
+    remote = [u for u in target["authInternalUsers"] if nvr in u["ips"]]
+    assert remote == [
+        {"user": "any", "ips": [nvr], "permissions": [{"action": "read", "path": "cam"}]}
+    ]
+    assert all("pass" not in u for u in target["authInternalUsers"])
 
 
 def test_only_audit_service_holds_audit_password() -> None:
