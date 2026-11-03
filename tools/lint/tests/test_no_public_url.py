@@ -157,6 +157,20 @@ def test_defaults_to_git_files(tmp_path: Path) -> None:
     assert "build/" not in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("url", "code"),
+    [
+        ("https://api.deepseek.com/v1", 0),
+        ("https://open.bigmodel.cn/api/paas/v4", 0),
+        ("https://api.deepseek.com/favicon.ico", 1),
+    ],
+)
+def test_allows_only_provider_preset_base_url(tmp_path: Path, url: str, code: int) -> None:
+    (tmp_path / "presets.ts").write_text(f'deepseek: ["DeepSeek", "{url}"],\n')
+
+    assert run(tmp_path, "presets.ts").returncode == code
+
+
 def test_inert_text_is_allowed_only_in_explicit_paths(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=30)
     (tmp_path / "app.ts").write_text("const doc = `https://react.dev/errors/`;\n")
