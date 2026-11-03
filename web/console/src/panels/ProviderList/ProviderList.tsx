@@ -2,7 +2,6 @@ import { ArrowLeft, Check, Circle, CircleAlert, CircleDot, Clock, Globe, GripVer
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
-import { formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { ProviderEditor } from "../ProviderEditor/ProviderEditor";
 
 export type Provider = components["schemas"]["LlmProvider"];
@@ -273,11 +272,13 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
   );
 }
 
-/** 健康状态以图标 + 文字表达，不用状态色（V-M7）；失败时悬停显示原因与时间。停用时由旁边的开关注明，这里不重复 */
+/**
+ * 健康状态以图标 + 文字表达，不用状态色（V-M7）；失败时悬停显示原因与日期时间。
+ * 停用的供应商同样显示：公网供应商新增后默认停用，管理员先测再决定启用
+ */
 function Health(props: { provider: Provider }) {
-  const { enabled, last_test: test } = props.provider;
+  const test = props.provider.last_test;
   const style = "ml-auto flex shrink-0 items-center gap-1 tabular-nums";
-  if (!enabled) return <span className="ml-auto" />;
   if (!test)
     return (
       <span className={`${style} text-fg-3`}>
@@ -289,7 +290,7 @@ function Health(props: { provider: Provider }) {
     const failed = test.checks.find((c) => !c.ok);
     const why = [failed?.reason, failed?.hint].filter(Boolean).join("；");
     return (
-      <span className={style} title={`${why}（${formatTime(Date.parse(test.tested_at))}）`}>
+      <span className={style} title={`${why}（${new Date(test.tested_at).toLocaleString("zh-CN", { hour12: false })}）`}>
         <X aria-hidden className="size-4" />
         失败
       </span>

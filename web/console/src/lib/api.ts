@@ -80,6 +80,17 @@ export const api = {
   listProviders: () => request<Schemas["LlmProviderList"]>("GET", "/api/llm/providers"),
   createProvider: (body: Schemas["LlmProviderCreate"]) =>
     request<Schemas["LlmProvider"]>("POST", "/api/llm/providers", body),
+  /** 模型列表最多向供应商发 2 次请求（补 /v1 重试），时限按 timeout_s × 2 加余量（CD-04） */
+  listProviderModels: (provider: Pick<Schemas["LlmProvider"], "id" | "timeout_s">) =>
+    request<Schemas["ModelList"]>(
+      "GET",
+      `/api/llm/providers/${encodeURIComponent(provider.id)}/models`,
+      undefined,
+      (provider.timeout_s * 2 + 10) * 1000,
+    ),
+  /** 保存前凭地址与 Key 获取模型列表（D-084），不保存任何内容 */
+  discoverModels: (body: Schemas["ModelDiscovery"] & { timeout_s: number }) =>
+    request<Schemas["ModelList"]>("POST", "/api/llm/models", body, (body.timeout_s * 2 + 10) * 1000),
   updateProvider: (id: string, body: Schemas["LlmProviderUpdate"]) =>
     request<Schemas["LlmProvider"]>("PATCH", `/api/llm/providers/${encodeURIComponent(id)}`, body),
   deleteProvider: (id: string) => request<undefined>("DELETE", `/api/llm/providers/${encodeURIComponent(id)}`),

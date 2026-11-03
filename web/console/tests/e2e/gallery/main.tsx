@@ -11,7 +11,7 @@ import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
-import { type EditorForm, type Pending, ProviderEditorView } from "../../../src/panels/ProviderEditor/ProviderEditor";
+import { type EditorForm, type Pending, ProviderEditorView, type TestResult } from "../../../src/panels/ProviderEditor/ProviderEditor";
 import { type Provider, type ProviderLoad, ProviderListView } from "../../../src/panels/ProviderList/ProviderList";
 import { type Report, ReportBarView, type ReportRequest } from "../../../src/panels/ReportBar/ReportBar";
 import { planView } from "../../../src/scene/layout";
@@ -145,12 +145,20 @@ const providerList = (load: ProviderLoad) => (
   </div>
 ); // prettier-ignore
 const EDIT_FORM: EditorForm = { ...LOCAL_PROVIDER, api_key: "", network: "auto" };
+const PARTIAL: TestResult = {
+  ...TESTED, health: "failed", suggested_models: ["qwen3.6-35b-a3b-q4", "qwen3.6-35b"],
+  checks: [
+    { check: "connectivity", ok: true, latency_ms: 312, reason: null, hint: null },
+    { check: "model", ok: false, latency_ms: null, reason: "模型 qwen3.6-35b-a3b 不在供应商的模型列表中", hint: "可改选：qwen3.6-35b-a3b-q4、qwen3.6-35b" },
+    { check: "structured_output", ok: false, latency_ms: null, reason: "未检查：前一项未通过", hint: null },
+  ],
+}; // prettier-ignore
 // 对话框为 fixed 定位：transform 使其以外框为定位基准，截图只含对话框
-const providerEditor = (form: EditorForm, provider: Provider | null, pending: Pending, message: string | null) => (
-  <div className="h-[34rem] w-[40rem] [transform:translateZ(0)]">
+const providerEditor = (form: EditorForm, provider: Provider | null, pending: Pending, message: string | null, result: TestResult | null = null) => (
+  <div className="h-[38rem] w-[40rem] [transform:translateZ(0)]">
     <ProviderEditorView
-      form={form} provider={provider} pending={pending} message={message}
-      onChange={() => {}} onPreset={() => {}} onSave={() => {}} onClose={() => {}}
+      form={form} provider={provider} models={[]} pending={pending} message={message} result={result}
+      onChange={() => {}} onPreset={() => {}} onFetchModels={() => {}} onSave={() => {}} onSaveAndTest={() => {}} onClose={() => {}}
     />
   </div>
 ); // prettier-ignore
@@ -248,6 +256,8 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     edit: providerEditor(EDIT_FORM, { ...LOCAL_PROVIDER, api_key_last4: "3f9a" }, null, null),
     saving: providerEditor(EDIT_FORM, LOCAL_PROVIDER, "save", null),
     error: providerEditor(EDIT_FORM, LOCAL_PROVIDER, null, "地址须为 http:// 或 https:// 开头的 OpenAI 兼容地址"),
+    testing: providerEditor(EDIT_FORM, LOCAL_PROVIDER, "test", null),
+    partial: providerEditor(EDIT_FORM, LOCAL_PROVIDER, null, null, PARTIAL),
   },
 };
 
