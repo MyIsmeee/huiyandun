@@ -155,7 +155,11 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.history = History()
     attack = json.loads(config.attack_file.read_text(encoding="utf-8"))
     app.state.tools = Tools(
-        app.state.history, app.state.devices, config.conn_log_file, attack["techniques"]
+        app.state.history,
+        app.state.devices,
+        config.conn_log_file,
+        attack["techniques"],
+        config.behavior_state_file,
     )
     app.state.investigator = investigator.Investigator(app.state)
     app.include_router(auth.router)

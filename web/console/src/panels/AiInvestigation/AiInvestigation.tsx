@@ -1,4 +1,5 @@
 import {
+  Activity,
   BellRing,
   BookOpen,
   Cctv,
@@ -35,6 +36,7 @@ const TOOL_ICON: Record<string, typeof Wrench> = {
   list_frame_events: Film,
   get_device: Cctv,
   query_sessions: Network,
+  get_baseline: Activity,
   lookup_technique: BookOpen,
 };
 const UNVERIFIED = "该实体未能在证据中溯源";

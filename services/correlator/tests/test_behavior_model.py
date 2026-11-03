@@ -138,6 +138,15 @@ def test_restart_resumes_state() -> None:
     assert len(traffic.window("guess")) == 1
 
 
+def test_state_carries_baseline_summary() -> None:
+    traffic = Traffic().learned()
+    saved = traffic.model.dump()["devices"]["cam-02"]
+    assert saved["seen"] == [NVR]
+    assert 1 <= saved["baseline"]["会话数"]["mean"] <= 3
+    assert saved["baseline"]["新访问方数"]["mean"] == 0.05  # 只有第一个窗口里录像机是新访问方
+    assert traffic.model.dump()["devices"]["cam-01"]["baseline"]["会话数"]["mean"] == 0
+
+
 def test_stale_state_ignored() -> None:
     model = BehaviorModel({CAM: "cam-02"})
     assert not model.load(model.dump() | {"version": "0.0.1"})

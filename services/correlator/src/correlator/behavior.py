@@ -273,11 +273,27 @@ class BehaviorModel:
         )
 
     def dump(self) -> dict[str, Any]:
+        """状态；baseline 为各特征在已学窗口上的均值与标准差，供值班员工具 get_baseline 读取。"""
         return {
             "model": MODEL_ID,
             "version": MODEL_VERSION,
+            "window_s": WINDOW_S,
+            "learn_windows": LEARN_WINDOWS,
             "devices": {
-                d.id: {"learned": d.learned, "seen": sorted(d.seen), "history": list(d.history)}
+                d.id: {
+                    "learned": d.learned,
+                    "seen": sorted(d.seen),
+                    "history": list(d.history),
+                    "baseline": {
+                        name: {
+                            "mean": round(fmean(h[i] for h in d.history), 3),
+                            "std": round(pstdev(h[i] for h in d.history), 3),
+                        }
+                        for i, (name, _) in enumerate(FEATURES)
+                    }
+                    if d.history
+                    else {},
+                }
                 for d in self._devices.values()
             },
         }

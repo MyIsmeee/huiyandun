@@ -51,6 +51,10 @@ class ApiConfig(DbConfig):
         Path("/zeek/logs/conn.log"),
         description="Zeek 会话日志（只读挂载），值班员工具 query_sessions 读取（TK-116）",
     )
+    behavior_state_file: Path = Field(
+        Path("/var/lib/correlator/behavior.json"),
+        description="设备行为模型状态（correlator 持久卷，只读挂载），值班员工具 get_baseline 读取（TK-115）",
+    )
     attack_file: Path = Field(
         Path("/etc/hyd/attack.json"),
         description="ATT&CK 精简查表 rules/attack/techniques.json，值班员工具 lookup_technique 读取",

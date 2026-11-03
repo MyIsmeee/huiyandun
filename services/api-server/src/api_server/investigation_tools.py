@@ -1,5 +1,5 @@
 """AI 安全值班员的只读工具（TK-116、FR-1101）：数据取自内存历史、站点登记与设备状态、Zeek 会话日志、
-ATT&CK 精简表。
+设备行为模型的基线（TK-115）、ATT&CK 精简表。
 
 参数以 Pydantic 校验，未声明的字段与未知工具一律拒绝、不执行；结果至多 MAX_ITEMS 条并附总数，不回显查询
 参数（回溯依据只含查到的数据，FR-1103）。工具只读：不写库、不发事件（G-03）。
@@ -61,6 +61,10 @@ class DeviceArgs(_Args):
 class SessionsArgs(_Args):
     ip: IPvAnyAddress
     minutes: Minutes = 10
+
+
+class BaselineArgs(_Args):
+    device_id: str = Field(max_length=64)
 
 
 class TechniqueArgs(_Args):
@@ -132,10 +136,16 @@ def _read_conn_log(path: Path, since: float, ip: str) -> list[dict[str, Any]]:
 
 class Tools:
     def __init__(
-        self, history: History, devices: Devices, conn_log: Path, techniques: dict[str, Any]
+        self,
+        history: History,
+        devices: Devices,
+        conn_log: Path,
+        techniques: dict[str, Any],
+        behavior_state: Path,
     ) -> None:
         self._history, self._devices = history, devices
         self._conn_log, self._techniques = conn_log, techniques
+        self._behavior_state = behavior_state
         self._tools: dict[
             str, tuple[type[_Args], Callable[[Any], Awaitable[tuple[dict[str, Any], str]]]]
         ] = {
@@ -143,6 +153,7 @@ class Tools:
             "list_frame_events": (FrameArgs, self._list_frame_events),
             "get_device": (DeviceArgs, self._get_device),
             "query_sessions": (SessionsArgs, self._query_sessions),
+            "get_baseline": (BaselineArgs, self._get_baseline),
             "lookup_technique": (TechniqueArgs, self._lookup_technique),
         }
 
@@ -222,6 +233,37 @@ class Tools:
         if items:
             summary += f"，最多：{items[0]['peer']}:{items[0]['port']} {items[0]['count']} 次"
         return {"available": True, "total": len(sessions), "peers": items[:MAX_ITEMS]}, summary
+
+    async def _get_baseline(self, a: BaselineArgs) -> tuple[dict[str, Any], str]:
+        if not self._behavior_state.is_file():
+            return {"available": False}, "行为基线不可用"
+        text = await asyncio.to_thread(self._behavior_state.read_text, encoding="utf-8")
+        try:
+            state = json.loads(text)
+            device = state["devices"].get(a.device_id)
+            if device is None:
+                return {"found": False}, f"{a.device_id} 没有行为基线"
+            learned, need, seen = device["learned"], state["learn_windows"], device["seen"]
+            data = {
+                "window_s": state["window_s"],
+                "learned_windows": learned,
+                "learning": learned < need,
+                "known_peers_total": len(seen),
+                "known_peers": seen[:MAX_ITEMS],
+                "features": device["baseline"],  # 每个窗口各特征的均值与标准差
+            }
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # 状态由 correlator 写入，损坏或结构不对时如实告诉模型，不让这一轮调查报错
+            return {"available": False}, "行为基线不可读"
+        summary = (
+            f"基线学习中 {learned}/{need}"
+            if learned < need
+            else f"已学 {learned} 个窗口（每窗口 {state['window_s']} s）"
+        )
+        summary += f"，见过的访问方 {len(seen)} 个"
+        if seen:
+            summary += "：" + "、".join(seen[:3]) + ("等" if len(seen) > 3 else "")
+        return data, summary
 
     async def _lookup_technique(self, a: TechniqueArgs) -> tuple[dict[str, Any], str]:
         entry = self._techniques.get(a.technique_id)
