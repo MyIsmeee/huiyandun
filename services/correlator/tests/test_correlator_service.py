@@ -1,15 +1,26 @@
-"""归一化器主循环：EVE 文件 → NATS hyd.security.alert.v1（TK-032）。"""
+"""归一化器主循环：EVE 文件 → NATS hyd.security.alert.v1（TK-032）；设备行为模型的状态与窗口（TK-115）。"""
 
 import asyncio
+import json
 import threading
 from pathlib import Path
 from typing import cast
 
+import pytest
 import yaml
 
+from correlator import service
+from correlator.behavior import BehaviorModel
 from correlator.eve import EveTail, Line
-from correlator.normalize import device_index
-from correlator.service import STREAM, STREAM_MAX_AGE_S, SUBJECT, CorrelatorConfig, run
+from correlator.normalize import device_index, normalize
+from correlator.service import (
+    STREAM,
+    STREAM_MAX_AGE_S,
+    SUBJECT,
+    CorrelatorConfig,
+    load_behavior,
+    run,
+)
 from py_common.bus import Bus
 from py_contracts.config.site_schema import SiteConfig
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
@@ -111,3 +122,67 @@ def test_publish_failure_retried_without_loss(tmp_path: Path) -> None:
 
     first, retry = asyncio.run(scenario())
     assert first.event_id == retry.event_id
+
+
+def behavior_config(tmp_path: Path, **fields: object) -> CorrelatorConfig:
+    return config(tmp_path).model_copy(
+        update={
+            "conn_file": tmp_path / "conn.log",
+            "conn_state_file": tmp_path / "conn-position.json",
+            "behavior_state_file": tmp_path / "behavior.json",
+            **fields,
+        }
+    )
+
+
+def learned_state(windows: int) -> dict[str, object]:
+    model = BehaviorModel({"172.30.0.12": "cam-02"})
+    for i in range(windows):
+        model.close_window(i * 30.0)
+    return model.dump()
+
+
+def test_behavior_state_preferred_over_baseline(tmp_path: Path) -> None:
+    """有存盘状态时续用；没有时加载基线快照；版本不符的状态跳过。"""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(learned_state(20)), encoding="utf-8")
+    cfg = behavior_config(tmp_path, behavior_baseline_file=baseline)
+    assert load_behavior(DEVICES, cfg).learning() == {"cam-01": 0}
+    cfg.behavior_state_file.write_text(json.dumps(learned_state(3)), encoding="utf-8")
+    assert load_behavior(DEVICES, cfg).learning() == {"cam-01": 0, "cam-02": 3}
+    cfg.behavior_state_file.write_text(
+        json.dumps(learned_state(3) | {"version": "0.0.1"}), encoding="utf-8"
+    )
+    assert load_behavior(DEVICES, cfg).learning() == {"cam-01": 0}
+
+
+def test_behavior_window_saves_state_and_retries_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """窗口结束时存盘并记录 conn.log 读取位置；告警发布失败下个周期重试。"""
+    monkeypatch.setattr(service, "WINDOW_S", 0.2)
+    cfg = behavior_config(tmp_path)
+    write_eve(
+        cfg.conn_file,
+        '{"ts": 1, "uid": "C1", "id.orig_h": "172.30.0.13", "id.resp_h": "172.30.0.12"}',
+    )
+    alert = normalize(LIVE, DEVICES)
+    model = BehaviorModel({"172.30.0.12": "cam-02"})
+    monkeypatch.setattr(model, "close_window", lambda start: [alert] * (not bus.attempts))
+
+    async def scenario() -> None:
+        tail = EveTail(cfg.conn_file, cfg.conn_state_file)
+        task = asyncio.create_task(service.behave(model, tail, cast(Bus, bus), cfg))
+        try:
+            await asyncio.wait_for(bus.published.wait(), 5)
+        finally:
+            task.cancel()
+            tail.close()
+
+    bus = FlakyBus()
+    asyncio.run(scenario())
+    assert [a.event_id for a in bus.attempts] == [alert.event_id] * 2
+    saved = json.loads(cfg.behavior_state_file.read_text(encoding="utf-8"))
+    assert saved["devices"]["cam-02"]["learned"] == 0
+    position = json.loads(cfg.conn_state_file.read_text(encoding="utf-8"))
+    assert position["offset"] == cfg.conn_file.stat().st_size
