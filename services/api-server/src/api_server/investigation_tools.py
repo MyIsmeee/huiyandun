@@ -238,19 +238,23 @@ class Tools:
         if not self._behavior_state.is_file():
             return {"available": False}, "行为基线不可用"
         text = await asyncio.to_thread(self._behavior_state.read_text, encoding="utf-8")
-        state = json.loads(text)
-        device = state["devices"].get(a.device_id)
-        if device is None:
-            return {"found": False}, f"{a.device_id} 没有行为基线"
-        learned, need, seen = device["learned"], state["learn_windows"], device["seen"]
-        data = {
-            "window_s": state["window_s"],
-            "learned_windows": learned,
-            "learning": learned < need,
-            "known_peers_total": len(seen),
-            "known_peers": seen[:MAX_ITEMS],
-            "features": device["baseline"],  # 每个窗口各特征的均值与标准差
-        }
+        try:
+            state = json.loads(text)
+            device = state["devices"].get(a.device_id)
+            if device is None:
+                return {"found": False}, f"{a.device_id} 没有行为基线"
+            learned, need, seen = device["learned"], state["learn_windows"], device["seen"]
+            data = {
+                "window_s": state["window_s"],
+                "learned_windows": learned,
+                "learning": learned < need,
+                "known_peers_total": len(seen),
+                "known_peers": seen[:MAX_ITEMS],
+                "features": device["baseline"],  # 每个窗口各特征的均值与标准差
+            }
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # 状态由 correlator 写入，损坏或结构不对时如实告诉模型，不让这一轮调查报错
+            return {"available": False}, "行为基线不可读"
         summary = (
             f"基线学习中 {learned}/{need}"
             if learned < need

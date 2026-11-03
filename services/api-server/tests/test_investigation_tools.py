@@ -189,6 +189,10 @@ def test_get_baseline(tools: Tools, tmp_path: Path) -> None:
     learning = run(tools, "get_baseline", {"device_id": "cam-01"})
     assert learning.summary == "基线学习中 3/20，见过的访问方 0 个"
     assert run(tools, "get_baseline", {"device_id": "cam-99"}).data == {"found": False}
+    for broken in ("{not json", '{"devices": []}', '{"devices": {"cam-02": {}}}'):
+        (tmp_path / "behavior.json").write_text(broken, encoding="utf-8")
+        r = run(tools, "get_baseline", {"device_id": "cam-02"})
+        assert (r.data, r.summary) == ({"available": False}, "行为基线不可读")
 
 
 def test_lookup_technique(tools: Tools) -> None:
