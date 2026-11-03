@@ -113,18 +113,28 @@ async def run(tail: EveTail, devices: dict[Ip, str], bus: Bus, config: Correlato
 
 
 def load_behavior(devices: dict[Ip, str], config: CorrelatorConfig) -> BehaviorModel:
-    """续用存盘的状态，其次加载基线快照，都没有时从头学习。"""
-    model = BehaviorModel({str(ip): device for ip, device in devices.items()})
+    """续用存盘的状态，其次加载基线快照，都没有时从头学习。文件损坏或结构不对时记录后跳过：
+    否则 correlator 反复重启，告警归一化与关联也跟着停。"""
+    by_ip = {str(ip): device for ip, device in devices.items()}
     for path in (config.behavior_state_file, config.behavior_baseline_file):
         if path is None or not path.is_file():
             continue
-        if model.load(json.loads(path.read_text(encoding="utf-8"))):
+        model = BehaviorModel(by_ip)  # 每次新建：加载到一半失败的模型不再沿用
+        try:
+            loaded = model.load(json.loads(path.read_text(encoding="utf-8")))
+        except (ValueError, KeyError, TypeError) as e:
+            log.warning(
+                "correlator.behavior_state_invalid", extra={"file": str(path), "error": repr(e)}
+            )
+            continue
+        if loaded:
             log.info(
                 "correlator.behavior_loaded",
                 extra={"file": str(path), "learning": model.learning()},
             )
             return model
         log.warning("correlator.behavior_state_stale", extra={"file": str(path)})
+    model = BehaviorModel(by_ip)
     log.info("correlator.behavior_learning", extra={"learning": model.learning()})
     return model
 

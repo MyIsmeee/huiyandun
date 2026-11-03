@@ -156,6 +156,18 @@ def test_behavior_state_preferred_over_baseline(tmp_path: Path) -> None:
     assert load_behavior(DEVICES, cfg).learning() == {"cam-01": 0}
 
 
+@pytest.mark.parametrize("broken", ["{not json", '{"model": "behavior-model", "version": "1.0.0"}'])
+def test_broken_behavior_state_falls_back_to_baseline(tmp_path: Path, broken: str) -> None:
+    """状态文件损坏或结构不对：记录后改用基线快照，不让 correlator 起不来（复核建议）。"""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(learned_state(20)), encoding="utf-8")
+    cfg = behavior_config(tmp_path, behavior_baseline_file=baseline)
+    cfg.behavior_state_file.write_text(broken, encoding="utf-8")
+    assert load_behavior(DEVICES, cfg).learning() == {"cam-01": 0}
+    baseline.write_text(broken, encoding="utf-8")
+    assert load_behavior(DEVICES, cfg).learning() == {"cam-01": 0, "cam-02": 0}
+
+
 def test_behavior_window_saves_state_and_retries_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
