@@ -11,6 +11,7 @@ import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
+import { type Provider, type ProviderLoad, ProviderListView } from "../../../src/panels/ProviderList/ProviderList";
 import { type Report, ReportBarView, type ReportRequest } from "../../../src/panels/ReportBar/ReportBar";
 import { planView } from "../../../src/scene/layout";
 import { Scene2D } from "../../../src/scene/Scene2D";
@@ -113,6 +114,36 @@ const reportBar = (report: Report | null, request: ReportRequest) => (
   </div>
 );
 
+const TESTED = { suggested_base_url: null, suggested_models: [], tested_at: "2026-10-27T06:20:00Z" };
+const LOCAL_PROVIDER: Provider = {
+  id: "p-1", name: "家用 5070 · llama.cpp", preset: "llama_cpp", base_url: "http://192.168.1.50:8888/v1",
+  api_key_last4: null, model: "qwen3.6-35b-a3b", network: "internal", network_overridden: false,
+  structured_output: "json_schema", timeout_s: 60, enabled: true, order: 0, usage_today: { calls: 48, tokens: 61_234 },
+  last_test: { ...TESTED, health: "ok", checks: [{ check: "connectivity", ok: true, latency_ms: 312, reason: null, hint: null }] },
+}; // prettier-ignore
+const PROVIDERS: Provider[] = [
+  LOCAL_PROVIDER,
+  {
+    id: "p-2", name: "DeepSeek 官方", preset: "deepseek", base_url: "https://api.deepseek.com/v1",
+    api_key_last4: "3f9a", model: "deepseek-chat", network: "public", network_overridden: false,
+    structured_output: null, timeout_s: 60, enabled: false, order: 1, usage_today: { calls: 0, tokens: 0 }, last_test: null,
+  },
+]; // prettier-ignore
+const FAILED_PROVIDER: Provider = {
+  ...LOCAL_PROVIDER, id: "p-3", name: "办公室 Ollama", preset: "ollama", base_url: "http://192.168.1.60:11434/v1", order: 1,
+  usage_today: { calls: 0, tokens: 0 },
+  last_test: { ...TESTED, health: "failed", checks: [{ check: "connectivity", ok: false, latency_ms: null, reason: "60 秒内无响应", hint: "确认地址可达，或调大超时" }] },
+}; // prettier-ignore
+const providerList = (load: ProviderLoad) => (
+  <div className="w-[56rem]">
+    <ProviderListView
+      load={load} busy={false} testing={null} notice={null} confirm={null}
+      onClose={() => {}} onRetry={() => {}} onBlockPublic={() => {}} onToggle={() => {}} onTest={() => {}}
+      onDelete={() => {}} onReorder={() => {}} onConfirm={() => {}} onCancel={() => {}}
+    />
+  </div>
+); // prettier-ignore
+
 const STEPS = [
   { tool: "list_alerts", args_summary: "ip=172.30.0.100", result_summary: "近 10 分钟 37 条告警，最近：RTSP 认证爆破 172.30.0.100 → 172.30.0.12", reason: "先看攻击源近期的告警" },
   { tool: "query_sessions", args_summary: "ip=172.30.0.100", result_summary: "近 10 分钟 41 个会话，对端 1 个：172.30.0.12:8554 41 次", reason: "核对与摄像头之间的会话" },
@@ -192,6 +223,14 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     normal: reportBar(REPORT, { status: "idle" }),
     reviewed: reportBar({ ...REPORT, reviewed_by: "operator" }, { status: "idle" }),
     error: reportBar(REPORT, { status: "failed", message: "报告已由 admin 复核" }),
+  },
+  ProviderList: {
+    normal: providerList({ status: "ready", providers: PROVIDERS, blockPublic: false }),
+    failing: providerList({ status: "ready", providers: [LOCAL_PROVIDER, FAILED_PROVIDER], blockPublic: false }),
+    blocked: providerList({ status: "ready", providers: PROVIDERS, blockPublic: true }),
+    empty: providerList({ status: "ready", providers: [], blockPublic: false }),
+    loading: providerList({ status: "loading" }),
+    error: providerList({ status: "failed", message: "无法连接服务器，请重试" }),
   },
 };
 

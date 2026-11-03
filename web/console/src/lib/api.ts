@@ -80,6 +80,17 @@ export const api = {
   listProviders: () => request<Schemas["LlmProviderList"]>("GET", "/api/llm/providers"),
   updateProvider: (id: string, body: Schemas["LlmProviderUpdate"]) =>
     request<Schemas["LlmProvider"]>("PATCH", `/api/llm/providers/${encodeURIComponent(id)}`, body),
+  deleteProvider: (id: string) => request<undefined>("DELETE", `/api/llm/providers/${encodeURIComponent(id)}`),
+  /** 测试连接最多向供应商发 4 次请求，api-server 按 timeout_s × 4 + 5 s 等网关（CD-04），这里再加余量 */
+  testProvider: (provider: Pick<Schemas["LlmProvider"], "id" | "timeout_s">) =>
+    request<Schemas["ProviderTestResult"]>(
+      "POST",
+      `/api/llm/providers/${encodeURIComponent(provider.id)}/test`,
+      undefined,
+      (provider.timeout_s * 4 + 10) * 1000,
+    ),
+  reorderProviders: (ids: string[]) =>
+    request<undefined>("PUT", "/api/llm/providers/order", { provider_ids: ids }),
   getLlmSettings: () => request<Schemas["LlmSettings"]>("GET", "/api/llm/settings"),
   updateLlmSettings: (body: Schemas["LlmSettings"]) =>
     request<Schemas["LlmSettings"]>("PUT", "/api/llm/settings", body),
