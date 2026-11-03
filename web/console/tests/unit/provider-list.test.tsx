@@ -57,7 +57,7 @@ describe("ProviderPage", () => {
     serve([{ ...PUBLIC, last_test: tested("failed", check) }]);
     render(<ProviderPage onClose={() => {}} />);
     const failed = await screen.findByText("失败");
-    expect(failed.title).toMatch(/^API Key 无效或无权限；重新填写 Key（2026\/11\/3 .+）$/);
+    expect(failed.title).toMatch(/^API Key 无效或无权限；重新填写 Key（\d{4}\/\d{1,2}\/\d{1,2} .+）$/); // 日期随运行环境时区变化，只断言含日期
   });
 
   it("停用内网供应商直接提交，之后重新读取列表", async () => {
