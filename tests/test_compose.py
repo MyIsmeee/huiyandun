@@ -212,9 +212,10 @@ RTSP_TARGET = "rtsp-target"
 NVR_SIM = "nvr-sim"
 
 
-def test_attack_sim_reaches_only_rtsp_target() -> None:
-    """DP-09、C-SEC-11：attack-sim 只接入 attack-net，网络里只有它、rtsp-target 与不监听端口的合法录像机
-    nvr-sim（TK-115）；该网络内部隔离、宿主不可达，attack-sim 在网络层碰不到 go2rtc 等其他服务。"""
+def test_attack_sim_reaches_no_service_but_rtsp_target() -> None:
+    """DP-09、C-SEC-11、D-095：attack-sim 只接入 attack-net，攻击方能访问的服务只有 rtsp-target——网络里另有
+    不监听任何端口的合法录像机 nvr-sim（TK-115）；该网络内部隔离、宿主不可达，attack-sim 在网络层碰不到
+    go2rtc 等其他服务。"""
     members = {n for n, s in SERVICES.items() if ATTACK_NET in set(s.get("networks", []))}
     assert members == {ATTACK_SIM, RTSP_TARGET, NVR_SIM}
     assert set(SERVICES[NVR_SIM]["networks"]) == {ATTACK_NET}
