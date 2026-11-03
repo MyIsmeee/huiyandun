@@ -5,6 +5,8 @@
 
 关联引擎从 JetStream 订阅告警与视觉事件，生成的关联事件发布到 hyd.correlator.incident.v1。重启时先重放
 近期的关联事件恢复去重状态，再从"当前时刻 − 最长规则窗口"起重放事件恢复匹配窗口。
+
+设备行为模型（TK-115）跟随 Zeek conn.log，每个窗口结束时判定，偏离告警同样发布到 hyd.security.alert.v1。
 """
 
 import asyncio
@@ -20,6 +22,7 @@ import nats.js.errors
 import yaml
 from pydantic import Field
 
+from correlator.behavior import WINDOW_S, BehaviorModel, save_state
 from correlator.engine import SUPPRESS, Engine
 from correlator.eve import EveTail, Line
 from correlator.normalize import Ip, device_index, normalize
@@ -29,6 +32,7 @@ from py_common.config import ServiceConfig, load_config
 from py_common.log import configure_logging
 from py_contracts.config.site_schema import SiteConfig
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
+from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
 SUBJECT = "hyd.security.alert.v1"
 # 告警保留 365 天（HYD-ARCH-001 §10.2）
@@ -66,6 +70,21 @@ class CorrelatorConfig(ServiceConfig):
     attack_file: Path = Field(
         Path("/etc/hyd/attack.json"), description="ATT&CK 精简查表 rules/attack/techniques.json"
     )
+    behavior_enabled: bool = Field(True, description="设备行为模型开关（FR-205）")
+    conn_file: Path = Field(
+        Path("/zeek/logs/conn.log"), description="Zeek 会话日志（JSON），只读挂载"
+    )
+    conn_state_file: Path = Field(
+        Path("/var/lib/correlator/conn-position.json"),
+        description="conn.log 已处理位置，须位于持久卷",
+    )
+    behavior_state_file: Path = Field(
+        Path("/var/lib/correlator/behavior.json"),
+        description="行为模型状态，每个窗口结束时存盘，须位于持久卷，重启后续用",
+    )
+    behavior_baseline_file: Path | None = Field(
+        None, description="预先学好的基线快照：没有可续用的状态时从它开始，免去 10 分钟学习期"
+    )
 
 
 async def run(tail: EveTail, devices: dict[Ip, str], bus: Bus, config: CorrelatorConfig) -> None:
@@ -90,6 +109,71 @@ async def run(tail: EveTail, devices: dict[Ip, str], bus: Bus, config: Correlato
                     extra={"rule_id": event.rule_id, "device_id": event.device_id},
                 )
             await asyncio.to_thread(tail.commit, pending.pop(0))
+        await asyncio.sleep(config.poll_s)
+
+
+def load_behavior(devices: dict[Ip, str], config: CorrelatorConfig) -> BehaviorModel:
+    """续用存盘的状态，其次加载基线快照，都没有时从头学习。文件损坏或结构不对时记录后跳过：
+    否则 correlator 反复重启，告警归一化与关联也跟着停。"""
+    by_ip = {str(ip): device for ip, device in devices.items()}
+    for path in (config.behavior_state_file, config.behavior_baseline_file):
+        if path is None or not path.is_file():
+            continue
+        model = BehaviorModel(by_ip)  # 每次新建：加载到一半失败的模型不再沿用
+        try:
+            loaded = model.load(json.loads(path.read_text(encoding="utf-8")))
+        except (ValueError, KeyError, TypeError) as e:
+            log.warning(
+                "correlator.behavior_state_invalid", extra={"file": str(path), "error": repr(e)}
+            )
+            continue
+        if loaded:
+            log.info(
+                "correlator.behavior_loaded",
+                extra={"file": str(path), "learning": model.learning()},
+            )
+            return model
+        log.warning("correlator.behavior_state_stale", extra={"file": str(path)})
+    model = BehaviorModel(by_ip)
+    log.info("correlator.behavior_learning", extra={"learning": model.learning()})
+    return model
+
+
+async def behave(model: BehaviorModel, tail: EveTail, bus: Bus, config: CorrelatorConfig) -> None:
+    """跟随 conn.log 逐条记入当前窗口；窗口结束时判定、发布告警、存盘并记录读取位置。
+    告警发布失败时保留，下个周期重试。"""
+    start = datetime.now(UTC).timestamp() // WINDOW_S * WINDOW_S
+    last: Line | None = None
+    pending: list[SecurityAlertV1] = []
+    while True:
+        lines = await asyncio.to_thread(tail.poll)
+        now = datetime.now(UTC).timestamp()
+        for line in lines:
+            model.add(line.text, now)
+        last = lines[-1] if lines else last
+        if now >= start + WINDOW_S:
+            pending += model.close_window(start)
+            await asyncio.to_thread(save_state, model, config.behavior_state_file)
+            if last is not None:
+                await asyncio.to_thread(tail.commit, last)
+                last = None
+            if learning := model.learning():
+                log.info("correlator.behavior_learning", extra={"learning": learning})
+            start = now // WINDOW_S * WINDOW_S
+        while pending:
+            try:
+                await bus.js_publish(SUBJECT, pending[0])
+            except (nats.errors.Error, TimeoutError) as e:
+                log.warning(
+                    "correlator.publish_failed",
+                    extra={"rule_id": pending[0].rule_id, "error": repr(e)},
+                )
+                break
+            alert = pending.pop(0)
+            log.info(
+                "correlator.alert_published",
+                extra={"rule_id": alert.rule_id, "device_id": alert.device_id},
+            )
         await asyncio.sleep(config.poll_s)
 
 
@@ -171,10 +255,15 @@ async def serve(config: CorrelatorConfig) -> None:
         extra={"eve_file": str(config.eve_file), "rules": [r.id for r in rules]},
     )
     window = timedelta(seconds=max(r.window_s for r in rules))
-    await asyncio.gather(
+    devices = device_index(site)
+    tasks = [
         correlate(engine, bus, window),
-        run(EveTail(config.eve_file, config.state_file), device_index(site), bus, config),
-    )
+        run(EveTail(config.eve_file, config.state_file), devices, bus, config),
+    ]
+    if config.behavior_enabled:
+        model = load_behavior(devices, config)
+        tasks.append(behave(model, EveTail(config.conn_file, config.conn_state_file), bus, config))
+    await asyncio.gather(*tasks)
 
 
 def main() -> None:
