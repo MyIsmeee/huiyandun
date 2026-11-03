@@ -177,6 +177,18 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      operationId: listReports
+      description: 该关联事件的全部报告，按生成时间倒序；报告长期保存，不受 24 小时历史限制（TK-071）
+      x-min-role: viewer
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: 报告列表，没有报告时为空
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/reports/{id}:
     get:
       operationId: getReport
@@ -430,6 +442,18 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/llm/status:
+    get:
+      operationId: getLlmStatus
+      description: 顶栏模型状态（FR-606、V-M8），以最近一次调用为准
+      x-min-role: viewer
+      responses:
+        "200":
+          description: 当前状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LlmStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/llm/settings:
     get:
       operationId: getLlmSettings
@@ -669,6 +693,11 @@ components:
         reviewed_by: { anyOf: [{ type: string }, { type: "null" }] }
         reviewed_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
         created_at: { type: string, format: date-time }
+    ReportList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Report" } }
     ReportAi:
       type: object
       description: AI 区（V-AI1），与事实区物理分隔；供应商信息为生成时的快照
@@ -789,6 +818,16 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/LlmProvider" } }
+    LlmStatus:
+      type: object
+      description: |
+        normal 为第一家已启用供应商生效；failover 为最近一次调用由排在后面的供应商完成；template 为没有已启用的
+        供应商或最近一次调用全部失败（V-M8）
+      required: [state, provider_name, reason]
+      properties:
+        state: { enum: [normal, failover, template] }
+        provider_name: { anyOf: [{ type: string }, { type: "null" }], description: template 时为 null }
+        reason: { anyOf: [{ type: string }, { type: "null" }], description: 模板模式的原因，其余为 null }
     LlmProviderCreate:
       type: object
       required: [name, preset, base_url, model]

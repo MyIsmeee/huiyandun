@@ -19,7 +19,7 @@ from api_server.history import History
 from api_server.investigator import investigation_table
 from api_server.llm_chain import invoke, record_invocation
 from api_server.report_view import render
-from py_contracts.api import Report, ReportAi, ReportFacts, ReportInvestigation, Site
+from py_contracts.api import Report, ReportAi, ReportFacts, ReportInvestigation, ReportList, Site
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
@@ -183,6 +183,20 @@ async def _load(request: Request, report_id: str) -> Report:
     if row is None:
         raise HTTPException(404, "报告不存在")
     return Report.model_validate(dict(row))
+
+
+@router.get("/incidents/{incident_id}/reports", dependencies=[Depends(require("viewer"))])
+async def list_reports(incident_id: str, request: Request) -> ReportList:
+    """历史报告（TK-071）：报告长期保存，不受 24 小时历史限制。"""
+    async with request.app.state.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                select(report_table)
+                .where(report_table.c.incident_id == incident_id)
+                .order_by(report_table.c.created_at.desc())
+            )
+        ).mappings()
+        return ReportList(items=[Report.model_validate(dict(r)) for r in rows])
 
 
 @router.get("/reports/{report_id}", dependencies=[Depends(require("viewer"))])

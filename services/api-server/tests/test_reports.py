@@ -537,3 +537,65 @@ def test_no_verdict_not_quoted(
     report = generate(client)
     assert report.investigation is None
     assert "AI 值班员判定" not in export(client, report.id, "html").text
+
+
+def test_list_reports_newest_first(client: TestClient, password: str) -> None:
+    """TK-071：按事件列出历史报告，viewer 可看；没有报告为空列表。"""
+    login(client, "operator", password)
+    first, second = generate(client), generate(client)
+    login(client, "viewer", password)
+
+    items = client.get("/api/incidents/inc-rep/reports").json()["items"]
+
+    assert [r["id"] for r in items][:2] == [second.id, first.id]
+    assert Report.model_validate(items[0]) == second
+    assert client.get("/api/incidents/never/reports").json() == {"items": []}
+
+
+def llm_status(client: TestClient) -> tuple[str, str | None, str | None]:
+    r = client.get("/api/llm/status")
+    assert r.status_code == 200
+    return r.json()["state"], r.json()["provider_name"], r.json()["reason"]
+
+
+def test_llm_status_template_without_providers(client: TestClient, password: str) -> None:
+    login(client, "viewer", password)
+    assert llm_status(client) == ("template", None, "未启用任何模型供应商")
+
+
+def test_llm_status_follows_last_call(client: TestClient, password: str) -> None:
+    """V-M8：无调用时为第一家；第一家成功为正常、后面的成功为已切换；全部失败为模板模式。"""
+    a, b = add_provider(client, password), add_provider(client, password, "DeepSeek 备用")
+    assert llm_status(client) == ("normal", "本地 llama.cpp", None)
+
+    def reply(pid: str | None, attempts: list[dict]) -> None:
+        body = {"output": AI if pid else None, "unverified": [], "provider_id": pid,
+                "attempts": attempts}  # fmt: skip
+        gateway(client, lambda _: httpx2.Response(200, json=body))
+        login(client, "operator", password)
+        generate(client)
+        login(client, "viewer", password)
+
+    reply(b, [attempt(a, "failed", "连接被拒绝"), attempt(b, "ok")])
+    assert llm_status(client) == ("failover", "DeepSeek 备用", None)
+    reply(a, [attempt(a, "ok")])
+    assert llm_status(client) == ("normal", "本地 llama.cpp", None)
+    reply(None, [attempt(a, "failed", "连接被拒绝"), attempt(b, "failed", "连接被拒绝")])
+    state, name, reason = llm_status(client)
+    assert (state, name) == ("template", None)
+    assert reason is not None and reason.startswith("全部模型供应商不可用：")
+
+
+def test_llm_status_resets_when_providers_change(client: TestClient, password: str) -> None:
+    """管理员改了启用或顺序后，不再沿用改动前那次调用的结果。"""
+    a, b = add_provider(client, password), add_provider(client, password, "DeepSeek 备用")
+    body = {"output": AI, "unverified": [], "provider_id": b,
+            "attempts": [attempt(a, "failed", "连接被拒绝"), attempt(b, "ok")]}  # fmt: skip
+    gateway(client, lambda _: httpx2.Response(200, json=body))
+    login(client, "operator", password)
+    generate(client)
+    login(client, "admin", password)
+    assert client.put("/api/llm/providers/order", json={"provider_ids": [b, a]},
+                      headers=rid()).status_code == 204  # fmt: skip
+
+    assert llm_status(client) == ("normal", "DeepSeek 备用", None)

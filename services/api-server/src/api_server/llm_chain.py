@@ -2,6 +2,7 @@
 api-server 自身不访问供应商（C-LLM-01）。
 
 无输出时给出模板原因（FR-502）；审计与当日用量由调用方在业务事务中写入（G-13、D-084）。
+报告与值班员都经 invoke 调用，最近一次的结果记在内存中，供顶栏模型状态使用（V-M8，重启即清空）。
 """
 
 import logging
@@ -11,11 +12,14 @@ from typing import Any
 
 import httpx2
 from cryptography.exceptions import InvalidTag
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from api_server.audit import record
+from api_server.auth import require
 from api_server.llm import providers, unseal
+from py_contracts.api import LlmStatus
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +34,10 @@ class Outcome:
     provider: Any  # 成功的供应商行，无输出时为 None
     attempts: list[dict[str, Any]]
     reason: str | None  # 无输出时模板报告的原因
-    networks: dict[str, str]  # 供应商 ID → 网络位置，供审计
+    networks: dict[str, str]  # 供应商 ID → 网络位置，供审计；键序即调用时已启用供应商的顺序
+
+
+router = APIRouter(prefix="/api/llm")
 
 
 def _skipped(provider_id: str, reason: str) -> dict[str, Any]:
@@ -45,6 +52,19 @@ def _skipped(provider_id: str, reason: str) -> dict[str, Any]:
 
 
 async def invoke(
+    state: Any,
+    task: str,
+    data: dict[str, Any],
+    *,
+    deadline_s: float | None = None,
+    evidence: dict[str, Any] | None = None,
+) -> Outcome:
+    outcome = await _invoke(state, task, data, deadline_s=deadline_s, evidence=evidence)
+    state.llm_last = outcome
+    return outcome
+
+
+async def _invoke(
     state: Any,
     task: str,
     data: dict[str, Any],
@@ -158,3 +178,25 @@ async def record_invocation(
         },
         request_id=request_id,
     )
+
+
+@router.get("/status", dependencies=[Depends(require("viewer"))])
+async def llm_status(request: Request) -> LlmStatus:
+    """以最近一次调用为准；之后管理员改了启用或顺序，则不再沿用那次的结果（设计 071 §3）。"""
+    async with request.app.state.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                select(providers.c.id, providers.c.name)
+                .where(providers.c.enabled)
+                .order_by(providers.c.position)
+            )
+        ).all()
+    if not rows:
+        return LlmStatus(state="template", provider_name=None, reason="未启用任何模型供应商")
+    last: Outcome | None = request.app.state.llm_last
+    if last is None or list(last.networks) != [r.id for r in rows]:
+        return LlmStatus(state="normal", provider_name=rows[0].name, reason=None)
+    if last.provider is None:
+        return LlmStatus(state="template", provider_name=None, reason=last.reason)
+    state = "normal" if last.provider["id"] == rows[0].id else "failover"
+    return LlmStatus(state=state, provider_name=last.provider["name"], reason=None)

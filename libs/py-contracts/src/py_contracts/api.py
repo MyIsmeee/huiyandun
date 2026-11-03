@@ -310,6 +310,24 @@ class ProviderUsage(ContractModel):
     tokens: int = Field(..., ge=0)
 
 
+class LlmStatus(ContractModel):
+    """
+    normal 为第一家已启用供应商生效；failover 为最近一次调用由排在后面的供应商完成；template 为没有已启用的
+    供应商或最近一次调用全部失败（V-M8）
+
+    """
+
+    state: Literal["normal", "failover", "template"]
+    provider_name: str | None
+    """
+    template 时为 null
+    """
+    reason: str | None
+    """
+    模板模式的原因，其余为 null
+    """
+
+
 class LlmProviderCreate(ContractModel):
     name: str
     preset: Preset
@@ -983,6 +1001,10 @@ class Report(ContractModel):
     reviewed_by: str | None
     reviewed_at: AwareDatetime | None
     created_at: AwareDatetime
+
+
+class ReportList(ContractModel):
+    items: list[Report]
 
 
 class VisionScene(RootModel[VisionSceneV1]):
