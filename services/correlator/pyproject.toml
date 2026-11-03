@@ -9,6 +9,7 @@ dependencies = [
     "py-contracts",
     "pydantic>=2.14,<3",
     "pyyaml>=6.0.3,<7",
+    "river>=0.26.1,<0.27",  # 设备行为模型 HalfSpaceTrees（REUSE-24）
 ]
 
 [project.scripts]
