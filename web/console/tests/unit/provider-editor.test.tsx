@@ -47,6 +47,8 @@ describe("ProviderEditor", () => {
   it("地址为 127.0.0.1 或 localhost 时提示改填局域网 IP（V-M3、DP-07）", () => {
     open(null);
     expect(screen.queryByRole("alert")).toBeNull();
+    type(field("地址"), "http://localhost.example.com/v1");
+    expect(screen.queryByRole("alert")).toBeNull();
     type(field("地址"), "http://localhost:8080/v1");
     expect(screen.getByRole("alert").textContent).toContain("局域网 IP");
   });
@@ -108,7 +110,14 @@ describe("ProviderEditor", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it("名称、地址、模型未填时不可保存", () => {
+  it("名称、地址、模型未填或超时不是正整数时不可保存", () => {
+    open(SAVED);
+    const save = screen.getByRole("button", { name: "保存" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    type(screen.getByRole("spinbutton"), "1.5");
+    expect(save.disabled).toBe(true);
+    cleanup();
+
     open(null);
     expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "保存并测试" }) as HTMLButtonElement).disabled).toBe(true);

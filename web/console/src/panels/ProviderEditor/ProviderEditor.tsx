@@ -32,7 +32,7 @@ const PRESETS: Record<Preset, [label: string, url: string]> = {
   custom: ["自定义", ""],
 };
 const CHECKS = { connectivity: "连通", model: "模型存在", structured_output: "结构化输出" } as const;
-const LOOPBACK = /^\s*https?:\/\/(127\.|localhost|\[::1\])/i;
+const LOOPBACK = /^\s*https?:\/\/(127\.|localhost(?=[:/]|\s*$)|\[::1\])/i;
 const button = "h-9 rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40";
 const field = "h-9 min-w-0 rounded-lg border border-line bg-page px-3";
 
@@ -151,7 +151,7 @@ export function ProviderEditorView(props: {
   onClose: () => void;
 }) {
   const { form, provider, models, pending, result, onChange } = props;
-  const incomplete = !form.name.trim() || !form.base_url.trim() || !form.model.trim() || !(form.timeout_s >= 1);
+  const incomplete = !form.name.trim() || !form.base_url.trim() || !form.model.trim() || !(Number.isInteger(form.timeout_s) && form.timeout_s >= 1);
   const network = provider && (provider.network === "internal" ? "内网" : "公网");
   return (
     <div className="fixed inset-0 z-10 grid place-items-center overflow-auto bg-page/60 p-4">
@@ -226,6 +226,7 @@ export function ProviderEditorView(props: {
               <input
                 type="number"
                 min={1}
+                step={1}
                 value={Number.isNaN(form.timeout_s) ? "" : form.timeout_s}
                 onChange={(e) => onChange({ timeout_s: e.target.valueAsNumber })}
                 className={`${field} w-24`}

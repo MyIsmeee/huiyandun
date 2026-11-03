@@ -52,12 +52,12 @@ describe("ProviderPage", () => {
     ]);
   });
 
-  it("测试失败时悬停显示原因、改法与时间（V-M7）", async () => {
+  it("测试失败时悬停显示原因、改法与日期时间；停用的供应商同样显示，便于先测再启用（V-M7、FR-602）", async () => {
     const check = { check: "connectivity", ok: false, latency_ms: null, reason: "API Key 无效或无权限", hint: "重新填写 Key" } as const; // prettier-ignore
-    serve([provider("p-1", { last_test: tested("failed", check) })]);
+    serve([{ ...PUBLIC, last_test: tested("failed", check) }]);
     render(<ProviderPage onClose={() => {}} />);
     const failed = await screen.findByText("失败");
-    expect(failed.title).toMatch(/^API Key 无效或无权限；重新填写 Key（.+）$/);
+    expect(failed.title).toMatch(/^API Key 无效或无权限；重新填写 Key（2026\/11\/3 .+）$/);
   });
 
   it("停用内网供应商直接提交，之后重新读取列表", async () => {
