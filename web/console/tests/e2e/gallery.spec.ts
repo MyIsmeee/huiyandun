@@ -11,8 +11,10 @@ const COMPONENTS = {
   AlertList: ["normal", "empty", "disconnected"],
   // 正常态为已判定、含未溯源实体与确认按钮；不可用态另含确认被拒；空态为尚未开始调查，错误态为读取失败
   AiInvestigation: ["normal", "running", "unavailable", "empty", "loading", "error", "disconnected"],
-  // 报告不随推送变化，无断线态；空态为尚未生成
-  ReportBar: ["empty", "loading", "normal", "reviewed", "error"],
+  // 报告不随推送变化，无断线态；空态为尚无报告，加载为读取历史，错误态含读取失败与生成失败
+  ReportBar: ["empty", "loading", "normal", "generating", "error"],
+  // 报告页嵌入导出网页（D-097），内容由导出网页呈现；只经 REST 读取，无断线态
+  ReportPage: ["draft", "reviewed", "error"],
   // 只经 REST 轮询、不随推送变化，无断线态与空态（没有可用供应商即模板模式）
   LlmStatusBadge: ["normal", "failover", "template", "loading", "error"],
   // 只经 REST 读取、不随推送变化，无断线态；failing 为含失败项，blocked 为全局禁止公网
@@ -24,6 +26,10 @@ const COMPONENTS = {
 for (const [component, states] of Object.entries(COMPONENTS)) {
   for (const state of states) {
     test(`${component}：${state}`, async ({ page }) => {
+      // 报告页嵌入的导出网页（由后端渲染）以固定内容代替
+      await page.route("/api/reports/*/export?format=html", (route) =>
+        route.fulfill({ contentType: "text/html", body: '<meta charset="utf-8"><h1>溯源报告</h1><p>事实区 · AI 分析区</p>' }),
+      );
       await page.goto(`/tests/e2e/gallery/?component=${component}`);
       // 视频须已有首帧，否则截到空白
       await page.waitForFunction(() => [...document.querySelectorAll("video")].every((v) => v.readyState >= 2));

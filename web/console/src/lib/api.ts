@@ -73,6 +73,9 @@ export const api = {
       undefined,
       REPORT_TIMEOUT_MS,
     ),
+  /** 该关联事件的历史报告，按生成时间倒序（TK-071） */
+  listReports: (incidentId: string) =>
+    request<Schemas["ReportList"]>("GET", `/api/incidents/${encodeURIComponent(incidentId)}/reports`),
   /** 标记报告已复核（FR-504），写审计 */
   reviewReport: (reportId: string) =>
     request<Schemas["Report"]>("POST", `/api/reports/${encodeURIComponent(reportId)}/review`),
