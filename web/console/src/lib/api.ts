@@ -76,6 +76,13 @@ export const api = {
   /** 标记报告已复核（FR-504），写审计 */
   reviewReport: (reportId: string) =>
     request<Schemas["Report"]>("POST", `/api/reports/${encodeURIComponent(reportId)}/review`),
+  /** 模型供应商（FR-601～604），只有 admin 可用；顺序即故障转移顺序 */
+  listProviders: () => request<Schemas["LlmProviderList"]>("GET", "/api/llm/providers"),
+  updateProvider: (id: string, body: Schemas["LlmProviderUpdate"]) =>
+    request<Schemas["LlmProvider"]>("PATCH", `/api/llm/providers/${encodeURIComponent(id)}`, body),
+  getLlmSettings: () => request<Schemas["LlmSettings"]>("GET", "/api/llm/settings"),
+  updateLlmSettings: (body: Schemas["LlmSettings"]) =>
+    request<Schemas["LlmSettings"]>("PUT", "/api/llm/settings", body),
   /** 实时画面的 WebRTC 信令：提交 SDP offer，返回 SDP answer（FR-106） */
   webrtc: async (deviceId: string, offer: string) =>
     (await send("POST", `/api/devices/${encodeURIComponent(deviceId)}/webrtc`, offer, "application/sdp")).text(),
