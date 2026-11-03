@@ -140,7 +140,7 @@ bundled:
       - { name: OpenBLAS（scipy-openblas64）, version: 0.3.34, license: BSD-3-Clause }
       - { name: libgfortran, version: 8.5.0, license: GPL-3.0-or-later WITH GCC-exception-3.1 }
       - { name: libquadmath, version: 8.5.0, license: LGPL-2.1-or-later }
-  # supervision 的依赖（REUSE-07）
+  # supervision（REUSE-07）与 river（REUSE-24）的依赖
   - package: scipy==1.18.1
     owner: MyIsmeee
     libraries:
