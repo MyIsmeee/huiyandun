@@ -8,6 +8,7 @@ members = [
     "audit-service",
     "correlator",
     "evidence-service",
+    "evidence-verify",
     "huiyandun",
     "llm-gateway",
     "playbook-executor",
@@ -426,6 +427,17 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "uvicorn", specifier = ">=0.54.0,<0.55" },
 ]
+
+[[package]]
+name = "evidence-verify"
+version = "0.1.0"
+source = { editable = "libs/evidence-verify" }
+dependencies = [
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cryptography", specifier = ">=50,<51" }]
 
 [[package]]
 name = "fastapi"

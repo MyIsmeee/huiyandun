@@ -79,6 +79,7 @@ known-first-party = [
     "audit_service",
     "correlator",
     "evidence_service",
+    "evidence_verify",
     "llm_gateway",
     "playbook_executor",
     "privileged_helper",

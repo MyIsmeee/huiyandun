@@ -1,0 +1,12 @@
+[project]
+name = "evidence-verify"
+version = "0.1.0"  # 证据包 manifest 的 verify_tool_version 以此为准（080 §4）
+description = "离线校验工具 hyd-evidence verify：在不运行慧眼盾的机器上校验证据包（C-EVD-03、FR-703）"
+requires-python = "==3.12.*"
+dependencies = [
+    "cryptography>=50,<51",  # 与 evidence-service 一致；SHA-256、Ed25519（REUSE-16）
+]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
