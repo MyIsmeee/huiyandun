@@ -1,0 +1,12 @@
+[project]
+name = "evidence-service"
+version = "0.0.0"
+description = "存证：哈希链、逐条 Ed25519 签名、视频片段截取、证据包导出（01 §7、C-EVD-01～04）"
+requires-python = "==3.12.*"
+dependencies = [
+    "cryptography>=50,<51",  # 与 playbook-executor 一致；SHA-256、Ed25519（REUSE-16）
+]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
