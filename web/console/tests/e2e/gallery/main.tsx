@@ -111,11 +111,11 @@ const REPORT: Report = {
   reviewed_by: null, reviewed_at: null, created_at: "2026-10-27T06:30:00Z",
 }; // prettier-ignore
 const REPORTS = [{ ...REPORT, id: "rep-2", source: "llm", created_at: "2026-10-27T06:31:00Z" }, { ...REPORT, reviewed_by: "operator" }] as Report[]; // prettier-ignore
-const reportBar = (load: ReportsLoad, request: ReportRequest = { status: "idle" }) => (
+const reportBar = (load: ReportsLoad, request: ReportRequest = { status: "idle" }, exporting: ReportRequest = { status: "idle" }) => (
   <div className="w-80 p-3">
-    <ReportBarView incident={INCIDENT} load={load} request={request} canGenerate onGenerate={() => {}} onOpen={() => {}} />
+    <ReportBarView incident={INCIDENT} load={load} request={request} exporting={exporting} canEdit onGenerate={() => {}} onExport={() => {}} onOpen={() => {}} />
   </div>
-);
+); // prettier-ignore
 // 报告网页由 gallery.spec.ts 拦截 /api/reports/*/export 返回固定内容
 const reportPage = (report: Report, review: ReportRequest = { status: "idle" }) => (
   <div className="h-[480px] w-[960px]">
@@ -248,8 +248,8 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     empty: reportBar({ status: "ready", reports: [] }),
     loading: reportBar({ status: "loading" }),
     normal: reportBar({ status: "ready", reports: REPORTS }),
-    generating: reportBar({ status: "ready", reports: REPORTS }, { status: "pending" }),
-    error: reportBar({ status: "failed" }, { status: "failed", message: "关联事件不存在或已超过 24 小时" }),
+    generating: reportBar({ status: "ready", reports: REPORTS }, { status: "pending" }, { status: "pending" }),
+    error: reportBar({ status: "failed" }, { status: "failed", message: "关联事件不存在或已超过 24 小时" }, { status: "failed", message: "存证服务暂不可达，请稍后重试" }), // prettier-ignore
   },
   ReportPage: {
     draft: reportPage(REPORT),

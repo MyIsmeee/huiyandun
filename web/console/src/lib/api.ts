@@ -6,6 +6,8 @@ export type Site = Schemas["Site"];
 const TIMEOUT_MS = 10_000;
 // 生成报告须等模型逐家尝试，网关总时限 60 s（SC-05）加余量
 const REPORT_TIMEOUT_MS = 70_000;
+// api-server 向 evidence-service 取包时限 30 s（evidence_timeout_s），包含录像可达数十 MB，再加传输余量
+const EVIDENCE_TIMEOUT_MS = 60_000;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -76,6 +78,17 @@ export const api = {
   /** 该关联事件的历史报告，按生成时间倒序（TK-071） */
   listReports: (incidentId: string) =>
     request<Schemas["ReportList"]>("GET", `/api/incidents/${encodeURIComponent(incidentId)}/reports`),
+  /** 导出关联事件的证据包 zip（FR-702），写审计；没有存证记录时为 404 */
+  exportEvidence: async (incidentId: string) =>
+    (
+      await send(
+        "POST",
+        `/api/incidents/${encodeURIComponent(incidentId)}/evidence/export`,
+        undefined,
+        undefined,
+        EVIDENCE_TIMEOUT_MS,
+      )
+    ).blob(),
   /** 标记报告已复核（FR-504），写审计 */
   reviewReport: (reportId: string) =>
     request<Schemas["Report"]>("POST", `/api/reports/${encodeURIComponent(reportId)}/review`),

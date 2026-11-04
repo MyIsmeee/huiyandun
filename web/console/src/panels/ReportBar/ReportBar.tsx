@@ -24,9 +24,21 @@ const row = (report: Report) =>
 const button = "h-9 rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40";
 const link = "underline underline-offset-4 hover:text-fg";
 
+/** 导出接口是 POST，不能用 <a download> 直接下载：取回后交给浏览器保存 */
+function save(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  // 下载开始后再释放，立即释放在部分浏览器中会使下载失败
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 /**
  * 报告栏（TK-071）：列出涉及所选设备的最近一个关联事件的全部历史报告，点击在主界面之上打开报告页；
- * 全部角色可看，"生成报告"只有 operator 及以上渲染（C-FE-07）。生成后新报告置顶并直接打开。
+ * 全部角色可看，"生成报告""导出证据包"（TK-081，演示第 11 步）只有 operator 及以上渲染（C-FE-07）。
+ * 生成后新报告置顶并直接打开。
  */
 export function ReportBar(props: { deviceId: string }) {
   const { deviceId } = props;
@@ -48,6 +60,7 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (i
   const [load, setLoad] = useState<ReportsLoad>({ status: "loading" });
   const [request, setRequest] = useState<ReportRequest>({ status: "idle" });
   const [review, setReview] = useState<ReportRequest>({ status: "idle" });
+  const [exporting, setExporting] = useState<ReportRequest>({ status: "idle" });
   // 打开的报告单独保存，不随列表的读取结果变化
   const [open, setOpen] = useState<Report | null>(null);
   // 只采用最近一次读取的结果：晚到的旧结果不覆盖生成后重新读取的列表
@@ -78,6 +91,16 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (i
     }
   }
 
+  async function exportEvidence() {
+    setExporting({ status: "pending" });
+    try {
+      save(await api.exportEvidence(incident.id), `evidence-${incident.id}.zip`);
+      setExporting({ status: "idle" });
+    } catch (e) {
+      setExporting({ status: "failed", message: failure(e) });
+    }
+  }
+
   async function markReviewed(id: string) {
     setReview({ status: "pending" });
     try {
@@ -102,8 +125,10 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (i
         incident={incident}
         load={load}
         request={request}
-        canGenerate={canEdit}
+        exporting={exporting}
+        canEdit={canEdit}
         onGenerate={() => void generate()}
+        onExport={() => void exportEvidence()}
         onOpen={openReport}
       />
       {/* 与供应商页相同，盖在主界面之上而不替换它；挂到 body 下，不受详情面板的布局约束 */}
@@ -128,11 +153,13 @@ export function ReportBarView(props: {
   incident: Incident;
   load: ReportsLoad;
   request: ReportRequest;
-  canGenerate: boolean;
+  exporting: ReportRequest;
+  canEdit: boolean;
   onGenerate: () => void;
+  onExport: () => void;
   onOpen: (report: Report) => void;
 }) {
-  const { incident, load, request, canGenerate, onGenerate, onOpen } = props;
+  const { incident, load, request, exporting, canEdit, onGenerate, onExport, onOpen } = props;
   return (
     <section aria-label="报告" className="flex flex-col gap-2 rounded-xl border border-line p-3 text-sm">
       <p className="flex items-center gap-2">
@@ -163,12 +190,18 @@ export function ReportBarView(props: {
             ))}
           </ul>
         ))}
-      {canGenerate && (
-        <button type="button" onClick={onGenerate} disabled={request.status === "pending"} className={`${button} self-start`}>
-          {request.status === "pending" ? "生成中…" : "生成报告"}
-        </button>
+      {canEdit && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={onGenerate} disabled={request.status === "pending"} className={button}>
+            {request.status === "pending" ? "生成中…" : "生成报告"}
+          </button>
+          <button type="button" onClick={onExport} disabled={exporting.status === "pending"} className={button}>
+            {exporting.status === "pending" ? "导出中…" : "导出证据包"}
+          </button>
+        </div>
       )}
       {request.status === "failed" && <Failure message={request.message} />}
+      {exporting.status === "failed" && <Failure message={exporting.message} />}
     </section>
   );
 }
