@@ -69,13 +69,14 @@ describe("ReportBar", () => {
     [null, false],
     ["operator", true],
     ["admin", true],
-  ] as const)("角色 %s：历史报告都可看，生成按钮 %s（C-FE-07）", async (role, visible) => {
+  ] as const)("角色 %s：历史报告都可看，生成与导出按钮 %s（C-FE-07）", async (role, visible) => {
     push(incident("inc-1"));
     vi.spyOn(api, "listReports").mockResolvedValue({ items: [] });
     show(role);
     await act(async () => {});
     expect(screen.getByText("尚无报告")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "生成报告" }) !== null).toBe(visible);
+    expect(screen.queryByRole("button", { name: "导出证据包" }) !== null).toBe(visible);
   });
 
   it("列出最近关联事件的历史报告，点击打开报告页（TK-071）", async () => {
@@ -216,5 +217,41 @@ describe("ReportBar", () => {
 
     expect(screen.getByRole("alert").textContent).toBe("关联事件不存在或已超过 24 小时");
     expect(screen.getByRole("button", { name: "生成报告" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("导出证据包：取回后以 evidence-<事件 ID>.zip 交给浏览器保存（FR-702）", async () => {
+    push(incident("inc-1"));
+    vi.spyOn(api, "listReports").mockResolvedValue({ items: [] });
+    const blob = new Blob(["zip"]);
+    const exportEvidence = vi.spyOn(api, "exportEvidence").mockResolvedValue(blob);
+    const createObjectURL = vi.fn().mockReturnValue("blob:evidence");
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }); // jsdom 未实现
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      expect([this.href, this.download]).toEqual(["blob:evidence", "evidence-inc-1.zip"]);
+    });
+    show("operator");
+    await act(async () => {});
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "导出证据包" })));
+    expect(exportEvidence).toHaveBeenCalledWith("inc-1");
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(click).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "导出证据包" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("导出期间不可再点，失败显示原因并可重试", async () => {
+    push(incident("inc-1"));
+    vi.spyOn(api, "listReports").mockResolvedValue({ items: [] });
+    let reject: (e: Error) => void = () => {};
+    vi.spyOn(api, "exportEvidence").mockReturnValue(new Promise((_, r) => (reject = r)));
+    show("operator");
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "导出证据包" }));
+    expect(screen.getByRole("button", { name: "导出中…" }).hasAttribute("disabled")).toBe(true);
+    await act(async () => reject(new ApiError(404, "存证尚未写入或没有记录，请稍后重试")));
+
+    expect(screen.getByRole("alert").textContent).toBe("存证尚未写入或没有记录，请稍后重试");
+    expect(screen.getByRole("button", { name: "导出证据包" }).hasAttribute("disabled")).toBe(false);
   });
 });

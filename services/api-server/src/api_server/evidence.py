@@ -36,7 +36,7 @@ async def export_evidence(
         log.warning("evidence.export_failed", extra={"incident_id": incident_id, "error": repr(e)})
         raise HTTPException(503, UNREACHABLE) from e
     if res.status_code == 404:
-        raise HTTPException(404, "该关联事件没有存证记录")
+        raise HTTPException(404, "存证尚未写入或没有记录，请稍后重试")  # 关联事件后约 32 s 才写入
     if res.status_code != 200:
         log.warning(
             "evidence.export_failed", extra={"incident_id": incident_id, "status": res.status_code}
