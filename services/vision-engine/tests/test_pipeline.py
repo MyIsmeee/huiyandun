@@ -220,7 +220,7 @@ def test_replay_reported_as_model_event_with_matched_time() -> None:
     assert (replay.type, replay.source, replay.confidence, replay.duration_s) == (
         "replay", "model", 0.8, 10,
     )  # fmt: skip
-    assert replay.detail is not None and replay.detail.startswith("画面与 60 s 前（")
+    assert replay.detail == "画面与 60 s 前的片段重复"  # 只写相对时刻（D-106）
 
 
 class FakeView:

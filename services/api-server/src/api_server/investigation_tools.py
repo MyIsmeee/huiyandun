@@ -10,7 +10,7 @@ import json
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, Self
 
@@ -78,19 +78,21 @@ class ToolResult:
     summary: str  # 展示给值守人员
 
 
-def _alert_item(event: EventBase) -> dict[str, Any]:
+def _alert_item(event: EventBase, tz: timezone) -> dict[str, Any]:
+    """ts 换算为站点时区并带偏移，模型叙述中的时刻与界面一致（D-106）。"""
+    ts = event.ts.astimezone(tz).isoformat()
     if isinstance(event, SecurityAlertV1):
-        return {"kind": "security_alert", "ts": event.ts.isoformat()} | event.model_dump(
+        return {"kind": "security_alert", "ts": ts} | event.model_dump(
             mode="json",
             include={"category", "severity", "src_ip", "dst_ip", "device_id", "technique",
                      "source", "confidence", "summary"},
         )  # fmt: skip
     if isinstance(event, VisionBehaviorV1):
-        return {"kind": "behavior", "ts": event.ts.isoformat()} | event.model_dump(
+        return {"kind": "behavior", "ts": ts} | event.model_dump(
             mode="json", include={"camera_id", "behavior", "confidence_avg", "duration_s"}
         )
     assert isinstance(event, VisionIntegrityV1)
-    return {"kind": "integrity", "ts": event.ts.isoformat()} | event.model_dump(
+    return {"kind": "integrity", "ts": ts} | event.model_dump(
         mode="json", include={"camera_id", "type", "duration_s", "source", "confidence", "detail"}
     )
 
@@ -103,8 +105,10 @@ def _describe(item: dict[str, Any]) -> str:
     return f"{item['type']}（{SOURCE[item['source']]}，可信度 {item['confidence']:.2f}）"
 
 
-def _listing(events: list[EventBase], minutes: int, noun: str) -> tuple[dict[str, Any], str]:
-    items = [_alert_item(e) for e in sorted(events, key=lambda e: e.ts, reverse=True)]
+def _listing(
+    events: list[EventBase], minutes: int, noun: str, tz: timezone
+) -> tuple[dict[str, Any], str]:
+    items = [_alert_item(e, tz) for e in sorted(events, key=lambda e: e.ts, reverse=True)]
     summary = f"近 {minutes} 分钟 {len(items)} 条{noun}"
     if items:
         summary += f"，最近：{_describe(items[0])}"
@@ -142,8 +146,10 @@ class Tools:
         conn_log: Path,
         techniques: dict[str, Any],
         behavior_state: Path,
+        tz: timezone,
     ) -> None:
-        self._history, self._devices = history, devices
+        """tz：站点时区，交给模型的时刻按它换算（D-106）。"""
+        self._history, self._devices, self._tz = history, devices, tz
         self._conn_log, self._techniques = conn_log, techniques
         self._behavior_state = behavior_state
         self._tools: dict[
@@ -186,7 +192,7 @@ class Tools:
             return isinstance(e, VisionBehaviorV1) and device == e.camera_id
 
         events = [e for e in self._history.events_since(_since(a.minutes)) if match(e)]
-        return _listing(events, a.minutes, "告警")
+        return _listing(events, a.minutes, "告警", self._tz)
 
     async def _list_frame_events(self, a: FrameArgs) -> tuple[dict[str, Any], str]:
         events = [
@@ -194,7 +200,7 @@ class Tools:
             for e in self._history.events_since(_since(a.minutes))
             if isinstance(e, VisionIntegrityV1 | VisionBehaviorV1) and e.camera_id == a.camera_id
         ]
-        return _listing(events, a.minutes, "画面事件")
+        return _listing(events, a.minutes, "画面事件", self._tz)
 
     async def _get_device(self, a: DeviceArgs) -> tuple[dict[str, Any], str]:
         device = self._devices.get(a.device_id)

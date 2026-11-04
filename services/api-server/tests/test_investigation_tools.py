@@ -14,6 +14,7 @@ from api_server import investigation_tools
 from api_server.devices import Devices
 from api_server.history import History
 from api_server.investigation_tools import Tools
+from api_server.localtime import site_tz
 from api_server.site import load
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
@@ -91,7 +92,14 @@ def tools(history: History, tmp_path: Path) -> Tools:
         )
         + "\n"
     )
-    return Tools(history, Devices(load(SITE).devices), log, TECHNIQUES, tmp_path / "behavior.json")
+    return Tools(
+        history,
+        Devices(load(SITE).devices),
+        log,
+        TECHNIQUES,
+        tmp_path / "behavior.json",
+        site_tz(480),
+    )
 
 
 def run(tools: Tools, tool: str, args: dict[str, Any]) -> investigation_tools.ToolResult:
@@ -107,6 +115,12 @@ def test_list_alerts_by_ip_in_window_newest_first(tools: Tools) -> None:
         r.summary
         == "近 10 分钟 2 条告警，最近：RTSP 认证爆破（第 37 次）（172.30.0.100 → 172.30.0.12）"
     )
+
+
+def test_alert_times_in_site_timezone(tools: Tools) -> None:
+    """交给模型的时刻按站点时区并带偏移，与界面一致（D-106）。"""
+    r = run(tools, "list_alerts", {"ip": ATTACKER})
+    assert all(i["ts"].endswith("+08:00") for i in r.data["items"])
 
 
 def test_list_alerts_by_device_includes_behavior(tools: Tools) -> None:
@@ -153,8 +167,9 @@ def test_query_sessions_aggregates_by_peer(tools: Tools) -> None:
 
 def test_query_sessions_without_log(history: History, tmp_path: Path) -> None:
     tools = Tools(
-        history, Devices(load(SITE).devices), tmp_path / "missing.log", TECHNIQUES, tmp_path / "b"
-    )
+        history, Devices(load(SITE).devices), tmp_path / "missing.log", TECHNIQUES, tmp_path / "b",
+        site_tz(480),
+    )  # fmt: skip
     r = run(tools, "query_sessions", {"ip": ATTACKER})
     assert r.data == {"available": False} and r.summary == "会话日志不可用"
 

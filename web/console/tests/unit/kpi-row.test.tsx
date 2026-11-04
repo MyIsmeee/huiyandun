@@ -10,7 +10,7 @@ const KPIS: Kpis = {
   online_devices: { value: 3, delta: -1 },
   active_alerts: { value: 0, delta: 0 },
   contained_today: { value: 2, delta: 2 },
-  detect_p95_ms: { value: null, delta: null },
+  last_contain_ms: { value: null, delta: null },
 };
 function tile(label: string): HTMLElement {
   const item = within(screen.getByRole("list", { name: "关键指标" }))
@@ -39,7 +39,15 @@ describe("KpiRow", () => {
     expect(tile("在线设备").textContent).toBe("在线设备3台较 1 小时前 ↓ 1");
     expect(tile("活跃告警").textContent).toBe("活跃告警0条较 1 小时前 持平");
     expect(tile("今日已处置").textContent).toBe("今日已处置2起较 1 小时前 ↑ 2");
-    expect(tile("检测时延 P95").textContent).toBe("检测时延 P95—");
+    expect(tile("最近处置用时").textContent).toBe("最近处置用时—");
+  });
+
+  it("最近处置用时按秒显示 1 位小数，与上一次相比（D-106）", async () => {
+    vi.spyOn(api, "getKpis").mockResolvedValue({ ...KPIS, last_contain_ms: { value: 12_340, delta: -2_500 } });
+    render(<KpiRow stale={false} />);
+    await flush();
+
+    expect(tile("最近处置用时").textContent).toBe("最近处置用时12.3秒较上一次 ↓ 2.5");
   });
 
   it("按浏览器本地当天 0 点起算今日（D-100）", async () => {

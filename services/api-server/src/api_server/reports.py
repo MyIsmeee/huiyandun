@@ -213,7 +213,7 @@ async def export_report(
     """未复核时带"未复核草稿"水印（FR-504、V-AI4、D-078）。"""
     report = await _load(request, report_id)
     return Response(
-        render(report, fmt),
+        render(report, fmt, request.app.state.tz),
         media_type=MEDIA_TYPE[fmt],
         headers={
             "Content-Disposition": f'{DISPOSITION[fmt]}; filename="report-{report.id}.{fmt}"',

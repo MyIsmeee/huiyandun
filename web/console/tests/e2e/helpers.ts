@@ -52,7 +52,7 @@ export async function mockLlmStatus(page: Page): Promise<void> {
 }
 
 const NO_KPI = { value: null, delta: null };
-const NO_KPIS = { online_devices: NO_KPI, active_alerts: NO_KPI, contained_today: NO_KPI, detect_p95_ms: NO_KPI };
+const NO_KPIS = { online_devices: NO_KPI, active_alerts: NO_KPI, contained_today: NO_KPI, last_contain_ms: NO_KPI };
 
 /** 大屏关键指标（D-100），缺省全部无数据 */
 export async function mockKpis(page: Page, kpis: object = NO_KPIS): Promise<void> {

@@ -13,6 +13,7 @@ import logging
 import math
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from ipaddress import ip_address
@@ -57,7 +58,6 @@ FEATURES = (
     ("平均会话时长", 300),
 )
 NEW_PEERS, FAILED, BYTES_OUT = 2, 3, 5
-UNITS = {4: " B", 5: " B", 6: " s"}
 # ATT&CK 由偏离的特征按固定表映射（确定性，不依赖模型）
 T_BRUTE_FORCE, T_EXFILTRATION, T_VIDEO_CAPTURE = "T1110", "T1041", "T1125"
 
@@ -120,10 +120,23 @@ def _scale(x: list[float]) -> list[float]:
     ]
 
 
-def _fmt(i: int, v: float) -> str:
-    if i == FAILED:
-        return f"{v:.2f}"
-    return f"{v:.1f}{UNITS.get(i, '')}" if i == 6 else f"{v:.0f}{UNITS.get(i, '')}"
+def _bytes(v: float) -> str:
+    for unit, size in (("MB", 1e6), ("KB", 1e3)):
+        if v >= size:
+            return f"{v / size:.1f} {unit}"
+    return f"{v:.0f} B"
+
+
+# 告警摘要的白话说法（D-106）：每项为（说法, 数值格式）；计数与流量均为每 30 s 窗口的量
+PLAIN: tuple[tuple[str, Callable[[float], str]], ...] = (
+    ("每 30 秒会话", lambda v: f"{v:.0f} 次"),
+    ("访问方", lambda v: f"{v:.0f} 个"),
+    ("新访问方", lambda v: f"{v:.0f} 个"),
+    ("连接失败率", lambda v: f"{v * 100:.0f}%"),
+    ("每 30 秒入向流量", _bytes),
+    ("每 30 秒出向流量", _bytes),
+    ("平均会话时长", lambda v: f"{v:.1f} 秒"),
+)
 
 
 @dataclass
@@ -233,14 +246,13 @@ class BehaviorModel:
         x = [fmean(w.x[i] for w in streak) for i in range(len(FEATURES))]
         sigmas = device.sigmas(x)
         baseline = [fmean(h[i] for h in device.history) for i in range(len(FEATURES))]
-        top = sorted(range(len(FEATURES)), key=lambda i: abs(sigmas[i]), reverse=True)[:2]
-        parts = [f"新访问方 {'、'.join(new)}"] if new else []
+        # 白话摘要（D-106）：陌生访问方 + 偏离最大的两项及其平时水平；数值与标准差留在基线工具中
+        shown = [i for i in range(len(FEATURES)) if not (new and i == NEW_PEERS)]
+        top = sorted(shown, key=lambda i: abs(sigmas[i]), reverse=True)[:2]
+        parts = [f"出现陌生访问方 {'、'.join(new)}"] if new else []
         parts.append(
-            "偏离最大："
-            + "、".join(
-                f"{FEATURES[i][0]} {_fmt(i, x[i])}（基线 {_fmt(i, baseline[i])}，"
-                f"{sigmas[i]:+.1f}σ）"
-                for i in top
+            "、".join(
+                f"{PLAIN[i][0]} {PLAIN[i][1](x[i])}（平时 {PLAIN[i][1](baseline[i])}）" for i in top
             )
         )
         if sigmas[FAILED] >= MIN_SIGMA:
@@ -269,7 +281,7 @@ class BehaviorModel:
             evidence_ref=f"zeek:conn/{first.uid}",
             source="model",
             confidence=round(min(1.0, max(w.score for w in streak)), 2),
-            summary=f"{device.id} 行为偏离基线：" + "；".join(parts),
+            summary=f"{device.id} " + "；".join(parts),
         )
 
     def dump(self) -> dict[str, Any]:

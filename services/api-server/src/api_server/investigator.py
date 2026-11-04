@@ -97,6 +97,8 @@ class _Run:
     def __init__(self, state: Any, incident: CorrelatorIncidentV1) -> None:
         self._state, self._id = state, incident.id
         self._incident = incident.model_dump(mode="json", exclude=ENVELOPE)
+        # 交给模型的时刻按站点时区，与界面一致（D-106）
+        self._incident["created_at"] = incident.created_at.astimezone(state.tz).isoformat()
         self._steps: list[dict[str, Any]] = []
         self._shown: list[dict[str, Any]] = []
         self._seq = self._round = 0
