@@ -1,0 +1,64 @@
+import { useEffect, useState } from "react";
+import type { components } from "../../api/schema";
+import { api } from "../../lib/api";
+import { type KpiData, KpiTile } from "./KpiTile";
+
+type Kpis = components["schemas"]["Kpis"];
+
+const POLL_MS = 5_000;
+const KPIS: { key: keyof Kpis; label: string; unit: string }[] = [
+  { key: "online_devices", label: "在线设备", unit: "台" },
+  { key: "active_alerts", label: "活跃告警", unit: "条" },
+  { key: "contained_today", label: "今日已处置", unit: "起" },
+  { key: "detect_p95_ms", label: "检测时延 P95", unit: "ms" },
+];
+
+/** 浏览器本地当天 0 点，"今日已处置"由此起算（D-100） */
+function dayStart(): string {
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  return day.toISOString();
+}
+
+/**
+ * 大屏关键指标（HYD-UIX-004 §4.1 B 区）：每 5 s 拉取一次，上一次返回后再计时，请求不会叠加。
+ * 拉取失败或断线时保留上次数值并标为陈旧，无上次数值显示 —（§8 KpiTile）。
+ */
+export function KpiRow({ stale }: { stale: boolean }) {
+  const [kpis, setKpis] = useState<Kpis | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let active = true;
+    async function poll() {
+      const next = await api.getKpis(dayStart()).catch(() => null);
+      if (!active) return;
+      if (next) setKpis(next);
+      setFailed(!next);
+      timer = setTimeout(() => void poll(), POLL_MS);
+    }
+    void poll();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const data = (key: keyof Kpis): KpiData =>
+    kpis === null && !failed && !stale
+      ? { status: "loading" }
+      : { status: failed || stale ? "stale" : "ready", value: kpis?.[key].value ?? null, delta: kpis?.[key].delta ?? null };
+  // 4 张卡共用一块半透明底板，计为一个浮层（V-L3）
+  return (
+    <ul
+      aria-label="关键指标"
+      className="absolute top-3 left-3 flex divide-x divide-line rounded-2xl border border-line bg-panel/80 backdrop-blur"
+    >
+      {KPIS.map(({ key, label, unit }) => (
+        <li key={key}>
+          <KpiTile label={label} unit={unit} data={data(key)} />
+        </li>
+      ))}
+    </ul>
+  );
+}

@@ -94,6 +94,9 @@ export const api = {
     request<Schemas["Report"]>("POST", `/api/reports/${encodeURIComponent(reportId)}/review`),
   /** 顶栏模型状态（V-M8）：正常 / 已切换 / 模板模式，全部角色可读 */
   getLlmStatus: () => request<Schemas["LlmStatus"]>("GET", "/api/llm/status"),
+  /** 大屏关键指标（D-100）：dayStart 为浏览器本地当天 0 点的 ISO 时刻 */
+  getKpis: (dayStart: string) =>
+    request<Schemas["Kpis"]>("GET", `/api/kpis?day_start=${encodeURIComponent(dayStart)}`),
   /** 模型供应商（FR-601～604），只有 admin 可用；顺序即故障转移顺序 */
   listProviders: () => request<Schemas["LlmProviderList"]>("GET", "/api/llm/providers"),
   createProvider: (body: Schemas["LlmProviderCreate"]) =>

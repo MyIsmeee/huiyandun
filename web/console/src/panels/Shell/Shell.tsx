@@ -9,20 +9,12 @@ import { canManageProviders, useSession } from "../../store/session";
 import { AlertList } from "../AlertList/AlertList";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
-import { type KpiData, KpiTile } from "../KpiTile/KpiTile";
+import { KpiRow } from "../KpiTile/KpiRow";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { ProviderPage } from "../ProviderList/ProviderList";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
-// 指标尚无数据来源，由后续任务接入
-const NO_DATA: KpiData = { status: "ready", value: null, delta: null };
 const deselect = () => select(null);
-const KPIS = [
-  { label: "在线设备", unit: "台" },
-  { label: "活跃告警", unit: "条" },
-  { label: "今日已处置", unit: "起" },
-  { label: "检测时延 P95", unit: "ms" },
-];
 
 /**
  * 主界面分区（HYD-UIX-004 §4.1）：位置固定、不可拖拽（V-L1）；场景视口面积占比 ≥ 50%（V-L2）。
@@ -105,17 +97,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         className={`relative overflow-hidden rounded-2xl border border-line ${offline ? "saturate-50" : ""}`}
       >
         <SceneViewport site={site} />
-        {/* 4 张卡共用一块半透明底板，计为一个浮层（V-L3） */}
-        <ul
-          aria-label="关键指标"
-          className="absolute top-3 left-3 flex divide-x divide-line rounded-2xl border border-line bg-panel/80 backdrop-blur"
-        >
-          {KPIS.map((kpi) => (
-            <li key={kpi.label}>
-              <KpiTile {...kpi} data={NO_DATA} />
-            </li>
-          ))}
-        </ul>
+        <KpiRow stale={offline} />
         {offline && (
           <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-dashed border-uncertain bg-panel/80 px-4 py-1.5 text-sm text-uncertain backdrop-blur">
             <Clock aria-hidden className="size-4" />

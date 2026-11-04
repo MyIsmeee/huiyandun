@@ -51,9 +51,18 @@ export async function mockLlmStatus(page: Page): Promise<void> {
   await page.route("/api/llm/status", (route) => route.fulfill({ json: status }));
 }
 
+const NO_KPI = { value: null, delta: null };
+const NO_KPIS = { online_devices: NO_KPI, active_alerts: NO_KPI, contained_today: NO_KPI, detect_p95_ms: NO_KPI };
+
+/** 大屏关键指标（D-100），缺省全部无数据 */
+export async function mockKpis(page: Page, kpis: object = NO_KPIS): Promise<void> {
+  await page.route(/\/api\/kpis\?/, (route) => route.fulfill({ json: kpis }));
+}
+
 export async function signedIn(page: Page): Promise<WebSocketRoute[]> {
   await page.route("/api/site", (route) => route.fulfill({ json: SITE }));
   await mockLlmStatus(page);
+  await mockKpis(page);
   return mockSocket(page);
 }
 
@@ -95,6 +104,7 @@ export const camera = (state: string, id = "cam-01") => ({
 export async function open(page: Page, devices: object[]) {
   await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices } }));
   await mockLlmStatus(page);
+  await mockKpis(page);
   const sockets = await mockSocket(page);
   await page.goto("/");
   // 先等场景代码与车辆模型加载完：加载按真实时间进行，期间 sceneSettled 逐帧推进的模拟时钟会随加载快慢漂移
