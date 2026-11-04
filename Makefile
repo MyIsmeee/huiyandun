@@ -37,6 +37,7 @@ DB_SECRETS = $(SECRETS)/postgres_password $(SECRETS)/db_app_password \
 	$(SECRETS)/db_audit_password
 HELPER_KEY = $(SECRETS)/executor_signing_key
 LLM_KEY = $(SECRETS)/llm_key_secret
+EVIDENCE_KEY = $(SECRETS)/evidence_signing_key
 
 doctor:
 	tools/dev/doctor.sh
@@ -59,10 +60,17 @@ $(LLM_KEY):
 	@mkdir -p -m 700 $(@D)
 	@umask 077 && head -c 32 /dev/urandom | base64 > $@
 
+# evidence-service 的存证签名私钥（D-098），首次启动时生成，只存于本机（G-14）
+# 删除或更换后，已有记录验签失败，evidence-service 拒绝启动（M0 不支持换钥）
+$(EVIDENCE_KEY):
+	@mkdir -p -m 700 $(@D)
+	@umask 077 && openssl genpkey -algorithm ed25519 -out $@
+
 # 目录只有本机属主可进入；文件须对容器内的非 root 进程可读（C-OPS-04）
 # --build：自研服务镜像随代码更新；源码未变时全部命中缓存，无需联网
-demo-up: $(DB_SECRETS) $(HELPER_KEY) $(LLM_KEY)
-	@chmod 700 $(SECRETS) && chmod 644 $(DB_SECRETS) $(HELPER_KEY) $(SECRETS)/helper_public_key $(LLM_KEY)
+demo-up: $(DB_SECRETS) $(HELPER_KEY) $(LLM_KEY) $(EVIDENCE_KEY)
+	@chmod 700 $(SECRETS) && chmod 644 $(DB_SECRETS) $(HELPER_KEY) $(SECRETS)/helper_public_key $(LLM_KEY) \
+		$(EVIDENCE_KEY)
 	$(COMPOSE) up -d --build
 
 # 按 demo/media/*.meta.yaml 剪接演示视频（DM-12、FR-306）；原始片段放在 demo/media/src/
