@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -49,35 +50,52 @@ def record_hash(record: dict[str, Any]) -> str:
     return sha256(canonical({k: record[k] for k in HASHED}))
 
 
+def _fsync_dir(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 class Chain:
     def __init__(self, root: Path, key: Ed25519PrivateKey) -> None:
-        """读入并逐条重算已有的链；不一致时抛 ChainBroken。"""
+        """读入并逐条重算哈希、验签已有的链；无法解析、不一致或签名无效时抛 ChainBroken。
+
+        只重算哈希挡不住改记录后把其后各条重新计算的篡改：验签须用私钥才能伪造。"""
         self._root = root
         self._key = key
         self._file = root / "chain.jsonl"
         public = key.public_key()
         self._public_pem = public.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
-        self._fingerprint = "sha256:" + sha256(public.public_bytes(Encoding.Raw, PublicFormat.Raw))
+        self._public = public
+        self.fingerprint = "sha256:" + sha256(public.public_bytes(Encoding.Raw, PublicFormat.Raw))
         (root / "objects").mkdir(parents=True, exist_ok=True)
         self._records: list[dict[str, Any]] = []
         if self._file.exists():
-            for line in self._file.read_bytes().splitlines():
-                self._check(json.loads(line))
+            for seq, line in enumerate(self._file.read_bytes().splitlines(), 1):
+                self._check(seq, line)
         self.incidents = {r["incident_id"] for r in self._records}
 
-    def _check(self, record: dict[str, Any]) -> None:
-        seq = len(self._records) + 1
+    def _check(self, seq: int, line: bytes) -> None:
+        """写到一半断电留下的残行同样按第几条报错。"""
         prev = self._records[-1]["hash"] if self._records else GENESIS
-        if (
-            record.get("seq") != seq
-            or record.get("prev_hash") != prev
-            or record.get("hash") != record_hash(record)
-        ):
-            raise ChainBroken(f"存证链第 {seq} 条与重算结果不一致")
+        try:
+            record = json.loads(line)
+            if record["seq"] != seq or record["prev_hash"] != prev:
+                raise ChainBroken(f"存证链第 {seq} 条与上一条不衔接")
+            if record["hash"] != record_hash(record):
+                raise ChainBroken(f"存证链第 {seq} 条与重算结果不一致")
+            self._public.verify(base64.b64decode(record["sig"]), bytes.fromhex(record["hash"]))
+        except (ValueError, KeyError, TypeError) as e:  # JSON 与 Base64 的解析错误均为 ValueError
+            raise ChainBroken(f"存证链第 {seq} 条无法解析") from e
+        except InvalidSignature as e:
+            raise ChainBroken(f"存证链第 {seq} 条签名无效") from e
         self._records.append(record)
 
     def append(self, entries: list[Entry]) -> None:
-        """载荷先落盘，记录整批追加后 fsync：一个关联事件的记录在链上连续（080 §3.1）。"""
+        """载荷与其目录项先 fsync，记录整批追加后 fsync：断电后链上的记录不会指向不存在的载荷；
+        一个关联事件的记录在链上连续（080 §3.1）。"""
         prev = self._records[-1]["hash"] if self._records else GENESIS
         added: list[dict[str, Any]] = []
         for entry in entries:
@@ -93,6 +111,8 @@ class Chain:
             record["hash"] = prev = record_hash(record)
             record["sig"] = base64.b64encode(self._key.sign(bytes.fromhex(prev))).decode()
             added.append(record)
+        if any(r["payload_ref"] is not None for r in added):
+            _fsync_dir(self._root / "objects")
         with self._file.open("ab") as f:
             f.write(b"".join(canonical(r) + b"\n" for r in added))
             f.flush()
@@ -107,7 +127,10 @@ class Chain:
         path = self._root / ref
         if not path.exists():
             tmp = path.with_name(path.name + ".tmp")
-            tmp.write_bytes(entry.payload)
+            with tmp.open("wb") as f:
+                f.write(entry.payload)
+                f.flush()
+                os.fsync(f.fileno())
             tmp.chmod(0o444)
             tmp.replace(path)
         return ref
@@ -136,7 +159,7 @@ class Chain:
                 },
                 "chain_head": records[-1]["hash"],
                 "files": {path: sha256(data) for path, data in files.items()},
-                "public_key_fingerprint": self._fingerprint,
+                "public_key_fingerprint": self.fingerprint,
                 "verify_tool_version": VERIFY_TOOL_VERSION,
             },
             ensure_ascii=False,

@@ -11,7 +11,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
 
-from evidence_service.store import GENESIS, Chain, ChainBroken, Entry, record_hash
+from evidence_service.store import GENESIS, Chain, ChainBroken, Entry, canonical, record_hash
 
 ALERT = b'{"event_id":"a1"}'
 CLIP = b"\x00\x00\x00\x18ftypmp42"
@@ -118,18 +118,45 @@ def test_reload_continues_chain_and_stores_payload_once(
     assert all(p.stat().st_mode & 0o222 == 0 for p in objects)
 
 
-@pytest.mark.parametrize("tamper", ["edit", "delete"])
+def rehash_from(records: list[dict], start: int) -> None:
+    """篡改者没有私钥：改动后把其后各条的哈希与衔接重新算一遍，签名保持原样。"""
+    for i in range(start, len(records)):
+        if i:
+            records[i]["prev_hash"] = records[i - 1]["hash"]
+        records[i]["hash"] = record_hash(records[i])
+
+
+@pytest.mark.parametrize(
+    ("tamper", "seq", "reason"),
+    [
+        ("edit", 2, "与重算结果不一致"),
+        ("delete", 2, "与上一条不衔接"),
+        ("edit_and_rehash", 2, "签名无效"),
+        ("swap_signature", 2, "签名无效"),
+        ("torn_last_line", 4, "无法解析"),
+    ],
+)
 def test_broken_chain_refuses_to_load(
-    tmp_path: Path, signer: Ed25519PrivateKey, tamper: str
+    tmp_path: Path, signer: Ed25519PrivateKey, tamper: str, seq: int, reason: str
 ) -> None:
     Chain(tmp_path, signer).append(entries("inc-a"))
     path = tmp_path / "chain.jsonl"
     lines = path.read_bytes().splitlines(keepends=True)
+    records = [json.loads(line) for line in lines]
     if tamper == "edit":
         lines[1] = lines[1].replace(b'"kind":"incident"', b'"kind":"alert"')
-    else:
+    elif tamper == "delete":
         del lines[1]
+    elif tamper == "torn_last_line":
+        lines[3] = lines[3][: len(lines[3]) // 2]  # 写到一半断电
+    else:
+        if tamper == "edit_and_rehash":
+            records[1]["kind"] = "alert"
+            rehash_from(records, 1)
+        else:
+            records[1]["sig"] = records[0]["sig"]
+        lines = [canonical(r) + b"\n" for r in records]
     path.write_bytes(b"".join(lines))
 
-    with pytest.raises(ChainBroken, match="第 2 条"):
+    with pytest.raises(ChainBroken, match=f"第 {seq} 条{reason}"):
         Chain(tmp_path, signer)
