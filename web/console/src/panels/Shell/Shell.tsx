@@ -9,6 +9,7 @@ import { canManageProviders, useSession } from "../../store/session";
 import { AlertList } from "../AlertList/AlertList";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
+import { IncidentTimeline } from "../IncidentTimeline/IncidentTimeline";
 import { KpiRow } from "../KpiTile/KpiRow";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { ProviderPage } from "../ProviderList/ProviderList";
@@ -53,7 +54,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   return (
     <div
       data-live={!offline}
-      className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[48px_minmax(0,1fr)_104px] gap-2 bg-page p-2 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-rows-[48px_minmax(0,1fr)_120px]"
+      className="grid h-full grid-cols-[minmax(0,1fr)_320px] grid-rows-[48px_minmax(0,1fr)_168px] gap-2 bg-page p-2 2xl:grid-cols-[minmax(0,1fr)_360px]"
     >
       <header className="col-span-2 flex items-center gap-3 px-2">
         <span className="flex items-center gap-2 font-black">
@@ -111,9 +112,9 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         </aside>
       </div>
 
-      <section aria-label="攻击链" className="flex flex-col rounded-2xl border border-line bg-panel px-4 py-3">
-        <h2 className="font-semibold">攻击链</h2>
-        <p className="m-auto text-sm text-fg-3">无活跃攻击链</p>
+      <section aria-label="处置时间线" className="flex min-h-0 flex-col gap-1 rounded-2xl border border-line bg-panel px-4 py-3">
+        <h2 className="font-semibold">处置时间线</h2>
+        <IncidentTimeline />
       </section>
 
       {/* 盖在主界面之上而不替换它：场景与推送保持运行，返回时无需重新加载 */}
