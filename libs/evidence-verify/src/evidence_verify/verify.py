@@ -10,7 +10,7 @@ import hashlib
 import json
 from typing import Any
 
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
 
@@ -45,7 +45,7 @@ def verify(files: dict[str, bytes], trusted_fingerprint: str) -> list[str]:
         return [f"缺少文件：{'、'.join(missing)}"]
     try:
         key = load_pem_public_key(files["public_key.pem"])
-    except ValueError:
+    except (ValueError, UnsupportedAlgorithm):  # 后者为不支持的密钥算法，不是 ValueError
         return ["public_key.pem 无法解析"]
     if not isinstance(key, Ed25519PublicKey):
         return ["public_key.pem 不是 Ed25519 公钥"]

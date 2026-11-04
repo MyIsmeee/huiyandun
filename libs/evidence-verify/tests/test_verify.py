@@ -1,5 +1,6 @@
 """离线校验工具（TK-081，FR-703、C-EVD-03）：用 evidence-service 生成真实证据包，逐类篡改后校验并定位。"""
 
+import base64
 import io
 import json
 import zipfile
@@ -7,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from evidence_service.store import Chain, Entry, canonical, record_hash
 from evidence_verify.verify import verify
@@ -152,3 +154,20 @@ def test_garbled_line_is_reported_without_crash(pkg: tuple[dict[str, bytes], str
     lines[1] = b'{"seq": "x"'
     problems = verify(files | {"chain.jsonl": b"\n".join(lines) + b"\n"}, fingerprint)
     assert "chain.jsonl 第 2 行无法解析" in problems
+
+
+def test_unsupported_key_type_is_reported(pkg: tuple[dict[str, bytes], str]) -> None:
+    """cryptography 不支持的公钥算法抛 UnsupportedAlgorithm（不是 ValueError），须报问题而非崩溃（复核建议 3）。"""
+    files, fingerprint = pkg
+    der = (
+        Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+    )
+    unknown = der.replace(bytes.fromhex("06032b6570"), bytes.fromhex("06032b657f"))  # 未知算法 OID
+    pem = (
+        b"-----BEGIN PUBLIC KEY-----\n"
+        + base64.b64encode(unknown)
+        + b"\n-----END PUBLIC KEY-----\n"
+    )
+    assert verify(files | {"public_key.pem": pem}, fingerprint) == ["public_key.pem 无法解析"]

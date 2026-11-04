@@ -7,6 +7,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from evidence_service.store import Chain, Entry
+from evidence_verify import cli
 from evidence_verify.cli import main
 
 
@@ -39,3 +40,35 @@ def test_unreadable_package_exits_2(tmp_path: Path) -> None:
     bad = tmp_path / "bad.zip"
     bad.write_bytes(b"not a zip")
     assert main(["verify", str(bad), "--fingerprint", "sha256:00"]) == 2
+
+
+@pytest.mark.filterwarnings("ignore:Duplicate name")  # 构造同名条目时 zipfile 的提示
+def test_duplicate_entry_names_exit_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """zip 可含同名条目：不同解压工具取到的可能是伪造的那份，校验的与人看到的不是同一份（复核阻断 1）。"""
+    chain = Chain(tmp_path / "store", Ed25519PrivateKey.generate())
+    chain.append([Entry("alert", "inc-b", {"event_id": "inc-b-a1"}, b'{"n":1}')])
+    package = chain.package("inc-b")
+    assert package is not None
+    original = tmp_path / "original.zip"
+    original.write_bytes(package)
+    forged = tmp_path / "forged.zip"
+    with zipfile.ZipFile(original) as src, zipfile.ZipFile(forged, "w") as dst:
+        dst.writestr("chain.jsonl", b'{"forged":true}\n')
+        for name in src.namelist():
+            dst.writestr(name, src.read(name))
+
+    assert main(["verify", str(forged), "--fingerprint", chain.fingerprint]) == 2
+    assert "同名文件" in capsys.readouterr().err
+
+
+def test_oversized_package_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """按条目声明的解压后大小先行拒绝，不把超大包读进内存（复核建议 2）。"""
+    monkeypatch.setattr(cli, "MAX_TOTAL_BYTES", 16)
+    big = tmp_path / "big.zip"
+    with zipfile.ZipFile(big, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("chain.jsonl", b"0" * 17)
+
+    assert main(["verify", str(big), "--fingerprint", "sha256:00"]) == 2
+    assert "过大" in capsys.readouterr().err

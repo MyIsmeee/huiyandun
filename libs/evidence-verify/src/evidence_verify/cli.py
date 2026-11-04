@@ -11,6 +11,8 @@ from pathlib import Path
 
 from evidence_verify.verify import verify
 
+MAX_TOTAL_BYTES = 4 << 30  # 包内全部文件解压后上限 4 GiB；一个关联事件的证据包实测约 39 MB
+
 
 def read(path: Path) -> dict[str, bytes]:
     """zip 只读入内存、不解压到磁盘；目录用于演示时解压后改一条记录再校验。"""
@@ -19,7 +21,15 @@ def read(path: Path) -> dict[str, bytes]:
             p.relative_to(path).as_posix(): p.read_bytes() for p in path.rglob("*") if p.is_file()
         }
     with zipfile.ZipFile(path) as z:
-        return {name: z.read(name) for name in z.namelist() if not name.endswith("/")}
+        entries = [i for i in z.infolist() if not i.is_dir()]
+        names = [i.filename for i in entries]
+        # 同名条目：不同解压工具取到的可能是另一份，校验的与人看到的不再是同一份
+        if len(names) != len(set(names)):
+            raise zipfile.BadZipFile("包内有同名文件")
+        # 按声明的解压后大小先行拒绝；读取时 zipfile 不会读出超过声明大小的内容
+        if sum(i.file_size for i in entries) > MAX_TOTAL_BYTES:
+            raise zipfile.BadZipFile("包内文件解压后过大")
+        return {i.filename: z.read(i) for i in entries}
 
 
 def main(argv: list[str] | None = None) -> int:
