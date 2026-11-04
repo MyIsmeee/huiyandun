@@ -265,7 +265,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 写入审计日志（FR-702）；包内格式由存证任务定义 */
+        /** @description 写入审计日志（FR-702）；zip，包内格式见存证设计（TK-080） */
         post: operations["exportEvidence"];
         delete?: never;
         options?: never;
@@ -1655,6 +1655,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description 存证服务暂不可达，请稍后重试 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listProviders: {
