@@ -2,6 +2,7 @@ import { expect, type Route, test } from "@playwright/test";
 import {
   expectNoOverflow,
   freezeClock,
+  mockKpis,
   mockSocket,
   presetTheme,
   SITE,
@@ -25,6 +26,31 @@ for (const theme of ["dark", "light"] as const) {
     await sceneSettled(page);
     await expectNoOverflow(page);
     await expect(page).toHaveScreenshot(`shell-${theme}.png`);
+  });
+
+  test(`关键指标显示数值与较 1 小时前的变化（${theme}，D-100）`, async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 }); // 最窄的布局
+    await presetTheme(page, theme);
+    await signedIn(page);
+    await mockKpis(page, {
+      online_devices: { value: 2, delta: 0 },
+      active_alerts: { value: 12, delta: 11 },
+      contained_today: { value: 3, delta: 1 },
+      detect_p95_ms: { value: 1840, delta: -260 },
+    });
+    await page.goto("/");
+
+    const kpis = page.getByRole("list", { name: "关键指标" });
+    await expect(kpis.getByText("较 1 小时前 ↓ 260")).toBeVisible();
+    await sceneSettled(page);
+    // V-P3：数值与趋势变宽后不与视角控件组重叠
+    const [row, toolbar] = await Promise.all([
+      kpis.boundingBox(),
+      page.getByRole("toolbar", { name: "视角" }).boundingBox(),
+    ]);
+    expect((row?.x ?? 0) + (row?.width ?? 0)).toBeLessThan(toolbar?.x ?? 0);
+    await expectNoOverflow(page);
+    await expect(kpis).toHaveScreenshot(`kpis-${theme}.png`);
   });
 }
 
