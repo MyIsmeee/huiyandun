@@ -61,7 +61,7 @@ $(LLM_KEY):
 	@umask 077 && head -c 32 /dev/urandom | base64 > $@
 
 # evidence-service 的存证签名私钥（D-098），首次启动时生成，只存于本机（G-14）
-# 删除或更换后，此前写入的记录在之后导出的证据包中验签失败（已导出的包不受影响）
+# 删除或更换后，已有记录验签失败，evidence-service 拒绝启动（M0 不支持换钥）
 $(EVIDENCE_KEY):
 	@mkdir -p -m 700 $(@D)
 	@umask 077 && openssl genpkey -algorithm ed25519 -out $@

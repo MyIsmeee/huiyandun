@@ -126,7 +126,11 @@ async def serve(config: EvidenceConfig) -> None:
     server = uvicorn.Server(
         uvicorn.Config(create_app(evidence), host="0.0.0.0", port=config.port, log_config=None)
     )
-    log.info("evidence.started", extra={"incidents": len(chain.incidents)})
+    # 公钥指纹是校验证据包的信任起点：包内自带公钥，须与此处另行记下的值比对（080 §4）
+    log.info(
+        "evidence.started",
+        extra={"incidents": len(chain.incidents), "public_key_fingerprint": chain.fingerprint},
+    )
     try:
         await server.serve()
     finally:
