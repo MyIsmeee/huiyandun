@@ -7,6 +7,7 @@ members = [
     "api-server",
     "audit-service",
     "correlator",
+    "evidence-service",
     "huiyandun",
     "llm-gateway",
     "playbook-executor",
@@ -396,6 +397,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/68/bc/d36966de7304047a1
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/2b/238f02a4927fa2e27aa995371d240a468b52e42eae44a678434aff736b38/distlib-0.4.4-py2.py3-none-any.whl", hash = "sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638", size = 472099, upload-time = "2026-10-16T13:56:32.053Z" },
 ]
+
+[[package]]
+name = "evidence-service"
+version = "0.0.0"
+source = { editable = "services/evidence-service" }
+dependencies = [
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cryptography", specifier = ">=50,<51" }]
 
 [[package]]
 name = "fastapi"
