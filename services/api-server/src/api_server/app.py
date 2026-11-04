@@ -24,6 +24,7 @@ from api_server import (
     executions,
     investigator,
     llm,
+    llm_chain,
     llm_probe,
     relay,
     reports,
@@ -153,6 +154,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.devices = Devices(app.state.site.devices)
     app.state.scenes = {}
     app.state.history = History()
+    app.state.llm_last = None  # 最近一次模型调用的结果（llm_chain.invoke），供顶栏模型状态
     attack = json.loads(config.attack_file.read_text(encoding="utf-8"))
     app.state.tools = Tools(
         app.state.history,
@@ -167,6 +169,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(containment.router)
     app.include_router(investigator.router)
     app.include_router(llm.router)
+    app.include_router(llm_chain.router)
     app.include_router(llm_probe.router)
     app.include_router(reports.router)
     app.include_router(site.router)

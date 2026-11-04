@@ -178,7 +178,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** @description 该关联事件的全部报告，按生成时间倒序；报告长期保存，不受 24 小时历史限制（TK-071） */
+        get: operations["listReports"];
         put?: never;
         /** @description 同步生成；全部供应商不可用时 3 s 内返回模板报告（FR-501、FR-502） */
         post: operations["createReport"];
@@ -375,6 +376,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/llm/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 顶栏模型状态（FR-606、V-M8），以最近一次调用为准 */
+        get: operations["getLlmStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm/settings": {
         parameters: {
             query?: never;
@@ -525,6 +543,9 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        ReportList: {
+            items: components["schemas"]["Report"][];
+        };
         /** @description AI 区（V-AI1），与事实区物理分隔；供应商信息为生成时的快照 */
         ReportAi: {
             content: components["schemas"]["incident_report.v1.schema"];
@@ -603,6 +624,18 @@ export interface components {
         };
         LlmProviderList: {
             items: components["schemas"]["LlmProvider"][];
+        };
+        /**
+         * @description normal 为第一家已启用供应商生效；failover 为最近一次调用由排在后面的供应商完成；template 为没有已启用的
+         *     供应商或最近一次调用全部失败（V-M8）
+         */
+        LlmStatus: {
+            /** @enum {unknown} */
+            state: "normal" | "failover" | "template";
+            /** @description template 时为 null */
+            provider_name: string | null;
+            /** @description 模板模式的原因，其余为 null */
+            reason: string | null;
         };
         LlmProviderCreate: {
             name: string;
@@ -1412,6 +1445,29 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listReports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 报告列表，没有报告时为空 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     createReport: {
         parameters: {
             query?: never;
@@ -1838,6 +1894,27 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getLlmStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     getLlmSettings: {
