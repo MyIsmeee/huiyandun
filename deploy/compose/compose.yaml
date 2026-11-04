@@ -190,6 +190,30 @@ services:
       start_period: 10s
       start_interval: 2s
 
+  # 存证唯一写入方（D-04、G-07，TK-080）：关联事件产生时写入命中事件、关联事件与 recorder 截取的录像；
+  # 内部接口只供 api-server 导出证据包。存证卷只有本服务挂载，签名私钥只给本服务（G-14）
+  evidence-service:
+    image: huiyandun/evidence-service:local
+    build: { context: ../.., dockerfile: services/evidence-service/Dockerfile }
+    profiles: [core]
+    secrets: [evidence_signing_key]
+    volumes:
+      - evidence-data:/var/lib/hyd-evidence
+      - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 摄像头的流名
+    depends_on: { nats: { condition: service_healthy } }
+    networks: [core-net, evidence-net]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
   # 唯一对外入口（C-OPS-05）：前端页面与 /api、/ws 同源反向代理，配置见 Caddyfile
   web-console:
     image: huiyandun/web-console:local
@@ -251,6 +275,26 @@ services:
       retries: 3
       start_period: 30s
       start_interval: 2s
+
+  # 持续录像（TK-080、D-098）：复用 MediaMTX（REUSE-04）从 go2rtc 拉流（摄像头仍只被拉一次，C-CV-10），
+  # 环形保留 20 分钟；只开回放接口，只在 evidence-net 供 evidence-service 截取告警前后的片段
+  recorder:
+    image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
+    profiles: [vision]
+    volumes:
+      - ./recorder.yml:/mediamtx.yml:ro
+      - recordings:/recordings
+    depends_on: { go2rtc: { condition: service_healthy } }
+    networks: [demo-net, evidence-net]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    healthcheck:
+      # 全部路径都已在录像（已从 go2rtc 取到流）才算就绪
+      test: ["CMD-SHELL", "s=$$(wget -qO- http://127.0.0.1:9997/v3/paths/list) && case $$s in *'\"ready\":false'*) exit 1 ;; *'\"ready\":true'*) exit 0 ;; *) exit 1 ;; esac"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # 网络探针隔离（C-SEC-08，参照 Malcolm、Security Onion 的加固并进一步隔离）：探针解析不可信流量，
   # 被攻破时不能成为横向移动的跳板。capture-tap 把抓包源的流量单向镜像进 tap-net，探针只接入 tap-net：
@@ -446,6 +490,10 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  # 存证网络：只有 recorder 与 evidence-service，回放接口不暴露给其他服务
+  evidence-net:
+    internal: true
+    driver_opts: { com.docker.network.bridge.gateway_mode_ipv4: isolated }
   # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
   edge-net:
     driver_opts:
@@ -465,6 +513,8 @@ volumes:
   suricata-cache:
   correlator-state:
   zeek-logs:
+  evidence-data:  # 存证（G-07），只有 evidence-service 挂载
+  recordings:  # recorder 的 20 分钟环形录像，不是存证
   helper-run:  # privileged-helper 的套接字，只与 playbook-executor 共享
 
 # 口令由 make demo-up 首次运行时生成，不入库（G-14）
@@ -482,3 +532,6 @@ secrets:
     file: .secrets/helper_public_key
   llm_key_secret:
     file: .secrets/llm_key_secret
+  # evidence-service 的存证签名私钥（D-098）
+  evidence_signing_key:
+    file: .secrets/evidence_signing_key

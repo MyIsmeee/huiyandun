@@ -113,10 +113,10 @@ def test_go2rtc_publishes_media_port_only() -> None:
 
 
 def test_go2rtc_api_reachable_only_by_its_clients() -> None:
-    """go2rtc 的 API 无鉴权且可新建 exec 源：内部网络上只有信令转发与取流的服务能访问。"""
+    """go2rtc 的 API 无鉴权且可新建 exec 源：内部网络上只有信令转发、取流与录像的服务能访问。"""
     internal = set(SERVICES["go2rtc"]["networks"]) - {EDGE}
     peers = {n for n, s in SERVICES.items() if internal & set(s.get("networks", []))} - {"go2rtc"}
-    assert peers == {"api-server", "vision-engine", "mediamtx"}
+    assert peers == {"api-server", "vision-engine", "mediamtx", "recorder"}
     assert "core-net" not in internal
 
 
@@ -278,6 +278,25 @@ def test_only_api_server_holds_llm_key() -> None:
     """C-ST-03：API Key 由 api-server 加解密，llm-gateway 只收到转交的明文、不持有密钥。"""
     holders = {n for n, s in SERVICES.items() if "llm_key_secret" in s.get("secrets", [])}
     assert holders == {"api-server"}
+
+
+def test_only_evidence_service_writes_evidence() -> None:
+    """D-04、G-14：存证卷与签名私钥只给 evidence-service。"""
+    holders = {n for n, s in SERVICES.items() if "evidence_signing_key" in s.get("secrets", [])}
+    assert holders == {"evidence-service"}
+    mounts = {
+        n
+        for n, s in SERVICES.items()
+        for v in s.get("volumes", [])
+        if v.startswith("evidence-data:")
+    }
+    assert mounts == {"evidence-service"}
+
+
+def test_recorder_playback_reachable_only_by_evidence_service() -> None:
+    """080 §2：回放接口不鉴权，只有 evidence-service 与 recorder 同在 evidence-net。"""
+    peers = {n for n, s in SERVICES.items() if "evidence-net" in s.get("networks", [])}
+    assert peers == {"evidence-service", "recorder"}
 
 
 @pytest.mark.parametrize("script", sorted((ROOT / "deploy/compose/postgres-init").glob("*.sh")))

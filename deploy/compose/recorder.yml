@@ -1,0 +1,38 @@
+# 持续录像（TK-080、D-098）：从 go2rtc 拉各路流写 fMP4 分段，环形保留 20 分钟，供 evidence-service 截取
+# 告警前后的原始码流（C-EVD-02）。路径名即 site.yaml 的 stream，与 go2rtc.yaml 一样逐路列出
+logLevel: info
+
+# 只开回放接口；API 只供容器内健康检查；不提供 RTSP 等任何取流服务
+api: true
+apiAddress: 127.0.0.1:9997
+playback: true
+playbackAddress: :9996
+rtsp: false
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+# 回放接口只在 evidence-net（只有本服务与 evidence-service）
+authInternalUsers:
+  - user: any
+    ips: ["127.0.0.1", "::1"]
+    permissions: [{ action: api }]
+  - user: any
+    permissions: [{ action: playback }]
+
+pathDefaults:
+  rtspTransport: tcp
+  record: true
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f%z
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 60s
+  recordDeleteAfter: 20m
+
+paths:
+  cam-01:
+    source: rtsp://go2rtc:8554/cam-01
+  cam-02:
+    source: rtsp://go2rtc:8554/cam-02
