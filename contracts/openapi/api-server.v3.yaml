@@ -276,7 +276,7 @@ paths:
   /api/incidents/{id}/evidence/export:
     post:
       operationId: exportEvidence
-      description: 写入审计日志（FR-702）；包内格式由存证任务定义
+      description: 写入审计日志（FR-702）；zip，包内格式见存证设计（TK-080）
       x-min-role: operator
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -291,6 +291,11 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: 存证服务暂不可达，请稍后重试
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/llm/providers:
     get:
       operationId: listProviders

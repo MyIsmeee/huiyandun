@@ -21,6 +21,7 @@ from api_server import (
     audit,
     auth,
     containment,
+    evidence,
     executions,
     investigator,
     llm,
@@ -115,6 +116,9 @@ def create_app(config: ApiConfig) -> FastAPI:
         )
         # 超时按供应商配置逐次给出（llm_probe.forward）
         app.state.llm_gateway = httpx2.AsyncClient(base_url=config.llm_gateway_url)
+        app.state.evidence = httpx2.AsyncClient(
+            base_url=config.evidence_url, timeout=config.evidence_timeout_s
+        )
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
@@ -141,6 +145,7 @@ def create_app(config: ApiConfig) -> FastAPI:
             await bus.close()
             await app.state.go2rtc.aclose()
             await app.state.llm_gateway.aclose()
+            await app.state.evidence.aclose()
             await app.state.engine.dispose()
 
     # 关闭自带文档页：其页面从公网 CDN 加载脚本（G-05）
@@ -167,6 +172,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(audit.router)
     app.include_router(containment.router)
+    app.include_router(evidence.router)
     app.include_router(investigator.router)
     app.include_router(llm.router)
     app.include_router(llm_chain.router)

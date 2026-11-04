@@ -47,6 +47,13 @@ class ApiConfig(DbConfig):
         "http://llm-gateway:8100",
         description="llm-gateway 内部接口地址；测试连接与模型列表经它访问供应商（C-LLM-01）",
     )
+    evidence_url: str = Field(
+        "http://evidence-service:8200",
+        description="evidence-service 内部接口地址，导出证据包（FR-702）",
+    )
+    evidence_timeout_s: float = Field(
+        30.0, gt=0, le=300, description="向 evidence-service 取证据包的超时，单位秒（CD-04）"
+    )
     conn_log_file: Path = Field(
         Path("/zeek/logs/conn.log"),
         description="Zeek 会话日志（只读挂载），值班员工具 query_sessions 读取（TK-116）",
