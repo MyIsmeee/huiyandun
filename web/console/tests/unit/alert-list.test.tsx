@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { components } from "../../src/api/schema";
-import { AlertList } from "../../src/panels/AlertList/AlertList";
+import { AlertList, groupAlerts } from "../../src/panels/AlertList/AlertList";
 import { MAX_ALERTS, receive, useLive } from "../../src/store/live";
 import { useSelection } from "../../src/store/selection";
 
@@ -159,5 +159,44 @@ describe("AlertList", () => {
     expect(useSelection.getState().deviceId).toBe("cam-02");
     const current = screen.getAllByRole("button").filter((b) => b.getAttribute("aria-current"));
     expect(current.map((b) => b.textContent)).toEqual([expect.stringContaining("告警 1")]);
+  });
+});
+
+describe("同类告警合并（D-106）", () => {
+  const climb = (n: number, minute: number, camera = "cam-02") => ({
+    ...fall(n),
+    camera_id: camera,
+    behavior: "climb",
+    ts: `2026-11-08T02:${String(minute).padStart(2, "0")}:00Z`,
+  });
+
+  it("同一摄像头同类行为 5 分钟内合并，超出另起一行；不同摄像头、不同行为不合并", () => {
+    const alerts = [climb(1, 20), climb(2, 18), fall(3), climb(4, 16), climb(5, 9), climb(6, 15, "cam-01")]
+      .map((a) => a as never)
+      .sort((a: { ts: string }, b: { ts: string }) => b.ts.localeCompare(a.ts));
+    const groups = groupAlerts(alerts);
+    const summary = groups.map((g) => [g.alerts[0].event_id.slice(-2), g.alerts.length]);
+    expect(summary).toEqual([
+      ["01", 3],
+      ["06", 1],
+      ["05", 1],
+      ["03", 1],
+    ]);
+  });
+
+  it("网络告警按设备、规则与来源合并", () => {
+    const groups = groupAlerts([alert(3), alert(2, "model"), alert(1)] as never);
+    expect(groups.map((g) => g.alerts.length)).toEqual([2, 1]);
+  });
+
+  it("合并行显示次数，展开后逐条列出", () => {
+    for (const n of [1, 2, 3]) receive(frame("alerts", alert(n)), 0);
+    render(<AlertList stale={false} lastFrameAt={0} />);
+    const list = screen.getByRole("list", { name: "单条告警" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(list.textContent).toContain("×3");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开 3 条" }));
+    expect(within(screen.getByRole("list", { name: "合并的告警" })).getAllByRole("listitem")).toHaveLength(3);
   });
 });

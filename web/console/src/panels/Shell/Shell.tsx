@@ -1,4 +1,4 @@
-import { Bot, CircleAlert, Clock, LogOut, ShieldCheck } from "lucide-react";
+import { CircleAlert, Clock, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Site } from "../../lib/api";
 import { SceneViewport } from "../../scene/SceneViewport";
@@ -16,6 +16,9 @@ import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
 const deselect = () => select(null);
 
+/** 顶栏导航的页面（D-106）：管理页盖在态势之上，场景与推送不中断 */
+type Page = "overview" | "providers";
+
 /**
  * 主界面分区（HYD-UIX-004 §4.1）：位置固定、不可拖拽（V-L1）；场景视口面积占比 ≥ 50%（V-L2）。
  * D 详情面板在选中对象时展开，未选中时收起，由 F 列表占满右栏。
@@ -25,7 +28,7 @@ const deselect = () => select(null);
 export function Shell(props: { site: Site; onLogout: () => Promise<void>; onRejected: () => void }) {
   const { site, onLogout, onRejected } = props;
   const [logout, setLogout] = useState<"idle" | "pending" | "failed">("idle");
-  const [providers, setProviders] = useState(false);
+  const [page, setPage] = useState<Page>("overview");
   const admin = canManageProviders(useSession((s) => s.role));
   const { open, connecting, lastFrameAt } = useConnection();
   const offline = !open && !connecting;
@@ -59,6 +62,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </span>
           慧眼盾
         </span>
+        <NavBar page={page} admin={admin} onChange={setPage} />
         <span className="rounded-full border border-line px-3 py-1 text-sm text-fg-2">{site.name}</span>
         <div className="ml-auto flex items-center gap-2">
           <LlmStatusBadge />
@@ -70,15 +74,6 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
             </p>
           )}
           <ThemeToggle />
-          {admin && (
-            <button
-              onClick={() => setProviders(true)}
-              className="flex h-9 items-center gap-2 rounded-full border border-line px-3 text-sm text-fg-2 transition-colors hover:bg-raised hover:text-fg"
-            >
-              <Bot aria-hidden className="size-4" />
-              模型供应商
-            </button>
-          )}
           <button
             onClick={handleLogout}
             disabled={logout === "pending"}
@@ -106,10 +101,11 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         )}
       </section>
 
+      {/* 右栏不随内容撑高（V-L2）：详情最多占 65%，在面板内滚动；告警列表至少保留 35%（D-106） */}
       <div className="row-span-2 flex min-h-0 flex-col gap-2">
         {selected && <DetailPanel device={selected} stale={offline} onClose={deselect} />}
         {target && <TargetPanel target={target} stale={offline} onClose={deselect} />}
-        <aside aria-label="告警" className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
+        <aside aria-label="告警" className="flex min-h-[35%] flex-1 flex-col rounded-2xl border border-line bg-panel">
           <h2 className="border-b border-line px-4 py-3 font-semibold">告警</h2>
           <AlertList stale={offline} lastFrameAt={lastFrameAt} />
         </aside>
@@ -121,11 +117,35 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       </section>
 
       {/* 盖在主界面之上而不替换它：场景与推送保持运行，返回时无需重新加载 */}
-      {admin && providers && (
-        <div className="fixed inset-0 z-10 overflow-auto bg-page">
-          <ProviderPage onClose={() => setProviders(false)} />
+      {admin && page === "providers" && (
+        <div className="fixed inset-x-0 top-14 bottom-0 z-10 overflow-auto bg-page">
+          <ProviderPage onClose={() => setPage("overview")} />
         </div>
       )}
     </div>
+  );
+}
+
+/** 顶栏胶囊导航（D-106）："模型供应商"只对 admin 渲染（C-FE-07） */
+function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
+  const { page, admin, onChange } = props;
+  const items: { page: Page; label: string }[] = [{ page: "overview", label: "态势" }];
+  if (admin) items.push({ page: "providers", label: "模型供应商" });
+  return (
+    <nav aria-label="导航" className="flex items-center gap-1 rounded-full border border-line p-1">
+      {items.map((item) => (
+        <button
+          key={item.page}
+          type="button"
+          aria-current={page === item.page ? "page" : undefined}
+          onClick={() => onChange(item.page)}
+          className={`h-7 rounded-full px-3 text-sm transition-colors ${
+            page === item.page ? "bg-fg font-semibold text-page" : "text-fg-2 hover:bg-raised hover:text-fg"
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
   );
 }
