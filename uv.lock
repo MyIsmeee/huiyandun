@@ -404,10 +404,16 @@ version = "0.0.0"
 source = { editable = "services/evidence-service" }
 dependencies = [
     { name = "cryptography" },
+    { name = "httpx2" },
+    { name = "py-contracts" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cryptography", specifier = ">=50,<51" }]
+requires-dist = [
+    { name = "cryptography", specifier = ">=50,<51" },
+    { name = "httpx2", specifier = ">=2.16.0,<3" },
+    { name = "py-contracts", editable = "libs/py-contracts" },
+]
 
 [[package]]
 name = "fastapi"
