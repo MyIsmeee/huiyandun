@@ -63,9 +63,12 @@ class Evidence:
 
     async def _record(self, incident: CorrelatorIncidentV1) -> None:
         try:
+            # 命中事件都早于关联事件：等到关联事件后 MARGIN + FLUSH，各时段的录像都已落盘。等完再查缓存：
+            # 告警与关联事件来自不同的流，到达先后没有保证
+            ready = incident.ts + MARGIN + FLUSH
+            await asyncio.sleep(max((ready - datetime.now(UTC)).total_seconds(), 0))
             hits = [(event_id, self._events.get(event_id)) for event_id in incident.hit_path]
             spans = windows([c[1].ts for _, c in hits if c] or [incident.ts])
-            await asyncio.sleep(max((spans[-1][1] + FLUSH - datetime.now(UTC)).total_seconds(), 0))
             entries = [
                 Entry(c[0], incident.id, {"event_id": str(i)}, c[1].model_dump_json().encode())
                 if c
@@ -88,54 +91,57 @@ class Evidence:
     async def _clips(
         self, incident_id: str, device_id: str, stream: str, start: datetime, end: datetime
     ) -> list[Entry]:
-        """该时段内每个连续录像区间一条 video 记录；没有录像或 recorder 不可用时一条 video_unavailable。"""
+        """该时段内每个连续录像区间一条记录：取到为 video，取失败为 video_unavailable；没有录像或
+        查不到区间时整个时段一条 video_unavailable。"""
         meta = {
             "device_id": device_id,
             "stream": stream,
             "capture_host": self._recorder.base_url.host,
         }
-        window = meta | {"start": _iso(start), "end": _iso(end)}
+
+        def unavailable(start: datetime, end: datetime, reason: str) -> Entry:
+            span = meta | {"start": _iso(start), "end": _iso(end), "reason": reason}
+            return Entry("video_unavailable", incident_id, span)
+
         try:
             res = await self._recorder.get(
                 "/list", params={"path": stream, "start": _iso(start), "end": _iso(end)}
             )
             if res.status_code == 404:
-                return [
-                    Entry("video_unavailable", incident_id, window | {"reason": "该时段无录像"})
-                ]
+                return [unavailable(start, end, "该时段无录像")]
             res.raise_for_status()
-            clips = []
-            for span in res.json():
-                clip_start = datetime.fromisoformat(span["start"])
-                duration = float(span["duration"])
+            spans = [
+                (s["start"], datetime.fromisoformat(s["start"]), float(s["duration"]))
+                for s in res.json()
+            ]
+        except (httpx2.HTTPError, ValueError, KeyError, TypeError) as e:
+            log.warning(
+                "evidence.recorder_failed", extra={"device_id": device_id, "error": repr(e)}
+            )
+            return [unavailable(start, end, f"录像不可用：{e!r}")]
+        clips = []
+        for raw_start, clip_start, duration in spans:
+            clip_end = clip_start + timedelta(seconds=duration)
+            try:
                 clip = await self._recorder.get(
                     "/get",
                     params={
                         "path": stream,
-                        "start": span["start"],
+                        "start": raw_start,
                         "duration": duration,
                         "format": "mp4",
                     },
                 )
                 clip.raise_for_status()
-                clip_end = clip_start + timedelta(seconds=duration)
-                clips.append(
-                    Entry(
-                        "video",
-                        incident_id,
-                        meta | {"start": _iso(clip_start), "end": _iso(clip_end)},
-                        clip.content,
-                        "mp4",
-                    )
+            except httpx2.HTTPError as e:
+                log.warning(
+                    "evidence.recorder_failed", extra={"device_id": device_id, "error": repr(e)}
                 )
-            return clips
-        except (httpx2.HTTPError, ValueError, KeyError, TypeError) as e:
-            log.warning(
-                "evidence.recorder_failed", extra={"device_id": device_id, "error": repr(e)}
-            )
-            return [
-                Entry("video_unavailable", incident_id, window | {"reason": f"录像不可用：{e!r}"})
-            ]
+                clips.append(unavailable(clip_start, clip_end, f"录像不可用：{e!r}"))
+                continue
+            span = meta | {"start": _iso(clip_start), "end": _iso(clip_end)}
+            clips.append(Entry("video", incident_id, span, clip.content, "mp4"))
+        return clips
 
     async def package(self, incident_id: str) -> bytes | None:
         async with self._lock:

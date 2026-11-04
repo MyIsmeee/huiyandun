@@ -185,3 +185,38 @@ def test_device_without_stream_has_no_video(chain: Chain, tmp_path: Path) -> Non
         "incident",
     ]
     assert recorder.requests == []
+
+
+def test_hit_arriving_after_incident_is_still_recorded(chain: Chain, tmp_path: Path) -> None:
+    """告警与关联事件来自不同的流，关联事件可能先到：等录像之后才查缓存。"""
+    evidence = Evidence(chain, {"cam-02": "cam-02"}, Recorder().client())
+    evidence.cache("integrity", freeze())
+
+    async def main() -> None:
+        await evidence.on_incident(incident())
+        await asyncio.sleep(0)  # 写入任务已开始
+        evidence.cache("alert", alert())
+        await asyncio.gather(*list(evidence._tasks.values()))
+
+    asyncio.run(main())
+
+    assert [r["kind"] for r in records(tmp_path)][:2] == ["alert", "integrity"]
+
+
+def test_failed_clip_keeps_other_clips_of_the_window(chain: Chain, tmp_path: Path) -> None:
+    def second_clip_fails(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/get" and request.url.params["duration"] == "55.0":
+            return httpx2.Response(500)
+        return Recorder.recorded(request)
+
+    evidence = Evidence(chain, {"cam-02": "cam-02"}, Recorder(second_clip_fails).client())
+    evidence.cache("alert", alert())
+    evidence.cache("integrity", freeze())
+
+    asyncio.run(run(evidence, incident()))
+
+    rows = records(tmp_path)
+    assert [r["kind"] for r in rows][3:] == ["video", "video_unavailable"]
+    assert rows[4]["meta"]["start"] == iso(T0 + timedelta(seconds=15))
+    assert rows[4]["meta"]["end"] == iso(T0 + timedelta(seconds=70))
+    assert rows[4]["meta"]["reason"].startswith("录像不可用：HTTPStatusError")
