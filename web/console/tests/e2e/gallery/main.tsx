@@ -14,7 +14,7 @@ import { LlmStatusBadgeView } from "../../../src/panels/LlmStatusBadge/LlmStatus
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
 import { type EditorForm, type Pending, ProviderEditorView, type TestResult } from "../../../src/panels/ProviderEditor/ProviderEditor";
 import { type Provider, type ProviderLoad, ProviderListView } from "../../../src/panels/ProviderList/ProviderList";
-import { type Report, ReportBarView, type ReportRequest } from "../../../src/panels/ReportBar/ReportBar";
+import { type Report, ReportBarView, ReportPage, type ReportRequest, type ReportsLoad } from "../../../src/panels/ReportBar/ReportBar";
 import { planView } from "../../../src/scene/layout";
 import { Scene2D } from "../../../src/scene/Scene2D";
 import type { Alert, Execution, Incident } from "../../../src/store/live";
@@ -110,9 +110,16 @@ const REPORT: Report = {
   ai: null, investigation: null, source: "template", provider_id: null, degraded_reason: "未启用任何模型供应商",
   reviewed_by: null, reviewed_at: null, created_at: "2026-10-27T06:30:00Z",
 }; // prettier-ignore
-const reportBar = (report: Report | null, request: ReportRequest) => (
+const REPORTS = [{ ...REPORT, id: "rep-2", source: "llm", created_at: "2026-10-27T06:31:00Z" }, { ...REPORT, reviewed_by: "operator" }] as Report[]; // prettier-ignore
+const reportBar = (load: ReportsLoad, request: ReportRequest = { status: "idle" }) => (
   <div className="w-80 p-3">
-    <ReportBarView incident={INCIDENT} report={report} request={request} onGenerate={() => {}} onReview={() => {}} />
+    <ReportBarView incident={INCIDENT} load={load} request={request} canGenerate onGenerate={() => {}} onOpen={() => {}} />
+  </div>
+);
+// 报告网页由 gallery.spec.ts 拦截 /api/reports/*/export 返回固定内容
+const reportPage = (report: Report, review: ReportRequest = { status: "idle" }) => (
+  <div className="h-[480px] w-[960px]">
+    <ReportPage report={report} canReview review={review} onReview={() => {}} onClose={() => {}} />
   </div>
 );
 
@@ -238,11 +245,16 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     disconnected: aiPanel({ status: "ready", investigation: RUNNING }, { stale: true }),
   },
   ReportBar: {
-    empty: reportBar(null, { status: "idle" }),
-    loading: reportBar(null, { status: "pending" }),
-    normal: reportBar(REPORT, { status: "idle" }),
-    reviewed: reportBar({ ...REPORT, reviewed_by: "operator" }, { status: "idle" }),
-    error: reportBar(REPORT, { status: "failed", message: "报告已由 admin 复核" }),
+    empty: reportBar({ status: "ready", reports: [] }),
+    loading: reportBar({ status: "loading" }),
+    normal: reportBar({ status: "ready", reports: REPORTS }),
+    generating: reportBar({ status: "ready", reports: REPORTS }, { status: "pending" }),
+    error: reportBar({ status: "failed" }, { status: "failed", message: "关联事件不存在或已超过 24 小时" }),
+  },
+  ReportPage: {
+    draft: reportPage(REPORT),
+    reviewed: reportPage({ ...REPORT, reviewed_by: "operator", reviewed_at: "2026-10-27T06:35:00Z" }),
+    error: reportPage(REPORT, { status: "failed", message: "报告已由 admin 复核" }),
   },
   LlmStatusBadge: {
     normal: <LlmStatusBadgeView load={{ status: "ready", data: { state: "normal", provider_name: "本地 llama.cpp", reason: null } }} />,
