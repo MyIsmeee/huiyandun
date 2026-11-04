@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from api_server.devices import Devices
 from api_server.history import WINDOW, History
 from api_server.investigator import Investigator
+from api_server.kpis import KpiTracker
 from api_server.ws import Hub
 from py_common.bus import Bus
 from py_contracts.api import Device, WsFrame
@@ -39,8 +40,11 @@ def _push(hub: Hub, device: Device | None) -> None:
         hub.broadcast(_frame("devices", device))
 
 
-async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]) -> None:
-    """scenes：各摄像头最新一帧场景，供新连接补推（只保留最新一帧，不持久化）。"""
+async def start(
+    bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame], kpis: KpiTracker
+) -> None:
+    """scenes：各摄像头最新一帧场景，供新连接补推（只保留最新一帧，不持久化）。核心订阅只收实时事件，
+    据此记录检测时延（D-100）。"""
 
     async def on_track(event: VisionTrackV1) -> None:
         hub.broadcast(_frame("tracks", event))
@@ -51,10 +55,12 @@ async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]
 
     # 先推行为事件与告警、再推设备：设备变色时事件卡内容已就绪
     async def on_behavior(event: VisionBehaviorV1) -> None:
+        kpis.on_live_alert(event, datetime.now(UTC))
         hub.broadcast(_frame("alerts", event))
         _push(hub, devices.on_behavior(event, time.monotonic()))
 
     async def on_alert(event: SecurityAlertV1) -> None:
+        kpis.on_live_alert(event, datetime.now(UTC))
         hub.broadcast(_frame("alerts", event))
         _push(hub, devices.on_alert(event, time.monotonic()))
 
@@ -71,7 +77,12 @@ async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]
 
 
 async def follow(
-    bus: Bus, hub: Hub, devices: Devices, history: History, investigator: Investigator
+    bus: Bus,
+    hub: Hub,
+    devices: Devices,
+    history: History,
+    investigator: Investigator,
+    kpis: KpiTracker,
 ) -> None:
     """从 JetStream 重放近 24 小时并持续接收（D-077）：告警与行为事件只记入历史（推送沿用 start 的转发）；
     画面完整性事件只记入历史，供报告查找（TK-070）；关联事件与处置执行记入历史并推送，执行同时更新设备的
@@ -90,6 +101,7 @@ async def follow(
 
     async def on_execution(event: PlaybookExecutionV1) -> None:
         history.add_execution(event)
+        kpis.on_execution(event)
         hub.broadcast(_frame("executions", event))
         for device in devices.on_execution(event, time.monotonic()):
             _push(hub, device)
@@ -118,8 +130,9 @@ async def _subscribe[T: EventBase](
             await asyncio.sleep(RESUBSCRIBE_S)
 
 
-async def expire(hub: Hub, devices: Devices) -> None:
+async def expire(hub: Hub, devices: Devices, kpis: KpiTracker) -> None:
     while True:
         await asyncio.sleep(EXPIRE_TICK_S)
         for device in devices.expire(time.monotonic()):
             _push(hub, device)
+        kpis.tick(datetime.now(UTC))

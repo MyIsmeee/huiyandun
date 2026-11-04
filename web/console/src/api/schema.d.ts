@@ -393,6 +393,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kpis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 大屏关键指标（HYD-UIX-004 §4.1 B 区、D-100），按边缘主机时钟计算 */
+        get: operations["getKpis"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm/settings": {
         parameters: {
             query?: never;
@@ -636,6 +653,23 @@ export interface components {
             provider_name: string | null;
             /** @description 模板模式的原因，其余为 null */
             reason: string | null;
+        };
+        Kpi: {
+            /** @description null 为无数据，显示 — */
+            value: number | null;
+            /** @description 较 1 小时前的变化，null 为无可比数据 */
+            delta: number | null;
+        };
+        /**
+         * @description online_devices：登记设备中当前不是离线的台数；active_alerts：仍在保持期内的告警条数（网络告警 5 分钟、
+         *     行为事件 1 分钟，与设备告警态一致）；contained_today：day_start 起处置通过校验的关联事件数（之后回滚仍计入，
+         *     只通知不计）；detect_p95_ms：近 1 小时实时收到的规则告警与行为事件从事件时刻到 api-server 收到的时延 95 分位（不含设备行为模型的告警）
+         */
+        Kpis: {
+            online_devices: components["schemas"]["Kpi"];
+            active_alerts: components["schemas"]["Kpi"];
+            contained_today: components["schemas"]["Kpi"];
+            detect_p95_ms: components["schemas"]["Kpi"];
         };
         LlmProviderCreate: {
             name: string;
@@ -1923,6 +1957,31 @@ export interface operations {
                     "application/json": components["schemas"]["LlmStatus"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getKpis: {
+        parameters: {
+            query: {
+                /** @description 浏览器本地当天 0 点，须带时区；"今日已处置"由此起算 */
+                day_start: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前指标 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Kpis"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
         };
     };

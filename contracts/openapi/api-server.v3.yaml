@@ -459,6 +459,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/LlmStatus" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/kpis:
+    get:
+      operationId: getKpis
+      description: 大屏关键指标（HYD-UIX-004 §4.1 B 区、D-100），按边缘主机时钟计算
+      x-min-role: viewer
+      parameters:
+        - name: day_start
+          in: query
+          required: true
+          description: 浏览器本地当天 0 点，须带时区；"今日已处置"由此起算
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: 当前指标
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Kpis" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/llm/settings:
     get:
       operationId: getLlmSettings
@@ -833,6 +852,26 @@ components:
         state: { enum: [normal, failover, template] }
         provider_name: { anyOf: [{ type: string }, { type: "null" }], description: template 时为 null }
         reason: { anyOf: [{ type: string }, { type: "null" }], description: 模板模式的原因，其余为 null }
+    Kpi:
+      type: object
+      required: [value, delta]
+      properties:
+        value: { anyOf: [{ type: integer }, { type: "null" }], description: null 为无数据，显示 — }
+        delta:
+          anyOf: [{ type: integer }, { type: "null" }]
+          description: 较 1 小时前的变化，null 为无可比数据
+    Kpis:
+      type: object
+      description: |
+        online_devices：登记设备中当前不是离线的台数；active_alerts：仍在保持期内的告警条数（网络告警 5 分钟、
+        行为事件 1 分钟，与设备告警态一致）；contained_today：day_start 起处置通过校验的关联事件数（之后回滚仍计入，
+        只通知不计）；detect_p95_ms：近 1 小时实时收到的规则告警与行为事件从事件时刻到 api-server 收到的时延 95 分位（不含设备行为模型的告警）
+      required: [online_devices, active_alerts, contained_today, detect_p95_ms]
+      properties:
+        online_devices: { $ref: "#/components/schemas/Kpi" }
+        active_alerts: { $ref: "#/components/schemas/Kpi" }
+        contained_today: { $ref: "#/components/schemas/Kpi" }
+        detect_p95_ms: { $ref: "#/components/schemas/Kpi" }
     LlmProviderCreate:
       type: object
       required: [name, preset, base_url, model]

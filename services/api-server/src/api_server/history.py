@@ -49,6 +49,10 @@ class History:
         """不早于 since 的告警、行为与画面完整性事件，供值班员工具查询（TK-116）。"""
         return [e for e in (*self._alerts, *self._integrity) if e.ts >= since]
 
+    def alerts_since(self, since: datetime) -> list[EventBase]:
+        """不早于 since 的告警与行为事件，供大屏指标（D-100）。"""
+        return [e for e in self._alerts if e.ts >= since]
+
     def executions_of(self, incident_id: str) -> list[PlaybookExecutionV1]:
         return [e for e in self._executions.values() if e.incident_id == incident_id]
 
