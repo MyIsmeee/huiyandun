@@ -1,7 +1,7 @@
 # 主剧本（HYD-DEP-005 §4.4、DM-11）：make demo-run SCENARIO=main 由 tools/dev/scenario_runner.py 执行。
 # at 为距开场的 分:秒；expect 的窗口为 [at, at + within_s]，match 为事件字段（数组字段取包含）。
-# 当前只含已具备的主链路（D-060、D-080）、画面重放（TK-114）与低速攻击（TK-115，放在末尾，不改动前面各步的
-# 时刻）：AI 值班员、供应商、零出站、存证随 TK-116、060、090、080 完成时追加。开场行为模型加载基线快照。连续执行时，上一轮结束后至少等 3 分钟再开始：
+# 当前只含已具备的主链路（D-060、D-080）、画面重放（TK-114）、存证校验（TK-081）与低速攻击（TK-115，放在末尾，
+# 不改动前面各步的时刻）：AI 值班员、供应商、零出站随 TK-116、060、090 完成时追加。开场行为模型加载基线快照。连续执行时，上一轮结束后至少等 3 分钟再开始：
 # 同一规则与设备的关联事件 5 分钟内去重，攻击持续期间的命中（含第 10 步的重放）顺延去重期（D-067）
 id: main
 overrides: { playbook_ttl_s: 150 }  # FR-404
@@ -52,6 +52,15 @@ steps:
   - name: 恢复 cam-02 画面
     at: "3:05"
     do: { action: restore_camera, camera: cam-02 }
+  # 关联事件后 30 s + 2 s 写入存证（080 §3.1），此时早已写完；剧本取同一个包断言（TK-081）。本步不支持 FROM_STEP
+  # 续跑：续跑时没收到第 6 步的关联事件
+  - name: 导出存证并离线校验，篡改一条记录后再校验
+    at: "3:10"
+    do: { action: verify_evidence, camera: cam-02 }
+    expect: { evidence: verified }
+    note: >-
+      在详情面板选中 cam-02，点"导出证据包"；运行 hyd-evidence verify <zip> --fingerprint <evidence-service
+      启动日志 evidence.started 的公钥指纹>，再解压、改 chain.jsonl 中一条记录后校验解压目录
   # 封禁约 1:30 生效，150 s 后到期；执行器按墙上时钟计时，WSL 校时会使到期时刻前后偏移十余秒
   - name: TTL 150 s 到期，封禁自动撤销
     at: "3:30"

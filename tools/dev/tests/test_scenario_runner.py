@@ -6,6 +6,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from evidence_service.store import Chain, Entry
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scenario_runner.py"
 _spec = importlib.util.spec_from_file_location("scenario_runner", SCRIPT)
@@ -13,8 +16,9 @@ assert _spec and _spec.loader
 runner = importlib.util.module_from_spec(_spec)
 sys.modules["scenario_runner"] = runner  # dataclass 定义时按模块名查找所在模块
 _spec.loader.exec_module(runner)
-attack_blocked, load, matches, parse_args, parse_at, timeline = (
+attack_blocked, evidence_verified, load, matches, parse_args, parse_at, timeline = (
     runner.attack_blocked,
+    runner.evidence_verified,
     runner.load,
     runner.matches,
     runner.parse_args,
@@ -128,6 +132,8 @@ def test_parse_at_rejects_malformed(text: str) -> None:
         ('{ name: x, at: "0:10", expect: { attack: allowed } }', "只能为 blocked"),
         ('{ name: x, at: "0:10", expect: { attack: blocked } }', "须与 start_attack 同一步"),
         ('{ name: x, at: "0:10", expect: { subject: a, within_s: 5, absent: no } }', "只能为 true"),
+        ('{ name: x, at: "0:10", expect: { evidence: forged } }', "只能为 verified"),
+        ('{ name: x, at: "0:10", expect: { evidence: verified } }', "须与 verify_evidence 同一步"),
         ('{ name: x, at: "0:10", wait: 3 }', "未知字段"),
     ],
 )
@@ -176,3 +182,43 @@ def test_attack_blocked_only_when_every_attempt_fails() -> None:
     assert attack_blocked(failed + "rtsp-bruteforce: 0/2 denied by rtsp://rtsp-target:8554/cam")
     assert not attack_blocked(mixed)
     assert not attack_blocked("")  # 未运行任何尝试不算封禁生效
+
+
+class EvidenceRunner(RecordingRunner):
+    """evidence-service 以真实存证链导出证据包，启动日志给出公钥指纹；校验用真实的 hyd-evidence 命令。"""
+
+    def __init__(self, tmp_path: Path, logged_fingerprint: str | None = None) -> None:
+        super().__init__()
+        self.chain = Chain(tmp_path, Ed25519PrivateKey.generate())
+        self.chain.append(
+            [
+                Entry("alert", "inc-2", {"event_id": "a1"}, b'{"event_id":"a1"}'),
+                Entry("incident", "inc-2", {}, b'{"id":"inc-2"}'),
+            ]
+        )
+        fingerprint = logged_fingerprint or self.chain.fingerprint
+        self.log = f'{{"event": "evidence.started", "public_key_fingerprint": "{fingerprint}"}}\n'
+
+    def compose(self, *args: str) -> str:
+        super().compose(*args)
+        return self.log if args[0] == "logs" else ""
+
+    def package(self, incident_id: str) -> bytes:
+        package = self.chain.package(incident_id)
+        assert package is not None
+        return package
+
+
+def test_verify_evidence_passes_then_locates_tampered_record(tmp_path: Path) -> None:
+    """演示第 11 步（TK-081）：原包按启动日志的公钥指纹校验通过，改第一条记录后定位到该条。"""
+    output = EvidenceRunner(tmp_path).verify_evidence({"id": "inc-2"})
+
+    assert evidence_verified(output), output
+    assert "第 1 条记录（chain.jsonl 第 1 行）内容与其摘要不符" in output
+
+
+def test_verify_evidence_fails_on_untrusted_key_or_missing_incident(tmp_path: Path) -> None:
+    untrusted = EvidenceRunner(tmp_path, logged_fingerprint="sha256:" + "0" * 64)
+
+    assert not evidence_verified(untrusted.verify_evidence({"id": "inc-2"}))
+    assert not evidence_verified(EvidenceRunner(tmp_path / "b").verify_evidence(None))

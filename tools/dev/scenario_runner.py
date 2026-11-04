@@ -7,11 +7,13 @@
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,7 @@ ACTIONS = {
     "freeze_camera": "camera",
     "replay_camera": "camera",
     "restore_camera": "camera",
+    "verify_evidence": "camera",
 }
 STEP_KEYS = {"name", "at", "do", "expect", "note"}
 EVENT_EXPECT_KEYS = {"subject", "match", "within_s", "absent"}
@@ -43,6 +46,16 @@ STREAM_CMD = (
 REPLAY_BACK_S = 120
 MEDIAMTX_API = "http://127.0.0.1:9997/v3/config/paths/replace/"  # 只监听容器内
 BEHAVIOR_STATE = "/var/lib/correlator/behavior.json"  # 行为模型存盘状态，与 correlator 的配置一致
+INCIDENT = "hyd.correlator.incident.v1"
+# 在 evidence-service 容器内取证据包（内部接口只在 core-net，080 §3.3）；界面导出经 api-server 审计，取的是同一个包
+FETCH_PACKAGE = (
+    "import sys, urllib.parse, urllib.request; sys.stdout.buffer.write(urllib.request.urlopen("
+    "'http://127.0.0.1:8200/internal/incidents/' + urllib.parse.quote(sys.argv[1], safe='') + "
+    "'/package', timeout=60).read())"
+)
+# 信任起点：evidence-service 启动日志 evidence.started 输出的公钥指纹（080 §4）
+FINGERPRINT = re.compile(r'"public_key_fingerprint": "(sha256:[0-9a-f]{64})"')
+VERIFY_CMD = ["uv", "run", "-q", "--package", "evidence-verify", "hyd-evidence", "verify"]
 
 
 @dataclass(frozen=True)
@@ -91,7 +104,7 @@ def load(path: Path) -> Scenario:
                 raise ValueError(f"{where}：未知动作 {action!r}")
             if set(do) != {"action", ACTIONS[action]}:
                 raise ValueError(f"{where}：{action} 须且只须有 {ACTIONS[action]}")
-        if expect is not None and set(expect) != {"attack"}:
+        if expect is not None and set(expect) not in ({"attack"}, {"evidence"}):
             _check_keys(where, expect, EVENT_EXPECT_KEYS)
             if not {"subject", "within_s"} <= set(expect):
                 raise ValueError(f"{where}：expect 须有 subject 与 within_s")
@@ -101,6 +114,14 @@ def load(path: Path) -> Scenario:
             raise ValueError(f"{where}：expect.attack 只能为 blocked")
         if expect is not None and "attack" in expect and (do or {}).get("action") != "start_attack":
             raise ValueError(f"{where}：expect.attack 须与 start_attack 同一步")
+        if expect is not None and expect.get("evidence", "verified") != "verified":
+            raise ValueError(f"{where}：expect.evidence 只能为 verified")
+        if (
+            expect is not None
+            and "evidence" in expect
+            and (do or {}).get("action") != "verify_evidence"
+        ):
+            raise ValueError(f"{where}：expect.evidence 须与 verify_evidence 同一步")
         steps.append(Step(raw["name"], parse_at(raw["at"]), do, expect, raw.get("note")))
     return Scenario(data["id"], overrides.get("playbook_ttl_s"), steps)
 
@@ -126,6 +147,16 @@ def attack_blocked(output: str) -> bool:
     """attack-sim 每次尝试输出一行 `attempt N: <状态>`；全部连接失败即封禁生效。"""
     attempts = [line for line in output.splitlines() if line.startswith("attempt ")]
     return bool(attempts) and all(": connection failed" in line for line in attempts)
+
+
+def evidence_verified(output: str) -> bool:
+    """verify_evidence 的输出为被改记录的序号、原包与篡改后两次校验的输出，以换页符分隔：
+    原包须通过，篡改后须未通过并定位到被改的那一条。"""
+    parts = output.split("\f")
+    if len(parts) != 3:
+        return False
+    seq, intact, tampered = parts
+    return "校验通过" in intact and "校验未通过" in tampered and f"第 {seq} 条记录" in tampered
 
 
 class Observer:
@@ -172,6 +203,14 @@ class Observer:
             while (hit := found()) is None and time.monotonic() < until:
                 self._cond.wait(timeout=max(0.0, until - time.monotonic()))
             return hit
+
+    def latest(self, subject: str, match: dict[str, Any]) -> dict[str, Any] | None:
+        """已收到的最近一条匹配事件。"""
+        with self._cond:
+            return next(
+                (e for _, s, e in reversed(self._events) if s == subject and matches(e, match)),
+                None,
+            )
 
     def close(self) -> None:
         assert self._proc.stdin is not None
@@ -272,6 +311,51 @@ class Runner:
         )  # fmt: skip
         return ""
 
+    def package(self, incident_id: str) -> bytes:
+        return subprocess.run(
+            [*self._compose, "exec", "-T", "evidence-service", "python3", "-c", FETCH_PACKAGE,
+             incident_id],
+            check=True,
+            stdout=subprocess.PIPE,
+            timeout=TIMEOUT_S,
+        ).stdout  # fmt: skip
+
+    def verify_evidence(self, incident: dict[str, Any] | None) -> str:
+        """演示第 11 步（TK-081）：按启动日志的公钥指纹校验关联事件的证据包，再解压、改第一条记录后校验目录。
+        与演示者在界面导出后用 hyd-evidence verify 的操作相同。输出格式见 evidence_verified。"""
+        if incident is None:
+            return "未收到该摄像头的关联事件"
+        fingerprints = FINGERPRINT.findall(
+            self.compose("logs", "--no-log-prefix", "evidence-service")
+        )
+        if not fingerprints:
+            return "evidence-service 日志中没有公钥指纹"
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / f"evidence-{incident['id']}.zip"
+            package.write_bytes(self.package(incident["id"]))
+            intact = self._verify(package, fingerprints[-1])
+            extracted = Path(tmp) / "extracted"
+            with zipfile.ZipFile(package) as z:
+                z.extractall(extracted)
+            chain = extracted / "chain.jsonl"
+            first, *rest = chain.read_bytes().splitlines(keepends=True)
+            record = json.loads(first)
+            record["meta"] = {**record["meta"], "note": "篡改"}
+            chain.write_bytes(
+                json.dumps(record, ensure_ascii=False).encode() + b"\n" + b"".join(rest)
+            )
+            tampered = self._verify(extracted, fingerprints[-1])
+        return f"{record['seq']}\f公钥指纹 {fingerprints[-1]}\n{intact}\f{tampered}"
+
+    def _verify(self, package: Path, fingerprint: str) -> str:
+        return subprocess.run(
+            [*VERIFY_CMD, str(package), "--fingerprint", fingerprint],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=TIMEOUT_S,
+        ).stdout
+
 
 def run(scenario: Scenario, site_file: Path, compose: list[str], from_step: int) -> int:
     runner = Runner(compose, site_file)
@@ -279,7 +363,8 @@ def run(scenario: Scenario, site_file: Path, compose: list[str], from_step: int)
     if cameras - runner.streams.keys():
         raise ValueError(f"站点未登记摄像头 {sorted(cameras - runner.streams.keys())}")
     expects = [s.expect for s in scenario.steps if s.expect and "subject" in s.expect]
-    observer = Observer(compose, sorted({e["subject"] for e in expects}))
+    # 关联事件始终订阅：verify_evidence 按摄像头找到最近的关联事件
+    observer = Observer(compose, sorted({e["subject"] for e in expects} | {INCIDENT}))
     failed = 0
     try:
         start = runner.setup(scenario.ttl_s)
@@ -290,7 +375,11 @@ def run(scenario: Scenario, site_file: Path, compose: list[str], from_step: int)
             if step.note:
                 print(f"    提示：{step.note}", flush=True)
             try:
-                output = runner.act(step.do, time.monotonic() - start) if step.do else ""
+                if step.do and step.do["action"] == "verify_evidence":
+                    camera = {"device_ids": step.do["camera"]}
+                    output = runner.verify_evidence(observer.latest(INCIDENT, camera))
+                else:
+                    output = runner.act(step.do, time.monotonic() - start) if step.do else ""
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                 # 记为本步失败并继续：后续的恢复画面等步骤照常执行，最后仍打印汇总
                 failed += 1
@@ -302,6 +391,8 @@ def run(scenario: Scenario, site_file: Path, compose: list[str], from_step: int)
                 continue
             if "attack" in step.expect:
                 ok, detail = attack_blocked(output), "攻击连接全部失败"
+            elif "evidence" in step.expect:
+                ok, detail = evidence_verified(output), "原包校验通过，篡改后定位到被改记录"
             else:
                 hit = observer.wait(
                     step.expect["subject"],
