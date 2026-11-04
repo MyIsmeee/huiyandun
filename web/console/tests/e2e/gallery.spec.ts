@@ -13,6 +13,8 @@ const COMPONENTS = {
   AiInvestigation: ["normal", "running", "unavailable", "empty", "loading", "error", "disconnected"],
   // 报告不随推送变化，无断线态；空态为尚未生成
   ReportBar: ["empty", "loading", "normal", "reviewed", "error"],
+  // 只经 REST 轮询、不随推送变化，无断线态与空态（没有可用供应商即模板模式）
+  LlmStatusBadge: ["normal", "failover", "template", "loading", "error"],
   // 只经 REST 读取、不随推送变化，无断线态；failing 为含失败项，blocked 为全局禁止公网
   ProviderList: ["normal", "failing", "blocked", "empty", "loading", "error"],
   // 新建态含误填 127.0.0.1 的提示；partial 为测试部分失败，含候选模型；只经 REST 提交，无断线态

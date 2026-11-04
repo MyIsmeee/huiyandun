@@ -1,5 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { expectNoOverflow, freezeClock, mockSocket, SITE, sceneSettled, signedIn, UNAUTHORIZED } from "./helpers";
+import { expectNoOverflow, freezeClock, mockLlmStatus, mockSocket, SITE, sceneSettled, signedIn, UNAUTHORIZED } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
@@ -7,6 +7,7 @@ const status = (page: Page) => page.getByRole("status", { name: "连接状态" }
 
 test("首次连接建立前显示连接中，不按断线呈现", async ({ page }) => {
   await page.route("/api/site", (route) => route.fulfill({ json: SITE }));
+  await mockLlmStatus(page);
   let accept = () => {};
   const accepted = new Promise<void>((resolve) => (accept = resolve));
   // 处理函数返回前页面一侧的连接不会建立
