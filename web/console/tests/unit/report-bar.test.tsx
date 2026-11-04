@@ -118,7 +118,9 @@ describe("ReportBar", () => {
 
   it("生成后新报告置顶并直接打开报告页", async () => {
     push(incident("inc-1"));
-    vi.spyOn(api, "listReports").mockResolvedValue({ items: [report()] });
+    vi.spyOn(api, "listReports")
+      .mockResolvedValueOnce({ items: [report()] })
+      .mockResolvedValueOnce({ items: [report({ id: "rep-new" }), report()] }); // 生成后重新读取
     const create = vi.spyOn(api, "createReport").mockResolvedValue(report({ id: "rep-new" }));
     show("operator");
     await act(async () => {});
@@ -147,6 +149,57 @@ describe("ReportBar", () => {
     expect(screen.getByText("模板生成 · 已复核：operator")).toBeTruthy(); // 报告页
     expect(screen.getByTitle("模板生成 · 已复核：operator")).toBeTruthy(); // 历史行
     expect(frame()).not.toBe(before);
+  });
+
+  it("报告页打开期间同一设备来了新的关联事件，报告页不关闭；关闭后报告栏换到新事件", async () => {
+    push(incident("inc-1"));
+    const list = vi.spyOn(api, "listReports").mockResolvedValue({ items: [report()] });
+    show("viewer");
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("list", { name: "历史报告" })).getByRole("button"));
+
+    push(incident("inc-2"));
+    await act(async () => {});
+
+    expect(frame().getAttribute("src")).toBe("/api/reports/rep-1/export?format=html");
+    expect(list).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    await act(async () => {});
+    expect(list).toHaveBeenLastCalledWith("inc-2");
+    expect(screen.getByTitle("摄像头疑似被入侵且画面遭篡改 inc-2")).toBeTruthy();
+  });
+
+  it("历史读取失败后生成，重新拉取完整列表", async () => {
+    push(incident("inc-1"));
+    const list = vi
+      .spyOn(api, "listReports")
+      .mockRejectedValueOnce(new Error("HTTP 502"))
+      .mockResolvedValueOnce({ items: [report({ id: "rep-new" }), report()] });
+    vi.spyOn(api, "createReport").mockResolvedValue(report({ id: "rep-new" }));
+    show("operator");
+    await act(async () => {});
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "生成报告" })));
+
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(within(screen.getByRole("list", { name: "历史报告" })).getAllByRole("button")).toHaveLength(2);
+    expect(frame().getAttribute("src")).toBe("/api/reports/rep-new/export?format=html");
+  });
+
+  it("首次读取晚于生成返回时不覆盖新列表，报告页不关闭", async () => {
+    push(incident("inc-1"));
+    let late: (v: { items: Report[] }) => void = () => {};
+    vi.spyOn(api, "listReports")
+      .mockReturnValueOnce(new Promise((r) => (late = r)))
+      .mockResolvedValueOnce({ items: [report({ id: "rep-new" })] });
+    vi.spyOn(api, "createReport").mockResolvedValue(report({ id: "rep-new" }));
+    show("operator");
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "生成报告" })));
+    await act(async () => late({ items: [] }));
+
+    expect(within(screen.getByRole("list", { name: "历史报告" })).getAllByRole("button")).toHaveLength(1);
+    expect(frame().getAttribute("src")).toBe("/api/reports/rep-new/export?format=html");
   });
 
   it("请求期间不可再点，失败显示原因并可重试", async () => {

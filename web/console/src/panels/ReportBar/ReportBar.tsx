@@ -1,5 +1,5 @@
 import { ArrowLeft, CircleAlert, FileText } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -29,40 +29,50 @@ const link = "underline underline-offset-4 hover:text-fg";
  * 全部角色可看，"生成报告"只有 operator 及以上渲染（C-FE-07）。生成后新报告置顶并直接打开。
  */
 export function ReportBar(props: { deviceId: string }) {
-  const incident = useLive((s) => s.incidents.find((i) => i.device_ids.includes(props.deviceId)));
+  const { deviceId } = props;
+  // 报告页打开期间锁定其关联事件：同一设备来了新事件也不换，否则报告栏重建、正在看的报告页随之关闭
+  const [pinned, setPinned] = useState<string | null>(null);
+  const incident = useLive(
+    (s) =>
+      s.incidents.find((i) => i.id === pinned && i.device_ids.includes(deviceId)) ??
+      s.incidents.find((i) => i.device_ids.includes(deviceId)),
+  );
   const canEdit = canContain(useSession((s) => s.role));
   if (!incident) return null;
   // key：换了关联事件即重新拉取，不再显示上一个事件的报告
-  return <ReportBarState key={incident.id} incident={incident} canEdit={canEdit} />;
+  return <ReportBarState key={incident.id} incident={incident} canEdit={canEdit} onPin={setPinned} />;
 }
 
-function ReportBarState(props: { incident: Incident; canEdit: boolean }) {
-  const { incident, canEdit } = props;
+function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (incidentId: string | null) => void }) {
+  const { incident, canEdit, onPin } = props;
   const [load, setLoad] = useState<ReportsLoad>({ status: "loading" });
   const [request, setRequest] = useState<ReportRequest>({ status: "idle" });
   const [review, setReview] = useState<ReportRequest>({ status: "idle" });
-  const [openId, setOpenId] = useState<string | null>(null);
-  const reports = load.status === "ready" ? load.reports : [];
-  const open = reports.find((r) => r.id === openId);
+  // 打开的报告单独保存，不随列表的读取结果变化
+  const [open, setOpen] = useState<Report | null>(null);
+  // 只采用最近一次读取的结果：晚到的旧结果不覆盖生成后重新读取的列表
+  const latest = useRef(0);
 
-  useEffect(() => {
-    let active = true;
-    api.listReports(incident.id).then(
-      ({ items }) => active && setLoad({ status: "ready", reports: items }),
-      () => active && setLoad({ status: "failed" }),
+  const reload = useCallback(async () => {
+    const seq = ++latest.current;
+    const next: ReportsLoad = await api.listReports(incident.id).then(
+      ({ items }) => ({ status: "ready", reports: items }),
+      () => ({ status: "failed" }),
     );
-    return () => {
-      active = false;
-    };
+    if (seq === latest.current) setLoad(next);
   }, [incident.id]);
+
+  useEffect(() => void reload(), [reload]);
+  // 换了设备或关联事件而卸载时解除锁定
+  useEffect(() => () => onPin(null), [onPin]);
 
   async function generate() {
     setRequest({ status: "pending" });
     try {
       const report = await api.createReport(incident.id);
-      setLoad((l) => ({ status: "ready", reports: [report, ...(l.status === "ready" ? l.reports : [])] }));
       setRequest({ status: "idle" });
-      openReport(report.id);
+      openReport(report);
+      await reload(); // 重新读取完整列表，不在可能读取失败或未读完的旧列表上拼接
     } catch (e) {
       setRequest({ status: "failed", message: failure(e) });
     }
@@ -72,6 +82,7 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean }) {
     setReview({ status: "pending" });
     try {
       const report = await api.reviewReport(id);
+      setOpen(report);
       setLoad((l) => (l.status === "ready" ? { ...l, reports: l.reports.map((r) => (r.id === id ? report : r)) } : l));
       setReview({ status: "idle" });
     } catch (e) {
@@ -79,9 +90,10 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean }) {
     }
   }
 
-  function openReport(id: string | null) {
+  function openReport(report: Report | null) {
     setReview({ status: "idle" });
-    setOpenId(id);
+    setOpen(report);
+    onPin(report ? incident.id : null);
   }
 
   return (
@@ -92,7 +104,7 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean }) {
         request={request}
         canGenerate={canEdit}
         onGenerate={() => void generate()}
-        onOpen={(r) => openReport(r.id)}
+        onOpen={openReport}
       />
       {/* 与供应商页相同，盖在主界面之上而不替换它；挂到 body 下，不受详情面板的布局约束 */}
       {open &&
