@@ -249,9 +249,9 @@ describe("ReportBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "导出证据包" }));
     expect(screen.getByRole("button", { name: "导出中…" }).hasAttribute("disabled")).toBe(true);
-    await act(async () => reject(new ApiError(404, "该关联事件没有存证记录")));
+    await act(async () => reject(new ApiError(404, "存证尚未写入或没有记录，请稍后重试")));
 
-    expect(screen.getByRole("alert").textContent).toBe("该关联事件没有存证记录");
+    expect(screen.getByRole("alert").textContent).toBe("存证尚未写入或没有记录，请稍后重试");
     expect(screen.getByRole("button", { name: "导出证据包" }).hasAttribute("disabled")).toBe(false);
   });
 });

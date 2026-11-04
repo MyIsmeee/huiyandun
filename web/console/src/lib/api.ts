@@ -78,7 +78,7 @@ export const api = {
   /** 该关联事件的历史报告，按生成时间倒序（TK-071） */
   listReports: (incidentId: string) =>
     request<Schemas["ReportList"]>("GET", `/api/incidents/${encodeURIComponent(incidentId)}/reports`),
-  /** 导出关联事件的证据包 zip（FR-702），写审计；没有存证记录时为 404 */
+  /** 导出关联事件的证据包 zip（FR-702），写审计；存证尚未写入或没有记录时为 404 */
   exportEvidence: async (incidentId: string) =>
     (
       await send(

@@ -99,7 +99,10 @@ def test_incident_without_evidence_is_not_found(
     login(client, "operator", password)
     evidence_service(client, lambda _: httpx2.Response(404))
 
-    assert client.post(URL, headers={"X-Request-ID": "req-missing"}).status_code == 404
+    res = client.post(URL, headers={"X-Request-ID": "req-missing"})
+    assert res.status_code == 404
+    # 关联事件后约 32 s 才写入存证：提示须说明可能尚未写入，演示时不被误解为故障（复核建议 1）
+    assert res.json()["message"] == "存证尚未写入或没有记录，请稍后重试"
     assert audited(db[1], "req-missing") == []
 
 
