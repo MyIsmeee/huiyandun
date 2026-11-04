@@ -98,8 +98,9 @@ class Devices:
         entry = self._entries.get(device_id)
         return entry.current if entry else None
 
-    def all(self) -> list[Device]:
-        return [entry.current for entry in self._entries.values()]
+    def online(self, now: float) -> int:
+        """不在断流离线期内的台数，供大屏指标（D-100）；处置状态在画面上覆盖离线，计数不受影响。"""
+        return sum(now >= entry.offline_until for entry in self._entries.values())
 
     def expire(self, now: float) -> list[Device]:
         """解除到期的告警态，返回状态变化的设备。"""

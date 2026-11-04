@@ -5,6 +5,7 @@
 """
 
 import math
+import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
 
@@ -48,7 +49,7 @@ class KpiTracker:
         self._contained: dict[str, datetime] = {}  # 关联事件 → 首次处置通过校验的时刻
 
     def _online_now(self) -> int:
-        return sum(d.state != "offline" for d in self._devices.all())
+        return self._devices.online(time.monotonic())  # 设备状态按单调时钟计时（devices.py）
 
     def tick(self, now: datetime) -> None:
         """由每秒一次的告警态到期检查调用，记录在线台数的变化。"""

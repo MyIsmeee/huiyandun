@@ -47,6 +47,19 @@ def test_online_devices_excludes_offline_and_compares_hour_ago(
     assert kpis.read(DAY_START, NOW).online_devices == Kpi(value=1, delta=-1)
 
 
+def test_online_devices_counts_stream_lost_under_containment(
+    devices: Devices, history: History
+) -> None:
+    """已处置在画面上覆盖离线（04 §5.2），在线台数仍按断流计。"""
+    kpis = tracker(devices, history)
+    now = time.monotonic()
+    devices.on_execution(execution("exe-1", "contained", NOW), now)  # 处置 cam-02
+    devices.on_stream_lost(stream_lost("cam-02"), now)
+
+    assert devices.get("cam-02").state == "contained"
+    assert kpis.read(DAY_START, NOW).online_devices.value == 1
+
+
 def test_online_devices_no_delta_within_first_hour(devices: Devices, history: History) -> None:
     kpis = tracker(devices, history, started=NOW - timedelta(minutes=10))
 
