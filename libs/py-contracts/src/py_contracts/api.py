@@ -328,6 +328,31 @@ class LlmStatus(ContractModel):
     """
 
 
+class Kpi(ContractModel):
+    value: int | None
+    """
+    null 为无数据，显示 —
+    """
+    delta: int | None
+    """
+    较 1 小时前的变化，null 为无可比数据
+    """
+
+
+class Kpis(ContractModel):
+    """
+    online_devices：登记设备中当前不是离线的台数；active_alerts：仍在保持期内的告警条数（网络告警 5 分钟、
+    行为事件 1 分钟，与设备告警态一致）；contained_today：day_start 起处置通过校验的关联事件数（之后回滚仍计入，
+    只通知不计）；detect_p95_ms：近 1 小时实时收到的规则告警与行为事件从事件时刻到 api-server 收到的时延 95 分位（不含设备行为模型的告警）
+
+    """
+
+    online_devices: Kpi
+    active_alerts: Kpi
+    contained_today: Kpi
+    detect_p95_ms: Kpi
+
+
 class LlmProviderCreate(ContractModel):
     name: str
     preset: Preset

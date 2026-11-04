@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime
 from http import HTTPStatus
 
 import httpx2
@@ -24,6 +25,7 @@ from api_server import (
     evidence,
     executions,
     investigator,
+    kpis,
     llm,
     llm_chain,
     llm_probe,
@@ -121,7 +123,7 @@ def create_app(config: ApiConfig) -> FastAPI:
         )
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
-            asyncio.create_task(relay.expire(app.state.hub, app.state.devices)),
+            asyncio.create_task(relay.expire(app.state.hub, app.state.devices, app.state.kpis)),
             asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
             asyncio.create_task(app.state.investigator.run()),  # TK-116
             asyncio.create_task(
@@ -131,11 +133,14 @@ def create_app(config: ApiConfig) -> FastAPI:
                     app.state.devices,
                     app.state.history,
                     app.state.investigator,
+                    app.state.kpis,
                 )
             ),
         ]
         try:
-            await relay.start(bus, app.state.hub, app.state.devices, app.state.scenes)
+            await relay.start(
+                bus, app.state.hub, app.state.devices, app.state.scenes, app.state.kpis
+            )
             yield
         finally:
             for task in tasks:
@@ -159,6 +164,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.devices = Devices(app.state.site.devices)
     app.state.scenes = {}
     app.state.history = History()
+    app.state.kpis = kpis.KpiTracker(app.state.devices, app.state.history, datetime.now(UTC))
     app.state.llm_last = None  # 最近一次模型调用的结果（llm_chain.invoke），供顶栏模型状态
     attack = json.loads(config.attack_file.read_text(encoding="utf-8"))
     app.state.tools = Tools(
@@ -174,6 +180,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(containment.router)
     app.include_router(evidence.router)
     app.include_router(investigator.router)
+    app.include_router(kpis.router)
     app.include_router(llm.router)
     app.include_router(llm_chain.router)
     app.include_router(llm_probe.router)

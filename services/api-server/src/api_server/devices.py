@@ -98,6 +98,9 @@ class Devices:
         entry = self._entries.get(device_id)
         return entry.current if entry else None
 
+    def all(self) -> list[Device]:
+        return [entry.current for entry in self._entries.values()]
+
     def expire(self, now: float) -> list[Device]:
         """解除到期的告警态，返回状态变化的设备。"""
         changed = (self._update(entry, now) for entry in self._entries.values())

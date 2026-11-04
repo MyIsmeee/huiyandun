@@ -55,6 +55,7 @@ ENDPOINTS = [
     ("put", "/api/llm/providers/order", "admin"),
     ("post", "/api/llm/models", "admin"),
     ("get", "/api/llm/status", "viewer"),
+    ("get", "/api/kpis", "viewer"),
     ("get", "/api/llm/settings", "admin"),
     ("put", "/api/llm/settings", "admin"),
     ("get", "/api/egress/stats", "viewer"),
