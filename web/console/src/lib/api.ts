@@ -98,6 +98,15 @@ export const api = {
   getKpis: (dayStart: string) =>
     request<Schemas["Kpis"]>("GET", `/api/kpis?day_start=${encodeURIComponent(dayStart)}`),
   /** 模型供应商（FR-601～604），只有 admin 可用；顺序即故障转移顺序 */
+  /** 摄像头登记表（FR-905，D-101），仅 admin */
+  listCameras: () => request<Schemas["CameraList"]>("GET", "/api/cameras"),
+  createCamera: (body: Schemas["CameraCreate"]) => request<Schemas["Camera"]>("POST", "/api/cameras", body),
+  updateCamera: (id: string, body: Schemas["CameraUpdate"]) =>
+    request<Schemas["Camera"]>("PATCH", `/api/cameras/${encodeURIComponent(id)}`, body),
+  deleteCamera: (id: string) => request<undefined>("DELETE", `/api/cameras/${encodeURIComponent(id)}`),
+  /** 经 go2rtc 取一帧（V-CAM4）；首帧须等关键帧，api-server 等 8 s，这里再加余量 */
+  getCameraSnapshot: async (id: string) =>
+    (await send("GET", `/api/cameras/${encodeURIComponent(id)}/snapshot`, undefined, undefined, 12_000)).blob(),
   listProviders: () => request<Schemas["LlmProviderList"]>("GET", "/api/llm/providers"),
   createProvider: (body: Schemas["LlmProviderCreate"]) =>
     request<Schemas["LlmProvider"]>("POST", "/api/llm/providers", body),

@@ -1,0 +1,289 @@
+import { CircleAlert, Eraser, X } from "lucide-react";
+import { type MouseEvent, useEffect, useState } from "react";
+import type { components } from "../../api/schema";
+import { ApiError, api } from "../../lib/api";
+
+type Schemas = components["schemas"];
+export type Camera = Schemas["Camera"];
+type Protocol = Schemas["CameraSource"]["protocol"];
+type Pose = Schemas["Pose"];
+
+const PROTOCOLS: Record<Protocol, [label: string, port: number]> = {
+  rtsp: ["RTSP", 554],
+  rtmp: ["RTMP", 1935],
+  http: ["HTTP（FLV、MJPEG）", 80],
+  onvif: ["ONVIF", 80],
+};
+const POSE_FIELDS: [key: keyof Pose, label: string, unit: string][] = [
+  ["x", "位置 x", "m"],
+  ["y", "位置 y", "m"],
+  ["height_m", "安装高度", "m"],
+  ["yaw_deg", "朝向", "°"],
+  ["pitch_deg", "俯角", "°"],
+  ["hfov_deg", "水平视场角", "°"],
+  ["range_m", "可视距离", "m"],
+];
+const DEFAULT_POSE: Pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
+const button = "h-9 rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40";
+const field = "h-9 min-w-0 rounded-lg border border-line bg-page px-3";
+
+export type CameraForm = {
+  name: string;
+  ip: string;
+  protocol: Protocol;
+  host: string;
+  port: number;
+  path: string;
+  username: string;
+  password: string;
+  pose: Pose;
+  climb_lines: number[][];
+};
+
+const initialForm = (c: Camera | null): CameraForm => ({
+  name: c?.name ?? "",
+  ip: c?.ip ?? "",
+  protocol: c?.source?.protocol ?? "rtsp",
+  host: c?.source?.host ?? "",
+  port: c?.source?.port ?? PROTOCOLS.rtsp[1],
+  path: c?.source?.path ?? "",
+  username: c?.username ?? "",
+  password: "",
+  pose: c?.pose ?? DEFAULT_POSE,
+  climb_lines: c?.climb_lines ?? [],
+});
+
+/** 主机留空时取设备 IP（常见情况：摄像头本身提供取流服务） */
+export function body(form: CameraForm): Schemas["CameraCreate"] {
+  return {
+    name: form.name.trim(),
+    ip: form.ip.trim(),
+    ingest: "pull",
+    source: { protocol: form.protocol, host: form.host.trim() || form.ip.trim(), port: form.port, path: form.path.trim() },
+    username: form.username.trim() || null,
+    ...(form.password ? { password: form.password } : {}),
+    pose: form.pose,
+    climb_lines: form.climb_lines,
+  };
+}
+
+/** 取一帧画面；失败时给出服务端的白话原因（V-CAM4） */
+const snapshotOf = (id: string): Promise<Snapshot> =>
+  api.getCameraSnapshot(id).then(
+    (blob) => ({ status: "ready", url: URL.createObjectURL(blob) }),
+    (e: unknown) => ({ status: "failed", message: e instanceof ApiError ? e.message : "取不到画面，请重试" }),
+  );
+
+type Snapshot = { status: "none" } | { status: "loading" } | { status: "ready"; url: string } | { status: "failed"; message: string };
+
+/**
+ * 添加与编辑摄像头（04 §7.4）。保存后自动取一帧预览（V-CAM4），可在预览上点两点画禁止攀爬警戒线（V-CAM7），
+ * 画完再保存。口令只写不读：留空表示不修改（V-CAM2）。推流接入随 TK-129 上线，此前不提供该选项（V-T3）。
+ */
+export function CameraEditor(props: { camera: Camera | null; onClose: () => void; onSaved: () => void }) {
+  const [saved, setSaved] = useState(props.camera);
+  const [form, setForm] = useState(() => initialForm(props.camera));
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<Snapshot>(() => (props.camera ? { status: "loading" } : { status: "none" }));
+  const [point, setPoint] = useState<[number, number] | null>(null);
+  const set = (patch: Partial<CameraForm>) => setForm((f) => ({ ...f, ...patch }));
+
+  async function preview(id: string) {
+    setSnapshot({ status: "loading" });
+    setSnapshot(await snapshotOf(id));
+  }
+  useEffect(() => {
+    if (!props.camera) return;
+    let current = true;
+    void snapshotOf(props.camera.id).then((s) => current && setSnapshot(s));
+    return () => {
+      current = false;
+    };
+  }, [props.camera]);
+  useEffect(() => () => void (snapshot.status === "ready" && URL.revokeObjectURL(snapshot.url)), [snapshot]);
+
+  async function save() {
+    setPending(true);
+    setMessage(null);
+    try {
+      const request = body(form);
+      const camera = saved ? await api.updateCamera(saved.id, request) : await api.createCamera(request);
+      setSaved(camera);
+      set({ password: "" });
+      props.onSaved();
+      void preview(camera.id);
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : "无法连接服务器，请重试");
+    }
+    setPending(false);
+  }
+
+  /** 预览上点两点成线：坐标按画面原始尺寸换算为像素（与视觉引擎一致） */
+  function click(e: MouseEvent<HTMLImageElement>) {
+    const img = e.currentTarget;
+    const rect = img.getBoundingClientRect();
+    const u = Math.round(((e.clientX - rect.left) / rect.width) * img.naturalWidth);
+    const v = Math.round(((e.clientY - rect.top) / rect.height) * img.naturalHeight);
+    if (!point) return setPoint([u, v]);
+    setPoint(null);
+    if (point[0] === u) return setMessage("警戒线不能是竖直线段，请重新点两点");
+    setMessage(null);
+    set({ climb_lines: [...form.climb_lines, [point[0], point[1], u, v]] });
+  }
+
+  return (
+    <div role="dialog" aria-label={saved ? "编辑摄像头" : "添加摄像头"} className="fixed inset-0 z-20 grid place-items-center bg-page/70 p-4 backdrop-blur-sm">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+        className="flex max-h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto rounded-2xl border border-line bg-panel p-6 text-sm"
+      >
+        <header className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">{saved ? `编辑摄像头 ${saved.id}` : "添加摄像头"}</h2>
+          <button type="button" aria-label="关闭" onClick={props.onClose} className="grid size-8 place-items-center rounded-full hover:bg-raised">
+            <X aria-hidden className="size-4" />
+          </button>
+        </header>
+
+        <div className="grid grid-cols-[6rem_minmax(0,1fr)_6rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+          <label htmlFor="cam-name">名称</label>
+          <input id="cam-name" required maxLength={40} className={field} value={form.name} onChange={(e) => set({ name: e.target.value })} />
+          <label htmlFor="cam-ip">设备 IP</label>
+          <input id="cam-ip" required placeholder="192.168.8.31" className={field} value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
+          <label htmlFor="cam-protocol">协议</label>
+          <select
+            id="cam-protocol"
+            className={field}
+            value={form.protocol}
+            onChange={(e) => {
+              const protocol = e.target.value as Protocol;
+              set({ protocol, port: PROTOCOLS[protocol][1] });
+            }}
+          >
+            {Object.entries(PROTOCOLS).map(([key, [label]]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="cam-port">端口</label>
+          <input id="cam-port" type="number" min={1} max={65535} required className={field} value={form.port} onChange={(e) => set({ port: Number(e.target.value) })} />
+          <label htmlFor="cam-host">主机</label>
+          <input id="cam-host" placeholder="留空即设备 IP" className={field} value={form.host} onChange={(e) => set({ host: e.target.value })} />
+          <label htmlFor="cam-path">流路径</label>
+          <input
+            id="cam-path"
+            disabled={form.protocol === "onvif"}
+            placeholder={form.protocol === "onvif" ? "ONVIF 自动获取" : "/Streaming/Channels/101"}
+            className={field}
+            value={form.path}
+            onChange={(e) => set({ path: e.target.value })}
+          />
+          <label htmlFor="cam-user">用户名</label>
+          <input id="cam-user" autoComplete="off" className={field} value={form.username} onChange={(e) => set({ username: e.target.value })} />
+          <label htmlFor="cam-pass">口令</label>
+          <input
+            id="cam-pass"
+            type="password"
+            autoComplete="new-password"
+            placeholder={saved?.password_set ? "已设置，留空不修改" : "可选"}
+            className={field}
+            value={form.password}
+            onChange={(e) => set({ password: e.target.value })}
+          />
+        </div>
+
+        <fieldset className="flex flex-col gap-2 border-t border-line pt-3">
+          <legend className="pr-2 font-semibold">安装参数</legend>
+          <p className="text-xs text-fg-3">朝向自平面 x 轴正方向逆时针计；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。</p>
+          <div className="grid grid-cols-4 gap-x-3 gap-y-2">
+            {POSE_FIELDS.map(([key, label, unit]) => (
+              <label key={key} className="flex items-center gap-2">
+                <span className="w-20 shrink-0">{label}</span>
+                <input
+                  type="number"
+                  step="any"
+                  required
+                  aria-label={label}
+                  className={`${field} w-full`}
+                  value={form.pose[key]}
+                  onChange={(e) => set({ pose: { ...form.pose, [key]: Number(e.target.value) } })}
+                />
+                <span className="text-fg-3">{unit}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <section aria-label="预览" className="flex flex-col gap-2 border-t border-line pt-3">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold">预览与攀爬警戒线</h3>
+            <span className="text-xs text-fg-3">在画面上沿墙顶或栏杆顶点两点画线；共 {form.climb_lines.length} 条</span>
+            {form.climb_lines.length > 0 && (
+              <button type="button" onClick={() => set({ climb_lines: [] })} className="ml-auto flex items-center gap-1 text-xs text-fg-2 hover:text-fg">
+                <Eraser aria-hidden className="size-3.5" />
+                清除
+              </button>
+            )}
+          </div>
+          <SnapshotView snapshot={snapshot} lines={form.climb_lines} point={point} onClick={click} />
+        </section>
+
+        {message && (
+          <p role="alert" className="flex items-center gap-1">
+            <CircleAlert aria-hidden className="size-4" />
+            {message}
+          </p>
+        )}
+        <footer className="flex justify-end gap-2">
+          <button type="button" onClick={props.onClose} className={button}>
+            关闭
+          </button>
+          <button type="submit" disabled={pending} className={`${button} bg-fg font-semibold text-page hover:bg-fg`}>
+            {pending ? "保存中…" : "保存"}
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function SnapshotView(props: {
+  snapshot: Snapshot;
+  lines: number[][];
+  point: [number, number] | null;
+  onClick: (e: MouseEvent<HTMLImageElement>) => void;
+}) {
+  const { snapshot, lines, point } = props;
+  const [size, setSize] = useState<[number, number] | null>(null);
+  if (snapshot.status !== "ready") {
+    const text = {
+      none: "保存后显示一帧画面",
+      loading: "正在取画面…",
+      failed: snapshot.status === "failed" ? `取不到画面：${snapshot.message}` : "",
+    }[snapshot.status];
+    return <p className="grid aspect-video place-items-center rounded-xl border border-dashed border-line text-fg-3">{text}</p>;
+  }
+  return (
+    <div className="relative">
+      <img
+        src={snapshot.url}
+        alt="摄像头画面预览"
+        onLoad={(e) => setSize([e.currentTarget.naturalWidth, e.currentTarget.naturalHeight])}
+        onClick={props.onClick}
+        className="w-full cursor-crosshair rounded-xl"
+      />
+      {size && (
+        <svg aria-hidden viewBox={`0 0 ${size[0]} ${size[1]}`} className="pointer-events-none absolute inset-0 size-full">
+          {lines.map(([u1, v1, u2, v2], i) => (
+            <line key={i} x1={u1} y1={v1} x2={u2} y2={v2} stroke="#3cc8f0" strokeWidth={size[0] / 250} />
+          ))}
+          {point && <circle cx={point[0]} cy={point[1]} r={size[0] / 120} fill="#3cc8f0" />}
+        </svg>
+      )}
+    </div>
+  );
+}

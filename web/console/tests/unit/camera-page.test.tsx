@@ -1,0 +1,109 @@
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError, api } from "../../src/lib/api";
+import { type Camera, CameraEditor, body } from "../../src/panels/CameraEditor/CameraEditor";
+import { CameraListView, address } from "../../src/panels/CameraList/CameraList";
+
+const POSE = { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
+const CAM: Camera = {
+  id: "cam-03",
+  name: "大门口",
+  ip: "192.168.8.31",
+  ingest: "pull",
+  source: { protocol: "rtsp", host: "192.168.8.31", port: 554, path: "/Streaming/Channels/101" },
+  username: "admin",
+  password_set: true,
+  pose: POSE,
+  calibration: [],
+  climb_lines: [],
+  created_at: "2026-11-05T00:00:00Z",
+  updated_at: "2026-11-05T00:00:00Z",
+};
+const flush = () => act(async () => {});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("摄像头列表（04 §7.4）", () => {
+  const view = (cameras: Camera[], deleting: Camera | null = null) => {
+    const handlers = { onEdit: vi.fn(), onDelete: vi.fn(), onConfirmDelete: vi.fn() };
+    render(
+      <CameraListView
+        load={{ status: "ready", cameras }}
+        notice={null}
+        deleting={deleting}
+        onClose={() => {}}
+        onRetry={() => {}}
+        onAdd={() => {}}
+        onCancelDelete={() => {}}
+        {...handlers}
+      />,
+    );
+    return handlers;
+  };
+
+  it("显示不含凭据的地址、口令是否设置、地面映射方式（V-CAM1、V-CAM2）", () => {
+    view([CAM, { ...CAM, id: "cam-01", name: "演示", password_set: false, calibration: [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]] }]);
+    const items = within(screen.getByRole("list", { name: "摄像头列表" })).getAllByRole("listitem");
+    expect(items[0]?.textContent).toContain("rtsp://192.168.8.31:554/Streaming/Channels/101 · 口令 已设置");
+    expect(items[0]?.textContent).toContain("按安装参数估算");
+    expect(items[0]?.textContent).not.toContain("admin");
+    expect(items[1]?.textContent).toContain("口令 未设置");
+    expect(items[1]?.textContent).toContain("已标定");
+  });
+
+  it("删除须二次确认并说明后果（V-CAM5）", () => {
+    const { onConfirmDelete } = view([CAM], CAM);
+    expect(screen.getByRole("alertdialog").textContent).toContain("告警历史保留，实时识别与录像停止");
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "删除" }));
+    expect(onConfirmDelete).toHaveBeenCalledWith(CAM);
+  });
+
+  it("地址：ONVIF 不带路径，IPv6 加方括号", () => {
+    expect(address({ ...CAM, source: { protocol: "onvif", host: "fe80::1", port: 80, path: "" } })).toBe("onvif://[fe80::1]:80");
+  });
+});
+
+describe("添加与编辑（04 §7.4）", () => {
+  it("请求体：主机留空取设备 IP；口令为空不发送（只写不读）", () => {
+    const form = { name: " 后门 ", ip: "10.0.0.5", protocol: "http" as const, host: "", port: 80, path: "video.mjpg", username: "", password: "", pose: POSE, climb_lines: [] };
+    expect(body(form)).toEqual({
+      name: "后门",
+      ip: "10.0.0.5",
+      ingest: "pull",
+      source: { protocol: "http", host: "10.0.0.5", port: 80, path: "video.mjpg" },
+      username: null,
+      pose: POSE,
+      climb_lines: [],
+    });
+  });
+
+  it("编辑时取一帧预览；在预览上点两点画警戒线，按画面原始尺寸换算（V-CAM4、V-CAM7）", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockResolvedValue(new Blob(["jpeg"]));
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:frame");
+    const update = vi.spyOn(api, "updateCamera").mockResolvedValue(CAM);
+    render(<CameraEditor camera={CAM} onClose={() => {}} onSaved={() => {}} />);
+    await flush();
+
+    const img = screen.getByAltText("摄像头画面预览") as HTMLImageElement;
+    Object.defineProperties(img, { naturalWidth: { value: 1280 }, naturalHeight: { value: 720 } });
+    img.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360 }) as DOMRect;
+    fireEvent.click(img, { clientX: 100, clientY: 300 });
+    fireEvent.click(img, { clientX: 300, clientY: 100 });
+    expect(screen.getByText(/共 1 条/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await flush();
+    expect(update.mock.calls[0]?.[1]).toMatchObject({ climb_lines: [[200, 600, 600, 200]] });
+    expect(update.mock.calls[0]?.[1]).not.toHaveProperty("password");
+  });
+
+  it("取不到画面时显示服务端给出的原因", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockRejectedValue(new ApiError(502, "取画面超时：摄像头无响应或网络不通"));
+    render(<CameraEditor camera={CAM} onClose={() => {}} onSaved={() => {}} />);
+    await flush();
+    expect(screen.getByText(/取不到画面：取画面超时/)).toBeTruthy();
+  });
+});
