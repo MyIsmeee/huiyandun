@@ -5,9 +5,11 @@ import importlib.util
 import logging
 import threading
 import time
+import uuid
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import nats
@@ -16,6 +18,7 @@ import pytest
 import supervision as sv
 
 from py_common.bus import Bus
+from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
@@ -600,3 +603,106 @@ def test_reader_beats_on_connect_and_every_frame(monkeypatch: pytest.MonkeyPatch
     # 第一次：建连前、建连后、两帧各一次；第二次：建连前一次
     assert len(beats) == 5
     assert reader.latest() is not None and reader.latest()[0] == 2
+
+
+POSE = {
+    "x": 0.0,
+    "y": 0.0,
+    "height_m": 3.0,
+    "yaw_deg": 0.0,
+    "pitch_deg": -30.0,
+    "hfov_deg": 90.0,
+    "range_m": 15,
+}
+
+
+def test_tracks_located_by_pose_without_calibration() -> None:
+    """D-102：没有标定点时取首帧尺寸按安装参数估算，仍输出坐标，误差随距离加大。"""
+    fake = FakeDetector()
+    camera = CameraPipeline("cam-01", None, cast(PoseDetector, fake), pose=POSE)
+    events = [e for i in range(4) for e in camera.process(frame(i), timestamp=i / FPS)]
+    assert len(events) == 3
+    last = events[-1]
+    expected = GroundMapping.from_pose(POSE, 1280, 720)
+    assert expected is not None
+    assert (last.x, last.y, last.uncertainty_m) == pytest.approx(expected.locate(356, 600, 400))
+    assert last.x > 0  # 在摄像头前方
+
+
+def test_unmapped_pose_outputs_no_coordinates() -> None:
+    """朝向地平线以上：估算不成立，只输出设备级行为，不输出坐标。"""
+    camera = CameraPipeline(
+        "cam-01", None, cast(PoseDetector, FakeDetector()), pose=POSE | {"pitch_deg": 60.0}
+    )
+    events = [e for i in range(4) for e in camera.process(frame(i), timestamp=i / FPS)]
+    assert events == []
+
+
+def test_reader_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-101：摄像头删除或参数变化时停止读帧线程。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
+
+    class Capture:
+        def read(self) -> tuple[bool, np.ndarray | None]:
+            return True, frame(0)
+
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", lambda *a: Capture())
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: None)
+    reader.start()
+    reader.stop()
+    reader.join(2)
+    assert not reader.is_alive()
+
+
+class FakeReaderThread:
+    started: list[str] = []
+    stopped: list[str] = []
+
+    def __init__(self, camera_id: str, url: str, beat: object) -> None:
+        self.camera_id, self.url = camera_id, url
+
+    def start(self) -> None:
+        FakeReaderThread.started.append(self.url)
+
+    def stop(self) -> None:
+        FakeReaderThread.stopped.append(self.url)
+
+    def latest(self) -> None:
+        return None
+
+
+def registry(*cameras: dict[str, object]) -> ConfigCamerasV1:
+    return ConfigCamerasV1.model_validate(
+        {"schema_version": "1.0.0", "event_id": str(uuid.uuid4()), "ts": "2026-11-05T00:00:00Z",
+         "cameras": list(cameras)}
+    )  # fmt: skip
+
+
+def cam(camera_id: str, **over: object) -> dict[str, object]:
+    return {"id": camera_id, "name": camera_id, "ip": "10.0.0.1", "pose": POSE,
+            "calibration": [], "climb_lines": []} | over  # fmt: skip
+
+
+def test_cameras_follow_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """D-101：新增的启动；删除或参数变化的停止后按新参数启动；未变的不动。"""
+    monkeypatch.setattr(pipeline_module, "FrameReader", FakeReaderThread)
+    FakeReaderThread.started, FakeReaderThread.stopped = [], []
+    config = cast(pipeline_module.VisionConfig, SimpleNamespace(go2rtc_rtsp="rtsp://go2rtc:8554"))
+    health = Health(tmp_path / "alive")
+    cameras = pipeline_module.Cameras(
+        config, cast(PoseDetector, FakeDetector()), None, None, None, cast(Bus, None), health
+    )
+
+    async def scenario() -> None:
+        await cameras.apply(registry(cam("cam-01"), cam("cam-02")))
+        await cameras.apply(registry(cam("cam-01"), cam("cam-03", pose=POSE | {"yaw_deg": 90.0})))
+        await cameras.apply(registry(cam("cam-01"), cam("cam-03", pose=POSE)))
+
+    asyncio.run(scenario())
+    url = "rtsp://go2rtc:8554/".__add__
+    assert FakeReaderThread.started == [url("cam-01"), url("cam-02"), url("cam-03"), url("cam-03")]
+    assert FakeReaderThread.stopped == [url("cam-02"), url("cam-03")]
+    assert not any(name.startswith("cam-02/") for name in health._beats)

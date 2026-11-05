@@ -65,14 +65,13 @@
     "CameraConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "ip", "stream", "pose"],
+      "required": ["id", "ip", "pose"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string", "description": "显示名称；省略时取 id" },
         "ip": {
           "anyOf": [{ "type": "string", "format": "ipv4" }, { "type": "string", "format": "ipv6" }]
         },
-        "stream": { "type": "string", "description": "go2rtc 流名" },
         "source": {
           "$ref": "#/$defs/SourceConfig",
           "description": "拉流地址（不含凭据），初始导入摄像头登记表时使用；省略时为推流（D-101）"

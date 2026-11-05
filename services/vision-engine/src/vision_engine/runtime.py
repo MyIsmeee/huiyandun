@@ -47,11 +47,9 @@ class VisionConfig(ServiceConfig):
         description="整个识别服务的 CUDA 显存上限，单位 MiB，由加载的模型平分；"
         "与同机其他 GPU 进程共存（C-HW-12）",
     )
-    site_file: Path = Field(
-        Path("/etc/hyd/site.yaml"), description="站点配置 site.yaml：摄像头流名与标定点（FR-901）"
-    )
     go2rtc_rtsp: str = Field(
-        "rtsp://go2rtc:8554", description="go2rtc 的 RTSP 地址，流名取自 site.yaml（C-CV-10）"
+        "rtsp://go2rtc:8554",
+        description="go2rtc 的 RTSP 地址，流名即摄像头编号，取自登记表（C-CV-10、D-101）",
     )
     heartbeat_file: Path = Field(
         Path("/tmp/hyd-vision-alive"),

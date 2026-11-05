@@ -109,9 +109,13 @@ def test_unreadable_file_is_rejected(tmp_path: Path, content: bytes | None) -> N
 def test_camera_mapping_estimated_below_four_points(
     tmp_path: Path, points: int, mapping: str
 ) -> None:
-    data = edited(
-        lambda d: d["cameras"][0].update(calibration=d["cameras"][0]["calibration"][:points])
-    )
+    corners = [
+        [312, 540, 4.0, 6.0],
+        [980, 552, 9.5, 6.2],
+        [450, 300, 5.1, 14.0],
+        [870, 310, 10.2, 13.8],
+    ]
+    data = edited(lambda d: d["cameras"][0].update(calibration=corners[:points]))
 
     device = site.load(write(tmp_path, data)).devices[0]
 
