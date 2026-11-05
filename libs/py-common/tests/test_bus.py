@@ -290,3 +290,28 @@ def test_connect_unreachable_fails_within_timeout(url: str) -> None:
     with pytest.raises(TimeoutError):
         asyncio.run(Bus.connect(url, name="test", timeout_s=1))
     assert time.monotonic() - start < 5
+
+
+def test_restart_switch_clears_start_time(nats_url: str) -> None:
+    """有序消费者重建时改为按序号起始（nats-py 的 reset_ordered_consumer），服务端须接受该配置；
+    nats-py 2.16 保留了 opt_start_time 而被拒（err_code 10094），订阅从此不再投递。"""
+    from nats.js.api import DeliverPolicy
+
+    from py_common.bus import _StartTimeConfig
+
+    async def main() -> str:
+        raw = await nats.connect(nats_url)
+        js = raw.jetstream()
+        try:
+            await js.add_stream(name="RESET", subjects=["hyd.test.reset"])
+            config = _StartTimeConfig(opt_start_time=datetime.now(UTC) - timedelta(minutes=1))
+            config.deliver_policy = DeliverPolicy.BY_START_SEQUENCE  # 与 nats-py 重建时的改法相同
+            config.opt_start_seq = 1
+            config.deliver_subject = raw.new_inbox()
+            info = await js._jsm.add_consumer("RESET", config=config)
+            return str(info.config.deliver_policy)
+        finally:
+            await js.delete_stream("RESET")
+            await raw.close()
+
+    assert "by_start_sequence" in asyncio.run(main())
