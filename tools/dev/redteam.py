@@ -59,15 +59,20 @@ class Compose:
     def __init__(self, compose: list[str]) -> None:
         self._compose = compose
 
-    def run(self, *args: str, check: bool = True) -> str:
+    def call(self, *args: str) -> subprocess.CompletedProcess[str]:
+        """执行并返回退出码与输出，不因非零退出码报错。"""
         return subprocess.run(
             [*self._compose, *args],
-            check=check,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             timeout=TIMEOUT_S,
-        ).stdout
+        )
+
+    def run(self, *args: str) -> str:
+        res = self.call(*args)
+        res.check_returncode()
+        return res.stdout
 
     def mediamtx(self, *args: str) -> str:
         return self.run("exec", "-T", "mediamtx", *args)
@@ -93,9 +98,12 @@ def attack(compose: Compose, slow: bool) -> int:
             "-e",
             f"HYD_INTERVAL_S={params['interval_s']}",
         ]
-    out = compose.run("run", "--rm", "--no-deps", "-T", *env, "attack-sim", check=False)
-    print(out, end="")
-    return 0
+    res = compose.call("run", "--rm", "--no-deps", "-T", *env, "attack-sim")
+    print(res.stdout, end="")
+    if res.returncode != 0:
+        # attack-sim 跑完总是返回 0（尝试被拒、连接被封禁都算跑完）：非零说明容器没能运行
+        print(f"attack-sim 未能运行（退出码 {res.returncode}），没有发出攻击流量", file=sys.stderr)
+    return res.returncode
 
 
 def tamper(compose: Compose, action: str, camera: str) -> int:
