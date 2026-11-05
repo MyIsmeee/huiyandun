@@ -1,0 +1,29 @@
+# 推流接收（TK-129、D-103）：复用 MediaMTX（REUSE-04）。设备把 RTSP 推到边缘主机 8554 端口的
+# rtsp://<边缘主机>:8554/<摄像头编号>，须带推流口令；go2rtc 按摄像头登记表从这里拉流，各服务仍只经 go2rtc 取流（C-CV-10）。
+# 推流口令由 make demo-up 生成在 .secrets/push_password，启动时替换 __PUSH_PASS__，只有本服务与 api-server 可读（G-14）
+logLevel: info
+
+api: true
+apiAddress: 127.0.0.1:9997
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+rtspTransports: [tcp]
+
+authInternalUsers:
+  - user: any
+    ips: ["127.0.0.1", "::1"]
+    permissions: [{ action: api }]
+  # 推流须带口令；只能推到摄像头编号格式的路径
+  - user: hyd
+    pass: __PUSH_PASS__
+    permissions: [{ action: publish }]
+  # 只有 go2rtc（ingest-net 中的固定地址）可读取
+  - user: any
+    ips: ["172.30.10.2"]
+    permissions: [{ action: read }]
+
+paths:
+  "~^cam-[0-9]+$":
+    source: publisher

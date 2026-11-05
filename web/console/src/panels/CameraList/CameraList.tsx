@@ -2,7 +2,7 @@ import { ArrowLeft, CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
 import { useLive } from "../../store/live";
-import { type Camera, CameraEditor } from "../CameraEditor/CameraEditor";
+import { type Camera, CameraEditor, PUSH_USER, pushUrl } from "../CameraEditor/CameraEditor";
 
 export type CameraLoad = { status: "loading" } | { status: "failed"; message: string } | { status: "ready"; cameras: Camera[] };
 
@@ -10,10 +10,10 @@ const errorMessage = (e: unknown) => (e instanceof ApiError ? e.message : "无�
 const button = "h-8 rounded-full border border-line px-3 transition-colors hover:bg-raised disabled:opacity-40";
 const PROTOCOL = { rtsp: "RTSP", rtmp: "RTMP", http: "HTTP", onvif: "ONVIF" } as const;
 
-/** 不含凭据的拉流地址（V-CAM1） */
+/** 不含凭据的拉流地址；推流为推流地址与用户名（V-CAM1） */
 export function address(camera: Camera): string {
   const s = camera.source;
-  if (!s) return "推流";
+  if (!s) return `推流地址 ${pushUrl(camera.id)} · 用户 ${PUSH_USER}`;
   const host = s.host.includes(":") ? `[${s.host}]` : s.host;
   return s.protocol === "onvif" ? `onvif://${host}:${s.port}` : `${s.protocol}://${host}:${s.port}/${s.path.replace(/^\//, "")}`;
 }

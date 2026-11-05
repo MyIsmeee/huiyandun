@@ -53,6 +53,8 @@ STREAM = "HYD_CONFIG"
 STREAM_MAX_AGE_S = 0  # 永久：每主题只保留最新一条
 SCHEMA_VERSION = "1.0.0"
 MAX_CAMERAS = 16  # D0 档位规划 4～8 路（01 §12.1），留余量；超出拒绝（125 设计 §8）
+# 推流接收（TK-129）的 ingest-net 固定地址：两者同在 edge-net，按名称会走 edge-net，而 ingest 只放行 ingest-net 上的 go2rtc
+INGEST_RTSP = "rtsp://172.30.10.10:8554"
 SYNC_S = 30  # go2rtc 重启会丢掉动态添加的流：定期比对补齐
 RETRY_S = 2
 CREATE_LOCK = 0x48594431  # 新增摄像头的事务级咨询锁：并发新增时路数上限不被同时突破
@@ -87,10 +89,11 @@ cameras = Table(
 )
 
 
-def source_url(row: Any, password: str | None) -> str | None:
-    """拉流地址；推流为 None。用户名与口令按 URL 规则转义。"""
+def source_url(row: Any, password: str | None) -> str:
+    """go2rtc 的取流地址。拉流按协议拼出，用户名与口令按 URL 规则转义；推流的设备推到 ingest，
+    go2rtc 从 ingest 按摄像头编号取（D-103，ingest 只放行 go2rtc 读取）。"""
     if row["ingest"] != "pull":
-        return None
+        return f"{INGEST_RTSP}/{row['id']}"
     auth = ""
     if row["username"]:
         auth = quote(row["username"], safe="")
@@ -129,6 +132,14 @@ def view(row: Any) -> Camera:
             "updated_at": row["updated_at"],
         }
     )
+
+
+def with_push_password(request: Request, camera: Camera, show: bool) -> Camera:
+    """新增推流摄像头或改为推流时，在响应中给出一次推流口令供配置设备（V-CAM2）；列表与其余响应不含。"""
+    if not show:
+        return camera
+    password = request.app.state.config.push_password_file.read_text(encoding="utf-8").strip()
+    return camera.model_copy(update={"push_password": password})
 
 
 def audit_view(camera: Camera) -> dict[str, Any]:
@@ -344,8 +355,6 @@ class Registry:
             (await client.delete("/api/streams", params={"src": name})).raise_for_status()
             log.info("cameras.stream_removed", extra={"camera_id": name})
         for name, url in desired.items():
-            if url is None:
-                continue  # 推流的流由 TK-129 建立（D-103）
             if current.get(name) == [masked(url)]:
                 continue
             if name in current:
@@ -416,7 +425,7 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
     except IntegrityError as e:
         raise HTTPException(409, f"设备 IP {body.ip} 已被其他摄像头使用") from e
     await request.app.state.cameras.apply()
-    return camera
+    return with_push_password(request, camera, camera.ingest == "push")
 
 
 @router.patch("/cameras/{camera_id}")
@@ -470,7 +479,7 @@ async def update_camera(
     except IntegrityError as e:
         raise HTTPException(409, f"设备 IP {body.ip} 已被其他摄像头使用") from e
     await request.app.state.cameras.apply()
-    return camera
+    return with_push_password(request, camera, camera.ingest == "push" and before.ingest != "push")
 
 
 @router.delete("/cameras/{camera_id}", status_code=204)

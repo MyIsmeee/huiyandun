@@ -30,6 +30,7 @@ const field = "h-9 min-w-0 rounded-lg border border-line bg-page px-3";
 export type CameraForm = {
   name: string;
   ip: string;
+  ingest: Camera["ingest"];
   protocol: Protocol;
   host: string;
   port: number;
@@ -43,6 +44,7 @@ export type CameraForm = {
 const initialForm = (c: Camera | null): CameraForm => ({
   name: c?.name ?? "",
   ip: c?.ip ?? "",
+  ingest: c?.ingest ?? "pull",
   protocol: c?.source?.protocol ?? "rtsp",
   host: c?.source?.host ?? "",
   port: c?.source?.port ?? PROTOCOLS.rtsp[1],
@@ -53,17 +55,20 @@ const initialForm = (c: Camera | null): CameraForm => ({
   climb_lines: c?.climb_lines ?? [],
 });
 
-/** 主机留空时取设备 IP（常见情况：摄像头本身提供取流服务） */
+/** 设备推流的地址（FR-907）：推到边缘主机的 8554 端口，路径即摄像头编号；边缘主机即打开本页的主机 */
+export const pushUrl = (id: string) => `rtsp://${location.hostname}:8554/${id}`;
+export const PUSH_USER = "hyd";
+
+/** 主机留空时取设备 IP（常见情况：摄像头本身提供取流服务）；推流不带拉流地址与凭据 */
 export function body(form: CameraForm): Schemas["CameraCreate"] {
+  const common = { name: form.name.trim(), ip: form.ip.trim(), pose: form.pose, climb_lines: form.climb_lines };
+  if (form.ingest === "push") return { ...common, ingest: "push", source: null, username: null };
   return {
-    name: form.name.trim(),
-    ip: form.ip.trim(),
+    ...common,
     ingest: "pull",
     source: { protocol: form.protocol, host: form.host.trim() || form.ip.trim(), port: form.port, path: form.path.trim() },
     username: form.username.trim() || null,
     ...(form.password ? { password: form.password } : {}),
-    pose: form.pose,
-    climb_lines: form.climb_lines,
   };
 }
 
@@ -78,7 +83,7 @@ type Snapshot = { status: "none" } | { status: "loading" } | { status: "ready"; 
 
 /**
  * 添加与编辑摄像头（04 §7.4）。保存后自动取一帧预览（V-CAM4），可在预览上点两点画禁止攀爬警戒线（V-CAM7），
- * 画完再保存。口令只写不读：留空表示不修改（V-CAM2）。推流接入随 TK-129 上线，此前不提供该选项（V-T3）。
+ * 画完再保存。口令只写不读：留空表示不修改（V-CAM2）。推流方式显示推流地址，推流口令只在保存为推流后显示一次。
  */
 export function CameraEditor(props: { camera: Camera | null; onClose: () => void; onSaved: () => void }) {
   const [saved, setSaved] = useState(props.camera);
@@ -87,6 +92,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
   const [message, setMessage] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot>(() => (props.camera ? { status: "loading" } : { status: "none" }));
   const [point, setPoint] = useState<[number, number] | null>(null);
+  const [pushPassword, setPushPassword] = useState<string | null>(null);
   const set = (patch: Partial<CameraForm>) => setForm((f) => ({ ...f, ...patch }));
 
   async function preview(id: string) {
@@ -110,6 +116,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
       const request = body(form);
       const camera = saved ? await api.updateCamera(saved.id, request) : await api.createCamera(request);
       setSaved(camera);
+      if (camera.push_password) setPushPassword(camera.push_password);
       set({ password: "" });
       props.onSaved();
       void preview(camera.id);
@@ -153,6 +160,24 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           <input id="cam-name" required maxLength={40} className={field} value={form.name} onChange={(e) => set({ name: e.target.value })} />
           <label htmlFor="cam-ip">设备 IP</label>
           <input id="cam-ip" required placeholder="192.168.8.31" className={field} value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
+          <span>接入方式</span>
+          <div role="radiogroup" aria-label="接入方式" className="col-span-3 flex gap-4">
+            {(
+              [
+                ["pull", "拉流（系统从摄像头取流）"],
+                ["push", "推流（设备推到本机）"],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-1.5">
+                <input type="radio" name="ingest" checked={form.ingest === value} onChange={() => set({ ingest: value })} />
+                {label}
+              </label>
+            ))}
+          </div>
+          {form.ingest === "push" ? (
+            <PushInfo id={saved?.id ?? null} password={pushPassword} />
+          ) : (
+            <>
           <label htmlFor="cam-protocol">协议</label>
           <select
             id="cam-protocol"
@@ -194,6 +219,8 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             value={form.password}
             onChange={(e) => set({ password: e.target.value })}
           />
+            </>
+          )}
         </div>
 
         <fieldset className="flex flex-col gap-2 border-t border-line pt-3">
@@ -248,6 +275,20 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
         </footer>
       </form>
     </div>
+  );
+}
+
+/** 推流地址、用户名与口令（FR-907、V-CAM2）：口令只在保存为推流后显示一次 */
+function PushInfo({ id, password }: { id: string | null; password: string | null }) {
+  return (
+    <dl className="col-span-4 grid grid-cols-[6rem_minmax(0,1fr)] gap-y-1 rounded-lg border border-line p-3">
+      <dt>推流地址</dt>
+      <dd className="font-mono break-all">{id ? pushUrl(id) : "保存后显示（路径为摄像头编号）"}</dd>
+      <dt>用户名</dt>
+      <dd className="font-mono">{PUSH_USER}</dd>
+      <dt>推流口令</dt>
+      <dd className="font-mono break-all">{password ?? "已设置（只在保存为推流后显示一次）"}</dd>
+    </dl>
   );
 }
 

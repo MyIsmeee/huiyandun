@@ -73,7 +73,9 @@ def client(db: tuple[ApiConfig, ApiConfig], password: str, key_file: Path) -> It
             await conn.execute(text("ALTER SEQUENCE camera_id_seq RESTART"))
 
     asyncio.run(reset())
-    config = db[1].model_copy(update={"device_key_file": key_file})
+    push = key_file.parent / "push_password"
+    push.write_text("push-secret\n")
+    config = db[1].model_copy(update={"device_key_file": key_file, "push_password_file": push})
     with TestClient(create_app(config), base_url="https://testserver") as c:
         login(c, "admin", password)
         # 登记表为空时由后台任务从 site.yaml 初始导入
@@ -173,6 +175,10 @@ def test_update_keeps_or_clears_password_and_switches_to_push(
 
     r = client.patch("/api/cameras/cam-03", json={"ingest": "push"}, headers=headers())
     assert (r.json()["ingest"], r.json()["source"]) == ("push", None)
+    # 改为推流时给出一次推流口令（V-CAM2），列表中不含
+    assert r.json()["push_password"] == "push-secret"
+    listed = {c["id"]: c for c in client.get("/api/cameras").json()["items"]}
+    assert listed["cam-03"].get("push_password") is None
     assert stored(db[1], "cam-03")["host"] is None
     assert len(audits(db[1], "camera.updated")) == 3
 
@@ -216,10 +222,15 @@ def row(**over: Any) -> dict[str, Any]:
             None,
             "http://[fe80::1]:80/video.mjpg",
         ),
-        (row(ingest="push", protocol=None, host=None, port=None, path=None), None, None),
+        # 推流：go2rtc 从 ingest 按编号取（D-103）
+        (
+            {"id": "cam-05"} | row(ingest="push", protocol=None, host=None, port=None, path=None),
+            None,
+            "rtsp://172.30.10.10:8554/cam-05",
+        ),
     ],
 )
-def test_source_url(values: dict[str, Any], password: str | None, url: str | None) -> None:
+def test_source_url(values: dict[str, Any], password: str | None, url: str) -> None:
     assert cameras.source_url(values, password) == url
 
 
@@ -264,6 +275,7 @@ def test_sync_go2rtc_adds_replaces_and_removes(tmp_path: Path, key_file: Path) -
         ("delete", {"src": "x"}),
         ("delete", {"src": "cam-02"}),
         ("put", {"name": "cam-02", "src": "rtsp://mediamtx:8554/cam-02"}),
+        ("put", {"name": "cam-03", "src": "rtsp://172.30.10.10:8554/cam-03"}),
     ]
 
 

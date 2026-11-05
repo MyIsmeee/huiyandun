@@ -743,6 +743,10 @@ class Camera(ContractModel):
     """
     口令只写不读（C-ST-03）
     """
+    push_password: str | None = None
+    """
+    推流口令（用户名 hyd）：只在新增推流摄像头或改为推流的响应中给出一次，列表中不含（V-CAM2、D-103）
+    """
     pose: Pose
     calibration: list[CalibrationItem]
     """

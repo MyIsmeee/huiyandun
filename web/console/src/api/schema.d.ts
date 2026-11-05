@@ -603,6 +603,8 @@ export interface components {
             username: string | null;
             /** @description 口令只写不读（C-ST-03） */
             password_set: boolean;
+            /** @description 推流口令（用户名 hyd）：只在新增推流摄像头或改为推流的响应中给出一次，列表中不含（V-CAM2、D-103） */
+            push_password?: string | null;
             pose: components["schemas"]["Pose"];
             /** @description 地面标定点 [u, v, x, y]，只经 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102） */
             calibration: number[][];
