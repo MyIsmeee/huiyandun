@@ -245,7 +245,9 @@ REGISTRY_RETRY_S = 2
 
 async def follow_registry(bus: Bus, devices: dict[Ip, str], model: list[BehaviorModel]) -> None:
     """设备登记表随 api-server 下发的摄像头登记表原地更新（FR-203、FR-906）；返回时已取到最新一条。
-    登记表的流由 api-server 创建，它尚未启动时重试。"""
+    登记表的流由 api-server 创建，它尚未启动时重试；流已建但尚无登记表时等到第一条，
+    行为模型不会按空设备表加载。"""
+    received = asyncio.Event()
 
     async def on_registry(event: ConfigCamerasV1) -> None:
         devices.clear()
@@ -253,16 +255,20 @@ async def follow_registry(bus: Bus, devices: dict[Ip, str], model: list[Behavior
         if model:
             model[0].sync({str(ip): device for ip, device in devices.items()})
         log.info("correlator.devices", extra={"devices": sorted(devices.values())})
+        received.set()
 
     while True:
         try:
             await bus.js_subscribe(
                 REGISTRY_SUBJECT, ConfigCamerasV1, on_registry, datetime.fromtimestamp(0, UTC)
             )
-            return
+            break
         except (nats.errors.Error, TimeoutError):
             log.warning("correlator.registry_unavailable")
             await asyncio.sleep(REGISTRY_RETRY_S)
+    if not received.is_set():
+        log.info("correlator.registry_waiting")
+        await received.wait()
 
 
 async def serve(config: CorrelatorConfig) -> None:

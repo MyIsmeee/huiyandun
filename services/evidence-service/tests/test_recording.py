@@ -3,7 +3,7 @@
 import asyncio
 import json
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -12,8 +12,11 @@ import httpx2
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from evidence_service import service
 from evidence_service.recording import Evidence, sync_recorder, windows
 from evidence_service.store import Chain
+from py_common.bus import Bus
+from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
@@ -236,10 +239,12 @@ class FakeRecorderApi:
 
     async def post(self, url: str, json: object) -> httpx2.Response:
         self.calls.append(("post", url, json))
+        self.paths.append(url.rsplit("/", 1)[1])
         return httpx2.Response(200, request=httpx2.Request("POST", url))
 
     async def delete(self, url: str) -> httpx2.Response:
         self.calls.append(("delete", url, None))
+        self.paths.remove(url.rsplit("/", 1)[1])
         return httpx2.Response(200, request=httpx2.Request("DELETE", url))
 
 
@@ -252,4 +257,55 @@ def test_sync_recorder_follows_registry() -> None:
     assert api.calls == [
         ("delete", "/v3/config/paths/delete/cam-02", None),
         ("post", "/v3/config/paths/add/cam-03", {"source": "rtsp://go2rtc:8554/cam-03"}),
+    ]
+
+
+class LateRecorderApi(FakeRecorderApi):
+    """recorder 晚于登记表启动：第一次比对时不可达。"""
+
+    def __init__(self) -> None:
+        super().__init__([])
+        self.up = False
+
+    async def get(self, url: str) -> httpx2.Response:
+        if not self.up:
+            self.up = True
+            raise httpx2.ConnectError("recorder 未启动", request=httpx2.Request("GET", url))
+        return await super().get(url)
+
+
+class RegistryBus:
+    """订阅时立即投递一条只含 cam-01 的登记表（只用到摄像头编号）。"""
+
+    async def js_subscribe(
+        self, subject: str, model: object, handler: Callable[..., object], since: object
+    ) -> None:
+        camera = type("Camera", (), {"id": "cam-01"})()
+        await cast(Callable[[ConfigCamerasV1], Awaitable[None]], handler)(
+            ConfigCamerasV1.model_construct(cameras=[camera])
+        )
+
+
+def test_recorder_sync_retried_until_recorder_is_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """登记表下发时 recorder 不可达：定期比对补上录像路径，之后不再重复添加。"""
+    monkeypatch.setattr(service, "RECORDER_SYNC_S", 0.01)
+    api = LateRecorderApi()
+    cameras: dict[str, str] = {}
+
+    async def main() -> None:
+        task = asyncio.create_task(
+            service.follow_registry(
+                cameras,
+                cast(httpx2.AsyncClient, api),
+                cast(Bus, RegistryBus()),
+                "rtsp://go2rtc:8554",
+            )
+        )
+        await asyncio.sleep(0.1)
+        task.cancel()
+
+    asyncio.run(main())
+    assert cameras == {"cam-01": "cam-01"}
+    assert api.calls == [
+        ("post", "/v3/config/paths/add/cam-01", {"source": "rtsp://go2rtc:8554/cam-01"})
     ]

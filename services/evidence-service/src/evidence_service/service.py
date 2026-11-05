@@ -64,25 +64,38 @@ class EvidenceConfig(ServiceConfig):
 
 
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
+# recorder 可能晚于登记表启动，重启会丢掉经接口添加的录像路径：定期比对补齐
+RECORDER_SYNC_S = 30
 
 
 async def follow_registry(
-    cameras: dict[str, str], recorder_api: httpx2.AsyncClient, bus: Bus, config: EvidenceConfig
+    cameras: dict[str, str], recorder_api: httpx2.AsyncClient, bus: Bus, go2rtc_rtsp: str
 ) -> None:
-    """摄像头登记表变化时更新摄像头表，并让 recorder 只录登记的摄像头；recorder 暂不可达时记录后由下次登记表补齐。"""
+    """摄像头登记表变化时更新摄像头表，并让 recorder 只录登记的摄像头；之后每 30 s 按当前摄像头表
+    比对一次 recorder，其暂不可达或重启丢失路径时下轮补齐。"""
+    lock = asyncio.Lock()  # 登记表下发与定期比对不并发改 recorder
+    registered = asyncio.Event()  # 收到登记表之前不比对：空表会删掉全部录像路径
+
+    async def sync() -> None:
+        async with lock:
+            try:
+                await sync_recorder(recorder_api, list(cameras), go2rtc_rtsp)
+            except (httpx2.HTTPError, KeyError) as e:
+                log.warning("evidence.recorder_sync_failed", extra={"error": repr(e)})
 
     async def on_registry(event: ConfigCamerasV1) -> None:
-        ids = [c.id for c in event.cameras]
         cameras.clear()
-        cameras.update({camera_id: camera_id for camera_id in ids})  # 录像路径名即摄像头编号
-        try:
-            await sync_recorder(recorder_api, ids, config.go2rtc_rtsp)
-        except (httpx2.HTTPError, KeyError) as e:
-            log.warning("evidence.recorder_sync_failed", extra={"error": repr(e)})
+        cameras.update({c.id: c.id for c in event.cameras})  # 录像路径名即摄像头编号
+        registered.set()
+        await sync()
 
     await _subscribe(
         bus, REGISTRY_SUBJECT, ConfigCamerasV1, on_registry, datetime.fromtimestamp(0, UTC)
     )
+    while True:
+        await asyncio.sleep(RECORDER_SYNC_S)
+        if registered.is_set():
+            await sync()
 
 
 async def follow(evidence: Evidence, bus: Bus) -> None:
@@ -152,7 +165,9 @@ async def serve(config: EvidenceConfig) -> None:
         config.nats_url, name="evidence-service", timeout_s=config.nats_timeout_s
     )
     # 登记表的流由 api-server 创建：在后台订阅，不推迟内部接口就绪
-    registry_task = asyncio.create_task(follow_registry(cameras, recorder_api, bus, config))
+    registry_task = asyncio.create_task(
+        follow_registry(cameras, recorder_api, bus, config.go2rtc_rtsp)
+    )
     follow_task = asyncio.create_task(follow(evidence, bus))
     # log_config=None：uvicorn 的日志沿用根 logger 的 JSON 格式（CD-06）
     server = uvicorn.Server(
