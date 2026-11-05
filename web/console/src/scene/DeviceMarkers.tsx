@@ -1,11 +1,14 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
+  AdditiveBlending,
   BoxGeometry,
-  type BufferGeometry,
+  BufferGeometry,
   CylinderGeometry,
   DoubleSide,
   EdgesGeometry,
+  Float32BufferAttribute,
+  type LineBasicMaterial,
   type LineSegments,
   type MeshBasicMaterial,
 } from "three";
@@ -16,7 +19,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useLive } from "../store/live";
 import { useTheme } from "../theme/store";
 import { useViewpointCamera } from "./camera";
-import { type Camera, deviceLook, type Look, STATUS } from "./devices";
+import { BODY, type Camera, deviceLook, type Look, SANDBOX } from "./devices";
 import { type Instance, Instanced } from "./Instanced";
 import { coneOpacity, detectingByCamera } from "./targets";
 
@@ -56,11 +59,11 @@ export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
   const detecting = useLive(useShallow((s) => detectingByCamera(s.targets)));
   const solid = placed.filter(({ look, shown }) => shown && look.fill && look.opacity === 1);
   const faded = placed.filter(({ look, shown }) => shown && look.fill && look.opacity < 1);
-  // 立杆随机身变色会使状态色块面积失真：立杆始终为中性色（V-S1）
+  // 立杆随机身变色会使状态色块面积失真：立杆始终为白色（V-S1、D-104）
   const poles = placed.filter(({ shown }) => shown).map(({ camera: { pose } }): Instance => ({
     position: [pose.x, 0, pose.y],
     scale: [1, pose.height_m, 1],
-    color: STATUS.neutral,
+    color: BODY,
   }));
   return (
     <>
@@ -79,7 +82,7 @@ type Item = { camera: Camera; look: Look };
 const head = ({ camera: { pose }, look }: Item): Instance => ({
   position: [pose.x, pose.height_m, pose.y],
   rotationY: turn(pose.yaw_deg),
-  color: look.fill ?? STATUS.neutral,
+  color: look.fill ?? BODY,
 });
 
 /** 单台设备的轮廓、轮廓环与视场 */
@@ -125,32 +128,82 @@ export function useMotion(): boolean {
   return live && !user && !system;
 }
 
-/** 视场：地面扇形，半径为视距、张角为水平视场角；常态视场在该摄像头有检出目标时提亮（§5.1 L3） */
+/** 视场锥体的取样段数：弧线平滑且顶点很少 */
+const ARC_SEGMENTS = 32;
+
+/**
+ * 三维视场（04 §5.1 L3、D-104）：从镜头到可视距离处地面的扇形锥体。几何在世界坐标中生成：
+ * faces 为两侧面与顶到弧的曲面，ground 为地面扇形，edges 为镜头到弧两端的棱线与弧线。
+ */
+export function coneGeometry(pose: Camera["pose"]): { faces: BufferGeometry; ground: BufferGeometry; edges: BufferGeometry } {
+  const yaw = (pose.yaw_deg * Math.PI) / 180;
+  const hfov = (pose.hfov_deg * Math.PI) / 180;
+  type P = [number, number, number];
+  const apex: P = [pose.x, pose.height_m, pose.y];
+  const base: P = [pose.x, 0.015, pose.y];
+  const arc = Array.from({ length: ARC_SEGMENTS + 1 }, (_, i): P => {
+    const a = yaw - hfov / 2 + (hfov * i) / ARC_SEGMENTS;
+    return [pose.x + pose.range_m * Math.cos(a), 0.015, pose.y + pose.range_m * Math.sin(a)];
+  });
+  const faces: number[] = [];
+  const ground: number[] = [];
+  const edges: number[] = [];
+  arc.slice(1).forEach((next, i) => {
+    const prev = arc[i] as P;
+    faces.push(...apex, ...prev, ...next);
+    ground.push(...base, ...prev, ...next);
+    edges.push(...prev, ...next);
+  });
+  for (const end of [arc[0], arc.at(-1)] as P[]) {
+    faces.push(...apex, ...base, ...end);
+    edges.push(...apex, ...end);
+  }
+  const geometry = (values: number[]) => new BufferGeometry().setAttribute("position", new Float32BufferAttribute(values, 3));
+  return { faces: geometry(faces), ground: geometry(ground), edges: geometry(edges) };
+}
+
+/** 侧面、地面、棱线相对视场不透明度的倍数；叠加混合下俯视时侧面与地面相加，常态合计约 16% */
+const LAYERS = { faces: 0.5, ground: 0.8, edges: 3 } as const;
+
+/** 视场：常态在该摄像头有检出目标时提亮（§5.1 L3）；critical / high 网络攻击时 1 Hz 呼吸（V-A1） */
 function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; severe: boolean }) {
   const { detecting, pose, cone, severe } = props;
-  const material = useRef<MeshBasicMaterial>(null);
+  const faces = useRef<MeshBasicMaterial>(null);
+  const ground = useRef<MeshBasicMaterial>(null);
+  const edges = useRef<LineBasicMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
-  const opacity = cone.color === STATUS.neutral ? coneOpacity(cone.opacity, detecting) : cone.opacity;
-  // 只有 critical / high 告警允许呼吸（V-A1）
+  const opacity = cone.color === SANDBOX ? coneOpacity(cone.opacity, detecting) : cone.opacity;
   const breathing = useMotion() && cone.breathe && severe;
+  const set = (value: number) => {
+    if (faces.current) faces.current.opacity = value * LAYERS.faces;
+    if (ground.current) ground.current.opacity = value * LAYERS.ground;
+    if (edges.current) edges.current.opacity = Math.min(1, value * LAYERS.edges);
+  };
+  // 呼吸停止后回到静止的不透明度
   useEffect(() => {
-    if (material.current) material.current.opacity = opacity;
-    invalidate();
-  }, [breathing, opacity, invalidate]);
-  useFrame(({ clock }) => {
-    if (!breathing || !material.current) return;
-    // 1 Hz 呼吸，不超过 2 Hz（V-A1）
-    material.current.opacity = opacity * (0.7 + 0.3 * Math.sin(2 * Math.PI * clock.elapsedTime));
+    if (!breathing) set(opacity);
     invalidate();
   });
-  const hfov = (pose.hfov_deg * Math.PI) / 180;
-  const yaw = (pose.yaw_deg * Math.PI) / 180;
-  const sector = useMemo(() => [pose.range_m, 48, yaw - hfov / 2, hfov] as const, [pose.range_m, yaw, hfov]);
+  useFrame(({ clock }) => {
+    if (!breathing) return;
+    set(opacity * (0.7 + 0.3 * Math.sin(2 * Math.PI * clock.elapsedTime)));
+    invalidate();
+  });
+  const geometry = useMemo(() => coneGeometry(pose), [pose]);
+  useEffect(() => () => Object.values(geometry).forEach((g) => g.dispose()), [geometry]);
+  // 叠加混合：重叠处更亮，形成发光感；不写深度，不遮挡其后的目标
+  const common = { color: cone.color, transparent: true, depthWrite: false, blending: AdditiveBlending } as const;
   return (
-    // 绕 x 轴转 90°：平面 (x, y) 落到地面 (x, 0, y)，扇形角度与 yaw 同向
-    <mesh rotation-x={Math.PI / 2} position={[pose.x, 0.015, pose.y]}>
-      <circleGeometry args={sector} />
-      <meshBasicMaterial ref={material} color={cone.color} transparent opacity={opacity} depthWrite={false} side={DoubleSide} />
-    </mesh>
+    <>
+      <mesh geometry={geometry.faces}>
+        <meshBasicMaterial ref={faces} {...common} opacity={opacity * LAYERS.faces} side={DoubleSide} />
+      </mesh>
+      <mesh geometry={geometry.ground}>
+        <meshBasicMaterial ref={ground} {...common} opacity={opacity * LAYERS.ground} side={DoubleSide} />
+      </mesh>
+      <lineSegments geometry={geometry.edges}>
+        <lineBasicMaterial ref={edges} {...common} opacity={Math.min(1, opacity * LAYERS.edges)} />
+      </lineSegments>
+    </>
   );
 }

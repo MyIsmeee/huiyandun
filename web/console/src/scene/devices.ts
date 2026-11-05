@@ -9,13 +9,16 @@ export const STATUS = {
   cyber: "#D03B3B",
   contained: "#0CA30C",
 } as const;
+/** 数字沙盘（04 §3.1、§5.2、D-104）：常态机身与立杆为白色，常态视场为沙盘青；二者都不表达状态 */
+export const BODY = "#E8F1F8";
+export const SANDBOX = "#3CC8F0";
 
 export type DeviceState = Device["state"];
 export type Camera = {
   id: string;
   state: DeviceState;
-  /** 标定点不少于 4 组（FR-902）；与 state 无关，处于告警的摄像头同样可能未标定 */
-  calibrated: boolean;
+  /** 有地面映射（标定或按安装参数估算，FR-902、D-102）：才投放目标与环境；与 state 无关 */
+  mapped: boolean;
   /** 处于网络攻击期间收到过 critical / high 告警：只有此时视场呼吸（V-A1） */
   severe: boolean;
   pose: NonNullable<Device["camera"]>["pose"];
@@ -30,7 +33,7 @@ export function useCameras(devices: Device[]): Camera[] {
         const { id, state, alert_severity, camera } = pushed[initial.id] ?? initial;
         if (!camera) return [];
         const severe = alert_severity === "critical" || alert_severity === "high";
-        return [{ id, state, calibrated: camera.calibration.length >= 4, severe, pose: camera.pose }];
+        return [{ id, state, mapped: camera.mapping !== "none", severe, pose: camera.pose }];
       }),
     [devices, pushed],
   );
@@ -52,7 +55,7 @@ export interface Look {
   tags: { icon: TagIcon; text: string; color: string }[];
 }
 
-const CONE = { color: STATUS.neutral, opacity: 0.12, breathe: false };
+const CONE = { color: SANDBOX, opacity: 0.12, breathe: false };
 const CYBER_CONE = { color: STATUS.cyber, opacity: 0.25, breathe: true };
 /** 处置中、待联动：保持告警色，攻击已在处理，不再呼吸 */
 const HELD_CONE = { ...CYBER_CONE, breathe: false };
@@ -66,7 +69,7 @@ const base = { opacity: 1, outline: null, ring: null, cone: CONE, tags: [] };
 export function deviceLook(state: DeviceState): Look {
   switch (state) {
     case "normal":
-      return { ...base, fill: STATUS.neutral };
+      return { ...base, fill: BODY };
     case "offline":
       return {
         ...base,
@@ -78,7 +81,7 @@ export function deviceLook(state: DeviceState): Look {
     case "uncalibrated":
       return {
         ...base,
-        fill: STATUS.neutral,
+        fill: BODY,
         outline: { color: STATUS.uncertain, dashed: true },
         cone: null,
         tags: [{ icon: "uncalibrated", text: "未标定", color: STATUS.uncertain }],
@@ -112,7 +115,13 @@ export function deviceLook(state: DeviceState): Look {
         tags: [{ icon: "pending", text: "处置中", color: STATUS.contained }],
       };
     case "contained":
-      return { ...base, fill: STATUS.contained, tags: [{ icon: "contained", text: "已处置", color: STATUS.contained }] };
+      // 视场转绿直至解除（PPT 的"红转绿"），机身绿色并配锁形标签（V-S3）
+      return {
+        ...base,
+        fill: STATUS.contained,
+        cone: { color: STATUS.contained, opacity: 0.18, breathe: false },
+        tags: [{ icon: "contained", text: "已处置", color: STATUS.contained }],
+      };
     case "notify_only":
       // 旁路模式只能通知，禁止显示"已阻断"（V-T1）
       return {

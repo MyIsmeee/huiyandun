@@ -47,24 +47,16 @@ export interface Palette {
   facade: string;
   marking: string;
 }
+/** 地面类别低饱和，立面、物体与家具取沙盘青，在场景中以半透明呈现（04 §5.1 L1、D-104） */
 export const PALETTE: Record<Theme, Palette> = {
-  light: {
-    road: "#5B6066",
-    sidewalk: "#D9DAD6",
-    floor: "#ECE6DC",
-    grass: "#C5CFBF",
-    earth: "#D6CFC2",
-    facade: "#FFFFFF",
-    marking: "#FFFFFF",
-  },
   dark: {
     road: "#40454C",
     sidewalk: "#2B2F34",
     floor: "#3E3B36",
     grass: "#283027",
     earth: "#342E26",
-    facade: "#A3A7AC",
-    marking: "#E6E7E9",
+    facade: "#3CC8F0",
+    marking: "#A9B8C6",
   },
 };
 
@@ -82,8 +74,8 @@ export function isStale(frame: SceneFrame, now: number): boolean {
 
 /** 只渲染已标定、已登记摄像头的场景（V-U2） */
 export function visibleScenes(scenes: Record<string, SceneFrame>, cameras: Camera[]): SceneFrame[] {
-  const calibrated = new Set(cameras.filter((c) => c.calibrated).map((c) => c.id));
-  return Object.values(scenes).filter((frame) => calibrated.has(frame.camera_id));
+  const mapped = new Set(cameras.filter((c) => c.mapped).map((c) => c.id));
+  return Object.values(scenes).filter((frame) => mapped.has(frame.camera_id));
 }
 
 /** 可见场景及是否陈旧：每秒按场景帧自带的 ts 重新判定，补推的旧帧到达即为陈旧（设计 §3.7） */
