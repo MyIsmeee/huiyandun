@@ -139,17 +139,27 @@ def test_last_contain_from_first_hit_to_verified(devices: Devices, history: Hist
     first, later = at(alert(), t0), at(alert(), t0 + timedelta(seconds=20))
     history.add_alert(first)
     history.add_alert(later)
-    history.add_incident(incident("inc-1", [later.event_id, first.event_id, uuid.uuid4()], t0))
+    history.add_incident(incident("inc-1", [later.event_id, first.event_id], t0))
     kpis = tracker(devices, history)
     contained(kpis, "inc-1", "contained", t0 + timedelta(seconds=31.5))
 
     assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=31500, delta=None)
 
-    # 命中事件已不在历史中时，从关联事件生成时刻起算
     t1 = t0 + timedelta(minutes=10)
-    history.add_incident(incident("inc-2", [uuid.uuid4()], t1))
+    hit = at(alert(), t1)
+    history.add_alert(hit)
+    history.add_incident(incident("inc-2", [hit.event_id], t1 + timedelta(seconds=5)))
     contained(kpis, "inc-2", "contained", t1 + timedelta(seconds=12))
     contained(kpis, "inc-2", "contained", t1 + timedelta(seconds=40))  # 同一事件只计首次
+
+    assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=12000, delta=-19500)
+
+    # 部分命中事件已不在历史中（如首条爆破告警被大量告警挤出）：不计，不拿余下的事件或生成时刻顶替
+    t2 = t1 + timedelta(minutes=10)
+    late = at(alert(), t2)
+    history.add_alert(late)
+    history.add_incident(incident("inc-3", [uuid.uuid4(), late.event_id], t2))
+    contained(kpis, "inc-3", "contained", t2 + timedelta(seconds=1))
 
     assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=12000, delta=-19500)
 
@@ -161,7 +171,9 @@ def test_last_contain_when_execution_replayed_before_incident(
     t0 = datetime.now(UTC) - timedelta(minutes=5)
     kpis = tracker(devices, history)
     contained(kpis, "inc-1", "contained", t0 + timedelta(seconds=9))
-    history.add_incident(incident("inc-1", [], t0))
+    hit = at(alert(), t0)
+    history.add_alert(hit)
+    history.add_incident(incident("inc-1", [hit.event_id], t0 + timedelta(seconds=3)))
 
     assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=9000, delta=None)
 

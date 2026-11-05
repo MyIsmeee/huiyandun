@@ -72,12 +72,15 @@ class KpiTracker:
         return durations
 
     def _attack_start(self, incident_id: str) -> datetime | None:
-        """关联事件命中路径中最早事件的时刻（如首条爆破告警）；命中事件已不在历史中时取关联事件生成时刻。"""
+        """关联事件命中路径中最早事件的时刻（如首条爆破告警）。关联事件或任一命中事件已不在历史中时为 None：
+        缺的可能正是最早的那条，用余下的事件或关联事件生成时刻顶替会把用时算成接近 0（D-106）。"""
         incident = self._history.incident(incident_id)
         if incident is None:
             return None
-        hits = [e.ts for e in map(self._history.event, incident.hit_path) if e is not None]
-        return min(hits, default=incident.created_at)
+        hits = [self._history.event(h) for h in incident.hit_path]
+        if not hits or any(e is None for e in hits):
+            return None
+        return min(e.ts for e in hits if e is not None)
 
     def read(self, day_start: datetime, now: datetime) -> Kpis:
         """day_start：浏览器本地当天 0 点。"""
