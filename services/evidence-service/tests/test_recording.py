@@ -6,12 +6,13 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import httpx2
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from evidence_service.recording import Evidence, windows
+from evidence_service.recording import Evidence, sync_recorder, windows
 from evidence_service.store import Chain
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
@@ -220,3 +221,35 @@ def test_failed_clip_keeps_other_clips_of_the_window(chain: Chain, tmp_path: Pat
     assert rows[4]["meta"]["start"] == iso(T0 + timedelta(seconds=15))
     assert rows[4]["meta"]["end"] == iso(T0 + timedelta(seconds=70))
     assert rows[4]["meta"]["reason"].startswith("录像不可用：HTTPStatusError")
+
+
+class FakeRecorderApi:
+    """MediaMTX 配置接口：记下增删调用。"""
+
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = list(paths)
+        self.calls: list[tuple[str, str, object]] = []
+
+    async def get(self, url: str) -> httpx2.Response:
+        body = {"items": [{"name": p} for p in self.paths]}
+        return httpx2.Response(200, json=body, request=httpx2.Request("GET", url))
+
+    async def post(self, url: str, json: object) -> httpx2.Response:
+        self.calls.append(("post", url, json))
+        return httpx2.Response(200, request=httpx2.Request("POST", url))
+
+    async def delete(self, url: str) -> httpx2.Response:
+        self.calls.append(("delete", url, None))
+        return httpx2.Response(200, request=httpx2.Request("DELETE", url))
+
+
+def test_sync_recorder_follows_registry() -> None:
+    """D-101：recorder 只录登记表中的摄像头；已有路径不动，不打断正在进行的录像。"""
+    api = FakeRecorderApi(["cam-01", "cam-02"])
+    asyncio.run(
+        sync_recorder(cast(httpx2.AsyncClient, api), ["cam-01", "cam-03"], "rtsp://go2rtc:8554")
+    )
+    assert api.calls == [
+        ("delete", "/v3/config/paths/delete/cam-02", None),
+        ("post", "/v3/config/paths/add/cam-03", {"source": "rtsp://go2rtc:8554/cam-03"}),
+    ]

@@ -177,6 +177,14 @@ class BehaviorModel:
         self._devices = {ip: _Device(device_id, ip) for ip, device_id in devices.items()}
         self._sessions: dict[str, list[_Session]] = {ip: [] for ip in devices}
 
+    def sync(self, devices: dict[str, str]) -> None:
+        """摄像头登记表变化（D-101）：新登记的设备从头学习，删除的丢弃，IP 与编号都未变的沿用。"""
+        kept = {ip: d for ip, d in self._devices.items() if devices.get(ip) == d.id}
+        self._devices = kept | {
+            ip: _Device(device_id, ip) for ip, device_id in devices.items() if ip not in kept
+        }
+        self._sessions = {ip: self._sessions.get(ip, []) for ip in self._devices}
+
     def add(self, line: str, now: float) -> None:
         """记一条会话：与已登记设备无关的会话、早已结束的会话忽略，不合格的记录跳过。"""
         try:

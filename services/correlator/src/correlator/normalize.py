@@ -10,7 +10,7 @@ from ipaddress import IPv4Address, IPv6Address
 
 from pydantic import AwareDatetime, BaseModel, ValidationError
 
-from py_contracts.config.site_schema import SiteConfig
+from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
 SCHEMA_VERSION = "1.2.0"  # 1.1：来源、可信度、说明（C-SEC-09）；1.2：mode（D-068）
@@ -48,9 +48,9 @@ class _Eve(BaseModel):
     alert: _Alert
 
 
-def device_index(site: SiteConfig) -> dict[Ip, str]:
-    """设备登记表：IP → 设备 ID。"""
-    return {camera.ip: camera.id for camera in site.cameras}
+def device_index(registry: ConfigCamerasV1) -> dict[Ip, str]:
+    """设备登记表：IP → 设备 ID，取自 api-server 下发的摄像头登记表（D-101）。"""
+    return {camera.ip: camera.id for camera in registry.cameras}
 
 
 def normalize(line: str, devices: dict[Ip, str]) -> SecurityAlertV1 | None:

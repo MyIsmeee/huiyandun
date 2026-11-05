@@ -118,7 +118,6 @@ services:
       - suricata-logs:/var/log/suricata:ro
       - zeek-logs:/zeek/logs:ro
       - correlator-state:/var/lib/correlator
-      - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 设备登记表（FR-203）
       - ../../rules/correlator:/etc/hyd/rules:ro  # 关联规则（HYD-PLAN-007 §4）
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro  # ATT&CK 精简查表（D-070）
       # 由 nvr-sim 正常流量学好的基线快照：没有存盘状态时加载（剧本开场会清除状态，见 100-demo-run.md）
@@ -200,9 +199,11 @@ services:
     secrets: [evidence_signing_key]
     volumes:
       - evidence-data:/var/lib/hyd-evidence
-      - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 摄像头的流名
     depends_on: { nats: { condition: service_healthy } }
-    networks: [core-net, evidence-net]
+    # recorder 的配置接口只放行此固定地址（D-101）
+    networks:
+      core-net: {}
+      evidence-net: { ipv4_address: 172.30.9.10 }
     restart: unless-stopped
     read_only: true
     tmpfs: [/tmp]
@@ -264,8 +265,7 @@ services:
       HYD_SCENE_MODEL_FILE: /models/efficientvit_seg_l1_ade20k_512.onnx
       HYD_INTEGRITY_MODEL_FILE: /models/dinov2_small.onnx
     volumes:
-      - ../../models/weights:/models:ro
-      - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 摄像头流名与标定点（FR-901）
+      - ../../models/weights:/models:ro  # 摄像头来自登记表 hyd.config.cameras.v1，不读 site.yaml（D-101）
     depends_on:
       nats: { condition: service_healthy }
       go2rtc: { condition: service_healthy }
@@ -295,8 +295,8 @@ services:
     read_only: true
     cap_drop: [ALL]
     healthcheck:
-      # 全部路径都已在录像（已从 go2rtc 取到流）才算就绪
-      test: ["CMD-SHELL", "s=$$(wget -qO- http://127.0.0.1:9997/v3/paths/list) && case $$s in *'\"ready\":false'*) exit 1 ;; *'\"ready\":true'*) exit 0 ;; *) exit 1 ;; esac"]
+      # 已登记的路径都在录像（已从 go2rtc 取到流）才算就绪；路径由 evidence-service 按登记表下发，尚无路径时也算就绪
+      test: ["CMD-SHELL", "s=$$(wget -qO- http://127.0.0.1:9997/v3/paths/list) && case $$s in *'\"ready\":false'*) exit 1 ;; *) exit 0 ;; esac"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -495,10 +495,13 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
-  # 存证网络：只有 recorder 与 evidence-service，回放接口不暴露给其他服务
+  # 存证网络：只有 recorder 与 evidence-service，回放接口不暴露给其他服务；固定网段供 recorder 按地址放行配置接口
   evidence-net:
     internal: true
     driver_opts: { com.docker.network.bridge.gateway_mode_ipv4: isolated }
+    ipam:
+      config:
+        - subnet: 172.30.9.0/24
   # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
   edge-net:
     driver_opts:

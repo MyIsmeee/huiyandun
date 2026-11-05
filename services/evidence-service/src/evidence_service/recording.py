@@ -37,9 +37,24 @@ def _iso(t: datetime) -> str:
     return t.astimezone(UTC).isoformat(timespec="milliseconds")
 
 
+async def sync_recorder(api: httpx2.AsyncClient, camera_ids: list[str], go2rtc_rtsp: str) -> None:
+    """recorder 只录登记表中的摄像头（D-101）：新增的加录像路径（从 go2rtc 按编号取流），删除的移除。
+    已有路径不动，不打断正在进行的录像。"""
+    res = await api.get("/v3/config/paths/list")
+    res.raise_for_status()
+    current = {item["name"] for item in res.json()["items"]}
+    for name in current - set(camera_ids):
+        (await api.delete(f"/v3/config/paths/delete/{name}")).raise_for_status()
+        log.info("evidence.recorder_path_removed", extra={"device_id": name})
+    for name in set(camera_ids) - current:
+        source = {"source": f"{go2rtc_rtsp}/{name}"}
+        (await api.post(f"/v3/config/paths/add/{name}", json=source)).raise_for_status()
+        log.info("evidence.recorder_path_added", extra={"device_id": name})
+
+
 class Evidence:
     def __init__(self, chain: Chain, cameras: dict[str, str], recorder: httpx2.AsyncClient) -> None:
-        """cameras：设备 ID → recorder 中的路径名（site.yaml 的 stream）。"""
+        """cameras：设备 ID → recorder 中的路径名；随摄像头登记表原地更新（D-101）。"""
         self._chain = chain
         self._cameras = cameras
         self._recorder = recorder
