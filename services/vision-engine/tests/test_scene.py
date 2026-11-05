@@ -7,6 +7,8 @@ classroom-1：classroom-1 20；lab-1：actions-1 0。投影以已知单应矩阵
 """
 
 import asyncio
+import threading
+import time
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
@@ -339,6 +341,37 @@ def test_segmenter_maps_classes_and_drops_low_confidence_and_dark() -> None:
     assert (labels[GRID // 4 :, : GRID // 2] == label("road")).all()
     assert (labels[: GRID // 4] == 0).all()
     assert (labels[:, GRID // 2 :] == 0).all()
+
+
+class CountingSession(FakeSession):
+    """记下同时在跑的推理数。"""
+
+    def __init__(self) -> None:
+        self.running = 0
+        self.peak = 0
+        self._count = threading.Lock()
+
+    def run(self, names: None, feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        with self._count:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+        time.sleep(0.02)
+        with self._count:
+            self.running -= 1
+        return super().run(names, feed)
+
+
+def test_segmenter_runs_one_inference_at_a_time() -> None:
+    """多路共用会话：同时识别时逐次推理，不叠加显存（实测两路并发超出上限）。"""
+    session = CountingSession()
+    segmenter = Segmenter(cast(Any, session))
+    threads = [threading.Thread(target=segmenter, args=(blank(128),)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert session.peak == 1
 
 
 def test_single_change_does_not_flip_two_do() -> None:
