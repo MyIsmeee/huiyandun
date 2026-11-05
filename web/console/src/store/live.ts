@@ -10,6 +10,7 @@ export type SecurityAlert = Schemas["SecurityAlert"];
 export type Incident = Schemas["incident.schema"];
 export type Execution = Schemas["playbook_execution.schema"];
 type AiFrame = Schemas["AiInvestigation"];
+export type Site = Schemas["Site"];
 /** 告警列表的单条告警：网络告警或行为事件（D-077） */
 export type Alert = SecurityAlert | Behavior;
 type Frame = Schemas["WsFrame"];
@@ -46,6 +47,8 @@ export interface Target {
 }
 
 interface LiveState {
+  /** 摄像头登记表变化后推送的站点（D-101）；未推送过时为 null，取 GET /api/site 的初始值 */
+  site: Site | null;
   /** 推送的设备最新状态，覆盖 GET /api/site 中的初始值 */
   devices: Record<string, Device>;
   /** 键为 "摄像头/track_id"：track_id 只在单个摄像头内唯一 */
@@ -68,6 +71,7 @@ interface LiveState {
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
 export const useLive = create<LiveState>()(() => ({
+  site: null,
   devices: {},
   targets: {},
   behaviors: {},
@@ -94,6 +98,24 @@ export function receive(frame: Frame, now: number): void {
     useLive.setState((s) => ({
       devices: { ...s.devices, [id]: device },
       behaviors: drop(s.behaviors, id, state === "physical_alert" || state === "both"),
+    }));
+  }
+  if (frame.channel === "site") {
+    const site = data as Site;
+    const ids = new Set(site.devices.map((d) => d.id));
+    // 删除的摄像头连同其推送状态、事件卡与场景一并移除；新增与修改的以推送的站点为初始值
+    const keep = <T,>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).filter(([id]) => ids.has(id)));
+    useLive.setState((s) => ({
+      site,
+      // 推送过的设备保留其当前状态，登记信息（名称、位置等）取新站点
+      devices: Object.fromEntries(
+        site.devices.map((d) => {
+          const pushed = s.devices[d.id];
+          return [d.id, pushed ? { ...d, state: pushed.state, alert_severity: pushed.alert_severity } : d];
+        }),
+      ),
+      behaviors: keep(s.behaviors),
+      scenes: keep(s.scenes),
     }));
   }
   if (frame.channel === "scene") {

@@ -21,6 +21,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from api_server import (
     audit,
     auth,
+    cameras,
     containment,
     evidence,
     executions,
@@ -122,11 +123,16 @@ def create_app(config: ApiConfig) -> FastAPI:
         app.state.evidence = httpx2.AsyncClient(
             base_url=config.evidence_url, timeout=config.evidence_timeout_s
         )
+        # 摄像头登记表的流（只保留最新一条）
+        await bus.ensure_stream(
+            cameras.STREAM, [cameras.SUBJECT], cameras.STREAM_MAX_AGE_S, max_msgs_per_subject=1
+        )
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices, app.state.kpis)),
             asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
             asyncio.create_task(app.state.investigator.run()),  # TK-116
+            asyncio.create_task(app.state.cameras.run()),  # D-101
             asyncio.create_task(
                 relay.follow(
                     bus,
@@ -176,7 +182,9 @@ def create_app(config: ApiConfig) -> FastAPI:
         app.state.tz,
     )
     app.state.investigator = investigator.Investigator(app.state)
+    app.state.cameras = cameras.Registry(app.state)
     app.include_router(auth.router)
+    app.include_router(cameras.router)
     app.include_router(audit.router)
     app.include_router(containment.router)
     app.include_router(evidence.router)

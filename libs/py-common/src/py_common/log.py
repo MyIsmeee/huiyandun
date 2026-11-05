@@ -56,3 +56,5 @@ def configure_logging(service: str, level: str, stream: TextIO | None = None) ->
     handler = logging.StreamHandler(stream)
     handler.setFormatter(_JsonFormatter(service))
     logging.basicConfig(level=level, handlers=[handler], force=True)
+    # HTTP 客户端的 INFO 日志逐条记录完整请求地址，地址可能带凭据（如 go2rtc 的取流源），不记（G-14、SD-06）
+    logging.getLogger("httpx2").setLevel(logging.WARNING)

@@ -103,9 +103,11 @@ def test_unreadable_file_is_rejected(tmp_path: Path, content: bytes | None) -> N
         site.load(path)
 
 
-@pytest.mark.parametrize(("points", "state"), [(3, "uncalibrated"), (4, "normal")])
-def test_camera_with_fewer_than_four_points_is_uncalibrated(
-    tmp_path: Path, points: int, state: str
+@pytest.mark.parametrize(
+    ("points", "mapping"), [(3, "estimated"), (0, "estimated"), (4, "calibrated")]
+)
+def test_camera_mapping_estimated_below_four_points(
+    tmp_path: Path, points: int, mapping: str
 ) -> None:
     data = edited(
         lambda d: d["cameras"][0].update(calibration=d["cameras"][0]["calibration"][:points])
@@ -113,7 +115,9 @@ def test_camera_with_fewer_than_four_points_is_uncalibrated(
 
     device = site.load(write(tmp_path, data)).devices[0]
 
-    assert device.state == state
+    # 少于 4 组标定点时按安装参数估算地面映射，仍为正常态（D-102）
+    assert device.state == "normal"
+    assert device.camera is not None and device.camera.mapping == mapping
     assert device.camera is not None
     assert device.camera.homography is None
 

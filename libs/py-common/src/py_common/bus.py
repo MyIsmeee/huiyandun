@@ -87,11 +87,22 @@ class Bus:
             headers={"Nats-Msg-Id": str(event.event_id)},
         )
 
-    async def ensure_stream(self, name: str, subjects: list[str], max_age_s: int) -> None:
+    async def ensure_stream(
+        self,
+        name: str,
+        subjects: list[str],
+        max_age_s: int,
+        max_msgs_per_subject: int | None = None,
+    ) -> None:
         """创建持久化 js_publish 主题的 JetStream 流（文件存储）。已存在且配置相同时不变；
-        配置不同（如调整保留期、增加主题）时按新配置更新，数据卷中的已有消息保留。"""
+        配置不同（如调整保留期、增加主题）时按新配置更新，数据卷中的已有消息保留。
+        max_age_s 为 0 表示永久保留；max_msgs_per_subject 为 1 时每主题只保留最新一条（如配置下发）。"""
         config = StreamConfig(
-            name=name, subjects=subjects, storage=StorageType.FILE, max_age=max_age_s
+            name=name,
+            subjects=subjects,
+            storage=StorageType.FILE,
+            max_age=max_age_s,
+            max_msgs_per_subject=max_msgs_per_subject or -1,
         )
         try:
             await self._js.add_stream(config)

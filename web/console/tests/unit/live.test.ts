@@ -114,3 +114,19 @@ it("scene：每台摄像头只保留最新一帧（FR-108）", () => {
   expect(Object.keys(useLive.getState().scenes)).toEqual(["cam-01", "cam-02"]);
   expect(useLive.getState().scenes["cam-01"]?.ts).toBe("2026-10-27T06:30:00Z");
 });
+
+describe("站点推送（D-101）", () => {
+  const device = (id: string, name = id) =>
+    ({ id, name, type: "camera", ip: "10.0.0.1", mode: "host_probe", state: "normal", alert_severity: null, camera: null }) as const;
+
+  it("删除的摄像头移除推送状态；保留的沿用当前状态、登记信息取新站点", () => {
+    receive({ channel: "devices", data: { ...device("cam-01"), state: "cyber_alert", alert_severity: "high" } } as never, 0);
+    receive({ channel: "devices", data: device("cam-02") } as never, 0);
+    receive({ channel: "site", data: { id: "s", name: "s", width_m: 1, height_m: 1, walls: [], doors: [], zones: [], devices: [device("cam-01", "大门口"), device("cam-03")] } } as never, 0);
+
+    const { site, devices } = useLive.getState();
+    expect(site?.devices.map((d) => d.id)).toEqual(["cam-01", "cam-03"]);
+    expect(Object.keys(devices)).toEqual(["cam-01", "cam-03"]);
+    expect(devices["cam-01"]).toMatchObject({ name: "大门口", state: "cyber_alert", alert_severity: "high" });
+  });
+});

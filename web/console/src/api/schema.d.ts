@@ -69,6 +69,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cameras": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 摄像头登记表（FR-905、D-101）；口令只返回是否已设置 */
+        get: operations["listCameras"];
+        put?: never;
+        /** @description 新增摄像头；保存后同步 go2rtc 并发布 hyd.config.cameras.v1，各服务热更新（FR-906） */
+        post: operations["createCamera"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cameras/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description 删除后实时识别与录像停止，告警历史保留 */
+        delete: operations["deleteCamera"];
+        options?: never;
+        head?: never;
+        /** @description 只修改给出的字段；口令省略表示不修改，clear_password 为 true 时清除；calibration 不可改 */
+        patch: operations["updateCamera"];
+        trace?: never;
+    };
+    "/api/cameras/{id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 经 go2rtc 取一帧 JPEG 供编辑框预览与画警戒线（V-CAM4、V-CAM7），不落盘 */
+        get: operations["getCameraSnapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/{id}": {
         parameters: {
             query?: never;
@@ -506,6 +559,8 @@ export interface components {
         };
         Device: {
             id: string;
+            /** @description 显示名称（摄像头登记表的 name） */
+            name: string;
             /** @enum {unknown} */
             type: "camera" | "nvr" | "switch";
             ip: string;
@@ -521,11 +576,84 @@ export interface components {
             /** @description type 为 camera 时必有 */
             camera: components["schemas"]["CameraInfo"] | null;
         };
+        /** @description 拉流地址的组成部分，不含凭据；地址由 api-server 拼出，不接受完整地址（D-103） */
+        CameraSource: {
+            /** @enum {unknown} */
+            protocol: "rtsp" | "rtmp" | "http" | "onvif";
+            /** @description 主机名或 IP */
+            host: string;
+            port: number;
+            /** @description 流路径，可含查询串；不含空白与 #（# 在 go2rtc 源中表示参数） */
+            path: string;
+        };
+        /** @description 禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）；不能是竖直线段 */
+        ClimbLine: number[];
+        Camera: {
+            /** @description cam-NN，也是 go2rtc 与录像中的流名 */
+            id: string;
+            name: string;
+            ip: string;
+            /**
+             * @description pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>
+             * @enum {unknown}
+             */
+            ingest: "pull" | "push";
+            /** @description 推流时为 null */
+            source: components["schemas"]["CameraSource"] | null;
+            username: string | null;
+            /** @description 口令只写不读（C-ST-03） */
+            password_set: boolean;
+            pose: components["schemas"]["Pose"];
+            /** @description 地面标定点 [u, v, x, y]，只经 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102） */
+            calibration: number[][];
+            climb_lines: components["schemas"]["ClimbLine"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CameraList: {
+            items: components["schemas"]["Camera"][];
+        };
+        CameraCreate: {
+            name: string;
+            ip: string;
+            /** @enum {unknown} */
+            ingest: "pull" | "push";
+            /** @description 拉流时必填 */
+            source?: components["schemas"]["CameraSource"] | null;
+            username?: string | null;
+            /** Format: password */
+            password?: string;
+            pose: components["schemas"]["Pose"];
+            climb_lines?: components["schemas"]["ClimbLine"][];
+        };
+        CameraUpdate: {
+            name?: string;
+            ip?: string;
+            /** @enum {unknown} */
+            ingest?: "pull" | "push";
+            source?: components["schemas"]["CameraSource"] | null;
+            username?: string | null;
+            /**
+             * Format: password
+             * @description 省略表示不修改
+             */
+            password?: string;
+            clear_password?: boolean;
+            pose?: components["schemas"]["Pose"];
+            climb_lines?: components["schemas"]["ClimbLine"][];
+        };
         CameraInfo: {
             /** @description go2rtc 流名 */
             stream: string;
+            /**
+             * @description 地面映射：calibrated 按 ≥ 4 组标定点；estimated 按安装参数估算（D-102）；none 时 state 为 uncalibrated
+             * @enum {unknown}
+             */
+            mapping: "calibrated" | "estimated" | "none";
             pose: components["schemas"]["Pose"];
-            /** @description 标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时 state 为 uncalibrated */
+            /** @description 标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时按安装参数估算（D-102） */
             calibration: number[][];
             homography: number[][] | null;
             reproj_error_m: number | null;
@@ -533,10 +661,15 @@ export interface components {
         Pose: {
             x: number;
             y: number;
+            /** @description 安装高度（米） */
             height_m: number;
+            /** @description 朝向，自平面 x 轴正方向逆时针计（度） */
             yaw_deg: number;
+            /** @description 俯角，向下为负（度） */
             pitch_deg: number;
+            /** @description 水平视场角（度） */
             hfov_deg: number;
+            /** @description 可视距离（米），只用于画视场锥体 */
             range_m: number;
         };
         IncidentList: {
@@ -771,7 +904,7 @@ export interface components {
          */
         WsFrame: {
             /** @enum {unknown} */
-            channel: "tracks" | "devices" | "alerts" | "incidents" | "executions" | "ai" | "scene" | "system";
+            channel: "tracks" | "devices" | "alerts" | "incidents" | "executions" | "ai" | "scene" | "site" | "system";
             data: Record<string, never>;
         };
         AiInvestigation: components["schemas"]["hyd.ai.investigation.v1.schema"];
@@ -1319,6 +1452,170 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listCameras: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部摄像头，按编号排列 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createCamera: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraCreate"];
+            };
+        };
+        responses: {
+            /** @description 已新增 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 设备 IP 已被其他摄像头使用，或已达 16 路上限 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteCamera: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateCamera: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraUpdate"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 设备 IP 已被其他摄像头使用 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCameraSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 一帧画面 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 取不到画面，message 为白话原因 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getDevice: {

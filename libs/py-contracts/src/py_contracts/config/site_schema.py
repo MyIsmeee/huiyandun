@@ -63,6 +63,16 @@ class ClimbLine(RootModel[list[float]]):
     root: list[float] = Field(..., max_length=4, min_length=4)
 
 
+class SourceConfig(ContractModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    protocol: Literal["rtsp", "rtmp", "http", "onvif"]
+    host: str
+    port: int = Field(..., ge=1, le=65535)
+    path: str
+
+
 class PoseConfig(ContractModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -81,15 +91,23 @@ class CameraConfig(ContractModel):
         extra="forbid",
     )
     id: str
+    name: str | None = None
+    """
+    显示名称；省略时取 id
+    """
     ip: IPv4Address | IPv6Address
     stream: str
     """
     go2rtc 流名
     """
-    pose: PoseConfig
-    calibration: list[CalibrationItem]
+    source: SourceConfig | None = None
     """
-    标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时摄像头为 uncalibrated（FR-902）
+    拉流地址（不含凭据），初始导入摄像头登记表时使用；省略时为推流（D-101）
+    """
+    pose: PoseConfig
+    calibration: list[CalibrationItem] | None = Field([], validate_default=True)
+    """
+    标定点 [u, v, x, y]：像素坐标与平面坐标；省略或少于 4 组时按 pose 估算地面映射（FR-902、D-102）
     """
     climb_lines: list[ClimbLine] | None = None
     """
@@ -99,7 +117,7 @@ class CameraConfig(ContractModel):
 
 class SiteConfig(ContractModel):
     """
-    站点配置 site.yaml：平面图、门洞、区域、摄像头、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）
+    站点配置 site.yaml：平面图、门洞、区域、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）
     """
 
     model_config = ConfigDict(

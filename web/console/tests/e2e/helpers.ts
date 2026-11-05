@@ -85,6 +85,7 @@ export async function sceneSettled(page: Page, state: "ready" | "2d" | "error" =
 /** 位于站点中部的摄像头，状态由参数给定（设备与目标模型截图共用） */
 export const camera = (state: string, id = "cam-01") => ({
   id,
+  name: id,
   type: "camera",
   ip: "172.30.0.11",
   mode: "host_probe",
@@ -95,6 +96,7 @@ export const camera = (state: string, id = "cam-01") => ({
     pose: { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90, range_m: 6 },
     // 4 组标定点即为已标定（FR-902），目标模型才会投放；外观状态由 state 给定
     calibration: [[312, 540, 14, 12], [980, 552, 18, 12], [450, 300, 14, 16], [870, 310, 18, 16]],
+    mapping: "calibrated",
     homography: null,
     reproj_error_m: 0.3,
   },

@@ -27,7 +27,9 @@ type Page = "overview" | "providers";
  * 进入即连接 WS；连接被拒时调用 onRejected 核对会话。
  */
 export function Shell(props: { site: Site; onLogout: () => Promise<void>; onRejected: () => void }) {
-  const { site, onLogout, onRejected } = props;
+  const { onLogout, onRejected } = props;
+  // 摄像头登记表变化后以推送的站点为准（D-101）
+  const site = useLive((s) => s.site) ?? props.site;
   const [logout, setLogout] = useState<"idle" | "pending" | "failed">("idle");
   const [page, setPage] = useState<Page>("overview");
   const admin = canManageProviders(useSession((s) => s.role));

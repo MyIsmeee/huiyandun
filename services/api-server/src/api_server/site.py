@@ -66,18 +66,22 @@ def _vertical_climb_lines(cameras: list[dict[str, Any]]) -> list[str]:
 
 
 def _device(camera: dict[str, Any], mode: str) -> dict[str, Any]:
-    calibrated = len(camera["calibration"]) >= MIN_CALIBRATION_POINTS
+    """启动时的初始设备；摄像头登记表就绪后由 cameras.Registry 按库重建（D-101）。
+    少于 4 组标定点时按安装参数估算地面映射（D-102），不再标为未标定。"""
+    calibrated = len(camera["calibration"] or []) >= MIN_CALIBRATION_POINTS
     return {
         "id": camera["id"],
+        "name": camera.get("name") or camera["id"],
         "type": "camera",
         "ip": camera["ip"],
         "mode": mode,
-        "state": "normal" if calibrated else "uncalibrated",
+        "state": "normal",
         "alert_severity": None,
         "camera": {
             "stream": camera["stream"],
             "pose": camera["pose"],
-            "calibration": camera["calibration"],
+            "calibration": camera["calibration"] or [],
+            "mapping": "calibrated" if calibrated else "estimated",
             # 单应矩阵与重投影误差由 vision-engine 计算（TK-023）
             "homography": None,
             "reproj_error_m": None,
