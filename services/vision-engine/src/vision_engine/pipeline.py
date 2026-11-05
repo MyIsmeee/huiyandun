@@ -73,6 +73,7 @@ INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（HYD-PLAN-007 v1
 TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（HYD-PLAN-007 v1.9）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
+STOP_WAIT_S = 2 * TIMEOUT_MS / 1000 + 1  # 停止一路时等读帧线程退出的上限
 # 检测循环 5 s 取不到新帧即为断流（FR-105 要求 10 s 内）：不依赖读帧线程何时发现连接断开（go2rtc 的源
 # 中断后实测约 15 s 才断开对外连接），推流源切换、重启时的瞬断也不算断流
 STREAM_LOST_S = 5.0
@@ -102,6 +103,11 @@ class FrameReader(threading.Thread):
         """至迟在当前读帧调用超时（TIMEOUT_MS）后退出。"""
         self._stopping.set()
 
+    def _alive(self) -> None:
+        """停止后不再登记：否则读完正在进行的一帧后，已移除的健康登记被写回，10 s 后整个进程被判停滞。"""
+        if not self._stopping.is_set():
+            self._beat()
+
     def latest(self) -> tuple[int, np.ndarray] | None:
         """(序号, 帧)；序号不变表示没有新帧（如断流期间）。"""
         with self._lock:
@@ -110,7 +116,7 @@ class FrameReader(threading.Thread):
     def run(self) -> None:
         seq, lost = 0, False
         while not self._stopping.is_set():
-            self._beat()
+            self._alive()
             try:
                 capture = cv2.VideoCapture(
                     self._url,
@@ -123,7 +129,7 @@ class FrameReader(threading.Thread):
                     ],
                 )
                 # 建连与读帧各有 5 s 超时：建连后再登记一次，断流重连的整个周期不超过 STALL_S
-                self._beat()
+                self._alive()
                 while not self._stopping.is_set():
                     ok, frame = capture.read()
                     if not ok:
@@ -132,7 +138,7 @@ class FrameReader(threading.Thread):
                         log.info("vision.stream_restored", extra={"camera_id": self._camera_id})
                         lost = False
                     seq += 1
-                    self._beat()
+                    self._alive()
                     with self._lock:
                         self._latest = (seq, frame)
                 capture.release()
@@ -560,6 +566,10 @@ class Cameras:
             task.cancel()
         await asyncio.gather(*running.tasks, return_exceptions=True)
         running.reader.stop()
+        # 等读帧线程退出后再移除健康登记（至多一次建连与一次读帧的超时）
+        await asyncio.to_thread(running.reader.join, STOP_WAIT_S)
+        if running.reader.is_alive():
+            log.warning("vision.reader_stop_slow", extra={"camera_id": camera_id})
         self._health.forget(f"{camera_id}/")
 
 

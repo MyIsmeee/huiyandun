@@ -670,6 +670,12 @@ class FakeReaderThread:
     def stop(self) -> None:
         FakeReaderThread.stopped.append(self.url)
 
+    def join(self, timeout: float | None = None) -> None:
+        pass
+
+    def is_alive(self) -> bool:
+        return False
+
     def latest(self) -> None:
         return None
 
@@ -706,3 +712,42 @@ def test_cameras_follow_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert FakeReaderThread.started == [url("cam-01"), url("cam-02"), url("cam-03"), url("cam-03")]
     assert FakeReaderThread.stopped == [url("cam-02"), url("cam-03")]
     assert not any(name.startswith("cam-02/") for name in health._beats)
+
+
+def test_removed_camera_does_not_leave_stale_heartbeat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """复核阻断项：删除一路时读帧线程正在读帧，读完会再登记一次心跳；被移除的登记写回后再无更新，
+    10 s 后整个进程被判停滞退出。删除后不得留下该路的健康登记。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
+
+    class Capture:
+        def read(self) -> tuple[bool, np.ndarray | None]:
+            time.sleep(0.05)  # 删除时线程大多正卡在读帧调用中
+            return True, frame(0)
+
+        def release(self) -> None:
+            pass
+
+    async def idle(*_: object) -> None:
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", lambda *a: Capture())
+    monkeypatch.setattr(pipeline_module, "run_camera", idle)
+    config = cast(pipeline_module.VisionConfig, SimpleNamespace(go2rtc_rtsp="rtsp://go2rtc:8554"))
+    health = Health(tmp_path / "alive")
+    cameras = pipeline_module.Cameras(
+        config, cast(PoseDetector, FakeDetector()), None, None, None, cast(Bus, None), health
+    )
+
+    async def scenario() -> None:
+        await cameras.apply(registry(cam("cam-01"), cam("cam-02")))
+        await asyncio.sleep(0.2)
+        await cameras.apply(registry(cam("cam-01")))
+        await asyncio.sleep(0.3)  # 被移除的线程若还会登记，此时已写回
+
+    asyncio.run(scenario())
+    assert not any(name.startswith("cam-02/") for name in health._beats)
+    assert "cam-01/reader" in health._beats
+    for running in cameras._running.values():
+        running.reader.stop()
