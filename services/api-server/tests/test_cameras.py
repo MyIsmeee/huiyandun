@@ -79,6 +79,7 @@ def client(db: tuple[ApiConfig, ApiConfig], password: str, key_file: Path) -> It
             assert time.monotonic() < deadline, "初始导入超时"
             time.sleep(0.1)
         yield c
+    asyncio.run(reset())  # 其他测试的 api-server 启动时按 site.yaml 重新初始导入
 
 
 def stored(config: ApiConfig, camera_id: str) -> dict[str, Any]:
@@ -267,3 +268,63 @@ def test_registry_event_has_no_credentials() -> None:
     )  # fmt: skip
     dumped = event.model_dump(mode="json")
     assert set(dumped["cameras"][0]) == {"id", "name", "ip", "pose", "calibration", "climb_lines"}
+
+
+class FakeSite:
+    devices: list[Any] = ["变化前"]
+
+    def model_copy(self, update: dict[str, Any]) -> "FakeSite":
+        return self
+
+    def model_dump(self, mode: str) -> dict[str, Any]:
+        return {}
+
+
+def test_apply_failure_does_not_raise_and_retries(key_file: Path) -> None:
+    """下发失败（如总线不可达）不让接口报保存失败；标记待重试，下次成功后清除。"""
+    site_file = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
+    published: list[object] = []
+    fail = [True]
+
+    async def js_publish(subject: str, event: object) -> None:
+        if fail.pop(0) if fail else False:
+            raise TimeoutError("nats")
+        published.append(event)
+
+    async def load() -> list[Any]:
+        return []
+
+    state = SimpleNamespace(
+        config=SimpleNamespace(site_file=site_file, device_key_file=key_file),
+        go2rtc=FakeGo2rtc({}),
+        bus=SimpleNamespace(js_publish=js_publish),
+        hub=SimpleNamespace(broadcast=lambda _: None),
+        devices=SimpleNamespace(sync=lambda *_: None),
+        site=FakeSite(),
+    )
+    registry = cameras.Registry(state)
+    registry._load = load  # type: ignore[method-assign]
+
+    async def twice() -> list[bool]:
+        pending = []
+        for _ in range(2):
+            await registry.apply()
+            pending.append(registry._pending)
+        return pending
+
+    assert asyncio.run(twice()) == [True, False]
+    assert len(published) == 1
+
+
+def test_concurrent_creates_get_distinct_ids(client: TestClient) -> None:
+    """并发新增串行化：不会分到同一编号而被误报为 IP 重复。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def create(n: int) -> int:
+        body = GATE | {"name": f"并发 {n}", "ip": f"192.168.8.{40 + n}"}
+        return client.post("/api/cameras", json=body, headers=headers()).status_code
+
+    with ThreadPoolExecutor(4) as pool:
+        assert sorted(pool.map(create, range(4))) == [201, 201, 201, 201]
+    ids = [c["id"] for c in client.get("/api/cameras").json()["items"]]
+    assert len(ids) == len(set(ids)) == 6

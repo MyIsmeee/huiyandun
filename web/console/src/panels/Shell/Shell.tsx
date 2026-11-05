@@ -1,9 +1,9 @@
 import { CircleAlert, Clock, LogOut, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Site } from "../../lib/api";
+import { api, type Site } from "../../lib/api";
 import { SceneViewport } from "../../scene/SceneViewport";
 import { connect, useConnection } from "../../store/connection";
-import { useLive } from "../../store/live";
+import { applySite, useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AlertList } from "../AlertList/AlertList";
@@ -36,6 +36,10 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   const { open, connecting, lastFrameAt } = useConnection();
   const offline = !open && !connecting;
   useEffect(() => connect(onRejected), [onRejected]);
+  // 断线期间摄像头登记表可能变化（site 频道不补推）：连接建立后重新读取站点
+  useEffect(() => {
+    if (open) api.getSite().then(applySite, () => undefined);
+  }, [open]);
   // 设备状态以推送为准，未推送过的取 GET /api/site 的初始值
   const selectedId = useSelection((s) => s.deviceId);
   const pushed = useLive((s) => (selectedId ? s.devices[selectedId] : undefined));

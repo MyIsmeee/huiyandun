@@ -100,24 +100,7 @@ export function receive(frame: Frame, now: number): void {
       behaviors: drop(s.behaviors, id, state === "physical_alert" || state === "both"),
     }));
   }
-  if (frame.channel === "site") {
-    const site = data as Site;
-    const ids = new Set(site.devices.map((d) => d.id));
-    // 删除的摄像头连同其推送状态、事件卡与场景一并移除；新增与修改的以推送的站点为初始值
-    const keep = <T,>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).filter(([id]) => ids.has(id)));
-    useLive.setState((s) => ({
-      site,
-      // 推送过的设备保留其当前状态，登记信息（名称、位置等）取新站点
-      devices: Object.fromEntries(
-        site.devices.map((d) => {
-          const pushed = s.devices[d.id];
-          return [d.id, pushed ? { ...d, state: pushed.state, alert_severity: pushed.alert_severity } : d];
-        }),
-      ),
-      behaviors: keep(s.behaviors),
-      scenes: keep(s.scenes),
-    }));
-  }
+  if (frame.channel === "site") applySite(data as Site);
   if (frame.channel === "scene") {
     const scene = data as SceneFrame;
     useLive.setState((s) => ({ scenes: { ...s.scenes, [scene.camera_id]: scene } }));
@@ -161,6 +144,27 @@ export function receive(frame: Frame, now: number): void {
     const { incident_id, seq } = data as AiFrame;
     useLive.setState((s) => ({ aiSeq: { ...s.aiSeq, [incident_id]: seq } }));
   }
+}
+
+/** 摄像头登记表变化后的站点（D-101）：site 频道推送，或断线重连后重新读取 */
+export function applySite(site: Site): void {
+  const ids = new Set(site.devices.map((d) => d.id));
+  // 删除的摄像头连同其推送状态、事件卡与场景一并移除；新增与修改的以推送的站点为初始值
+  const keep = <T,>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).filter(([id]) => ids.has(id)));
+  useLive.setState((s) => ({
+    site,
+    // 推送过的设备保留其当前状态，登记信息（名称、位置等）取新站点
+    devices: Object.fromEntries(
+      site.devices.map((d) => {
+        const pushed = s.devices[d.id];
+        return [d.id, pushed ? { ...d, state: pushed.state, alert_severity: pushed.alert_severity } : d];
+      }),
+    ),
+    behaviors: keep(s.behaviors),
+    scenes: keep(s.scenes),
+    // 删除的摄像头的目标立即移除，不等 2 s 过期
+    targets: Object.fromEntries(Object.entries(s.targets).filter(([, t]) => ids.has(t.camera_id))),
+  }));
 }
 
 function move(track: Track, now: number) {

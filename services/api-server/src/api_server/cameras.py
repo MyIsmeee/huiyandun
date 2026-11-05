@@ -28,6 +28,7 @@ from sqlalchemy import (
     Table,
     Text,
     delete,
+    func,
     insert,
     select,
     update,
@@ -53,6 +54,7 @@ SCHEMA_VERSION = "1.0.0"
 MAX_CAMERAS = 16  # D0 档位规划 4～8 路（01 §12.1），留余量；超出拒绝（125 设计 §8）
 SYNC_S = 30  # go2rtc 重启会丢掉动态添加的流：定期比对补齐
 RETRY_S = 2
+CREATE_LOCK = 0x48594431  # 新增摄像头的事务级咨询锁：并发新增时编号与路数上限不冲突
 SNAPSHOT_TIMEOUT_S = 8.0  # 首帧须等关键帧，摄像头的关键帧间隔常为 2～4 s
 SNAPSHOT_ERRORS = {
     404: "视频服务中没有这路流：拉流地址尚未同步，稍后重试",
@@ -233,6 +235,7 @@ class Registry:
         # 部署模式全站统一，设备的 mode 取此值
         site = yaml.safe_load(state.config.site_file.read_text(encoding="utf-8"))
         self._mode = SiteConfig.model_validate(site).site.mode
+        self._pending = False  # 最近一次下发未完成（如总线不可达），尽快重试
 
     async def run(self) -> None:
         """启动时初始导入并下发（数据库或总线不可达时重试），之后定期比对 go2rtc。"""
@@ -244,13 +247,17 @@ class Registry:
                         for row in seeds(self._state.config.site_file, now):
                             await conn.execute(insert(cameras).values(row))
                         log.info("cameras.seeded")
-                await self.apply()
                 break
             except Exception:
                 log.exception("cameras.bootstrap_failed")
                 await asyncio.sleep(RETRY_S)
+        await self.apply()
         while True:
-            await asyncio.sleep(SYNC_S)
+            # 下发未完成时 2 s 后重试；否则每 30 s 比对 go2rtc（其重启会丢掉动态添加的流）
+            await asyncio.sleep(RETRY_S if self._pending else SYNC_S)
+            if self._pending:
+                await self.apply()
+                continue
             try:
                 async with self._lock:
                     await self._sync_go2rtc(await self._load())
@@ -262,23 +269,34 @@ class Registry:
             return await _rows(conn)
 
     async def apply(self) -> None:
-        """按库重建站点设备、推送 site 频道、同步 go2rtc、发布登记表。"""
+        """按库重建站点设备（有变化时推送 site 频道）、同步 go2rtc、发布登记表。不抛出：数据库或总线不可达时记录，
+        由 run 在 2 s 后重试；接口的保存已提交，不因下发失败而报保存失败。"""
         async with self._lock:
-            rows = await self._load()
-            site: Site = self._state.site
-            devices = [device(r, self._mode) for r in rows]
+            try:
+                await self._apply()
+                self._pending = False
+            except Exception:
+                log.exception("cameras.apply_failed")
+                self._pending = True
+
+    async def _apply(self) -> None:
+        rows = await self._load()
+        site: Site = self._state.site
+        devices = [device(r, self._mode) for r in rows]
+        # 只在登记表实际变化时推送：启动时从 site.yaml 初始导入的结果与启动时的站点相同
+        if devices != site.devices:
             self._state.site = site.model_copy(update={"devices": devices})
             self._state.devices.sync(devices, time.monotonic())
             self._state.hub.broadcast(
                 WsFrame(channel="site", data=self._state.site.model_dump(mode="json"))
             )
-            try:
-                await self._sync_go2rtc(rows)
-            except (httpx2.HTTPError, ValueError):
-                # 视频服务暂不可达：登记表照常下发，定期比对时补齐
-                log.exception("cameras.go2rtc_unavailable")
-            await self._state.bus.js_publish(SUBJECT, registry(rows))
-            log.info("cameras.published", extra={"cameras": [r["id"] for r in rows]})
+        try:
+            await self._sync_go2rtc(rows)
+        except (httpx2.HTTPError, ValueError):
+            # 视频服务暂不可达：登记表照常下发，定期比对时补齐
+            log.exception("cameras.go2rtc_unavailable")
+        await self._state.bus.js_publish(SUBJECT, registry(rows))
+        log.info("cameras.published", extra={"cameras": [r["id"] for r in rows]})
 
     async def _sync_go2rtc(self, rows: list[Any]) -> None:
         """go2rtc 只按登记表拉流；登记表外的流删除。go2rtc 的 PATCH 只改地址不重连，修改时先删再加。"""
@@ -351,6 +369,8 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
     _check(values)
     try:
         async with request.app.state.engine.begin() as conn:
+            # 并发新增串行化：否则可能分到同一编号，主键冲突被误报为 IP 重复
+            await conn.execute(select(func.pg_advisory_xact_lock(CREATE_LOCK)))
             if len(await _rows(conn)) >= MAX_CAMERAS:
                 raise HTTPException(409, f"最多登记 {MAX_CAMERAS} 路摄像头")
             values["id"] = await _next_id(conn)

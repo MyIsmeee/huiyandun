@@ -130,3 +130,12 @@ describe("站点推送（D-101）", () => {
     expect(devices["cam-01"]).toMatchObject({ name: "大门口", state: "cyber_alert", alert_severity: "high" });
   });
 });
+
+describe("站点推送移除已删除摄像头的目标", () => {
+  it("目标随摄像头删除立即移除", () => {
+    useLive.setState({ targets: { "cam-02/1": { camera_id: "cam-02" } as never, "cam-01/1": { camera_id: "cam-01" } as never } });
+    const device = { id: "cam-01", name: "cam-01", type: "camera", ip: "10.0.0.1", mode: "host_probe", state: "normal", alert_severity: null, camera: null };
+    receive({ channel: "site", data: { id: "s", name: "s", width_m: 1, height_m: 1, walls: [], doors: [], zones: [], devices: [device] } } as never, 0);
+    expect(Object.keys(useLive.getState().targets)).toEqual(["cam-01/1"]);
+  });
+});
