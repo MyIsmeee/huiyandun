@@ -63,6 +63,7 @@ const video = (node: ReactNode) => <div className="w-72">{node}</div>;
 /** 没有视频流的设备：详情面板截图不依赖 WebRTC 连接 */
 const SWITCH = {
   id: "sw-01",
+  name: "交换机",
   type: "switch",
   ip: "10.0.0.2",
   mode: "bypass",

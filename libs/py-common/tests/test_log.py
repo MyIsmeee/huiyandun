@@ -75,3 +75,11 @@ def test_request_id_isolated_between_tasks(stream: io.StringIO) -> None:
 
     assert sorted(r["request_id"] for r in records(stream)[:2]) == ["req-a", "req-b"]
     assert records(stream)[2]["request_id"] is None
+
+
+def test_http_client_request_urls_not_logged(stream: io.StringIO) -> None:
+    """请求地址可能带凭据（如 go2rtc 的取流源）：HTTP 客户端的 INFO 请求日志不输出（G-14）。"""
+    logging.getLogger("httpx2").info(
+        "HTTP Request: PUT http://go2rtc/api/streams?src=rtsp://u:pw@h"
+    )
+    assert stream.getvalue() == ""

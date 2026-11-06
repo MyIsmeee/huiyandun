@@ -65,6 +65,106 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Site" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/cameras:
+    get:
+      operationId: listCameras
+      description: 摄像头登记表（FR-905、D-101）；口令只返回是否已设置
+      x-min-role: admin
+      responses:
+        "200":
+          description: 全部摄像头，按编号排列
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createCamera
+      description: 新增摄像头；保存后同步 go2rtc 并发布 hyd.config.cameras.v1，各服务热更新（FR-906）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraCreate" }
+      responses:
+        "201":
+          description: 已新增
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Camera" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: 设备 IP 已被其他摄像头使用，或已达 16 路上限
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/cameras/{id}:
+    patch:
+      operationId: updateCamera
+      description: 只修改给出的字段；口令省略表示不修改，clear_password 为 true 时清除；calibration 不可改
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraUpdate" }
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Camera" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 设备 IP 已被其他摄像头使用
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      operationId: deleteCamera
+      description: 删除后实时识别与录像停止，告警历史保留
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "204": { description: 已删除 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/cameras/{id}/snapshot:
+    get:
+      operationId: getCameraSnapshot
+      description: 经 go2rtc 取一帧 JPEG 供编辑框预览与画警戒线（V-CAM4、V-CAM7），不落盘
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+      responses:
+        "200":
+          description: 一帧画面
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: 取不到画面，message 为白话原因
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/devices/{id}:
     get:
       operationId: getDevice
@@ -636,9 +736,10 @@ components:
         no_climb: { type: boolean }
     Device:
       type: object
-      required: [id, type, ip, mode, state, alert_severity, camera]
+      required: [id, name, type, ip, mode, state, alert_severity, camera]
       properties:
         id: { type: string }
+        name: { type: string, description: 显示名称（摄像头登记表的 name） }
         type: { enum: [camera, nvr, switch] }
         ip:
           anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
@@ -661,15 +762,88 @@ components:
         camera:
           anyOf: [{ $ref: "#/components/schemas/CameraInfo" }, { type: "null" }]
           description: type 为 camera 时必有
-    CameraInfo:
+    CameraSource:
       type: object
-      required: [stream, pose, calibration, homography, reproj_error_m]
+      description: 拉流地址的组成部分，不含凭据；地址由 api-server 拼出，不接受完整地址（D-103）
+      required: [protocol, host, port, path]
       properties:
-        stream: { type: string, description: go2rtc 流名 }
+        protocol: { enum: [rtsp, rtmp, http, onvif] }
+        host: { type: string, pattern: "^[A-Za-z0-9.:\\[\\]-]{1,253}$", description: 主机名或 IP }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        path:
+          type: string
+          maxLength: 512
+          pattern: "^[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*$"
+          description: "流路径，可含查询串；不含空白与 #（# 在 go2rtc 源中表示参数）"
+    ClimbLine:
+      type: array
+      description: 禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）；不能是竖直线段
+      items: { type: number }
+      minItems: 4
+      maxItems: 4
+    Camera:
+      type: object
+      required: [id, name, ip, ingest, source, username, password_set, pose, calibration, climb_lines, created_at, updated_at]
+      properties:
+        id: { type: string, description: cam-NN，也是 go2rtc 与录像中的流名 }
+        name: { type: string }
+        ip:
+          anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
+        ingest: { enum: [pull, push], description: pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id> }
+        source: { anyOf: [{ $ref: "#/components/schemas/CameraSource" }, { type: "null" }], description: 推流时为 null }
+        username: { anyOf: [{ type: string }, { type: "null" }] }
+        password_set: { type: boolean, description: 口令只写不读（C-ST-03） }
         pose: { $ref: "#/components/schemas/Pose" }
         calibration:
           type: array
-          description: 标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时 state 为 uncalibrated
+          description: 地面标定点 [u, v, x, y]，只经 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102）
+          items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+        climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CameraList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Camera" } }
+    CameraCreate:
+      type: object
+      required: [name, ip, ingest, pose]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        ip:
+          anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
+        ingest: { enum: [pull, push] }
+        source: { anyOf: [{ $ref: "#/components/schemas/CameraSource" }, { type: "null" }], description: 拉流时必填 }
+        username: { anyOf: [{ type: string, maxLength: 128 }, { type: "null" }] }
+        password: { type: string, format: password, writeOnly: true, maxLength: 128 }
+        pose: { $ref: "#/components/schemas/Pose" }
+        climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
+    CameraUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        ip:
+          anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
+        ingest: { enum: [pull, push] }
+        source: { anyOf: [{ $ref: "#/components/schemas/CameraSource" }, { type: "null" }] }
+        username: { anyOf: [{ type: string, maxLength: 128 }, { type: "null" }] }
+        password: { type: string, format: password, writeOnly: true, maxLength: 128, description: 省略表示不修改 }
+        clear_password: { type: boolean }
+        pose: { $ref: "#/components/schemas/Pose" }
+        climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
+    CameraInfo:
+      type: object
+      required: [stream, pose, calibration, mapping, homography, reproj_error_m]
+      properties:
+        stream: { type: string, description: go2rtc 流名 }
+        mapping:
+          enum: [calibrated, estimated, none]
+          description: 地面映射：calibrated 按 ≥ 4 组标定点；estimated 按安装参数估算（D-102）；none 时 state 为 uncalibrated
+        pose: { $ref: "#/components/schemas/Pose" }
+        calibration:
+          type: array
+          description: 标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时按安装参数估算（D-102）
           items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
         homography:
           anyOf:
@@ -685,11 +859,11 @@ components:
       properties:
         x: { type: number }
         y: { type: number }
-        height_m: { type: number }
-        yaw_deg: { type: number }
-        pitch_deg: { type: number }
-        hfov_deg: { type: number }
-        range_m: { type: number }
+        height_m: { type: number, exclusiveMinimum: 0, maximum: 50, description: 安装高度（米） }
+        yaw_deg: { type: number, description: 朝向，自平面 x 轴正方向逆时针计（度） }
+        pitch_deg: { type: number, minimum: -90, exclusiveMaximum: 0, description: 俯角，向下为负（度） }
+        hfov_deg: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 180, description: 水平视场角（度） }
+        range_m: { type: number, exclusiveMinimum: 0, maximum: 200, description: 可视距离（米），只用于画视场锥体 }
     IncidentList:
       type: object
       required: [items]
@@ -985,7 +1159,7 @@ components:
         各自的最新状态），按发生先后排列（D-077）
       required: [channel, data]
       properties:
-        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, scene, system] }
+        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, scene, site, system] }
         data: { type: object }
     AiInvestigation: { $ref: "../events/hyd.ai.investigation.v1.schema.json" }
     Investigation:

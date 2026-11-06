@@ -13,6 +13,7 @@ afterEach(cleanup);
 /** 不含视频流：只测面板本身，不建立 WebRTC 连接 */
 const DEVICE: Device = {
   id: "sw-01",
+  name: "交换机",
   type: "switch",
   ip: "10.0.0.2",
   mode: "bypass",

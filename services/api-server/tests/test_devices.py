@@ -215,3 +215,24 @@ def test_later_execution_keeps_contained(devices: Devices, state: str) -> None:
 
 def test_execution_for_unknown_device_ignored(devices: Devices) -> None:
     assert devices.on_execution(execution("contained", "cam-99"), 0) == []
+
+
+def test_sync_keeps_kept_devices_and_drops_removed(devices: Devices) -> None:
+    """D-101：登记表变化时，保留的设备沿用告警态与处置覆盖并换上新的登记信息；新增的从初始态开始；
+    删除的丢弃。"""
+    devices.on_alert(alert(), now=0)
+    devices.on_execution(execution("contained"), now=1)
+    cam1 = site.load(SITE).devices[0]
+    renamed = cam1.model_copy(update={"name": "改名后"})
+    added = cam1.model_copy(update={"id": "cam-03", "name": "新增"})
+
+    devices.sync([renamed, added], now=2)
+
+    kept = devices.get("cam-01")
+    assert kept is not None and (kept.name, kept.state) == ("改名后", "contained")
+    new = devices.get("cam-03")
+    assert new is not None and (new.state, new.alert_severity) == ("normal", None)
+    assert devices.get("cam-02") is None
+    # 处置覆盖仍在：解除后回到仍未到期的网络告警
+    [rolled] = devices.on_execution(execution("rolled_back"), now=3)
+    assert (rolled.state, rolled.alert_severity) == ("cyber_alert", "high")

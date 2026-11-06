@@ -94,6 +94,20 @@ class Devices:
                 changed.append(device)
         return changed
 
+    def sync(self, devices: list[Device], now: float) -> None:
+        """摄像头登记表变化（D-101）：新设备从初始态开始，删除的丢弃；保留的设备沿用告警态与处置覆盖，
+        按新的登记信息重算当前状态。"""
+        entries = {}
+        for d in devices:
+            entry = self._entries.get(d.id)
+            if entry is None:
+                entries[d.id] = _Entry(initial=d, current=d)
+                continue
+            entry.initial = d
+            self._update(entry, now)
+            entries[d.id] = entry
+        self._entries = entries
+
     def get(self, device_id: str) -> Device | None:
         entry = self._entries.get(device_id)
         return entry.current if entry else None

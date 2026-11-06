@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from py_contracts.events.hyd_ai_investigation_v1_schema import AiInvestigationV1
+from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_confirmation_v1_schema import CorrelatorConfirmationV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
@@ -160,6 +161,29 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "hyd.playbook.rollback.v1": (
         PlaybookRollbackV1,
         {"execution_id": "exe-0001", "actor": "operator1", "request_id": "req-2"},
+    ),
+    "hyd.config.cameras.v1": (
+        ConfigCamerasV1,
+        {
+            "cameras": [
+                {
+                    "id": "cam-01",
+                    "name": "演示画面 1",
+                    "ip": "172.30.0.11",
+                    "pose": {
+                        "x": 2,
+                        "y": 2,
+                        "height_m": 3,
+                        "yaw_deg": 45,
+                        "pitch_deg": -30,
+                        "hfov_deg": 90,
+                        "range_m": 15,
+                    },
+                    "calibration": [],
+                    "climb_lines": [[427, 700, 602, 340]],
+                }
+            ]
+        },
     ),
 }
 

@@ -54,7 +54,8 @@ services:
     image: huiyandun/api-server:local
     build: { context: ../.., dockerfile: services/api-server/Dockerfile }
     profiles: [core]
-    secrets: [db_app_password, llm_key_secret]  # 后者加密供应商 API Key（C-ST-03）
+    # 后两者分别加密供应商 API Key 与摄像头口令（C-ST-03、D-101）
+    secrets: [db_app_password, llm_key_secret, device_key_secret]
     volumes:
       - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 站点配置（FR-901）
       # 值班员只读工具（TK-116）：会话日志、行为模型基线（TK-115）与 ATT&CK 精简表
@@ -235,7 +236,11 @@ services:
   go2rtc:
     image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
     profiles: [vision]
-    volumes: ["./go2rtc.yaml:/config/go2rtc.yaml:ro"]
+    # 流由 api-server 按摄像头登记表经 API 增删（D-101）；go2rtc 每次增删都写回配置文件，
+    # 故启动时把只读的基础配置复制到容器内的临时目录再运行，重启后由 api-server 补齐
+    volumes: ["./go2rtc.yaml:/base/go2rtc.yaml:ro"]
+    tmpfs: [/config]
+    command: ["sh", "-c", "cp /base/go2rtc.yaml /config/go2rtc.yaml && exec go2rtc -config /config/go2rtc.yaml"]
     # 只开放 WebRTC 媒体端口（C-OPS-05、D-02）。API（1984）无鉴权且可新建 exec 源：
     # 不接入 core-net，只经 video-net 供 api-server 转发信令、经 demo-net 供 vision-engine 取流
     ports: ["8555:8555/tcp", "8555:8555/udp"]
@@ -532,6 +537,8 @@ secrets:
     file: .secrets/helper_public_key
   llm_key_secret:
     file: .secrets/llm_key_secret
+  device_key_secret:
+    file: .secrets/device_key_secret
   # evidence-service 的存证签名私钥（D-098）
   evidence_signing_key:
     file: .secrets/evidence_signing_key

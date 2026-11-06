@@ -1,0 +1,48 @@
+{
+  "title": "ConfigCamerasV1",
+  "description": "摄像头登记表（生产者 api-server，消费者 vision-engine、correlator、evidence-service；D-101、FR-906）。JetStream 每主题只保留最新一条，各服务启动时取最新一条、之后随新登记表热更新。不含凭据与取流地址：各服务只经 go2rtc 按摄像头编号取流（C-CV-10）",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["cameras"],
+  "properties": {
+    "cameras": { "type": "array", "items": { "$ref": "#/$defs/RegisteredCamera" } }
+  },
+  "$defs": {
+    "RegisteredCamera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "ip", "pose", "calibration", "climb_lines"],
+      "properties": {
+        "id": { "type": "string", "description": "摄像头编号，也是 go2rtc 与录像中的流名" },
+        "name": { "type": "string" },
+        "ip": {
+          "anyOf": [{ "type": "string", "format": "ipv4" }, { "type": "string", "format": "ipv6" }]
+        },
+        "pose": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "height_m", "yaw_deg", "pitch_deg", "hfov_deg", "range_m"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "height_m": { "type": "number" },
+            "yaw_deg": { "type": "number" },
+            "pitch_deg": { "type": "number" },
+            "hfov_deg": { "type": "number" },
+            "range_m": { "type": "number" }
+          }
+        },
+        "calibration": {
+          "type": "array",
+          "description": "地面标定点 [u, v, x, y]；少于 4 组时按 pose 估算（D-102）",
+          "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+        },
+        "climb_lines": {
+          "type": "array",
+          "description": "禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）",
+          "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+        }
+      }
+    }
+  }
+}

@@ -61,9 +61,43 @@ class Zone(ContractModel):
     no_climb: bool
 
 
+class CameraSource(ContractModel):
+    """
+    拉流地址的组成部分，不含凭据；地址由 api-server 拼出，不接受完整地址（D-103）
+    """
+
+    protocol: Literal["rtsp", "rtmp", "http", "onvif"]
+    host: str = Field(..., pattern="^[A-Za-z0-9.:\\[\\]-]{1,253}$")
+    """
+    主机名或 IP
+    """
+    port: int = Field(..., ge=1, le=65535)
+    path: str = Field(..., max_length=512, pattern="^[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*$")
+    """
+    流路径，可含查询串；不含空白与 #（# 在 go2rtc 源中表示参数）
+    """
+
+
+class ClimbLine(RootModel[list[float]]):
+    """
+    禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）；不能是竖直线段
+    """
+
+    model_config = {"allow_inf_nan": False}
+    root: list[float] = Field(..., max_length=4, min_length=4)
+    """
+    禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）；不能是竖直线段
+    """
+
+
 class CalibrationItem(RootModel[list[float]]):
     model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=4, min_length=4)
+
+
+class Username(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
+    root: str = Field(..., max_length=128)
 
 
 class HomographyItem(RootModel[list[float]]):
@@ -84,11 +118,26 @@ class ReprojErrorM(RootModel[float]):
 class Pose(ContractModel):
     x: float
     y: float
-    height_m: float
+    height_m: float = Field(..., gt=0.0, le=50.0)
+    """
+    安装高度（米）
+    """
     yaw_deg: float
-    pitch_deg: float
-    hfov_deg: float
-    range_m: float
+    """
+    朝向，自平面 x 轴正方向逆时针计（度）
+    """
+    pitch_deg: float = Field(..., ge=-90.0, lt=0.0)
+    """
+    俯角，向下为负（度）
+    """
+    hfov_deg: float = Field(..., gt=0.0, lt=180.0)
+    """
+    水平视场角（度）
+    """
+    range_m: float = Field(..., gt=0.0, le=200.0)
+    """
+    可视距离（米），只用于画视场锥体
+    """
 
 
 class Technique(RootModel[str]):
@@ -448,7 +497,7 @@ class WsFrame(ContractModel):
     """
 
     channel: Literal[
-        "tracks", "devices", "alerts", "incidents", "executions", "ai", "scene", "system"
+        "tracks", "devices", "alerts", "incidents", "executions", "ai", "scene", "site", "system"
     ]
     data: dict[str, Any]
 
@@ -674,15 +723,82 @@ class VisionIntegrityV1(EventBase):
     """
 
 
+class Camera(ContractModel):
+    id: str
+    """
+    cam-NN，也是 go2rtc 与录像中的流名
+    """
+    name: str
+    ip: IPv4Address | IPv6Address
+    ingest: Literal["pull", "push"]
+    """
+    pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>
+    """
+    source: CameraSource | None
+    """
+    推流时为 null
+    """
+    username: str | None
+    password_set: bool
+    """
+    口令只写不读（C-ST-03）
+    """
+    pose: Pose
+    calibration: list[CalibrationItem]
+    """
+    地面标定点 [u, v, x, y]，只经 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102）
+    """
+    climb_lines: list[ClimbLine]
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+
+
+class CameraList(ContractModel):
+    items: list[Camera]
+
+
+class CameraCreate(ContractModel):
+    name: str = Field(..., max_length=40, min_length=1)
+    ip: IPv4Address | IPv6Address
+    ingest: Literal["pull", "push"]
+    source: CameraSource | None = None
+    """
+    拉流时必填
+    """
+    username: Username | None = None
+    password: SecretStr | None = Field(None, max_length=128)
+    pose: Pose
+    climb_lines: list[ClimbLine] | None = None
+
+
+class CameraUpdate(ContractModel):
+    name: str | None = Field(None, max_length=40, min_length=1)
+    ip: IPv4Address | IPv6Address | None = None
+    ingest: Literal["pull", "push"] | None = None
+    source: CameraSource | None = None
+    username: Username | None = None
+    password: SecretStr | None = Field(None, max_length=128)
+    """
+    省略表示不修改
+    """
+    clear_password: bool | None = None
+    pose: Pose | None = None
+    climb_lines: list[ClimbLine] | None = None
+
+
 class CameraInfo(ContractModel):
     stream: str
     """
     go2rtc 流名
     """
+    mapping: Literal["calibrated", "estimated", "none"]
+    """
+    地面映射：calibrated 按 ≥ 4 组标定点；estimated 按安装参数估算（D-102）；none 时 state 为 uncalibrated
+    """
     pose: Pose
     calibration: list[CalibrationItem]
     """
-    标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时 state 为 uncalibrated
+    标定点 [u, v, x, y]：像素坐标与平面坐标；少于 4 组时按安装参数估算（D-102）
     """
     homography: Homography | None
     reproj_error_m: ReprojErrorM | None
@@ -802,6 +918,10 @@ class VisionIntegrity(RootModel[VisionIntegrityV1]):
 
 class Device(ContractModel):
     id: str
+    name: str
+    """
+    显示名称（摄像头登记表的 name）
+    """
     type: Literal["camera", "nvr", "switch"]
     ip: IPv4Address | IPv6Address
     mode: Literal["bypass", "host_probe"]
