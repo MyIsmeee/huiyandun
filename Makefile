@@ -102,9 +102,12 @@ fetch-models:
 verify-models:
 	uv run python tools/dev/models.py verify models
 
-# 第三方许可证声明（G-08、C-RU-02）：依赖变化后重新生成并提交
+# 第三方许可证声明（G-08、C-RU-02）：依赖变化后重新生成并提交。
+# 先写临时文件，生成失败时不清空已提交的清单
 licenses:
-	uv run python tools/dev/third_party_licenses.py > LICENSE-THIRD-PARTY.md
+	uv run python tools/dev/third_party_licenses.py > LICENSE-THIRD-PARTY.md.tmp \
+		&& mv LICENSE-THIRD-PARTY.md.tmp LICENSE-THIRD-PARTY.md \
+		|| { rm -f LICENSE-THIRD-PARTY.md.tmp; exit 1; }
 
 # 检测规则测试（CI-19、C-SEC-01）：构建 suricata 镜像，加载全部规则，回放 rules/tests/ 的样本并比对告警数
 test-rules:
