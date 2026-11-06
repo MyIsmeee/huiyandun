@@ -1,5 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, open, presetTheme, zoomIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, open, presetTheme, targetAt, zoomIn } from "./helpers";
 
 // HYD-UIX-004 §8 TargetModels：人员 / 各类车辆 / 告警 / 高误差；V-U4 事件卡
 const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", ts: "2026-10-27T06:30:00Z" };
@@ -220,14 +220,14 @@ test("人形补全：桌后只见上半身时腿半透明补全，完全不可�
   await expect(scene(page)).toHaveScreenshot("person-completion.png");
 
   // 完全不可辨的人员同样可选中，括框按补全的人形投影
-  await scene(page).click({ position: { x: 599, y: 375 } });
+  await scene(page).click({ position: await targetAt(page, "cam-01/3") });
   await page.clock.runFor(100);
   await expect(page.getByRole("region", { name: "详情" }).getByRole("heading", { level: 2 })).toHaveText("人员 #3");
   await expect(scene(page)).toHaveScreenshot("person-completion-selected.png");
 });
 
 test("单击人员：四角括框与胶囊标签，详情播放所属摄像头画面；离开画面即收起（D-054）", async ({ page }) => {
-  await presetTheme(page, "light", true);
+  await presetTheme(page, "dark", true);
   await page.route("/api/devices/cam-01/webrtc", (route) =>
     route.fulfill({ status: 502, json: { code: "bad_gateway", message: "视频服务不可用", request_id: "r" } }),
   );
@@ -241,7 +241,7 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
     await page.clock.runFor(500);
   }
 
-  await scene(page).click({ position: { x: 564, y: 330 } }); // 人员所在位置（与 person-normal 截图一致）
+  await scene(page).click({ position: await targetAt(page, "cam-01/7") });
   await page.clock.runFor(100); // 时钟暂停：推进一帧，括框按投影就位
   const panel = page.getByRole("region", { name: "详情" });
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("人员 #7");
@@ -251,7 +251,8 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   await expectNoOverflow(page);
   await expect(page).toHaveScreenshot("target-selected.png");
 
-  await scene(page).click({ position: { x: 547, y: 235 } }); // 轿车：括框按车身投影范围
+  const car = await targetAt(page, "cam-01/1000001");
+  await scene(page).click({ position: car }); // 轿车：括框按车身投影范围
   await page.clock.runFor(100);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("轿车 #1000001");
   await expect(scene(page)).toHaveScreenshot("target-selected-car.png");
@@ -260,15 +261,15 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   const box = await scene(page).boundingBox();
-  await page.mouse.move((box?.x ?? 0) + 547, (box?.y ?? 0) + 235);
+  await page.mouse.move((box?.x ?? 0) + car.x, (box?.y ?? 0) + car.y);
   await page.mouse.down();
-  await page.mouse.move((box?.x ?? 0) + 577, (box?.y ?? 0) + 255, { steps: 3 });
+  await page.mouse.move((box?.x ?? 0) + car.x + 30, (box?.y ?? 0) + car.y + 20, { steps: 3 });
   await page.mouse.up();
   await page.clock.runFor(100);
   await expect(panel).toHaveCount(0);
 
   // 选中轿车后停止推送：2 s 无更新即移除（V-U4），详情与括框随之收起（D-054）
-  await scene(page).click({ position: { x: 577, y: 250 } }); // 平移后轿车所在位置
+  await scene(page).click({ position: await targetAt(page, "cam-01/1000001") }); // 平移后轿车所在位置
   await page.clock.runFor(100);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("轿车 #1000001");
   await page.clock.runFor(2500);
@@ -291,7 +292,7 @@ test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再�
   const toolbar = page.getByRole("toolbar", { name: "视角" });
   const panel = page.getByRole("region", { name: "详情" });
 
-  await scene(page).dblclick({ position: { x: 564, y: 330 } }); // 人员所在位置（与 person-normal 截图一致）
+  await scene(page).dblclick({ position: await targetAt(page, "cam-01/7") });
   await page.clock.runFor(100);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("人员 #7");
   for (const name of ["缩小", "放大", "向左旋转 90°", "向右旋转 90°"]) await expect(toolbar.getByRole("button", { name })).toBeDisabled();
@@ -316,7 +317,7 @@ test("跟随的车辆离开画面：详情收起，镜头飞回总览", async ({
     await page.clock.runFor(500);
   }
   await zoomIn(page);
-  await scene(page).dblclick({ position: { x: 547, y: 235 } }); // 轿车所在位置（与 target-selected 截图一致）
+  await scene(page).dblclick({ position: await targetAt(page, "cam-01/1000001") });
   await page.clock.runFor(100);
   await expect(scene(page)).toHaveScreenshot("follow-car.png");
 
@@ -334,7 +335,8 @@ test("悬停人员显示中性灰括框；单击空白处收起详情", async ({
   const box = await scene(page).boundingBox();
   const at = (x: number, y: number) => page.mouse.move((box?.x ?? 0) + x, (box?.y ?? 0) + y);
 
-  await at(564, 330); // 人员所在位置（与 person-normal 截图一致）
+  const person = await targetAt(page, "cam-01/7");
+  await at(person.x, person.y);
   await page.clock.runFor(100);
   await expect(page.locator("[data-scene]")).toHaveCSS("cursor", "pointer");
   await expect(scene(page).locator("[data-hover] > span")).toBeVisible(); // 外层只作定位锚点、自身无尺寸
@@ -343,7 +345,7 @@ test("悬停人员显示中性灰括框；单击空白处收起详情", async ({
   await expect(page.locator("[data-scene]")).not.toHaveCSS("cursor", "pointer");
   await expect(scene(page).locator("[data-hover]")).toHaveCount(0);
 
-  await scene(page).click({ position: { x: 564, y: 330 } });
+  await scene(page).click({ position: person });
   const panel = page.getByRole("region", { name: "详情" });
   await expect(panel).toHaveCount(1);
   await scene(page).click({ position: { x: 200, y: 600 } });
@@ -354,7 +356,7 @@ test("悬停人员显示中性灰括框；单击空白处收起详情", async ({
   await expect(panel).toHaveCount(0);
 
   // 悬停的人员离开画面（2 s 无更新即移除，V-U4）：括框消失，指针恢复，不必等鼠标再动
-  await at(564, 330);
+  await at(person.x, person.y);
   await expect(page.locator("[data-scene]")).toHaveCSS("cursor", "pointer");
   await page.clock.runFor(2500);
   await expect(scene(page).locator("[data-hover]")).toHaveCount(0);

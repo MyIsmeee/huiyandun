@@ -115,6 +115,20 @@ export function SceneViewport({ site }: { site: Site }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [animate]);
 
+  // 只在 e2e 构建中提供：目标（模型中部）当前的场景内像素位置，用例据此点选，不随机位调整失效
+  useEffect(() => {
+    if (import.meta.env.MODE !== "e2e" || !view3d) return;
+    window.__hydTargetAt = (key) => {
+      const target = useLive.getState().targets[key];
+      if (!target) return null;
+      const [x, y] = renderedPosition(key, target, Date.now(), true);
+      return view3d.project([x, 0.9, y]);
+    };
+    return () => {
+      delete window.__hydTargetAt;
+    };
+  }, [view3d]);
+
   /** 指针下的人员或车辆：按渲染中的位置命中。2D 降级视图不绘制目标 */
   const hit = (e: MouseEvent<HTMLDivElement>) => {
     if (!view3d || (e.target as Element).closest("button")) return null;
@@ -237,4 +251,11 @@ function useDragPan(view: View | null) {
     onPointerCancel: end,
     onLostPointerCapture: end,
   };
+}
+
+declare global {
+  interface Window {
+    /** e2e 构建专用（见 SceneViewport） */
+    __hydTargetAt?: (key: string) => readonly [number, number] | null;
+  }
 }
