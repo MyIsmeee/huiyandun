@@ -1,41 +1,89 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* HYD-UIX-004 §3.1：只有暗色一套（D-104，数字沙盘） */
+/* 只有一套暗色主题：shadcn 组件的 dark: 变体始终生效（04 §3.1） */
+@custom-variant dark (&);
+
+/* HYD-UIX-004 §3.1：石墨中性灰（D-110），变量名沿用 shadcn/ui */
 :root {
   color-scheme: dark;
-  --hyd-base: #070b14;
-  /* 面板半透明：叠在场景之上时可见场景 */
-  --hyd-panel: rgb(13 20 32 / 0.78);
-  --hyd-raised: #111a28;
-  --hyd-grid: rgb(60 200 240 / 0.12);
-  --hyd-text: #e8f1f8;
-  --hyd-text-2: #a9b8c6;
-  --hyd-text-3: #6f8091;
-  --hyd-border: rgb(60 200 240 / 0.16);
-  /* §5.1 L0 站点底板与沙盘青（V-S5：沙盘青不表达状态） */
-  --hyd-ground: #0b1626;
-  --hyd-sandbox: #3cc8f0;
+  --background: #0a0a0b;
+  --foreground: #ededef;
+  --card: #131316;
+  --popover: #1c1c20;
+  --secondary: #1c1c20;
+  --accent: #26262b;
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: rgb(255 255 255 / 0.4);
+  --muted-foreground: #a1a1aa;
+  --subtle-foreground: #8b8b94;
+  --primary: #ededef;
+  --primary-foreground: #0a0a0b;
+  /* 危险操作不用红色：红色是网络攻击（V-S2） */
+  --destructive: #ededef;
+  --radius: 0.5rem;
+  /* §5.3.1 动效令牌 */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
 }
 
 @theme inline {
   /* 清空 Tailwind 默认色板：界面只能使用规范定义的颜色（V-S1、V-G2） */
   --color-*: initial;
-  --color-page: var(--hyd-base);
-  --color-panel: var(--hyd-panel);
-  --color-raised: var(--hyd-raised);
-  --color-grid: var(--hyd-grid);
-  --color-fg: var(--hyd-text);
-  --color-fg-2: var(--hyd-text-2);
-  --color-fg-3: var(--hyd-text-3);
-  --color-line: var(--hyd-border);
-  --color-ground: var(--hyd-ground);
-  --color-sandbox: var(--hyd-sandbox);
+  --color-black: #000;
+  --color-white: #fff;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--secondary);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
   /* §3.2 状态色：固定语义、不随主题变化，只用于表达状态且必须配图标与文字（V-S2、V-S3） */
-  --color-idle: #6e7a8a;
   --color-physical: #fab219;
   --color-cyber: #d03b3b;
   --color-contained: #0ca30c;
   --color-uncertain: #898781;
+  /* TODO(#230): 旧令牌名，TK-133、TK-136 逐个组件改用上面的名称后删除 */
+  --color-page: var(--background);
+  --color-panel: var(--card);
+  --color-raised: var(--secondary);
+  --color-grid: rgb(255 255 255 / 0.05);
+  --color-fg: var(--foreground);
+  --color-fg-2: var(--muted-foreground);
+  --color-fg-3: var(--subtle-foreground);
+  --color-line: var(--border);
+  --color-ground: #17171a;
+  --color-idle: var(--subtle-foreground);
+  /* §3.5 圆角：面板 8、控件 6、徽标 4 */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  /* §3.4 字号：13 px 元数据行、28 px 指标数字 */
+  --text-meta: 0.8125rem;
+  --text-meta--line-height: 1.25rem;
+  --text-kpi: 1.75rem;
+  --text-kpi--line-height: 2.25rem;
+  /* §5.3.1 缓动：进入 ease-out、退出 ease-in；默认过渡 200 ms */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --default-transition-duration: var(--duration-base);
+  --default-transition-timing-function: var(--ease-out);
   /* §3.4：只用系统字体，不加载 Web 字体（C-FE-01） */
   --font-sans: system-ui, "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace;
@@ -48,14 +96,20 @@
     height: 100%;
   }
 
+  * {
+    border-color: var(--color-border);
+    outline-color: var(--color-ring);
+  }
+
   body {
-    background: var(--color-page);
-    color: var(--color-fg);
+    background: var(--color-background);
+    color: var(--color-foreground);
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
 }
 
-/* 静态点阵底纹，取栅格色，与场景地面栅格同源（§5.1 L0） */
+/* 静态点阵底纹（登录页），不动 */
 @utility bg-dots {
   background-image: radial-gradient(var(--color-grid) 1px, transparent 1px);
   background-size: 24px 24px;
@@ -70,7 +124,7 @@
 }
 
 @utility animate-enter {
-  animation: enter 240ms ease-out both;
+  animation: enter var(--duration-slow) var(--ease-out) both;
 }
 
 /* 一次性淡出（攻击连线断开，04 §5.2）：终态即不可见，动效停止时瞬时消失 */
