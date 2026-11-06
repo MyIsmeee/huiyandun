@@ -212,6 +212,11 @@ RTSP_TARGET = "rtsp-target"
 NVR_SIM = "nvr-sim"
 
 
+def test_attack_sim_only_runs_on_demand() -> None:
+    """D-105：攻击只由队员手动触发（make attack），启动演示环境时不运行 attack-sim。"""
+    assert SERVICES[ATTACK_SIM]["scale"] == 0
+
+
 def test_attack_sim_reaches_no_service_but_rtsp_target() -> None:
     """DP-09、C-SEC-11、D-095：attack-sim 只接入 attack-net，攻击方能访问的服务只有 rtsp-target——网络里另有
     不监听任何端口的合法录像机 nvr-sim（TK-115）；该网络内部隔离、宿主不可达，attack-sim 在网络层碰不到

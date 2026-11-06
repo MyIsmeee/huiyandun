@@ -1,5 +1,5 @@
 .PHONY: lint lint-py lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	console-ca fetch-models verify-models test-rules llm-check demo-run
+	console-ca fetch-models verify-models test-rules llm-check attack attack-slow tamper
 
 WEB = pnpm --dir web/console
 
@@ -107,9 +107,14 @@ todo = @echo "$@：由 $(1) 实现" >&2; exit 1
 
 llm-check: ; $(call todo,TK-060)
 
-# 执行演示剧本（DM-11）：先等全部服务 healthy；FROM_STEP=<N> 从第 N 步续跑（HYD-DEP-005 §5.3）
-SCENARIO ?= main
-demo-run:
-	tools/dev/wait-healthy.sh $(COMPOSE)
-	uv run python tools/dev/scenario_runner.py demo/scenarios/$(SCENARIO).yaml \
-		$(if $(FROM_STEP),--from-step $(FROM_STEP)) -- $(COMPOSE)
+# 红方手动命令（D-105、HYD-PLAN-007 §7）：演示与走查时由队员执行，不发布任何事件。
+# M0 只能攻击自建靶机 rtsp-target，它的地址即 cam-02 的设备 IP；攻击现场摄像头待 D-064 实现
+TARGET ?= cam-02
+CAMERA ?= cam-02
+attack attack-slow:
+	$(if $(filter-out cam-02,$(TARGET)),$(error M0 只能攻击自建靶机 rtsp-target（cam-02）))
+	uv run python tools/dev/redteam.py $@ -- $(COMPOSE)
+
+# ACTION：freeze 定格、replay 切回约 2 分钟前、restore 恢复；只作用于调试素材（mediamtx 推流）
+tamper:
+	uv run python tools/dev/redteam.py tamper $(ACTION) $(CAMERA) -- $(COMPOSE)

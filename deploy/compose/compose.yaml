@@ -120,7 +120,7 @@ services:
       - correlator-state:/var/lib/correlator
       - ../../rules/correlator:/etc/hyd/rules:ro  # 关联规则（HYD-PLAN-007 §4）
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro  # ATT&CK 精简查表（D-070）
-      # 由 nvr-sim 正常流量学好的基线快照：没有存盘状态时加载（剧本开场会清除状态，见 100-demo-run.md）
+      # 由 nvr-sim 正常流量学好的基线快照：没有存盘状态时加载
       - ../../demo/scenarios/behavior-baseline.json:/etc/hyd/behavior-baseline.json:ro
     environment:
       HYD_BEHAVIOR_BASELINE_FILE: /etc/hyd/behavior-baseline.json
@@ -396,13 +396,15 @@ services:
       retries: 10
 
   # 受控攻击模拟（DP-09、C-SEC-11）：只对 rtsp-target 发 RTSP 认证重试，触发 HYD-NET-0001。
-  # 一次性执行后退出（scenario-runner 在主剧本 1:00 与 1:50 再次启动）；只接入 attack-net，网络层只够得到
+  # 一次性执行后退出（红方命令 make attack、make attack-slow 启动，D-105）；只接入 attack-net，网络层只够得到
   # rtsp-target，碰不到 go2rtc 等。源地址在白名单（172.30.0.0/28）之外，后续处置才能真正封禁它。
   # 行为参数登记于 demo/scenarios/attack-sim.yaml
   attack-sim:
     image: huiyandun/attack-sim:local
     build: { context: ../.., dockerfile: agents/sim/attack-sim/Dockerfile }
     profiles: [demo]
+    # 只由队员执行 make attack / attack-slow 时运行（compose run），demo-up 不启动（D-105）
+    scale: 0
     labels: { hyd.oneshot: "true" }
     environment:
       HYD_TARGET: rtsp-target
@@ -411,7 +413,7 @@ services:
       HYD_USER: admin
       HYD_PASSWORD: wrong-password
       HYD_ATTEMPTS: "6"
-      HYD_INTERVAL_S: "0"  # 低速模式由 scenario-runner 改为 20（每分钟 3 次）
+      HYD_INTERVAL_S: "0"  # 低速模式由 make attack-slow 改为 20（每分钟 3 次）
     depends_on: { rtsp-target: { condition: service_healthy } }
     networks:
       attack-net:
@@ -448,20 +450,6 @@ services:
       retries: 3
       start_period: 30s
       start_interval: 5s
-
-  # 剧本观测端（TK-100）：只在 make demo-run 时由 docker compose run 启动，订阅事件逐行写到标准输出，
-  # 供宿主机上的 tools/dev/scenario_runner.py 断言；剧本结束即退出。复用 correlator 镜像（事件总线客户端），
-  # 只接入 core-net
-  scenario-runner:
-    image: huiyandun/correlator:local
-    build: { context: ../.., dockerfile: services/correlator/Dockerfile }
-    profiles: [runner]
-    labels: { hyd.oneshot: "true" }
-    entrypoint: ["python3", "/opt/hyd/scenario_observer.py"]
-    volumes: ["../../tools/dev/scenario_observer.py:/opt/hyd/scenario_observer.py:ro"]
-    networks: [core-net]
-    read_only: true
-    cap_drop: [ALL]
 
 networks:
   # 内部网络不给宿主分配网关地址（gateway_mode_ipv4: isolated）：宿主上的进程访问不到其中的服务

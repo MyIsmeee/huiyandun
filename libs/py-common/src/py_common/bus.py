@@ -22,6 +22,19 @@ from pydantic import ValidationError
 
 from py_contracts.events.event_base_schema import EventBase
 
+
+class _StartTimeConfig(ConsumerConfig):
+    """按起始时刻订阅的有序消费者配置。nats-py 2.16 的有序消费者在断线或漏收心跳后重建时，
+    把投递方式改为按序号起始，却保留 opt_start_time，服务端拒绝（err_code 10094），订阅从此不再投递
+    （2026-11-05 实测：NATS 重建后 correlator 不再生成关联事件）。改为按序号起始时清除起始时刻。
+    nats-py 复用传入的同一个配置对象；升级时由 test_restart_switch_clears_start_time 验证。"""
+
+    def __setattr__(self, name: str, value: object) -> None:
+        super().__setattr__(name, value)
+        if name == "deliver_policy" and value == DeliverPolicy.BY_START_SEQUENCE:
+            super().__setattr__("opt_start_time", None)
+
+
 log = logging.getLogger(__name__)
 # 导致断连的错误：nats-py 先报告错误、随后才切换为重连状态
 # JetStream 错误码：同名流已存在且配置不同
@@ -140,7 +153,7 @@ class Bus:
             cb=on_message,
             ordered_consumer=True,
             deliver_policy=DeliverPolicy.BY_START_TIME,
-            config=ConsumerConfig(opt_start_time=since),
+            config=_StartTimeConfig(opt_start_time=since),
         )
         try:
             info = await sub.consumer_info()
