@@ -8,6 +8,7 @@ lint: lint-py lint-web
 lint-py:
 	uv run ruff check .
 	uv run ruff format --check .
+	uv run lint-imports  # CI-06 模块依赖边界
 
 lint-web:
 	$(WEB) exec eslint .
