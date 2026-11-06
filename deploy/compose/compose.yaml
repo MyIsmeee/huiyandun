@@ -55,7 +55,8 @@ services:
     build: { context: ../.., dockerfile: services/api-server/Dockerfile }
     profiles: [core]
     # 后两者分别加密供应商 API Key 与摄像头口令（C-ST-03、D-101）
-    secrets: [db_app_password, llm_key_secret, device_key_secret]
+    # push_password 只用于新增推流摄像头时显示一次（V-CAM2）
+    secrets: [db_app_password, llm_key_secret, device_key_secret, push_password]
     volumes:
       - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 站点配置（FR-901）
       # 值班员只读工具（TK-116）：会话日志、行为模型基线（TK-115）与 ATT&CK 精简表
@@ -245,9 +246,40 @@ services:
     # 只开放 WebRTC 媒体端口（C-OPS-05、D-02）。API（1984）无鉴权且可新建 exec 源：
     # 不接入 core-net，只经 video-net 供 api-server 转发信令、经 demo-net 供 vision-engine 取流
     ports: ["8555:8555/tcp", "8555:8555/udp"]
-    networks: [video-net, demo-net, edge-net]
+    # camera-net：拉取摄像头登记表中的局域网摄像头（D-103，G-05 例外）；ingest-net：从 ingest 取推流
+    networks:
+      video-net: {}
+      demo-net: {}
+      edge-net: {}
+      camera-net: {}
+      ingest-net: { ipv4_address: 172.30.10.2 }
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:1984/api"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 推流接收（TK-129、D-103）：复用 MediaMTX（REUSE-04）。设备推到边缘主机 8554 端口，须带推流口令；
+  # 只有 go2rtc 可从这里读取。推流口令只给本服务与 api-server（G-14）
+  ingest:
+    image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
+    profiles: [vision]
+    secrets: [push_password]
+    entrypoint:
+      - sh
+      - -c
+      - sed "s|__PUSH_PASS__|$$(cat /run/secrets/push_password)|" /base/ingest.yml > /tmp/ingest.yml && exec /mediamtx /tmp/ingest.yml
+    volumes: ["./ingest.yml:/base/ingest.yml:ro"]
+    ports: ["8554:8554/tcp"]
+    networks:
+      edge-net: {}
+      ingest-net: { ipv4_address: 172.30.10.10 }
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9997/v3/paths/list"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -494,6 +526,15 @@ networks:
   edge-net:
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
+  # go2rtc 拉取局域网摄像头的出站网络（D-103）：只有 go2rtc 接入，只拉登记表中的地址
+  camera-net: {}
+  # go2rtc 从 ingest 取设备推来的流；固定网段供 ingest 按地址只放行 go2rtc 读取
+  ingest-net:
+    internal: true
+    driver_opts: { com.docker.network.bridge.gateway_mode_ipv4: isolated }
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
   # api-server 经此调用 llm-gateway 的内部接口；只有这两个服务接入
   llm-net:
     internal: true
@@ -530,6 +571,9 @@ secrets:
     file: .secrets/llm_key_secret
   device_key_secret:
     file: .secrets/device_key_secret
+  # 设备向 ingest 推流的口令（D-103）
+  push_password:
+    file: .secrets/push_password
   # evidence-service 的存证签名私钥（D-098）
   evidence_signing_key:
     file: .secrets/evidence_signing_key

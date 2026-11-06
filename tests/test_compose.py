@@ -72,19 +72,34 @@ def test_doctor_image_registered() -> None:
 
 EDGE = "edge-net"
 EGRESS = "llm-egress"
-EXPOSED = {"web-console", "go2rtc"}
-INTERNAL_NETWORKS = [n for n in COMPOSE["networks"] if n not in (EDGE, EGRESS)]
+CAMERA_NET = "camera-net"  # go2rtc 拉取局域网摄像头（D-103）
+EXPOSED = {"web-console", "go2rtc", "ingest"}
+INTERNAL_NETWORKS = [n for n in COMPOSE["networks"] if n not in (EDGE, EGRESS, CAMERA_NET)]
 
 
 @pytest.mark.parametrize("name", INTERNAL_NETWORKS)
 def test_network_internal(name: str) -> None:
-    """DP-05：例外为开放端口的 edge-net 与 llm-gateway 出站的 llm-egress。"""
+    """DP-05：例外为开放端口的 edge-net、llm-gateway 出站的 llm-egress、go2rtc 拉流的 camera-net。"""
     assert COMPOSE["networks"][name].get("internal") is True
 
 
 def test_only_llm_gateway_reaches_outside() -> None:
     """DP-05、C-LLM-01：只有 llm-gateway 接入出站网络。"""
     assert {n for n, s in SERVICES.items() if EGRESS in s.get("networks", [])} == {"llm-gateway"}
+
+
+def test_only_go2rtc_pulls_cameras_outside() -> None:
+    """D-103：只有 go2rtc 接入可出站的 camera-net，取流地址只由 api-server 按登记表下发。"""
+    assert {n for n, s in SERVICES.items() if CAMERA_NET in s.get("networks", [])} == {"go2rtc"}
+
+
+def test_ingest_publishes_push_port_only_and_feeds_only_go2rtc() -> None:
+    """D-103：ingest 只开放推流端口；ingest-net 上只有 go2rtc 与 ingest，推流口令只给 ingest 与 api-server。"""
+    assert SERVICES["ingest"]["ports"] == ["8554:8554/tcp"]
+    peers = {n for n, s in SERVICES.items() if "ingest-net" in s.get("networks", [])}
+    assert peers == {"go2rtc", "ingest"}
+    holders = {n for n, s in SERVICES.items() if "push_password" in s.get("secrets", [])}
+    assert holders == {"ingest", "api-server"}
 
 
 def test_llm_gateway_reachable_only_by_api_server() -> None:
@@ -114,9 +129,9 @@ def test_go2rtc_publishes_media_port_only() -> None:
 
 def test_go2rtc_api_reachable_only_by_its_clients() -> None:
     """go2rtc 的 API 无鉴权且可新建 exec 源：内部网络上只有信令转发、取流与录像的服务能访问。"""
-    internal = set(SERVICES["go2rtc"]["networks"]) - {EDGE}
+    internal = set(SERVICES["go2rtc"]["networks"]) - {EDGE, CAMERA_NET}
     peers = {n for n, s in SERVICES.items() if internal & set(s.get("networks", []))} - {"go2rtc"}
-    assert peers == {"api-server", "vision-engine", "mediamtx", "recorder"}
+    assert peers == {"api-server", "vision-engine", "mediamtx", "recorder", "ingest"}
     assert "core-net" not in internal
 
 

@@ -68,7 +68,7 @@ describe("摄像头列表（04 §7.4）", () => {
 
 describe("添加与编辑（04 §7.4）", () => {
   it("请求体：主机留空取设备 IP；口令为空不发送（只写不读）", () => {
-    const form = { name: " 后门 ", ip: "10.0.0.5", protocol: "http" as const, host: "", port: 80, path: "video.mjpg", username: "", password: "", pose: POSE, climb_lines: [] };
+    const form = { name: " 后门 ", ip: "10.0.0.5", ingest: "pull" as const, protocol: "http" as const, host: "", port: 80, path: "video.mjpg", username: "", password: "", pose: POSE, climb_lines: [] };
     expect(body(form)).toEqual({
       name: "后门",
       ip: "10.0.0.5",
@@ -78,6 +78,12 @@ describe("添加与编辑（04 §7.4）", () => {
       pose: POSE,
       climb_lines: [],
     });
+  });
+
+  it("推流：不带拉流地址与凭据；列表显示推流地址与用户名（FR-907）", () => {
+    const form = { name: "手机", ip: "10.0.0.6", ingest: "push" as const, protocol: "rtsp" as const, host: "x", port: 554, path: "p", username: "u", password: "pw", pose: POSE, climb_lines: [] };
+    expect(body(form)).toEqual({ name: "手机", ip: "10.0.0.6", ingest: "push", source: null, username: null, pose: POSE, climb_lines: [] });
+    expect(address({ ...CAM, ingest: "push", source: null })).toBe(`推流地址 rtsp://${location.hostname}:8554/cam-03 · 用户 hyd`);
   });
 
   it("编辑时取一帧预览；在预览上点两点画警戒线，按画面原始尺寸换算（V-CAM4、V-CAM7）", async () => {
