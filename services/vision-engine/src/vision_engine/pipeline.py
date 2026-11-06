@@ -98,15 +98,18 @@ class FrameReader(threading.Thread):
         self._lock = threading.Lock()
         self._latest: tuple[int, np.ndarray] | None = None
         self._stopping = threading.Event()  # 摄像头从登记表删除或参数变化时停止（D-101）
+        self._beat_lock = threading.Lock()  # stop 返回后不会再有登记
 
     def stop(self) -> None:
-        """至迟在当前读帧调用超时（TIMEOUT_MS）后退出。"""
-        self._stopping.set()
+        """至迟在当前读帧调用超时（TIMEOUT_MS）后退出；返回后不再登记心跳。"""
+        with self._beat_lock:
+            self._stopping.set()
 
     def _alive(self) -> None:
         """停止后不再登记：否则读完正在进行的一帧后，已移除的健康登记被写回，10 s 后整个进程被判停滞。"""
-        if not self._stopping.is_set():
-            self._beat()
+        with self._beat_lock:
+            if not self._stopping.is_set():
+                self._beat()
 
     def latest(self) -> tuple[int, np.ndarray] | None:
         """(序号, 帧)；序号不变表示没有新帧（如断流期间）。"""
@@ -566,11 +569,11 @@ class Cameras:
             task.cancel()
         await asyncio.gather(*running.tasks, return_exceptions=True)
         running.reader.stop()
-        # 等读帧线程退出后再移除健康登记（至多一次建连与一次读帧的超时）
+        # 先移除健康登记再等读帧线程退出：等待至多 STOP_WAIT_S，超过停滞阈值；stop 返回后线程不再登记
+        self._health.forget(f"{camera_id}/")
         await asyncio.to_thread(running.reader.join, STOP_WAIT_S)
         if running.reader.is_alive():
             log.warning("vision.reader_stop_slow", extra={"camera_id": camera_id})
-        self._health.forget(f"{camera_id}/")
 
 
 async def serve(config: VisionConfig) -> None:

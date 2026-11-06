@@ -714,6 +714,37 @@ def test_cameras_follow_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert not any(name.startswith("cam-02/") for name in health._beats)
 
 
+def test_stopping_forgets_heartbeat_before_waiting_for_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """复核建议：读帧线程卡住时至多等 STOP_WAIT_S，超过停滞阈值；须先移除该路的健康登记再等，
+    否则等待期间整个进程被判停滞。"""
+    health = Health(tmp_path / "alive")
+    during_join: list[list[str]] = []
+
+    class StuckReader(FakeReaderThread):
+        def join(self, timeout: float | None = None) -> None:
+            during_join.append([n for n in health._beats if n.startswith("cam-02/")])
+
+    async def idle(*_: object) -> None:
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(pipeline_module, "FrameReader", StuckReader)
+    monkeypatch.setattr(pipeline_module, "run_camera", idle)
+    config = cast(pipeline_module.VisionConfig, SimpleNamespace(go2rtc_rtsp="rtsp://go2rtc:8554"))
+    cameras = pipeline_module.Cameras(
+        config, cast(PoseDetector, FakeDetector()), None, None, None, cast(Bus, None), health
+    )
+
+    async def scenario() -> None:
+        await cameras.apply(registry(cam("cam-01"), cam("cam-02")))
+        health.beat("cam-02/reader")
+        await cameras.apply(registry(cam("cam-01")))
+
+    asyncio.run(scenario())
+    assert during_join == [[]]
+
+
 def test_removed_camera_does_not_leave_stale_heartbeat(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
