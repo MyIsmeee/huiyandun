@@ -57,7 +57,7 @@ class ExecutorConfig(ServiceConfig):
         description="向 privileged-helper 签名指令的 Ed25519 私钥（PEM，D-074）",
     )
     ttl_override_s: int | None = Field(
-        None, ge=1, le=86400, description="覆盖全部 Playbook 的 TTL，主剧本为 150（FR-404）"
+        None, ge=1, le=86400, description="覆盖全部 Playbook 的 TTL，如演示时缩短封禁时长（FR-404）"
     )
     heartbeat_file: Path = Field(
         Path("/tmp/hyd-playbook-alive"), description="事件循环每秒更新其修改时间，供健康检查判断"

@@ -50,7 +50,7 @@ class Executor:
         self._mode = mode
         self._whitelist = whitelist
         self._publish = publish
-        self._ttl_override = ttl_override_s  # 主剧本覆盖为 150 s（FR-404）
+        self._ttl_override = ttl_override_s  # 演示时可缩短封禁时长（FR-404）
         self._executions: dict[str, PlaybookExecutionV1] = {}
         self._active: set[str] = set()  # 执行中或已生效的目标，同一目标互斥（C-BE-04）
         self._tasks: dict[str, asyncio.Task[None]] = {}
