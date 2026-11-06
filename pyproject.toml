@@ -7,6 +7,7 @@ requires-python = "==3.12.*"
 dev = [
     "datamodel-code-generator",
     "httpx2",
+    "import-linter>=2.15,<3",  # CI-06 模块依赖边界（D-01～D-05、C-LLM-01）
     "pip-licenses",
     "pre-commit",
     "pre-commit-hooks",
@@ -31,6 +32,74 @@ override-dependencies = [
 
 [tool.uv.workspace]
 members = ["services/*", "libs/*"]
+
+# CI-06（HYD-PROC-002 §4.1）：模块依赖边界，G-03 的机械保障
+[tool.importlinter]
+root_packages = [
+    "api_server",
+    "audit_service",
+    "correlator",
+    "evidence_service",
+    "llm_gateway",
+    "playbook_executor",
+    "privileged_helper",
+    "vision_engine",
+    "py_common",
+    "py_contracts",
+    "evidence_verify",
+]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "服务之间只经事件总线或 HTTP 通信，不互相 import（D-01、D-04、D-05）"
+type = "independence"
+modules = [
+    "api_server",
+    "audit_service",
+    "correlator",
+    "evidence_service",
+    "llm_gateway",
+    "playbook_executor",
+    "privileged_helper",
+    "vision_engine",
+]
+# 已有的共享代码：签名指令格式由 privileged-helper 定义、执行器按它签名（D-074）；
+# 审计封存与 api-server 共用审计表定义与数据库连接（G-13）
+ignore_imports = [
+    "playbook_executor.nftables -> privileged_helper.protocol",
+    "audit_service.cli -> api_server.config",
+    "audit_service.cli -> api_server.db",
+    "audit_service.seal -> api_server.audit",
+]
+
+[[tool.importlinter.contracts]]
+name = "只有 llm-gateway 使用 openai 客户端（C-LLM-01）"
+type = "forbidden"
+source_modules = [
+    "api_server",
+    "audit_service",
+    "correlator",
+    "evidence_service",
+    "playbook_executor",
+    "privileged_helper",
+    "vision_engine",
+    "py_common",
+    "py_contracts",
+    "evidence_verify",
+]
+forbidden_modules = ["openai"]
+
+[[tool.importlinter.contracts]]
+name = "处置链路不引用任何 LLM 客户端（G-03、D-01）"
+type = "forbidden"
+source_modules = ["playbook_executor", "privileged_helper"]
+forbidden_modules = ["openai", "llm_gateway", "httpx2"]
+
+[[tool.importlinter.contracts]]
+name = "vision-engine 只发事件，不写业务库（D-03）"
+type = "forbidden"
+source_modules = ["vision_engine"]
+forbidden_modules = ["sqlalchemy", "asyncpg"]
 
 [tool.pytest.ini_options]
 markers = ["ci11: 公网供应商默认状态与网络位置判定，由 CI-11 单独运行（G-02、C-LLM-13）"]
