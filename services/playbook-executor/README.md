@@ -11,7 +11,7 @@
 
 ## 配置项
 
-见 `src/playbook_executor/service.py` 的 `ExecutorConfig`，环境变量前缀 `HYD_`。`HYD_TTL_OVERRIDE_S` 覆盖全部 Playbook 的 TTL，主剧本为 150（FR-404）。
+见 `src/playbook_executor/service.py` 的 `ExecutorConfig`，环境变量前缀 `HYD_`。`HYD_TTL_OVERRIDE_S` 覆盖全部 Playbook 的 TTL，如演示时缩短封禁时长（FR-404）；未设置时取 Playbook 的 `ttl_s`。
 
 ## 测试
 

@@ -150,7 +150,7 @@ def test_still_history_scores_zero() -> None:
 
 
 def test_replay_detected_after_freeze_in_history() -> None:
-    """主剧本顺序：冻结 40 s、恢复，之后重放冻结之前的片段，仍须检出（复核阻断 1）。"""
+    """演示顺序：冻结 40 s、恢复，之后重放冻结之前的片段，仍须检出（复核阻断 1）。"""
     live = scene(100).astype(np.float32)
     f = SAMPLE_FPS
     history = np.vstack([live[: 80 * f], frozen(live[80 * f - 1], 40), live[80 * f :]])
