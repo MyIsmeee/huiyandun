@@ -30,7 +30,7 @@ export function DevicePicker(props: { cameras: Camera[]; view: View; onFocus?: (
         onClick={() => select(id)}
         onDoubleClick={() => onFocus?.(id)}
         style={{ left, top, width: size, height: size }}
-        className="absolute -translate-1/2 rounded-full outline-offset-2 hover:ring-2 hover:ring-fg/40 focus-visible:outline-2 focus-visible:outline-fg aria-pressed:ring-2 aria-pressed:ring-fg/40"
+        className="absolute -translate-1/2 rounded-full outline-offset-2 hover:ring-2 hover:ring-foreground/40 focus-visible:outline-2 focus-visible:outline-foreground aria-pressed:ring-2 aria-pressed:ring-foreground/40"
       />
     );
   });

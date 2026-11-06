@@ -58,17 +58,6 @@
   --color-cyber: #d03b3b;
   --color-contained: #0ca30c;
   --color-uncertain: #898781;
-  /* TODO(#230): 旧令牌名，TK-133、TK-136 逐个组件改用上面的名称后删除 */
-  --color-page: var(--background);
-  --color-panel: var(--card);
-  --color-raised: var(--secondary);
-  --color-grid: rgb(255 255 255 / 0.05);
-  --color-fg: var(--foreground);
-  --color-fg-2: var(--muted-foreground);
-  --color-fg-3: var(--subtle-foreground);
-  --color-line: var(--border);
-  --color-ground: #17171a;
-  --color-idle: var(--subtle-foreground);
   /* §3.5 圆角：面板 8、控件 6、徽标 4 */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -111,7 +100,7 @@
 
 /* 静态点阵底纹（登录页），不动 */
 @utility bg-dots {
-  background-image: radial-gradient(var(--color-grid) 1px, transparent 1px);
+  background-image: radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 

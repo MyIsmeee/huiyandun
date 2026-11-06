@@ -39,12 +39,12 @@ export function LlmStatusBadgeView(props: { load: LlmStatusLoad }) {
   if (load.status !== "ready")
     view =
       load.status === "loading"
-        ? [LoaderCircle, "模型状态…", "border-line text-fg-3"]
+        ? [LoaderCircle, "模型状态…", "border-border text-subtle-foreground"]
         : [CircleHelp, "模型状态未知", "border-dashed border-uncertain text-uncertain"];
-  else if (load.data.state === "normal") view = [Bot, `模型：${load.data.provider_name}`, "border-line text-fg-2"];
+  else if (load.data.state === "normal") view = [Bot, `模型：${load.data.provider_name}`, "border-border text-muted-foreground"];
   else if (load.data.state === "failover")
-    view = [ArrowRightLeft, `已切换至 ${load.data.provider_name}`, "border-dashed border-fg-3 text-fg"];
-  else view = [FileText, "模板模式", "border-dashed border-fg-3 text-fg", load.data.reason ?? undefined];
+    view = [ArrowRightLeft, `已切换至 ${load.data.provider_name}`, "border-dashed border-subtle-foreground text-foreground"];
+  else view = [FileText, "模板模式", "border-dashed border-subtle-foreground text-foreground", load.data.reason ?? undefined];
   const [Icon, text, style, title] = view;
   return (
     <p

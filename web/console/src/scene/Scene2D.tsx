@@ -24,8 +24,8 @@ export function Scene2D({ site, cameras, view }: { site: Site; cameras: Camera[]
   return (
     <svg aria-hidden className="absolute inset-0 size-full">
       <g transform={view.transform}>
-        <rect x={x0} y={y0} width={GROUND_M} height={GROUND_M} className="fill-ground" />
-        <path d={grid.join("")} vectorEffect="non-scaling-stroke" className="fill-none stroke-grid" />
+        <rect x={x0} y={y0} width={GROUND_M} height={GROUND_M} className="fill-card" />
+        <path d={grid.join("")} vectorEffect="non-scaling-stroke" className="fill-none stroke-accent" />
         {scenes.map(({ frame, stale }) => (
           <g key={frame.camera_id} opacity={stale ? STALE_OPACITY : 1}>
             <TopDown frame={frame} palette={palette} />
@@ -48,7 +48,7 @@ function TopDown({ frame, palette }: { frame: SceneFrame; palette: Palette }) {
       ))}
       {frame.walls.map((w, i) => (
         <g key={`w${i}`} fill="none" strokeLinejoin="round">
-          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M + EDGE_M * 2} className="stroke-grid" />
+          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M + EDGE_M * 2} className="stroke-accent" />
           <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M} stroke={w.class === "board" ? palette.board : palette.facade} />
         </g>
       ))}
@@ -58,11 +58,11 @@ function TopDown({ frame, palette }: { frame: SceneFrame; palette: Palette }) {
           points={points(o.polygon)}
           fill={isFurniture(o.class) ? palette.furniture : palette.facade}
           strokeWidth={EDGE_M}
-          className="stroke-grid"
+          className="stroke-accent"
         />
       ))}
       {frame.trees.map((t, i) => (
-        <circle key={`t${i}`} cx={t.x} cy={t.y} r={t.height_m * CROWN_RATIO} fill={palette.canopy} strokeWidth={EDGE_M} className="stroke-grid" />
+        <circle key={`t${i}`} cx={t.x} cy={t.y} r={t.height_m * CROWN_RATIO} fill={palette.canopy} strokeWidth={EDGE_M} className="stroke-accent" />
       ))}
     </>
   );

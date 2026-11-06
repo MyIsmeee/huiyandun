@@ -1,4 +1,7 @@
 import { CircleAlert, Eraser, X } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { type MouseEvent, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -24,8 +27,9 @@ const POSE_FIELDS: [key: keyof Pose, label: string, unit: string][] = [
   ["range_m", "可视距离", "m"],
 ];
 const DEFAULT_POSE: Pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
-const button = "h-9 rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40";
-const field = "h-9 min-w-0 rounded-lg border border-line bg-page px-3";
+const button = buttonVariants({ variant: "outline", size: "sm" });
+/** 原生下拉框：与 Input 同样式（04 §3.6） */
+const field = "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 export type CameraForm = {
   name: string;
@@ -140,26 +144,27 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
   }
 
   return (
-    <div role="dialog" aria-label={saved ? "编辑摄像头" : "添加摄像头"} className="fixed inset-0 z-20 grid place-items-center bg-page/70 p-4 backdrop-blur-sm">
+    <Dialog open onOpenChange={(open) => !open && props.onClose()}>
+      <DialogContent aria-describedby={undefined} showCloseButton={false} className="max-h-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-3xl">
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void save();
         }}
-        className="flex max-h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto rounded-2xl border border-line bg-panel p-6 text-sm"
+        className="flex flex-col gap-4 p-6 text-sm"
       >
         <header className="flex items-center justify-between">
-          <h2 className="text-base font-semibold">{saved ? `编辑摄像头 ${saved.id}` : "添加摄像头"}</h2>
-          <button type="button" aria-label="关闭" onClick={props.onClose} className="grid size-8 place-items-center rounded-full hover:bg-raised">
+          <DialogTitle className="text-base font-medium">{saved ? `编辑摄像头 ${saved.id}` : "添加摄像头"}</DialogTitle>
+          <button type="button" aria-label="关闭" onClick={props.onClose} className="grid size-8 place-items-center rounded-full hover:bg-secondary">
             <X aria-hidden className="size-4" />
           </button>
         </header>
 
         <div className="grid grid-cols-[6rem_minmax(0,1fr)_6rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
           <label htmlFor="cam-name">名称</label>
-          <input id="cam-name" required maxLength={40} className={field} value={form.name} onChange={(e) => set({ name: e.target.value })} />
+          <Input id="cam-name" required maxLength={40} value={form.name} onChange={(e) => set({ name: e.target.value })} />
           <label htmlFor="cam-ip">设备 IP</label>
-          <input id="cam-ip" required placeholder="192.168.8.31" className={field} value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
+          <Input id="cam-ip" required placeholder="192.168.8.31" value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
           <span>接入方式</span>
           <div role="radiogroup" aria-label="接入方式" className="col-span-3 flex gap-4">
             {(
@@ -195,27 +200,26 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             ))}
           </select>
           <label htmlFor="cam-port">端口</label>
-          <input id="cam-port" type="number" min={1} max={65535} required className={field} value={form.port} onChange={(e) => set({ port: Number(e.target.value) })} />
+          <Input id="cam-port" type="number" min={1} max={65535} required value={form.port} onChange={(e) => set({ port: Number(e.target.value) })} />
           <label htmlFor="cam-host">主机</label>
-          <input id="cam-host" placeholder="留空即设备 IP" className={field} value={form.host} onChange={(e) => set({ host: e.target.value })} />
+          <Input id="cam-host" placeholder="留空即设备 IP" value={form.host} onChange={(e) => set({ host: e.target.value })} />
           <label htmlFor="cam-path">流路径</label>
-          <input
+          <Input
             id="cam-path"
             disabled={form.protocol === "onvif"}
             placeholder={form.protocol === "onvif" ? "ONVIF 自动获取" : "/Streaming/Channels/101"}
-            className={field}
+           
             value={form.path}
             onChange={(e) => set({ path: e.target.value })}
           />
           <label htmlFor="cam-user">用户名</label>
-          <input id="cam-user" autoComplete="off" className={field} value={form.username} onChange={(e) => set({ username: e.target.value })} />
+          <Input id="cam-user" autoComplete="off" value={form.username} onChange={(e) => set({ username: e.target.value })} />
           <label htmlFor="cam-pass">口令</label>
-          <input
+          <Input
             id="cam-pass"
             type="password"
             autoComplete="new-password"
             placeholder={saved?.password_set ? "已设置，留空不修改" : "可选"}
-            className={field}
             value={form.password}
             onChange={(e) => set({ password: e.target.value })}
           />
@@ -223,9 +227,9 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           )}
         </div>
 
-        <fieldset className="flex flex-col gap-2 border-t border-line pt-3">
-          <legend className="pr-2 font-semibold">安装参数</legend>
-          <p className="text-xs text-fg-3">朝向自平面 x 轴正方向逆时针计；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。</p>
+        <fieldset className="flex flex-col gap-2 border-t border-border pt-3">
+          <legend className="pr-2 font-medium">安装参数</legend>
+          <p className="text-xs text-subtle-foreground">朝向自平面 x 轴正方向逆时针计；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。</p>
           <div className="grid grid-cols-4 gap-x-3 gap-y-2">
             {POSE_FIELDS.map(([key, label, unit]) => (
               <label key={key} className="flex items-center gap-2">
@@ -239,18 +243,18 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
                   value={form.pose[key]}
                   onChange={(e) => set({ pose: { ...form.pose, [key]: Number(e.target.value) } })}
                 />
-                <span className="text-fg-3">{unit}</span>
+                <span className="text-subtle-foreground">{unit}</span>
               </label>
             ))}
           </div>
         </fieldset>
 
-        <section aria-label="预览" className="flex flex-col gap-2 border-t border-line pt-3">
+        <section aria-label="预览" className="flex flex-col gap-2 border-t border-border pt-3">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold">预览与攀爬警戒线</h3>
-            <span className="text-xs text-fg-3">在画面上沿墙顶或栏杆顶点两点画线；共 {form.climb_lines.length} 条</span>
+            <h3 className="font-medium">预览与攀爬警戒线</h3>
+            <span className="text-xs text-subtle-foreground">在画面上沿墙顶或栏杆顶点两点画线；共 {form.climb_lines.length} 条</span>
             {form.climb_lines.length > 0 && (
-              <button type="button" onClick={() => set({ climb_lines: [] })} className="ml-auto flex items-center gap-1 text-xs text-fg-2 hover:text-fg">
+              <button type="button" onClick={() => set({ climb_lines: [] })} className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                 <Eraser aria-hidden className="size-3.5" />
                 清除
               </button>
@@ -269,19 +273,20 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           <button type="button" onClick={props.onClose} className={button}>
             关闭
           </button>
-          <button type="submit" disabled={pending} className={`${button} bg-fg font-semibold text-page hover:bg-fg`}>
+          <button type="submit" disabled={pending} className={buttonVariants({ size: "sm" })}>
             {pending ? "保存中…" : "保存"}
           </button>
         </footer>
       </form>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /** 推流地址、用户名与口令（FR-907、V-CAM2）：口令只在保存为推流后显示一次 */
 function PushInfo({ id, password }: { id: string | null; password: string | null }) {
   return (
-    <dl className="col-span-4 grid grid-cols-[6rem_minmax(0,1fr)] gap-y-1 rounded-lg border border-line p-3">
+    <dl className="col-span-4 grid grid-cols-[6rem_minmax(0,1fr)] gap-y-1 rounded-lg border border-border p-3">
       <dt>推流地址</dt>
       <dd className="font-mono break-all">{id ? pushUrl(id) : "保存后显示（路径为摄像头编号）"}</dd>
       <dt>用户名</dt>
@@ -306,7 +311,7 @@ function SnapshotView(props: {
       loading: "正在取画面…",
       failed: snapshot.status === "failed" ? `取不到画面：${snapshot.message}` : "",
     }[snapshot.status];
-    return <p className="grid aspect-video place-items-center rounded-xl border border-dashed border-line text-fg-3">{text}</p>;
+    return <p className="grid aspect-video place-items-center rounded-lg border border-dashed border-border text-subtle-foreground">{text}</p>;
   }
   return (
     <div className="relative">
@@ -315,7 +320,7 @@ function SnapshotView(props: {
         alt="摄像头画面预览"
         onLoad={(e) => setSize([e.currentTarget.naturalWidth, e.currentTarget.naturalHeight])}
         onClick={props.onClick}
-        className="w-full cursor-crosshair rounded-xl"
+        className="w-full cursor-crosshair rounded-lg"
       />
       {size && (
         <svg aria-hidden viewBox={`0 0 ${size[0]} ${size[1]}`} className="pointer-events-none absolute inset-0 size-full">

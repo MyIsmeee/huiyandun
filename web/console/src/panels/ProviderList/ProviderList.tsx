@@ -1,4 +1,11 @@
 import { ArrowLeft, Check, Circle, CircleAlert, CircleDot, Clock, Globe, GripVertical, House, Minus, Plus, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { buttonVariants } from "@/components/ui/button";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -14,7 +21,7 @@ export type Confirm = { kind: "enable" | "delete"; provider: Provider };
 const errorMessage = (e: unknown) => (e instanceof ApiError ? e.message : "无法连接服务器，请重试");
 const host = (url: string) => (URL.canParse(url) ? new URL(url).host : url);
 const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
-const button = "h-8 rounded-full border border-line px-3 transition-colors hover:bg-raised disabled:opacity-40";
+const button = buttonVariants({ variant: "outline", size: "sm" });
 
 /**
  * 模型供应商页（04 §7.1），只对 admin 渲染入口（C-FE-07）。每次变更后重新读取列表：
@@ -119,13 +126,13 @@ export function ProviderListView(props: {
 }) {
   const { load, busy, notice, confirm } = props;
   return (
-    <section aria-label="模型供应商" className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6 text-sm">
+    <section aria-label="模型供应商" className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-6 py-8 text-sm">
       <header className="flex items-center gap-3">
         <button type="button" onClick={props.onClose} className={`${button} flex items-center gap-1`}>
           <ArrowLeft aria-hidden className="size-4" />
           返回
         </button>
-        <h1 className="text-base font-semibold">模型供应商</h1>
+        <h1 className="text-xl font-semibold">模型供应商</h1>
         {load.status === "ready" && (
           <Switch
             label="禁止公网供应商"
@@ -136,14 +143,14 @@ export function ProviderListView(props: {
             className="ml-auto"
           />
         )}
-        <button type="button" onClick={props.onAdd} className={`${button} flex items-center gap-1`}>
+        <button type="button" onClick={props.onAdd} className={buttonVariants({ size: "sm" })}>
           <Plus aria-hidden className="size-4" />
           添加
         </button>
       </header>
-      <p className="text-fg-2">按顺序调用，前一个失败自动使用下一个。拖动 ⠿ 调整顺序。</p>
+      <p className="text-muted-foreground">按顺序调用，前一个失败自动使用下一个。拖动 ⠿ 调整顺序。</p>
       {notice && <Notice>{notice}</Notice>}
-      {load.status === "loading" && <p className="text-fg-3">读取中…</p>}
+      {load.status === "loading" && <p className="text-subtle-foreground">读取中…</p>}
       {load.status === "failed" && (
         <>
           <Notice>{load.message}</Notice>
@@ -154,28 +161,26 @@ export function ProviderListView(props: {
       )}
       {load.status === "ready" && <Cards {...props} providers={load.providers} blockPublic={load.blockPublic} />}
       {confirm && (
-        <div className="fixed inset-0 grid place-items-center bg-page/60">
-          <div
-            role="dialog"
-            aria-modal
-            aria-label={confirm.kind === "enable" ? "启用公网供应商" : "删除供应商"}
-            className="flex w-96 flex-col gap-4 rounded-2xl border border-line bg-panel p-4"
-          >
-            <p>
+        <AlertDialog open onOpenChange={(open) => !open && props.onCancel()}>
+          <AlertDialogContent role="dialog" className="sm:max-w-md">
+            <AlertDialogTitle className="text-base font-medium">
+              {confirm.kind === "enable" ? "启用公网供应商" : "删除供应商"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
               {confirm.kind === "enable"
                 ? `启用公网供应商“${confirm.provider.name}”？日志与告警内容将脱敏后发送至 ${host(confirm.provider.base_url)}；视频、图片、流量包不会发送。`
                 : `删除供应商“${confirm.provider.name}”？`}
-            </p>
+            </AlertDialogDescription>
             <p className="flex justify-end gap-2">
               <button type="button" onClick={props.onCancel} className={button}>
                 取消
               </button>
-              <button type="button" onClick={() => props.onConfirm(confirm)} className={button}>
+              <button type="button" onClick={() => props.onConfirm(confirm)} className={buttonVariants({ size: "sm" })}>
                 {confirm.kind === "enable" ? "确认启用" : "确认删除"}
               </button>
             </p>
-          </div>
-        </div>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
       {props.editor}
     </section>
@@ -201,7 +206,7 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
 
   return (
     <ol aria-label="供应商" className="flex flex-col gap-2">
-      {providers.length === 0 && <li className="text-fg-3">尚未添加供应商，报告使用规则模板生成</li>}
+      {providers.length === 0 && <li className="text-subtle-foreground">尚未添加供应商，报告使用规则模板生成</li>}
       {providers.map((p, i) => {
         const blocked = blockPublic && p.network === "public";
         return (
@@ -211,15 +216,15 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
             onDragStart={() => setDragged(p.id)}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => drop(p.id)}
-            className={`flex flex-col gap-1 rounded-xl border border-line bg-panel p-3 ${blocked ? "opacity-50" : ""}`}
+            className={`flex flex-col gap-1 rounded-lg border border-border bg-card p-3 ${blocked ? "opacity-50" : ""}`}
           >
             <div className="flex items-center gap-2">
-              <GripVertical aria-hidden className="size-4 shrink-0 cursor-grab text-fg-3" />
-              <span className="w-4 tabular-nums text-fg-3">{i + 1}</span>
+              <GripVertical aria-hidden className="size-4 shrink-0 cursor-grab text-subtle-foreground" />
+              <span className="w-4 tabular-nums text-subtle-foreground">{i + 1}</span>
               <span className="min-w-0 truncate font-medium" title={p.name}>
                 {p.name}
               </span>
-              <span className="flex shrink-0 items-center gap-1 rounded-full border border-line px-2 text-xs text-fg-2">
+              <span className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs text-muted-foreground">
                 {p.network === "public" ? <Globe aria-hidden className="size-3" /> : <House aria-hidden className="size-3" />}
                 {p.network === "public" ? "公网" : "内网"}
                 {p.network_overridden && "（手动）"}
@@ -233,11 +238,11 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
                 onClick={() => props.onToggle(p)}
               />
             </div>
-            <p className="truncate pl-10 text-fg-2" title={p.base_url}>
+            <p className="truncate pl-10 text-muted-foreground" title={p.base_url}>
               {p.base_url} · {p.model}
               {p.api_key_last4 && ` · Key ••••${p.api_key_last4}`}
             </p>
-            <div className="flex flex-wrap items-center gap-2 pl-10 text-fg-2">
+            <div className="flex flex-wrap items-center gap-2 pl-10 text-muted-foreground">
               <span className="tabular-nums">
                 今日 {p.usage_today.calls} 次 · {tokens(p.usage_today.tokens)} tokens
                 {p.structured_output && ` · 结构化输出 ${p.structured_output === "none" ? "无" : p.structured_output}`}
@@ -263,10 +268,10 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
           </li>
         );
       })}
-      <li className="flex items-center gap-2 rounded-xl border border-dashed border-line p-3 text-fg-2">
-        <span className="font-medium text-fg">兜底</span>
+      <li className="flex items-center gap-2 rounded-lg border border-dashed border-border p-3 text-muted-foreground">
+        <span className="font-medium text-foreground">兜底</span>
         规则模板报告
-        <span className="ml-auto text-fg-3">始终可用，不可删除、不可移动</span>
+        <span className="ml-auto text-subtle-foreground">始终可用，不可删除、不可移动</span>
       </li>
     </ol>
   );
@@ -281,7 +286,7 @@ function Health(props: { provider: Provider }) {
   const style = "ml-auto flex shrink-0 items-center gap-1 tabular-nums";
   if (!test)
     return (
-      <span className={`${style} text-fg-3`}>
+      <span className={`${style} text-subtle-foreground`}>
         <Minus aria-hidden className="size-4" />
         未测试
       </span>
@@ -334,7 +339,7 @@ function Switch(props: {
 
 function Notice(props: { children: ReactNode }) {
   return (
-    <p role="alert" className="flex items-start gap-1 text-fg-2">
+    <p role="alert" className="flex items-start gap-1 text-muted-foreground">
       <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
       <span className="min-w-0">{props.children}</span>
     </p>

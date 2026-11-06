@@ -17,10 +17,10 @@ function useNow(intervalMs: number): number {
 
 // 不使用 §3.2 状态色（V-S2）：延迟用"不确定 / 非实时"样式，断线以反色突出（V-U3 顶栏转告警态）
 const STYLE: Record<Freshness, string> = {
-  connecting: "border-line text-fg-3",
-  live: "border-line text-fg-2",
+  connecting: "border-border text-subtle-foreground",
+  live: "border-border text-muted-foreground",
   delayed: "border-dashed border-uncertain text-uncertain",
-  offline: "border-fg bg-fg text-page",
+  offline: "border-foreground bg-foreground text-background",
 };
 
 /** 连接与数据新鲜度（HYD-UIX-004 §8），常驻顶栏不可隐藏（§4.1 A 区）；以图标与文字区分状态（V-S3） */

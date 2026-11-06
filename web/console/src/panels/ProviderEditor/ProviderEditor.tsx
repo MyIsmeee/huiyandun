@@ -1,4 +1,7 @@
 import { Check, CircleAlert, X } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -33,8 +36,9 @@ const PRESETS: Record<Preset, [label: string, url: string]> = {
 };
 const CHECKS = { connectivity: "连通", model: "模型存在", structured_output: "结构化输出" } as const;
 const LOOPBACK = /^\s*https?:\/\/(127\.|localhost(?=[:/]|\s*$)|\[::1\])/i;
-const button = "h-9 rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40";
-const field = "h-9 min-w-0 rounded-lg border border-line bg-page px-3";
+const button = buttonVariants({ variant: "outline", size: "sm" });
+/** 原生下拉框：与 Input 同样式（04 §3.6） */
+const field = "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 const initialForm = (p: Provider | null): EditorForm => ({
   preset: p?.preset ?? "llama_cpp",
@@ -154,18 +158,16 @@ export function ProviderEditorView(props: {
   const incomplete = !form.name.trim() || !form.base_url.trim() || !form.model.trim() || !(Number.isInteger(form.timeout_s) && form.timeout_s >= 1);
   const network = provider && (provider.network === "internal" ? "内网" : "公网");
   return (
-    <div className="fixed inset-0 z-10 grid place-items-center overflow-auto bg-page/60 p-4">
+    <Dialog open onOpenChange={(open) => !open && props.onClose()}>
+      <DialogContent aria-describedby={undefined} showCloseButton={false} className="max-h-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-[34rem]">
       <form
-        role="dialog"
-        aria-modal
-        aria-label={provider ? "编辑供应商" : "添加供应商"}
         onSubmit={(e) => {
           e.preventDefault();
           props.onSave();
         }}
-        className="flex w-[34rem] max-w-full flex-col gap-3 rounded-2xl border border-line bg-panel p-4 text-sm"
+        className="flex flex-col gap-3 p-5 text-sm"
       >
-        <h2 className="font-semibold">{provider ? "编辑供应商" : "添加供应商"}</h2>
+        <DialogTitle className="text-base font-medium">{provider ? "编辑供应商" : "添加供应商"}</DialogTitle>
         <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
           <label className="contents">
             预设
@@ -179,26 +181,25 @@ export function ProviderEditorView(props: {
           </label>
           <label className="contents">
             名称
-            <input value={form.name} onChange={(e) => onChange({ name: e.target.value })} className={field} />
+            <Input value={form.name} onChange={(e) => onChange({ name: e.target.value })} />
           </label>
           <label className="contents">
             地址
-            <input value={form.base_url} onChange={(e) => onChange({ base_url: e.target.value })} className={field} />
+            <Input value={form.base_url} onChange={(e) => onChange({ base_url: e.target.value })} />
           </label>
           {LOOPBACK.test(form.base_url) && (
-            <p role="alert" className="col-start-2 text-fg-2">
+            <p role="alert" className="col-start-2 text-muted-foreground">
               容器内 127.0.0.1、localhost 指向网关自身：改填模型服务所在主机的局域网 IP，如 http://192.168.1.50:8080/v1（DP-07）
             </p>
           )}
           <label className="contents">
             API Key
-            <input
+            <Input
               type="password"
               autoComplete="off"
               value={form.api_key}
               placeholder={provider?.api_key_last4 ? `已保存 ••••${provider.api_key_last4}，留空不修改` : "可选"}
               onChange={(e) => onChange({ api_key: e.target.value })}
-              className={field}
             />
           </label>
           {/* 按钮不放进 label，否则成为输入框名称的一部分 */}
@@ -249,7 +250,7 @@ export function ProviderEditorView(props: {
         </div>
         {result && <Result result={result} onChange={onChange} />}
         {props.message && (
-          <p role="alert" className="flex items-start gap-1 text-fg-2">
+          <p role="alert" className="flex items-start gap-1 text-muted-foreground">
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span className="min-w-0">{props.message}</span>
           </p>
@@ -266,32 +267,33 @@ export function ProviderEditorView(props: {
           <button type="button" onClick={props.onClose} className={button}>
             关闭
           </button>
-          <button type="submit" disabled={pending !== null || incomplete} className={button}>
+          <button type="submit" disabled={pending !== null || incomplete} className={buttonVariants({ size: "sm" })}>
             {pending === "save" ? "保存中…" : "保存"}
           </button>
         </p>
       </form>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /** 分项结果与改法（V-M4）；建议地址与候选模型由管理员一键采用，不静默改写（D-084） */
 function Result(props: { result: TestResult; onChange: (patch: Partial<EditorForm>) => void }) {
   const { checks, suggested_base_url: url, suggested_models: candidates } = props.result;
-  const link = "underline underline-offset-4 hover:text-fg";
+  const link = "underline underline-offset-4 hover:text-foreground";
   return (
-    <section aria-label="测试结果" className="flex flex-col gap-1.5 rounded-xl border border-line p-3">
+    <section aria-label="测试结果" className="flex flex-col gap-1.5 rounded-lg border border-border p-3">
       {checks.map((c) => (
         <p key={c.check} className="flex items-start gap-2">
           {c.ok ? <Check aria-hidden className="mt-0.5 size-4 shrink-0" /> : <X aria-hidden className="mt-0.5 size-4 shrink-0" />}
           <span className="w-20 shrink-0">{CHECKS[c.check]}</span>
-          <span className="min-w-0 text-fg-2">
+          <span className="min-w-0 text-muted-foreground">
             {c.ok ? (c.latency_ms != null ? `${c.latency_ms} ms` : "通过") : [c.reason, c.hint].filter(Boolean).join("；")}
           </span>
         </p>
       ))}
       {url && (
-        <p className="flex flex-wrap gap-x-2 text-fg-2">
+        <p className="flex flex-wrap gap-x-2 text-muted-foreground">
           建议地址 {url}
           <button type="button" onClick={() => props.onChange({ base_url: url })} className={link}>
             采用
@@ -299,7 +301,7 @@ function Result(props: { result: TestResult; onChange: (patch: Partial<EditorFor
         </p>
       )}
       {candidates.length > 0 && (
-        <p className="flex flex-wrap gap-x-2 text-fg-2">
+        <p className="flex flex-wrap gap-x-2 text-muted-foreground">
           改选模型
           {candidates.map((m) => (
             <button key={m} type="button" onClick={() => props.onChange({ model: m })} className={link}>

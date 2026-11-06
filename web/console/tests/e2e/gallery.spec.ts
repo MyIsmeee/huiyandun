@@ -23,6 +23,9 @@ const COMPONENTS = {
   ProviderEditor: ["new", "edit", "saving", "error", "testing", "partial"],
 };
 
+/** 以模态对话框呈现的组件 */
+const DIALOGS = new Set(["ProviderEditor"]);
+
 for (const [component, states] of Object.entries(COMPONENTS)) {
   for (const state of states) {
     test(`${component}：${state}`, async ({ page }) => {
@@ -30,11 +33,13 @@ for (const [component, states] of Object.entries(COMPONENTS)) {
       await page.route("/api/reports/*/export?format=html", (route) =>
         route.fulfill({ contentType: "text/html", body: '<meta charset="utf-8"><h1>溯源报告</h1><p>事实区 · AI 分析区</p>' }),
       );
-      await page.goto(`/tests/e2e/gallery/?component=${component}`);
+      await page.goto(`/tests/e2e/gallery/?component=${component}&state=${state}`);
       // 视频须已有首帧，否则截到空白
       await page.waitForFunction(() => [...document.querySelectorAll("video")].every((v) => v.readyState >= 2));
 
-      await expect(page.locator(`[data-state="${state}"]`)).toHaveScreenshot(`${component}-${state}.png`);
+      // 编辑对话框经 Radix 渲染到 body（04 §3.6）：截对话框本身
+      const shot = DIALOGS.has(component) ? page.getByRole("dialog") : page.locator(`[data-state="${state}"]`);
+      await expect(shot).toHaveScreenshot(`${component}-${state}.png`);
     });
   }
 }
