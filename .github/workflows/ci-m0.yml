@@ -94,11 +94,7 @@ jobs:
         with:
           version: 0.13.5
       - run: |
-          if [ ! -f .importlinter ] && ! grep -q '^\[tool\.importlinter\]' pyproject.toml; then
-            echo "::notice title=CI-06 跳过::尚未配置 import-linter 契约（D-01～D-05、C-LLM-01），由 #4 接入"
-            exit 0
-          fi
-          uv run lint-imports
+          make lint-imports
 
   ci-07:
     name: CI-07 公网资源扫描

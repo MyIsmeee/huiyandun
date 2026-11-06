@@ -1,14 +1,17 @@
-.PHONY: lint lint-py lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
+.PHONY: lint lint-py lint-imports lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
 	console-ca fetch-models verify-models test-rules llm-check attack attack-slow tamper
 
 WEB = pnpm --dir web/console
 
-lint: lint-py lint-web
+lint: lint-py lint-imports lint-web
 
 lint-py:
 	uv run ruff check .
 	uv run ruff format --check .
-	uv run lint-imports  # CI-06 模块依赖边界
+
+# CI-06 模块依赖边界（G-03）：只分析源码，经 PYTHONPATH 找到各服务包，不安装服务的运行时依赖
+lint-imports:
+	PYTHONPATH=$$(ls -d services/*/src libs/*/src | paste -sd:) uv run lint-imports
 
 lint-web:
 	$(WEB) exec eslint .
