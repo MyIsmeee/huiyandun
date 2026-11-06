@@ -7,6 +7,7 @@ import { applySite, useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AlertList } from "../AlertList/AlertList";
+import { CameraPage } from "../CameraList/CameraList";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
 import { IncidentTimeline } from "../IncidentTimeline/IncidentTimeline";
@@ -18,7 +19,7 @@ import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 const deselect = () => select(null);
 
 /** 顶栏导航的页面（D-106）：管理页盖在态势之上，场景与推送不中断 */
-type Page = "overview" | "providers";
+type Page = "overview" | "cameras" | "providers";
 
 /**
  * 主界面分区（HYD-UIX-004 §4.1）：位置固定、不可拖拽（V-L1）；场景视口面积占比 ≥ 50%（V-L2）。
@@ -124,6 +125,11 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       </section>
 
       {/* 盖在主界面之上而不替换它：场景与推送保持运行，返回时无需重新加载 */}
+      {admin && page === "cameras" && (
+        <div className="fixed inset-x-0 top-14 bottom-0 z-10 overflow-auto bg-page">
+          <CameraPage onClose={() => setPage("overview")} />
+        </div>
+      )}
       {admin && page === "providers" && (
         <div className="fixed inset-x-0 top-14 bottom-0 z-10 overflow-auto bg-page">
           <ProviderPage onClose={() => setPage("overview")} />
@@ -133,11 +139,11 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   );
 }
 
-/** 顶栏胶囊导航（D-106）："模型供应商"只对 admin 渲染（C-FE-07） */
+/** 顶栏胶囊导航（D-106）："摄像头""模型供应商"只对 admin 渲染（C-FE-07） */
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
   const { page, admin, onChange } = props;
   const items: { page: Page; label: string }[] = [{ page: "overview", label: "态势" }];
-  if (admin) items.push({ page: "providers", label: "模型供应商" });
+  if (admin) items.push({ page: "cameras", label: "摄像头" }, { page: "providers", label: "模型供应商" });
   return (
     <nav aria-label="导航" className="flex items-center gap-1 rounded-full border border-line p-1">
       {items.map((item) => (
