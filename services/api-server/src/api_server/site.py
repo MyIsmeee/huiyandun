@@ -78,7 +78,7 @@ def _device(camera: dict[str, Any], mode: str) -> dict[str, Any]:
         "state": "normal",
         "alert_severity": None,
         "camera": {
-            "stream": camera["stream"],
+            "stream": camera["id"],  # 流名即摄像头编号（D-101）
             "pose": camera["pose"],
             "calibration": camera["calibration"] or [],
             "mapping": "calibrated" if calibrated else "estimated",

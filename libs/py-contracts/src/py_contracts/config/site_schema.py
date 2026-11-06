@@ -96,10 +96,6 @@ class CameraConfig(ContractModel):
     显示名称；省略时取 id
     """
     ip: IPv4Address | IPv6Address
-    stream: str
-    """
-    go2rtc 流名
-    """
     source: SourceConfig | None = None
     """
     拉流地址（不含凭据），初始导入摄像头登记表时使用；省略时为推流（D-101）

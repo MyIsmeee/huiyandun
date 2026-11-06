@@ -6,6 +6,9 @@ hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
 
 各路相互隔离（#79）：单路循环异常只重试该路；任一路循环或读帧线程停滞时进程退出，由 Compose 拉起。
+
+摄像头来自 api-server 下发的登记表 hyd.config.cameras.v1（D-101）：新增的启动，删除或参数变化的停止后
+按新参数启动，其余不动。没有 4 组标定点时，取到首帧后按安装参数估算地面映射（D-102）。
 """
 
 import asyncio
@@ -17,22 +20,22 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import cv2
 import nats
 import numpy as np
 import supervision as sv
-import yaml
 from trackers import ByteTrackTracker
 
 from py_common.bus import Bus
 from py_common.config import load_config
 from py_common.log import configure_logging
-from py_contracts.config.site_schema import SiteConfig
+from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
@@ -58,6 +61,7 @@ TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
+REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
 SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
 # 持久化的视觉事件（HYD-PLAN-007 §2）。
 # 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
@@ -69,6 +73,7 @@ INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（HYD-PLAN-007 v1
 TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（HYD-PLAN-007 v1.9）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
+STOP_WAIT_S = 2 * TIMEOUT_MS / 1000 + 1  # 停止一路时等读帧线程退出的上限
 # 检测循环 5 s 取不到新帧即为断流（FR-105 要求 10 s 内）：不依赖读帧线程何时发现连接断开（go2rtc 的源
 # 中断后实测约 15 s 才断开对外连接），推流源切换、重启时的瞬断也不算断流
 STREAM_LOST_S = 5.0
@@ -92,6 +97,19 @@ class FrameReader(threading.Thread):
         self._beat = beat  # 每次建连与每读到一帧登记一次，卡在读帧调用中即停滞（#79）
         self._lock = threading.Lock()
         self._latest: tuple[int, np.ndarray] | None = None
+        self._stopping = threading.Event()  # 摄像头从登记表删除或参数变化时停止（D-101）
+        self._beat_lock = threading.Lock()  # stop 返回后不会再有登记
+
+    def stop(self) -> None:
+        """至迟在当前读帧调用超时（TIMEOUT_MS）后退出；返回后不再登记心跳。"""
+        with self._beat_lock:
+            self._stopping.set()
+
+    def _alive(self) -> None:
+        """停止后不再登记：否则读完正在进行的一帧后，已移除的健康登记被写回，10 s 后整个进程被判停滞。"""
+        with self._beat_lock:
+            if not self._stopping.is_set():
+                self._beat()
 
     def latest(self) -> tuple[int, np.ndarray] | None:
         """(序号, 帧)；序号不变表示没有新帧（如断流期间）。"""
@@ -100,8 +118,8 @@ class FrameReader(threading.Thread):
 
     def run(self) -> None:
         seq, lost = 0, False
-        while True:
-            self._beat()
+        while not self._stopping.is_set():
+            self._alive()
             try:
                 capture = cv2.VideoCapture(
                     self._url,
@@ -114,8 +132,8 @@ class FrameReader(threading.Thread):
                     ],
                 )
                 # 建连与读帧各有 5 s 超时：建连后再登记一次，断流重连的整个周期不超过 STALL_S
-                self._beat()
-                while True:
+                self._alive()
+                while not self._stopping.is_set():
                     ok, frame = capture.read()
                     if not ok:
                         break
@@ -123,18 +141,20 @@ class FrameReader(threading.Thread):
                         log.info("vision.stream_restored", extra={"camera_id": self._camera_id})
                         lost = False
                     seq += 1
-                    self._beat()
+                    self._alive()
                     with self._lock:
                         self._latest = (seq, frame)
                 capture.release()
             except cv2.error:
                 # 解码器异常按断流处理并重连，读帧线程不退出（#79）
                 log.exception("vision.reader_failed", extra={"camera_id": self._camera_id})
+            if self._stopping.is_set():
+                break
             if not lost:
                 # 不静默跳过（C-CV-09）：stream_lost 事件由检测循环按取不到新帧的时长发布（FR-105）
                 log.warning("vision.stream_lost", extra={"camera_id": self._camera_id})
                 lost = True
-            threading.Event().wait(RECONNECT_S)
+            self._stopping.wait(RECONNECT_S)
 
 
 class CameraPipeline:
@@ -148,9 +168,12 @@ class CameraPipeline:
         climb_lines: list[list[float]] | None = None,
         vehicles: VehicleDetector | None = None,
         embedder: FrameEmbedder | None = None,
+        pose: dict[str, Any] | None = None,
     ) -> None:
         self._camera_id = camera_id
         self._mapping = mapping
+        # 没有标定映射时，取到首帧后按安装参数估算（D-102）；估算不成立（如朝向地平线以上）只算一次
+        self._pose = pose if mapping is None else None
         self._detector = detector
         self._vehicles = vehicles  # None 时只检测人员（如关键点录制工具）
         self._behaviors = BehaviorDetector(climb_lines or [])
@@ -254,9 +277,12 @@ class CameraPipeline:
                 else []
             )
         ]
-        if self._mapping is None:
-            return events  # 未标定不输出坐标（FR-902）
         height, width = frame.shape[:2]
+        if self._mapping is None and self._pose is not None:
+            self._mapping = GroundMapping.from_pose(self._pose, width, height)
+            self._pose = None
+        if self._mapping is None:
+            return events  # 没有地面映射不输出坐标（FR-902）
         scale = np.array([width, height], dtype=np.float32)
         targets = [
             (int(i), "person", box, np.column_stack([points / scale, scores]))
@@ -353,6 +379,10 @@ class Health:
     def beat(self, name: str) -> None:
         self._beats[name] = time.monotonic()
 
+    def forget(self, prefix: str) -> None:
+        """停止的摄像头不再参与停滞判断。"""
+        self._beats = {k: v for k, v in self._beats.items() if not k.startswith(prefix)}
+
     def stalled(self) -> list[str]:
         now = time.monotonic()
         return [name for name, t in self._beats.items() if now - t > STALL_S]
@@ -436,6 +466,116 @@ async def run_scene(
         beat()
 
 
+def mapping_of(camera: dict[str, Any], frame: np.ndarray) -> GroundMapping | None:
+    """按标定点拟合；不足 4 组时按安装参数与画面尺寸估算（D-102）。"""
+    mapping = GroundMapping.fit(camera["calibration"])
+    if mapping is None:
+        height, width = frame.shape[:2]
+        mapping = GroundMapping.from_pose(camera["pose"], width, height)
+    return mapping
+
+
+async def run_scene_when_ready(
+    camera: dict[str, Any],
+    segmenter: Segmenter,
+    reader: FrameReader,
+    bus: Bus,
+    beat: Callable[[], None],
+) -> None:
+    """取到首帧、建立地面映射后再识别环境；建立不了映射（如朝向地平线以上）的摄像头不识别环境。"""
+    while (latest := reader.latest()) is None:
+        beat()
+        await asyncio.sleep(1 / SCENE_FPS)
+    mapping = mapping_of(camera, latest[1])
+    if mapping is None:
+        log.warning("vision.unmapped", extra={"camera_id": camera["id"]})
+        while True:
+            beat()
+            await asyncio.sleep(1)
+    perception = ScenePerception(camera["id"], mapping, camera["pose"], segmenter)
+    await run_scene(perception, reader, bus, beat)
+
+
+@dataclass
+class _Running:
+    camera: dict[str, Any]
+    reader: FrameReader
+    tasks: list[asyncio.Task[None]]
+
+
+class Cameras:
+    """按登记表运行各路摄像头（D-101）：新增的启动，删除或参数变化的停止后按新参数启动，其余不动。"""
+
+    def __init__(
+        self,
+        config: VisionConfig,
+        detector: PoseDetector,
+        vehicles: VehicleDetector | None,
+        segmenter: Segmenter | None,
+        embedder: FrameEmbedder | None,
+        bus: Bus,
+        health: Health,
+    ) -> None:
+        self._config, self._bus, self._health = config, bus, health
+        self._detector, self._vehicles = detector, vehicles
+        self._segmenter, self._embedder = segmenter, embedder
+        self._running: dict[str, _Running] = {}
+
+    async def apply(self, event: ConfigCamerasV1) -> None:
+        wanted = {c["id"]: c for c in event.model_dump(mode="json")["cameras"]}
+        for camera_id in list(self._running):
+            if wanted.get(camera_id) != self._running[camera_id].camera:
+                await self._stop(camera_id)
+        for camera_id, camera in wanted.items():
+            if camera_id not in self._running:
+                self._start(camera)
+        log.info("vision.cameras", extra={"cameras": sorted(wanted)})
+
+    def _start(self, camera: dict[str, Any]) -> None:
+        camera_id = camera["id"]
+        reader_name = f"{camera_id}/reader"
+        self._health.beat(reader_name)
+        reader = FrameReader(
+            camera_id,
+            f"{self._config.go2rtc_rtsp}/{camera_id}",  # 流名即摄像头编号（D-101）
+            partial(self._health.beat, reader_name),
+        )
+        reader.start()
+        mapping = GroundMapping.fit(camera["calibration"])
+        detection = CameraPipeline(
+            camera_id,
+            mapping,
+            self._detector,
+            camera["climb_lines"],
+            self._vehicles,
+            self._embedder,
+            camera["pose"],
+        )
+        runs = [
+            supervise(
+                f"{camera_id}/detect",
+                partial(run_camera, detection, reader, self._bus),
+                self._health,
+            )
+        ]
+        if self._segmenter is not None:
+            scene = partial(run_scene_when_ready, camera, self._segmenter, reader, self._bus)
+            runs.append(supervise(f"{camera_id}/scene", scene, self._health))
+        self._running[camera_id] = _Running(camera, reader, [asyncio.create_task(r) for r in runs])
+
+    async def _stop(self, camera_id: str) -> None:
+        running = self._running.pop(camera_id)
+        for task in running.tasks:
+            task.cancel()
+        await asyncio.gather(*running.tasks, return_exceptions=True)
+        running.reader.stop()
+        # 先移除健康登记再等读帧线程退出：等待至多 STOP_WAIT_S，超过停滞阈值；stop 返回后线程不再登记
+        self._health.forget(f"{camera_id}/")
+        await asyncio.to_thread(running.reader.join, STOP_WAIT_S)
+        if running.reader.is_alive():
+            log.warning("vision.reader_stop_slow", extra={"camera_id": camera_id})
+
+
 async def serve(config: VisionConfig) -> None:
     models = len(model_files(config))  # 显存上限由加载的模型平分（C-HW-12）
     detector = PoseDetector(
@@ -465,38 +605,24 @@ async def serve(config: VisionConfig) -> None:
         log.warning("vision.scene_disabled")  # 未配置 HYD_SCENE_MODEL_FILE
     if embedder is None:
         log.warning("vision.replay_disabled")  # 未配置 HYD_INTEGRITY_MODEL_FILE
-    site = SiteConfig.model_validate(yaml.safe_load(config.site_file.read_text(encoding="utf-8")))
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
     health = Health(config.heartbeat_file)
-    runs = []
-    for camera in site.model_dump(mode="json")["cameras"]:
-        mapping = GroundMapping.fit(camera["calibration"])
-        if mapping is None:
-            log.warning("vision.uncalibrated", extra={"camera_id": camera["id"]})
-        reader_name = f"{camera['id']}/reader"
-        health.beat(reader_name)
-        reader = FrameReader(
-            camera["id"],
-            f"{config.go2rtc_rtsp}/{camera['stream']}",
-            partial(health.beat, reader_name),
-        )
-        reader.start()
-        if mapping is not None and segmenter is not None:
-            perception = ScenePerception(camera["id"], mapping, camera["pose"], segmenter)
-            runs.append(
-                supervise(
-                    f"{camera['id']}/scene", partial(run_scene, perception, reader, bus), health
-                )
+    cameras = Cameras(config, detector, vehicles, segmenter, embedder, bus, health)
+    # 登记表的流由 api-server 创建；它尚未启动时重试
+    while True:
+        try:
+            await bus.js_subscribe(
+                REGISTRY_SUBJECT, ConfigCamerasV1, cameras.apply, datetime.fromtimestamp(0, UTC)
             )
-        detection = CameraPipeline(
-            camera["id"], mapping, detector, camera["climb_lines"], vehicles, embedder
-        )
-        runs.append(
-            supervise(f"{camera['id']}/detect", partial(run_camera, detection, reader, bus), health)
-        )
-    log.info("vision.started", extra={"device": config.device, "cameras": len(site.cameras)})
-    await asyncio.gather(health.run(), *runs)
+            break
+        except (nats.errors.Error, TimeoutError):
+            log.warning("vision.registry_unavailable")
+            health.beat("registry")
+            await asyncio.sleep(RECONNECT_S)
+    health.forget("registry")
+    log.info("vision.started", extra={"device": config.device})
+    await health.run()
 
 
 def main() -> None:

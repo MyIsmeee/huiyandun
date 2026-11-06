@@ -122,3 +122,45 @@ def test_locates_below_horizon() -> None:
 )
 def test_no_location_above_horizon(v: float, box_h: float) -> None:
     assert fit(horizon_calibration()).locate(500, v, box_h=box_h) is None
+
+
+POSE = {
+    "x": 0.0,
+    "y": 0.0,
+    "height_m": 3.0,
+    "yaw_deg": 0.0,
+    "pitch_deg": -45.0,
+    "hfov_deg": 90.0,
+    "range_m": 15,
+}
+
+
+def test_from_pose_center_pixel_lands_where_optical_axis_meets_ground() -> None:
+    """俯角 45°、高 3 m：画面中心的视线落在正前方 3 m 处（D-102）。"""
+    mapping = GroundMapping.from_pose(POSE, 1280, 720)
+    assert mapping is not None
+    x, y, _ = mapping.locate(640, 360, 0)
+    assert (x, y) == pytest.approx((3.0, 0.0), abs=1e-6)
+
+
+def test_from_pose_follows_yaw_and_left_right() -> None:
+    """朝向 90° 时正前方为平面 +y；画面右侧在朝向的右手边（+x）。"""
+    mapping = GroundMapping.from_pose(POSE | {"yaw_deg": 90.0}, 1280, 720)
+    assert mapping is not None
+    x, y, _ = mapping.locate(640, 360, 0)
+    assert (x, y) == pytest.approx((0.0, 3.0), abs=1e-6)
+    right, _, _ = mapping.locate(1000, 600, 0)
+    assert right > 0
+
+
+def test_from_pose_error_grows_with_distance() -> None:
+    mapping = GroundMapping.from_pose(POSE, 1280, 720)
+    assert mapping is not None
+    _, _, near = mapping.locate(640, 700, 0)
+    _, _, far = mapping.locate(640, 360, 0)
+    assert near < far
+    assert far == pytest.approx(0.1 * 3.0)
+
+
+def test_from_pose_looking_at_horizon_is_unmapped() -> None:
+    assert GroundMapping.from_pose(POSE | {"pitch_deg": 60.0}, 1280, 720) is None

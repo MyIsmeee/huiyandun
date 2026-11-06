@@ -74,7 +74,7 @@ class ClimbLine:
     v2: float
 
     def __post_init__(self) -> None:
-        # 与 api-server 导入校验一致；vision-engine 独立读取 site.yaml，不依赖 api-server 先拦截
+        # 与 api-server 的校验一致；不依赖登记表已在上游拦截
         if self.u1 == self.u2:
             raise ValueError(f"警戒线不能是竖直线段：{[self.u1, self.v1, self.u2, self.v2]}")
 

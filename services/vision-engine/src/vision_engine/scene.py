@@ -1,10 +1,11 @@
 """场景感知（TK-118、FR-108）：EfficientViT-Seg 识别环境 → 归并为渲染类别 → 时间平滑 → 投影到平面。
 
-每台已标定摄像头每秒 1 次，取最新帧。输出只含平面坐标（米）的多边形与线段，不含图像（G-04）；
+每台建立了地面映射的摄像头（标定或按安装参数估算，D-102）每秒 1 次，取最新帧。输出只含平面坐标（米）的多边形与线段，不含图像（G-04）；
 人员与车辆不在场景中，由 track 事件呈现。地面类别取掩码外轮廓；立面与物体取与地面接触的下边缘
 （每列最低一格）；树取底部中心；路面标线在路面区域内按白色条纹检出（ADE20K 无此类别）。
 """
 
+import threading
 import uuid
 from collections import deque
 from collections.abc import Iterator
@@ -92,16 +93,19 @@ def label(name: str) -> int:
 
 
 class Segmenter:
-    """BGR 帧 → GRID×GRID 的渲染类别编号；多路共用一个会话。"""
+    """BGR 帧 → GRID×GRID 的渲染类别编号；多路共用一个会话，逐次推理：并发推理各占一份显存，
+    多路同时识别会超出该模型分到的显存上限（C-HW-12）。每路每秒 1 次，排队的等待可忽略。"""
 
     def __init__(self, session: ort.InferenceSession) -> None:
         self._session = session
         self._input = session.get_inputs()[0].name
+        self._lock = threading.Lock()
 
     def __call__(self, frame: np.ndarray) -> np.ndarray:
         rgb = cv2.cvtColor(cv2.resize(frame, (INPUT, INPUT)), cv2.COLOR_BGR2RGB)
         x = ((rgb - MEAN) / STD).transpose(2, 0, 1)[None].astype(np.float32)
-        logits = self._session.run(None, {self._input: x})[0][0]
+        with self._lock:
+            logits = self._session.run(None, {self._input: x})[0][0]
         confidence = 1 / np.exp(logits - logits.max(0)).sum(0)  # softmax 的最大值
         labels = LUT[logits.argmax(0)]
         gray = cv2.resize(
