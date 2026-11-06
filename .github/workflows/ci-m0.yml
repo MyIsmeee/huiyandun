@@ -199,6 +199,14 @@ jobs:
             echo "$bad"
             exit 1
           fi
+      # 前两步已装好全部 Python 包与前端依赖
+      - name: LICENSE-THIRD-PARTY.md 与锁文件一致
+        run: |
+          make licenses
+          git diff --exit-code LICENSE-THIRD-PARTY.md || {
+            echo "::error title=CI-09::依赖已变化，运行 make licenses 并提交 LICENSE-THIRD-PARTY.md"
+            exit 1
+          }
 
   ci-10:
     name: CI-10 依赖锁定

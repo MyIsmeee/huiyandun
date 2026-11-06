@@ -129,10 +129,12 @@
 | mypy_extensions | 1.1.0 | MIT |
 | nodeenv | 1.11.0 | BSD License |
 | pathspec | 1.1.1 | Mozilla Public License 2.0 (MPL 2.0) |
+| pip-licenses | 5.5.5 | MIT |
 | platformdirs | 4.13.5 | MIT |
 | pluggy | 1.7.0 | MIT License |
 | pre_commit | 4.7.0 | MIT |
 | pre_commit_hooks | 6.0.0 | MIT |
+| prettytable | 3.18.0 | BSD-3-Clause |
 | pytest | 9.1.1 | MIT |
 | python-discovery | 1.6.4 | MIT License |
 | pytokens | 0.4.1 | MIT License |
@@ -140,6 +142,7 @@
 | ruff | 0.17.2 | MIT |
 | typeguard | 4.6.0 | MIT |
 | virtualenv | 21.14.13 | MIT |
+| wcwidth | 0.9.4 | MIT License |
 
 ### 前端（`pnpm-lock.yaml` 的 devDependencies）
 

@@ -7,8 +7,11 @@
 """
 
 import json
+import re
 import subprocess
 import sys
+
+from packaging.markers import Marker
 
 TIMEOUT_S = 120
 WEB = "web/console"
@@ -49,12 +52,19 @@ def run(*args: str) -> str:
 
 
 def names(export: str) -> set[str]:
-    """`uv export` 输出中的包名。"""
-    return {
-        line.split("==", 1)[0].lower()
-        for line in export.splitlines()
-        if "==" in line and not line.startswith(" ")
-    }
+    """`uv export` 输出中会装到本平台的包名（与运行镜像同为 Linux x86_64、CPython 3.12）。
+
+    跳过环境标记不成立的包：override 排除的（`sys_platform == 'never'`）与其他平台专用的。
+    """
+    found = set()
+    for line in export.splitlines():
+        if "==" not in line or line.startswith(" "):
+            continue
+        requirement, _, marker = line.partition(";")
+        if marker.strip() and not Marker(marker.strip()).evaluate():
+            continue
+        found.add(normalize(requirement.split("==", 1)[0]))
+    return found
 
 
 def python_rows() -> tuple[Rows, Rows]:
@@ -66,6 +76,7 @@ def python_rows() -> tuple[Rows, Rows]:
 
 
 def pip_licenses(packages: list[str]) -> Rows:
+    """缺任何一个包都报错，不生成不全的清单。"""
     if not packages:
         return []
     out = run(
@@ -75,10 +86,20 @@ def pip_licenses(packages: list[str]) -> Rows:
         "pip-licenses",
         "--from=mixed",
         "--format=json",
+        "--with-system",  # 不加时 pip-licenses 略去自身及其依赖（prettytable、wcwidth）
         "--packages",
         *packages,
     )
-    return [(p["Name"], p["Version"], p["License"]) for p in json.loads(out)]
+    rows = [(p["Name"], p["Version"], p["License"]) for p in json.loads(out)]
+    missing = set(packages) - {normalize(n) for n, _, _ in rows}
+    if missing:
+        raise SystemExit(f"pip-licenses 未列出：{', '.join(sorted(missing))}")
+    return rows
+
+
+def normalize(name: str) -> str:
+    """PEP 503 包名规范化，与 `uv export` 输出一致。"""
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def node_rows(scope: str) -> Rows:
