@@ -33,6 +33,7 @@ export const GROUP_GAP_MS = 5 * 60_000;
 
 /** 合并后的一行：alerts 新的在前，至少一条 */
 export interface AlertGroup {
+  /** 组内最早一条的 event_id：新告警并入时不变，已展开的行不会自己收起 */
   id: string;
   alerts: [Alert, ...Alert[]];
 }
@@ -56,6 +57,7 @@ export function groupAlerts(alerts: Alert[]): AlertGroup[] {
     const oldest = group?.alerts[group.alerts.length - 1];
     if (group && oldest && Date.parse(oldest.ts) - Date.parse(alert.ts) <= GROUP_GAP_MS) {
       group.alerts.push(alert);
+      group.id = alert.event_id;
       continue;
     }
     const created: AlertGroup = { id: alert.event_id, alerts: [alert] };

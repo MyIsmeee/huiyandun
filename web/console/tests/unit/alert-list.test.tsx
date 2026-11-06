@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { components } from "../../src/api/schema";
 import { AlertList, groupAlerts } from "../../src/panels/AlertList/AlertList";
@@ -198,5 +198,15 @@ describe("同类告警合并（D-106）", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "展开 3 条" }));
     expect(within(screen.getByRole("list", { name: "合并的告警" })).getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("新告警并入已展开的行时保持展开", () => {
+    for (const n of [1, 2, 3]) receive(frame("alerts", alert(n)), 0);
+    render(<AlertList stale={false} lastFrameAt={0} />);
+    fireEvent.click(screen.getByRole("button", { name: "展开 3 条" }));
+
+    act(() => receive(frame("alerts", alert(4)), 0));
+
+    expect(within(screen.getByRole("list", { name: "合并的告警" })).getAllByRole("listitem")).toHaveLength(4);
   });
 });
