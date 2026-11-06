@@ -120,7 +120,9 @@
 | distlib | 0.4.4 | Python Software Foundation License |
 | filelock | 4.2.4 | MIT |
 | genson | 1.4.0 | MIT License |
+| grimp | 3.18 | BSD License |
 | identify | 2.6.20 | MIT |
+| import-linter | 2.15 | BSD License |
 | inflect | 7.6.0 | MIT |
 | iniconfig | 2.3.1 | MIT |
 | isort | 8.0.1 | MIT |
