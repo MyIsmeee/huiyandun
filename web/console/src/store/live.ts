@@ -60,6 +60,8 @@ interface LiveState {
   incidents: Incident[];
   /** 处置执行的最新状态，键为执行 id；按最近更新排在最后 */
   executions: Record<string, Execution>;
+  /** 每个执行各状态的事件时刻（ISO），供处置时间线（FR-304）；连接补推只含最新状态 */
+  executionTimes: Record<string, Partial<Record<Execution["state"], string>>>;
   /** 每个关联事件最近一帧调查流的 seq：面板据此重新读取调查记录（调查记录先落库后推送） */
   aiSeq: Record<string, number>;
 }
@@ -73,6 +75,7 @@ export const useLive = create<LiveState>()(() => ({
   alerts: [],
   incidents: [],
   executions: {},
+  executionTimes: {},
   aiSeq: {},
 }));
 
@@ -120,10 +123,16 @@ export function receive(frame: Frame, now: number): void {
   }
   if (frame.channel === "executions") {
     const execution = data as Execution;
+    // 推送的是 hyd.playbook.execution.v1，带事件时刻 ts
+    const { ts } = data as { ts?: string };
     // 移到最后：遍历顺序即更新先后，设备取最近更新的执行
     useLive.setState((s) => {
       const rest = Object.fromEntries(Object.entries(s.executions).filter(([id]) => id !== execution.id));
-      return { executions: { ...rest, [execution.id]: execution } };
+      const times = ts ? { ...s.executionTimes[execution.id], [execution.state]: ts } : s.executionTimes[execution.id];
+      return {
+        executions: { ...rest, [execution.id]: execution },
+        executionTimes: times ? { ...s.executionTimes, [execution.id]: times } : s.executionTimes,
+      };
     });
   }
   if (frame.channel === "ai") {

@@ -657,19 +657,19 @@ export interface components {
         Kpi: {
             /** @description null 为无数据，显示 — */
             value: number | null;
-            /** @description 较 1 小时前的变化，null 为无可比数据 */
+            /** @description 较 1 小时前的变化（last_contain_ms 为较上一次处置），null 为无可比数据 */
             delta: number | null;
         };
         /**
          * @description online_devices：登记设备中当前不是离线的台数；active_alerts：仍在保持期内的告警条数（网络告警 5 分钟、
          *     行为事件 1 分钟，与设备告警态一致）；contained_today：day_start 起处置通过校验的关联事件数（之后回滚仍计入，
-         *     只通知不计）；detect_p95_ms：近 1 小时实时收到的规则告警与行为事件从事件时刻到 api-server 收到的时延 95 分位（不含设备行为模型的告警）
+         *     只通知不计）；last_contain_ms：最近一次通过校验的处置，从其关联事件命中路径中最早事件的时刻到通过校验的毫秒数（D-106）
          */
         Kpis: {
             online_devices: components["schemas"]["Kpi"];
             active_alerts: components["schemas"]["Kpi"];
             contained_today: components["schemas"]["Kpi"];
-            detect_p95_ms: components["schemas"]["Kpi"];
+            last_contain_ms: components["schemas"]["Kpi"];
         };
         LlmProviderCreate: {
             name: string;

@@ -36,7 +36,7 @@ for (const theme of ["dark", "light"] as const) {
       online_devices: { value: 2, delta: 0 },
       active_alerts: { value: 12, delta: 11 },
       contained_today: { value: 3, delta: 1 },
-      detect_p95_ms: { value: 1840, delta: -260 },
+      last_contain_ms: { value: 18_400, delta: -2_600 },
     });
     await page.goto("/");
 

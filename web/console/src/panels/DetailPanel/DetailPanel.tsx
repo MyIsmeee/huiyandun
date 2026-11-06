@@ -86,8 +86,9 @@ function Frame(props: { title: string; onClose: () => void; children: ReactNode 
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <section aria-label="详情" className="flex flex-col gap-3 rounded-2xl border border-line bg-panel p-4">
-      <header className="flex items-center justify-between gap-2">
+    // 最多占右栏 65%，内容超出在面板内滚动，页面不随之撑高（V-L2、D-106）
+    <section aria-label="详情" className="flex max-h-[65%] min-h-0 shrink-0 flex-col rounded-2xl border border-line bg-panel">
+      <header className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
         <h2 className="truncate font-semibold">{title}</h2>
         <button
           onClick={onClose}
@@ -97,7 +98,7 @@ function Frame(props: { title: string; onClose: () => void; children: ReactNode 
           <X aria-hidden className="size-4" />
         </button>
       </header>
-      {children}
+      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 pb-4">{children}</div>
     </section>
   );
 }

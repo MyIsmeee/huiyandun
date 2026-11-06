@@ -40,6 +40,7 @@ from api_server.db import create_engine
 from api_server.devices import Devices
 from api_server.history import History
 from api_server.investigation_tools import Tools
+from api_server.localtime import site_tz
 from py_common.bus import Bus
 from py_common.log import bind_request_id
 
@@ -138,9 +139,7 @@ def create_app(config: ApiConfig) -> FastAPI:
             ),
         ]
         try:
-            await relay.start(
-                bus, app.state.hub, app.state.devices, app.state.scenes, app.state.kpis
-            )
+            await relay.start(bus, app.state.hub, app.state.devices, app.state.scenes)
             yield
         finally:
             for task in tasks:
@@ -159,6 +158,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.add_exception_handler(HTTPException, on_http_error)
     app.add_exception_handler(RequestValidationError, on_validation_error)
     app.state.config = config
+    app.state.tz = site_tz(config.display_utc_offset_min)
     app.state.site = site.load(config.site_file)
     app.state.hub = ws.Hub()
     app.state.devices = Devices(app.state.site.devices)
@@ -173,6 +173,7 @@ def create_app(config: ApiConfig) -> FastAPI:
         config.conn_log_file,
         attack["techniques"],
         config.behavior_state_file,
+        app.state.tz,
     )
     app.state.investigator = investigator.Investigator(app.state)
     app.include_router(auth.router)

@@ -212,8 +212,8 @@ class CameraPipeline:
             embedding = self._embedder(frame)
             replay = self._replay.update(embedding, timestamp)
             if replay is not None:
-                matched = datetime.now(UTC) - timedelta(seconds=replay.ago_s + REPLAY_S)
-                detail = f"画面与 {replay.ago_s:.0f} s 前（{matched:%H:%M:%S} UTC 起）的片段重复"
+                # 只写相对时刻：界面与报告按站点时区显示，这里写 UTC 钟点会与之对不上（D-106）
+                detail = f"画面与 {replay.ago_s:.0f} s 前的片段重复"
                 integrity.append(
                     self._integrity("replay", REPLAY_S, "model", replay.confidence, detail)
                 )

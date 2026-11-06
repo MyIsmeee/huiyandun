@@ -6,12 +6,13 @@
 """
 
 import re
-from datetime import UTC, datetime
+from datetime import timezone
 from typing import Any, Literal
 
 from jinja2 import Environment, PackageLoader
 from markupsafe import Markup, escape
 
+from api_server.localtime import stamp
 from py_contracts.api import (
     Report,
     ReportAi,
@@ -101,12 +102,14 @@ def _ai(ai: ReportAi, fmt: Literal["html", "md"]) -> dict[str, Any]:
     }
 
 
-def _verdict(investigation: ReportInvestigation, fmt: Literal["html", "md"]) -> dict[str, Any]:
+def _verdict(
+    investigation: ReportInvestigation, fmt: Literal["html", "md"], tz: timezone
+) -> dict[str, Any]:
     """AI 区开头引用的值班员判定（D-089），未溯源实体按工具结果回溯，与面板判定卡一致。"""
     v, p, u = investigation.verdict, investigation.provider, investigation.verdict.unverified
     return {
         "by": f"{p.name}（{NETWORK[p.location]}）" if p else "未知供应商",
-        "at": utc(investigation.finished_at),
+        "at": stamp(investigation.finished_at, tz),
         "rows": [
             ("是否攻击", "是" if v.is_attack else "否"),
             ("可信度", f"{round(v.confidence * 100)}%"),
@@ -125,15 +128,11 @@ ENVS = {
 }
 
 
-def utc(ts: datetime) -> str:
-    return ts.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-
 def _source(source: str, confidence: float) -> str:
     return SOURCE[source] if source == "rule" else f"模型 · {round(confidence * 100)}%"
 
 
-def _entry(entry: ReportTimelineEntry) -> dict[str, Any]:
+def _entry(entry: ReportTimelineEntry, tz: timezone) -> dict[str, Any]:
     """命中路径的一行：时间、类型、内容、来源与可信度。行为事件按模型证据显示（D-069）。"""
     if entry.event is None:
         text = f"事件 {entry.event_id} 已超出 24 小时保留或未收到"
@@ -150,27 +149,27 @@ def _entry(entry: ReportTimelineEntry) -> dict[str, Any]:
         text = f"{e.camera_id} {INTEGRITY[e.type]}，持续 {e.duration_s:.1f} s"
         if e.detail:
             text += f"（{e.detail}）"
-    return {"ts": utc(e.ts), "kind": kind, "text": text, "source": source, "missing": False}
+    return {"ts": stamp(e.ts, tz), "kind": kind, "text": text, "source": source, "missing": False}
 
 
-def _executions(facts: ReportFacts) -> list[str]:
+def _executions(facts: ReportFacts, tz: timezone) -> list[str]:
     lines = []
     for x in facts.executions:
         detail = x.reason or (x.verify_result.reason if x.verify_result else None)
         line = f"{x.playbook_id} v{x.playbook_version} → {x.target}：{EXECUTION[x.state]}"
         line += f"，TTL {x.ttl_s} s"
         if x.expires_at:
-            line += f"，到期 {utc(x.expires_at)}"
+            line += f"，到期 {stamp(x.expires_at, tz)}"
         lines.append(line + (f"（{detail}）" if detail else ""))
     return lines
 
 
-def _narrative(facts: ReportFacts, executions: list[str]) -> str:
+def _narrative(facts: ReportFacts, executions: list[str], tz: timezone) -> str:
     """模板叙述：模型不可用时 AI 区的内容（V-AI5）。"""
     i = facts.incident
     devices = "、".join(f"{d.id}（{d.ip}）" for d in facts.devices) or "未登记设备"
     text = (
-        f"{utc(i.created_at)}，关联规则 {i.rule_id} v{i.rule_version} 判定「{i.title}」，"
+        f"{stamp(i.created_at, tz)}，关联规则 {i.rule_id} v{i.rule_version} 判定「{i.title}」，"
         f"等级{SEVERITY[i.severity]}，涉及设备 {devices}"
     )
     text += f"，攻击源 {i.source_ip}。" if i.source_ip else "。"
@@ -184,9 +183,10 @@ def _narrative(facts: ReportFacts, executions: list[str]) -> str:
     return text
 
 
-def render(report: Report, fmt: Literal["html", "md"]) -> str:
+def render(report: Report, fmt: Literal["html", "md"], tz: timezone) -> str:
+    """tz：站点时区，报告中的时刻按它显示（D-106）。"""
     facts, i = report.facts, report.facts.incident
-    executions = _executions(facts)
+    executions = _executions(facts, tz)
     devices = "、".join(f"{d.id}（{DEVICE[d.type]}，{d.ip}）" for d in facts.devices)
     summary = [
         ("关联规则", f"{i.rule_id} v{i.rule_version}（{MODE[i.mode]}）"),
@@ -196,7 +196,7 @@ def render(report: Report, fmt: Literal["html", "md"]) -> str:
         ("ATT&CK 技术", "、".join(t.root for t in i.techniques) or "无"),
         ("ATT&CK 战术", "、".join(i.tactics) or "无"),
         ("处置前须人工确认", "是" if i.requires_confirmation else "否"),
-        ("发生时间", utc(i.created_at)),
+        ("发生时间", stamp(i.created_at, tz)),
     ]
     return (
         ENVS[fmt]
@@ -204,14 +204,14 @@ def render(report: Report, fmt: Literal["html", "md"]) -> str:
         .render(
             report=report,
             title=i.title,
-            created_at=utc(report.created_at),
-            reviewed_at=utc(report.reviewed_at) if report.reviewed_at else None,
+            created_at=stamp(report.created_at, tz),
+            reviewed_at=stamp(report.reviewed_at, tz) if report.reviewed_at else None,
             summary=summary,
-            timeline=[_entry(e) for e in facts.timeline],
+            timeline=[_entry(e, tz) for e in facts.timeline],
             evidence_refs=i.evidence_refs,
             executions=executions,
-            narrative=_narrative(facts, executions),
+            narrative=_narrative(facts, executions, tz),
             ai=_ai(report.ai, fmt) if report.ai else None,
-            verdict=_verdict(report.investigation, fmt) if report.investigation else None,
+            verdict=_verdict(report.investigation, fmt, tz) if report.investigation else None,
         )
     )

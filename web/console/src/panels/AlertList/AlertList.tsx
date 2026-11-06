@@ -1,5 +1,5 @@
-import { Clock, Cpu, Shield, ShieldAlert, TriangleAlert } from "lucide-react";
-import { useMemo } from "react";
+import { ChevronDown, Clock, Cpu, Shield, ShieldAlert, TriangleAlert } from "lucide-react";
+import { useMemo, useState } from "react";
 import { type Alert, type Execution, type Incident, useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
 import { formatTime } from "../ConnectionStatus/ConnectionStatus";
@@ -28,6 +28,45 @@ function describe(alert: Alert) {
   return { device: alert.device_id, title: alert.summary, model: alert.source === "model", confidence: alert.confidence };
 }
 
+/** 同一设备、同一类告警的合并间隔（D-106）：比组内最早一条晚不超过 5 分钟的并入该组 */
+export const GROUP_GAP_MS = 5 * 60_000;
+
+/** 合并后的一行：alerts 新的在前，至少一条 */
+export interface AlertGroup {
+  /** 组内最早一条的 event_id：新告警并入时不变，已展开的行不会自己收起 */
+  id: string;
+  alerts: [Alert, ...Alert[]];
+}
+
+/** 同类：行为事件按摄像头与行为，网络告警按设备、规则与来源 */
+function kindOf(alert: Alert): string {
+  if ("behavior" in alert) return `b/${alert.camera_id}/${alert.behavior}`;
+  return `s/${alert.device_id ?? ""}/${alert.rule_id}/${alert.source}`;
+}
+
+/**
+ * 合并同类告警（D-106）：输入新的在前；某条与同类最近一组的最早一条相隔不超过 GROUP_GAP_MS 即并入，
+ * 否则另起一组。各组按其最新一条排列；不丢弃任何告警。
+ */
+export function groupAlerts(alerts: Alert[]): AlertGroup[] {
+  const groups: AlertGroup[] = [];
+  const latest = new Map<string, AlertGroup>();
+  for (const alert of alerts) {
+    const kind = kindOf(alert);
+    const group = latest.get(kind);
+    const oldest = group?.alerts[group.alerts.length - 1];
+    if (group && oldest && Date.parse(oldest.ts) - Date.parse(alert.ts) <= GROUP_GAP_MS) {
+      group.alerts.push(alert);
+      group.id = alert.event_id;
+      continue;
+    }
+    const created: AlertGroup = { id: alert.event_id, alerts: [alert] };
+    groups.push(created);
+    latest.set(kind, created);
+  }
+  return groups;
+}
+
 /** F 告警列表：数据取自推送 */
 export function AlertList(props: { stale: boolean; lastFrameAt: number | null }) {
   const alerts = useLive((s) => s.alerts);
@@ -37,8 +76,9 @@ export function AlertList(props: { stale: boolean; lastFrameAt: number | null })
 }
 
 /**
- * F 告警列表（D-077）：上方置顶关联事件及其处置状态，下方按时间倒序列出单条告警；规则来源为盾牌、
- * 模型来源为芯片并显示可信度（V-AI10、FR-206）；单击选中对应设备，选中的设备在列表中同步高亮（V-I3）。
+ * F 告警列表（D-077）：上方置顶关联事件及其处置状态，下方按时间倒序列出单条告警，同类合并为一行并显示次数，
+ * 可展开（D-106）；规则来源为盾牌、模型来源为芯片并显示可信度（V-AI10、FR-206）；单击选中对应设备，
+ * 选中的设备在列表中同步高亮（V-I3）。
  * stale 为推送连接已断开：列表是断开前的内容，弱化显示并标注（UP-3、V-U3）。
  */
 export function AlertListView(props: {
@@ -50,6 +90,14 @@ export function AlertListView(props: {
 }) {
   const { alerts, incidents, executions, stale, lastFrameAt } = props;
   const selected = useSelection((s) => s.deviceId);
+  const groups = useMemo(() => groupAlerts(alerts), [alerts]);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   // M0 每个关联事件至多由一个 Playbook 处置（isolate-attacker）
   const stateOf = useMemo(() => {
     const byIncident = new Map(Object.values(executions).map((e) => [e.incident_id, e]));
@@ -102,34 +150,69 @@ export function AlertListView(props: {
           </ul>
         )}
         <ul aria-label="单条告警">
-          {alerts.map((alert) => {
-            const { device, title, model, confidence } = describe(alert);
-            const Source = model ? Cpu : Shield;
+          {groups.map((group) => {
+            const [latest] = group.alerts;
+            const count = group.alerts.length;
+            const open = expanded.has(group.id);
             return (
-              <li key={alert.event_id}>
-                <Row device={device} selected={device !== null && device === selected}>
-                  {"behavior" in alert ? (
-                    <TriangleAlert aria-label="物理告警" className="mt-0.5 size-4 shrink-0 text-physical" />
-                  ) : (
-                    <ShieldAlert aria-label="网络攻击" className="mt-0.5 size-4 shrink-0 text-cyber" />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block break-words">{title}</span>
-                    <span className="block text-xs text-fg-3">
-                      {device ?? "未登记设备"} · {formatTime(Date.parse(alert.ts))}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1 text-xs text-fg-2" title={model ? "模型发现" : "规则发现"}>
-                    <Source aria-label={model ? "模型" : "规则"} className="size-3.5" />
-                    {model && `${Math.round(confidence * 100)}%`}
-                  </span>
-                </Row>
+              <li key={group.id}>
+                <AlertRow alert={latest} selected={selected} count={count} />
+                {count > 1 && (
+                  <button
+                    type="button"
+                    aria-expanded={open}
+                    onClick={() => toggle(group.id)}
+                    className="ml-10 flex items-center gap-1 pb-1 text-xs text-fg-3 hover:text-fg"
+                  >
+                    <ChevronDown aria-hidden className={`size-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+                    {open ? "收起" : `展开 ${count} 条`}
+                  </button>
+                )}
+                {open && (
+                  <ul aria-label="合并的告警" className="ml-6 border-l border-line">
+                    {group.alerts.map((alert) => (
+                      <li key={alert.event_id}>
+                        <AlertRow alert={alert} selected={selected} count={1} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}
         </ul>
       </div>
     </>
+  );
+}
+
+/** 一条告警或合并行；count > 1 时标出次数 */
+function AlertRow(props: { alert: Alert; selected: string | null; count: number }) {
+  const { alert, selected, count } = props;
+  const { device, title, model, confidence } = describe(alert);
+  const Source = model ? Cpu : Shield;
+  return (
+    <Row device={device} selected={device !== null && device === selected}>
+      {"behavior" in alert ? (
+        <TriangleAlert aria-label="物理告警" className="mt-0.5 size-4 shrink-0 text-physical" />
+      ) : (
+        <ShieldAlert aria-label="网络攻击" className="mt-0.5 size-4 shrink-0 text-cyber" />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block break-words">
+          {title}
+          {count > 1 && <span className="ml-1.5 text-xs font-semibold text-fg-2 tabular-nums">×{count}</span>}
+        </span>
+        <span className="block text-xs text-fg-3">
+          {device ?? "未登记设备"} · {count > 1 ? "最近 " : ""}
+          {formatTime(Date.parse(alert.ts))}
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1 text-xs text-fg-2" title={model ? "模型发现" : "规则发现"}>
+        <Source aria-label={model ? "模型" : "规则"} className="size-3.5" />
+        {model && `${Math.round(confidence * 100)}%`}
+      </span>
+    </Row>
   );
 }
 

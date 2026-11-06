@@ -6,11 +6,15 @@ import { type KpiData, KpiTile } from "./KpiTile";
 type Kpis = components["schemas"]["Kpis"];
 
 const POLL_MS = 5_000;
-const KPIS: { key: keyof Kpis; label: string; unit: string }[] = [
+/** 毫秒按秒显示，保留 1 位小数 */
+const seconds = (ms: number) => (ms / 1000).toFixed(1);
+
+const KPIS: { key: keyof Kpis; label: string; unit: string; since?: string; format?: (v: number) => string }[] = [
   { key: "online_devices", label: "在线设备", unit: "台" },
   { key: "active_alerts", label: "活跃告警", unit: "条" },
   { key: "contained_today", label: "今日已处置", unit: "起" },
-  { key: "detect_p95_ms", label: "检测时延 P95", unit: "ms" },
+  // 从首条攻击告警到处置通过校验（D-106）
+  { key: "last_contain_ms", label: "最近处置用时", unit: "秒", since: "较上一次", format: seconds },
 ];
 
 /** 浏览器本地当天 0 点，"今日已处置"由此起算（D-100） */
@@ -54,9 +58,9 @@ export function KpiRow({ stale }: { stale: boolean }) {
       aria-label="关键指标"
       className="absolute top-3 left-3 flex divide-x divide-line rounded-2xl border border-line bg-panel/80 backdrop-blur"
     >
-      {KPIS.map(({ key, label, unit }) => (
+      {KPIS.map(({ key, label, unit, since, format }) => (
         <li key={key}>
-          <KpiTile label={label} unit={unit} data={data(key)} />
+          <KpiTile label={label} unit={unit} since={since} format={format} data={data(key)} />
         </li>
       ))}
     </ul>

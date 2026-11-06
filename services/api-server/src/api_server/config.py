@@ -27,6 +27,12 @@ class DbConfig(ServiceConfig):
 
 class ApiConfig(DbConfig):
     port: int = Field(8000, ge=1, le=65535, description="HTTP 监听端口")
+    display_utc_offset_min: int = Field(
+        480,
+        ge=-720,
+        le=840,
+        description="站点时区与 UTC 相差的分钟数：报告与交给模型的时刻按此换算，与界面一致（D-106）",
+    )
     session_ttl_s: int = Field(
         28800, ge=300, le=86400, description="会话有效期，单位秒；到期须重新登录（C-BE-07）"
     )

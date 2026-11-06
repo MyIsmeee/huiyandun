@@ -40,11 +40,8 @@ def _push(hub: Hub, device: Device | None) -> None:
         hub.broadcast(_frame("devices", device))
 
 
-async def start(
-    bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame], kpis: KpiTracker
-) -> None:
-    """scenes：各摄像头最新一帧场景，供新连接补推（只保留最新一帧，不持久化）。核心订阅只收实时事件，
-    据此记录检测时延（D-100）。"""
+async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]) -> None:
+    """scenes：各摄像头最新一帧场景，供新连接补推（只保留最新一帧，不持久化）。核心订阅只收实时事件。"""
 
     async def on_track(event: VisionTrackV1) -> None:
         hub.broadcast(_frame("tracks", event))
@@ -55,12 +52,10 @@ async def start(
 
     # 先推行为事件与告警、再推设备：设备变色时事件卡内容已就绪
     async def on_behavior(event: VisionBehaviorV1) -> None:
-        kpis.on_live_alert(event, datetime.now(UTC))
         hub.broadcast(_frame("alerts", event))
         _push(hub, devices.on_behavior(event, time.monotonic()))
 
     async def on_alert(event: SecurityAlertV1) -> None:
-        kpis.on_live_alert(event, datetime.now(UTC))
         hub.broadcast(_frame("alerts", event))
         _push(hub, devices.on_alert(event, time.monotonic()))
 

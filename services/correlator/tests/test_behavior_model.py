@@ -83,8 +83,10 @@ def test_slow_bruteforce_alerts_after_two_windows() -> None:
     assert (alert.device_id, str(alert.src_ip), str(alert.dst_ip)) == ("cam-02", ATTACKER, CAM)
     assert alert.technique == "T1110"
     assert 0.6 < alert.confidence <= 1
-    assert alert.summary.startswith(f"cam-02 行为偏离基线：新访问方 {ATTACKER}；偏离最大：")
-    assert "σ" in alert.summary
+    # 白话摘要（D-106）：陌生访问方 + 偏离最大的两项及平时水平，不出现 σ
+    assert alert.summary.startswith(f"cam-02 出现陌生访问方 {ATTACKER}；")
+    assert "连接失败率" in alert.summary and "（平时 " in alert.summary
+    assert "σ" not in alert.summary
     # 时刻取偏离开始：攻击方的首个会话
     assert first_guess <= alert.ts.timestamp() < first_guess + WINDOW_S
     assert alert.evidence_ref.startswith("zeek:conn/C")

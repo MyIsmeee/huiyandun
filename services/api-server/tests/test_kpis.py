@@ -1,6 +1,7 @@
-"""大屏关键指标（D-100）：四项指标的口径、较 1 小时前的变化与 GET /api/kpis。"""
+"""大屏关键指标（D-100、D-106）：四项指标的口径、变化量与 GET /api/kpis。"""
 
 import time
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -17,6 +18,7 @@ from api_server.history import History
 from api_server.kpis import KpiTracker
 from py_contracts.api import Kpi
 from py_contracts.events.event_base_schema import EventBase
+from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 
 DAY_START = datetime(2026, 11, 3, 16, tzinfo=UTC)  # 北京时间 11 月 4 日 0 点
 NOW = DAY_START + timedelta(hours=12)
@@ -115,36 +117,72 @@ def test_contained_hour_ago_counts_previous_day(devices: Devices, history: Histo
     assert kpis.read(DAY_START, now).contained_today == Kpi(value=1, delta=0)
 
 
-def live(kpis: KpiTracker, latency_ms: int, received: datetime) -> None:
-    kpis.on_live_alert(at(alert(), received - timedelta(milliseconds=latency_ms)), received)
+def incident(
+    incident_id: str, hit_path: list[uuid.UUID], created_at: datetime
+) -> CorrelatorIncidentV1:
+    return CorrelatorIncidentV1.model_validate(
+        {
+            "schema_version": "1.2.0", "event_id": str(uuid.uuid4()), "ts": created_at.isoformat(),
+            "id": incident_id, "rule_id": "HYD-X-0001", "rule_version": "1.0.0", "mode": "enforce",
+            "title": "摄像头疑似被入侵且画面遭篡改", "severity": "critical", "device_ids": ["cam-02"],
+            "source_ip": "172.30.0.100", "techniques": ["T1110"], "tactics": ["Credential Access"],
+            "evidence_refs": [], "hit_path": [str(h) for h in hit_path],
+            "requires_confirmation": False, "status": "open", "created_at": created_at.isoformat(),
+        }
+    )  # fmt: skip
 
 
-def test_detect_p95_over_last_hour(devices: Devices, history: History) -> None:
+def test_last_contain_from_first_hit_to_verified(devices: Devices, history: History) -> None:
+    """从命中路径中最早的事件（首条爆破告警）到处置通过校验；与上一次处置相比（D-106）。
+    历史只保留近 24 小时，事件时刻按真实时钟取。"""
+    t0 = datetime.now(UTC) - timedelta(minutes=30)
+    first, later = at(alert(), t0), at(alert(), t0 + timedelta(seconds=20))
+    history.add_alert(first)
+    history.add_alert(later)
+    history.add_incident(incident("inc-1", [later.event_id, first.event_id], t0))
     kpis = tracker(devices, history)
-    for i in range(1, 21):  # 10～200 ms，95 分位按最近秩取第 19 个
-        live(kpis, i * 10, NOW - timedelta(minutes=i))
-    live(kpis, 500, NOW - 90 * timedelta(minutes=1))  # 前一小时
-    live(kpis, 9000, NOW - 3 * HOUR)  # 两小时以前，不参与
+    contained(kpis, "inc-1", "contained", t0 + timedelta(seconds=31.5))
 
-    assert kpis.read(DAY_START, NOW).detect_p95_ms == Kpi(value=190, delta=-310)
+    assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=31500, delta=None)
+
+    t1 = t0 + timedelta(minutes=10)
+    hit = at(alert(), t1)
+    history.add_alert(hit)
+    history.add_incident(incident("inc-2", [hit.event_id], t1 + timedelta(seconds=5)))
+    contained(kpis, "inc-2", "contained", t1 + timedelta(seconds=12))
+    contained(kpis, "inc-2", "contained", t1 + timedelta(seconds=40))  # 同一事件只计首次
+
+    assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=12000, delta=-19500)
+
+    # 部分命中事件已不在历史中（如首条爆破告警被大量告警挤出）：不计，不拿余下的事件或生成时刻顶替
+    t2 = t1 + timedelta(minutes=10)
+    late = at(alert(), t2)
+    history.add_alert(late)
+    history.add_incident(incident("inc-3", [uuid.uuid4(), late.event_id], t2))
+    contained(kpis, "inc-3", "contained", t2 + timedelta(seconds=1))
+
+    assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=12000, delta=-19500)
 
 
-def test_detect_p95_without_samples(devices: Devices, history: History) -> None:
+def test_last_contain_when_execution_replayed_before_incident(
+    devices: Devices, history: History
+) -> None:
+    """启动重放时处置执行可能先于关联事件到达：读取时再查。"""
+    t0 = datetime.now(UTC) - timedelta(minutes=5)
     kpis = tracker(devices, history)
-    live(kpis, 300, NOW - 90 * timedelta(minutes=1))
+    contained(kpis, "inc-1", "contained", t0 + timedelta(seconds=9))
+    hit = at(alert(), t0)
+    history.add_alert(hit)
+    history.add_incident(incident("inc-1", [hit.event_id], t0 + timedelta(seconds=3)))
 
-    assert kpis.read(DAY_START, NOW).detect_p95_ms == Kpi(value=None, delta=None)
+    assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=9000, delta=None)
 
 
-def test_detect_p95_excludes_behavior_model(devices: Devices, history: History) -> None:
-    """设备行为模型要连续两个 30 s 窗口偏离才告警，时延是设计使然，不计入（D-100）。"""
+def test_last_contain_without_containment(devices: Devices, history: History) -> None:
     kpis = tracker(devices, history)
-    live(kpis, 120, NOW - timedelta(minutes=2))
-    received = NOW - timedelta(minutes=1)
-    model = alert().model_copy(update={"source": "model", "rule_id": "behavior-model"})
-    kpis.on_live_alert(at(model, received - timedelta(seconds=38)), received)
+    contained(kpis, "inc-x", "contained", NOW)  # 关联事件不在历史中：不计用时
 
-    assert kpis.read(DAY_START, NOW).detect_p95_ms.value == 120
+    assert kpis.read(DAY_START, NOW).last_contain_ms == Kpi(value=None, delta=None)
 
 
 @pytest.fixture
@@ -169,7 +207,7 @@ def test_viewer_gets_kpis(client: TestClient, password: str) -> None:
         "online_devices",
         "active_alerts",
         "contained_today",
-        "detect_p95_ms",
+        "last_contain_ms",
     }
 
 

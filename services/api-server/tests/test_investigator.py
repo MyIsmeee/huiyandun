@@ -355,7 +355,7 @@ def test_worker_survives_database_down_at_start() -> None:
             raise OSError("数据库不可达")
 
     frames: list[WsFrame] = []
-    state = SimpleNamespace(engine=Down(), hub=SimpleNamespace(broadcast=frames.append))
+    state = SimpleNamespace(engine=Down(), hub=SimpleNamespace(broadcast=frames.append), tz=UTC)
 
     async def main() -> bool:
         worker = investigator.Investigator(state)
@@ -395,7 +395,7 @@ def test_worker_survives_failed_fail_frame() -> None:
             yield
 
     engine = Flaky()
-    state = SimpleNamespace(engine=engine, hub=SimpleNamespace(broadcast=lambda _: None))
+    state = SimpleNamespace(engine=engine, hub=SimpleNamespace(broadcast=lambda _: None), tz=UTC)
 
     async def main() -> bool:
         worker = investigator.Investigator(state)
