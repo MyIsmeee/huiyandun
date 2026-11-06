@@ -38,7 +38,6 @@ const MARKING_Y = 0.055;
 
 /** 环境类别色（§5.1 L1、V-S5）：两套分别取值，均为去饱和色，与状态色的色差 ΔE2000 ≥ 20 */
 export interface Palette {
-  /** 路面，另作黑板色（D-059） */
   road: string;
   sidewalk: string;
   floor: string;
@@ -46,9 +45,13 @@ export interface Palette {
   earth: string;
   /** 立面、物体与树干 */
   facade: string;
+  /** 家具模型（D-059） */
+  furniture: string;
+  canopy: string;
+  board: string;
   marking: string;
 }
-/** 地面类别低饱和，立面、物体与家具取沙盘青，在场景中以半透明呈现（04 §5.1 L1、D-104） */
+/** 地面类别低饱和；立面、物体与家具为中性灰实体，受光并投射阴影（04 §5.1 L1、D-111） */
 export const PALETTE: Record<Theme, Palette> = {
   dark: {
     road: "#40454C",
@@ -56,8 +59,11 @@ export const PALETTE: Record<Theme, Palette> = {
     floor: "#3E3B36",
     grass: "#283027",
     earth: "#342E26",
-    facade: "#3CC8F0",
-    marking: "#A9B8C6",
+    facade: "#52525B",
+    furniture: "#A1A1AA",
+    canopy: "#3F4A3C",
+    board: "#27272A",
+    marking: "#A1A1AA",
   },
 };
 
@@ -211,7 +217,7 @@ export interface Furnishing {
 function tree({ x, y, height_m }: SceneFrame["trees"][number], palette: Palette): BufferGeometry[] {
   return [
     paint(new CylinderGeometry(0.03, 0.04, 0.4, 6).translate(0, 0.2, 0), palette.facade),
-    paint(new IcosahedronGeometry(0.35, 0).translate(0, 0.7, 0), palette.grass),
+    paint(new IcosahedronGeometry(0.35, 0).translate(0, 0.7, 0), palette.canopy),
   ].map((g) => g.scale(height_m, height_m, height_m).translate(x, 0, y));
 }
 
@@ -227,7 +233,7 @@ export function sceneGeometry(frame: SceneFrame, palette: Palette, furnishing: F
   ];
   const walls = frame.walls.flatMap(({ class: kind, line, height_m }) => {
     const [base, thickness, color] =
-      kind === "board" ? [BOARD_BASE_M, BOARD_THICKNESS_M, palette.road] : [0, WALL_THICKNESS_M, palette.facade];
+      kind === "board" ? [BOARD_BASE_M, BOARD_THICKNESS_M, palette.board] : [0, WALL_THICKNESS_M, palette.facade];
     return line.slice(1).map((to, i) => {
       const [[x1 = 0, y1 = 0], [x2 = 0, y2 = 0]] = [line[i] ?? [], to];
       const box = new BoxGeometry(Math.hypot(x2 - x1, y2 - y1), height_m, thickness)
@@ -239,7 +245,7 @@ export function sceneGeometry(frame: SceneFrame, palette: Palette, furnishing: F
   const objects = frame.objects.flatMap(({ class: kind, polygon, height_m }) =>
     isFurniture(kind)
       ? arrange(polygon, widthOf(kind), furnishing.camera).map(({ x, y, yaw, width, depth }) =>
-          tint(furnishing.models[kind].clone().scale(width, height_m, depth).rotateY(yaw).translate(x, 0, y), palette.facade),
+          tint(furnishing.models[kind].clone().scale(width, height_m, depth).rotateY(yaw).translate(x, 0, y), palette.furniture),
         )
       : [paint(upright(new ExtrudeGeometry(shape(polygon), { depth: height_m, bevelEnabled: false })), palette.facade)],
   );
