@@ -18,8 +18,8 @@ export function useAnimate(): () => boolean {
 }
 
 /**
- * 相机控件组（V-I1、V-I5）：缩小、放大、左转、右转、返回总览，位于场景右上角。
- * 2D 降级说明并入同一浮层，场景内同时可见的浮层不超过 3 个（V-L3）。
+ * 相机控件组（V-I1、V-I5）：缩小、放大、左转、右转、返回总览，位于场景左下角，详情抽屉展开时不被遮挡。
+ * 2D 降级说明并入同一浮层，场景内同时可见的浮层不超过 4 个（V-L3）。
  */
 export function CameraControls({ notice }: { notice?: { text: string; title: string } }) {
   const goal = useCamera((s) => s.goal);
@@ -37,10 +37,10 @@ export function CameraControls({ notice }: { notice?: { text: string; title: str
     <div
       role="toolbar"
       aria-label="视角"
-      className="absolute top-3 right-3 flex items-center rounded-full border border-line bg-panel/80 p-0.5 text-sm text-fg-2 backdrop-blur"
+      className="absolute bottom-3 left-3 flex items-center rounded-lg border bg-card/90 p-1 text-meta text-muted-foreground backdrop-blur-sm"
     >
       {notice && (
-        <span title={notice.title} className="border-r border-line px-3 whitespace-nowrap">
+        <span title={notice.title} className="border-r px-3 whitespace-nowrap">
           {notice.text}
         </span>
       )}
@@ -60,7 +60,7 @@ function ControlButton(props: { label: string; disabled: boolean; onClick: () =>
       title={props.label}
       disabled={props.disabled}
       onClick={props.onClick}
-      className="grid size-8 place-items-center rounded-full transition-colors hover:bg-raised hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent"
+      className="grid size-8 place-items-center rounded-md transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
     >
       {props.children}
     </button>

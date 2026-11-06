@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { timelineOf } from "../../src/panels/IncidentTimeline/IncidentTimeline";
+import { formatOffset, timelineOf } from "../../src/panels/IncidentTimeline/IncidentTimeline";
 import type { Alert, Execution, Incident } from "../../src/store/live";
 
 const HIT = "00000000-0000-4000-8000-000000000001";
@@ -69,5 +69,14 @@ describe("处置时间线（FR-304、D-106）", () => {
       expect.objectContaining({ note: "未调查" }),
       expect.objectContaining({ reached: false, note: "未处置" }),
     ]);
+  });
+});
+
+describe("formatOffset（04 §4.1 时长格式）", () => {
+  it("小于 1 分钟按秒，小于 1 小时按分秒，否则按时分", () => {
+    expect(formatOffset(0)).toBe("+0 秒");
+    expect(formatOffset(38_800)).toBe("+39 秒");
+    expect(formatOffset(1_800_100)).toBe("+30 分 0 秒");
+    expect(formatOffset(3_725_000)).toBe("+1 小时 2 分");
   });
 });

@@ -1,4 +1,6 @@
 import { Clock } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 export type KpiData =
   | { status: "loading" }
@@ -28,10 +30,8 @@ export function KpiTile(props: {
   const { label, unit, data, since = "较 1 小时前", format = plain } = props;
   const stale = data.status === "stale";
   return (
-    <div
-      className={`min-w-36 rounded-xl border px-4 py-3 ${stale ? "border-dashed border-uncertain" : "border-transparent"}`}
-    >
-      <p className="flex items-center gap-2 text-sm text-fg-2">
+    <div className={cn("min-w-40 rounded-md border px-4 py-3", stale ? "border-dashed border-uncertain" : "border-transparent")}>
+      <p className="flex items-center gap-2 text-meta text-muted-foreground">
         {label}
         {stale && (
           <span className="flex items-center gap-1 text-uncertain">
@@ -41,15 +41,15 @@ export function KpiTile(props: {
         )}
       </p>
       {data.status === "loading" ? (
-        <span aria-label="加载中" className="mt-2 block h-7 w-16 rounded-md bg-raised" />
+        <Skeleton aria-label="加载中" className="mt-2 h-8 w-16" />
       ) : (
         <>
-          <p className={`mt-1 text-2xl font-black ${stale ? "opacity-50" : ""}`}>
+          <p className={cn("mt-1 text-kpi font-semibold tabular-nums", stale && "opacity-50")}>
             {data.value === null ? "—" : format(data.value)}
-            {data.value !== null && <span className="ml-1 text-sm font-normal text-fg-3">{unit}</span>}
+            {data.value !== null && <span className="ml-1 text-sm font-normal text-subtle-foreground">{unit}</span>}
           </p>
           {data.value !== null && data.delta !== null && (
-            <p className="mt-1 text-sm text-fg-3">{trend(data.delta, since, format)}</p>
+            <p className="text-xs text-subtle-foreground tabular-nums">{trend(data.delta, since, format)}</p>
           )}
         </>
       )}

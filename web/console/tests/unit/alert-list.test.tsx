@@ -162,6 +162,31 @@ describe("AlertList", () => {
   });
 });
 
+describe("告警栏筛选（D-112）", () => {
+  it("物理只显示行为告警并隐藏关联事件，网络只显示网络告警与关联事件；筛选后为空时提示", () => {
+    receive(frame("alerts", alert(1)), 0);
+    receive(frame("alerts", fall(2)), 0);
+    receive(frame("incidents", incident), 0);
+    render(<AlertList stale={false} lastFrameAt={0} />);
+    const shown = () => within(screen.getByRole("list", { name: "单条告警" })).getAllByRole("listitem").map((li) => li.textContent);
+
+    fireEvent.click(screen.getByRole("radio", { name: "物理" }));
+    expect(shown()).toEqual([expect.stringContaining("跌倒")]);
+    expect(screen.queryByRole("list", { name: "关联事件" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("radio", { name: "网络" }));
+    expect(shown()).toEqual([expect.stringContaining("告警 1")]);
+    expect(screen.getByRole("list", { name: "关联事件" })).toBeTruthy();
+  });
+
+  it("该类没有告警时显示空态", () => {
+    receive(frame("alerts", alert(1)), 0);
+    render(<AlertList stale={false} lastFrameAt={0} />);
+    fireEvent.click(screen.getByRole("radio", { name: "物理" }));
+    expect(screen.getByText("该类暂无告警")).toBeTruthy();
+  });
+});
+
 describe("同类告警合并（D-106）", () => {
   const climb = (n: number, minute: number, camera = "cam-02") => ({
     ...fall(n),
