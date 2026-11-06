@@ -8,11 +8,12 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from api_server import cameras
 from api_server.app import create_app
@@ -68,6 +69,8 @@ def client(db: tuple[ApiConfig, ApiConfig], password: str, key_file: Path) -> It
     async def reset() -> None:
         async with transaction(db[1]) as conn:
             await conn.execute(delete(cameras.cameras))
+        async with transaction(db[0]) as conn:  # 序列重置须属主权限
+            await conn.execute(text("ALTER SEQUENCE camera_id_seq RESTART"))
 
     asyncio.run(reset())
     config = db[1].model_copy(update={"device_key_file": key_file})
@@ -143,6 +146,11 @@ def test_create_password_write_only_and_audited(
         ({"source": GATE["source"] | {"path": "/live#video=copy"}}, 400),  # go2rtc 参数
         ({"source": GATE["source"] | {"host": "exec:rm -rf /"}}, 400),
         ({"source": GATE["source"] | {"protocol": "exec"}}, 400),
+        ({"source": GATE["source"] | {"host": "127.0.0.1", "port": 1984}}, 400),  # go2rtc 自身
+        ({"source": GATE["source"] | {"host": "localhost"}}, 400),
+        ({"source": GATE["source"] | {"host": "GO2RTC"}}, 400),
+        ({"source": GATE["source"] | {"host": "[::1]"}}, 400),
+        ({"source": GATE["source"] | {"host": "0.0.0.0"}}, 400),
         ({"pose": POSE | {"pitch_deg": 10}}, 400),
         ({"ip": "172.30.0.11"}, 409),  # 与 cam-01 重复
     ],
@@ -166,6 +174,15 @@ def test_update_keeps_or_clears_password_and_switches_to_push(
     assert (r.json()["ingest"], r.json()["source"]) == ("push", None)
     assert stored(db[1], "cam-03")["host"] is None
     assert len(audits(db[1], "camera.updated")) == 3
+
+
+def test_ids_are_never_reused(client: TestClient) -> None:
+    """D-108：删除后新增的摄像头取下一个未用过的编号，含初始导入的编号。"""
+    assert client.post("/api/cameras", json=GATE, headers=headers()).json()["id"] == "cam-03"
+    for camera_id in ("cam-03", "cam-02"):
+        assert client.delete(f"/api/cameras/{camera_id}", headers=headers()).status_code == 204
+    r = client.post("/api/cameras", json=GATE, headers=headers())
+    assert r.status_code == 201 and r.json()["id"] == "cam-04"
 
 
 def test_delete_and_roles(client: TestClient, password: str) -> None:
@@ -328,3 +345,53 @@ def test_concurrent_creates_get_distinct_ids(client: TestClient) -> None:
         assert sorted(pool.map(create, range(4))) == [201, 201, 201, 201]
     ids = [c["id"] for c in client.get("/api/cameras").json()["items"]]
     assert len(ids) == len(set(ids)) == 6
+
+
+class FrameGo2rtc(FakeGo2rtc):
+    """取一帧时返回给定的响应或抛出给定的异常；流接口同 FakeGo2rtc。"""
+
+    def __init__(self, frame: httpx2.Response | Exception) -> None:
+        super().__init__({})
+        self.frame = frame
+
+    async def get(self, path: str, **kw: Any) -> Any:
+        if path != "/api/frame.jpeg":
+            return await super().get(path, **kw)
+        if isinstance(self.frame, Exception):
+            raise self.frame
+        return self.frame
+
+
+@pytest.mark.parametrize(
+    ("frame", "status", "detail"),
+    [
+        (httpx2.Response(200, content=b"\xff\xd8jpeg"), 200, None),
+        (httpx2.ReadTimeout("slow"), 502, "取画面超时"),
+        (httpx2.ConnectError("down"), 502, "视频服务不可用"),
+        (httpx2.Response(404), 502, "视频服务中没有这路流"),
+        (httpx2.Response(500), 502, "取不到画面"),
+        (httpx2.Response(200, content=b""), 502, "取不到画面"),
+    ],
+)
+def test_snapshot(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    frame: httpx2.Response | Exception,
+    status: int,
+    detail: str | None,
+) -> None:
+    """V-CAM4：取一帧只返回给管理员浏览器、不缓存；超时、视频服务不可用、无此流、空画面各有提示。"""
+    monkeypatch.setattr(cast(Any, client.app).state, "go2rtc", FrameGo2rtc(frame))
+    r = client.get("/api/cameras/cam-01/snapshot", headers=headers())
+    assert r.status_code == status, r.text
+    if detail is None:
+        assert r.content == b"\xff\xd8jpeg"
+        assert (r.headers["content-type"], r.headers["cache-control"]) == ("image/jpeg", "no-store")
+    else:
+        assert detail in r.text
+
+
+def test_snapshot_unknown_camera_and_viewer(client: TestClient, password: str) -> None:
+    assert client.get("/api/cameras/cam-99/snapshot", headers=headers()).status_code == 404
+    login(client, "viewer", password)
+    assert client.get("/api/cameras/cam-01/snapshot", headers=headers()).status_code == 403

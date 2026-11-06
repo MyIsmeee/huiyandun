@@ -7,6 +7,7 @@ go2rtc 的 exec: 等源可执行命令（D-103）。口令只写不读（C-ST-03
 """
 
 import asyncio
+import ipaddress
 import logging
 import re
 import time
@@ -54,7 +55,10 @@ SCHEMA_VERSION = "1.0.0"
 MAX_CAMERAS = 16  # D0 档位规划 4～8 路（01 §12.1），留余量；超出拒绝（125 设计 §8）
 SYNC_S = 30  # go2rtc 重启会丢掉动态添加的流：定期比对补齐
 RETRY_S = 2
-CREATE_LOCK = 0x48594431  # 新增摄像头的事务级咨询锁：并发新增时编号与路数上限不冲突
+CREATE_LOCK = 0x48594431  # 新增摄像头的事务级咨询锁：并发新增时路数上限不被同时突破
+ID_SEQUENCE = "camera_id_seq"  # 编号只增不复用（D-108）
+# 取流主机不能指向 go2rtc 自身：它的接口无鉴权（D-103）
+FORBIDDEN_HOSTS = {"localhost", "go2rtc"}
 SNAPSHOT_TIMEOUT_S = 8.0  # 首帧须等关键帧，摄像头的关键帧间隔常为 2～4 s
 SNAPSHOT_ERRORS = {
     404: "视频服务中没有这路流：拉流地址尚未同步，稍后重试",
@@ -171,12 +175,26 @@ def registry(rows: list[Any]) -> ConfigCamerasV1:
 
 
 def _check(values: dict[str, Any]) -> None:
-    """契约之外的校验：拉流须有地址，警戒线不能竖直（FR-104）。"""
+    """契约之外的校验：拉流须有地址且不指向本机，警戒线不能竖直（FR-104）。"""
     if values["ingest"] == "pull" and values.get("protocol") is None:
         raise HTTPException(400, "source: 拉流方式须填写协议、主机、端口与路径")
+    if values["ingest"] == "pull" and _local(values["host"]):
+        raise HTTPException(400, "source.host: 不能是本机或视频服务自身的地址")
     for i, (u1, _, u2, _) in enumerate(values["climb_lines"]):
         if u1 == u2:
             raise HTTPException(400, f"climb_lines.{i}: 警戒线不能是竖直线段")
+
+
+def _local(host: str) -> bool:
+    """回环、未指定地址、localhost 与 go2rtc：取流请求会落到 go2rtc 自身。"""
+    name = host.strip("[]").lower().rstrip(".")
+    if name in FORBIDDEN_HOSTS or name.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_unspecified
 
 
 SOURCE_FIELDS = ("protocol", "host", "port", "path")
@@ -194,8 +212,14 @@ async def _rows(conn: AsyncConnection) -> list[Any]:
 
 
 async def _next_id(conn: AsyncConnection) -> str:
-    used = set(await conn.scalars(select(cameras.c.id)))
-    return next(f"cam-{n:02d}" for n in range(1, MAX_CAMERAS + 2) if f"cam-{n:02d}" not in used)
+    """编号只增不复用（D-108）：删除 cam-02 后新增的是下一个未用过的编号。"""
+    return f"cam-{await conn.scalar(select(func.nextval(ID_SEQUENCE))):02d}"
+
+
+def _seeded_max(rows: list[dict[str, Any]]) -> int:
+    """初始导入的 cam-NN 中最大的 NN：序列从其后开始，导入的编号删除后也不复用。"""
+    numbers = [int(r["id"][4:]) for r in rows if re.fullmatch(r"cam-\d+", r["id"])]
+    return max(numbers, default=0)
 
 
 def seeds(site_file: Path, now: datetime) -> list[dict[str, Any]]:
@@ -244,8 +268,11 @@ class Registry:
                 async with self._state.engine.begin() as conn:
                     if not await conn.scalar(select(cameras.c.id).limit(1)):
                         now = datetime.now(UTC)
-                        for row in seeds(self._state.config.site_file, now):
+                        rows = seeds(self._state.config.site_file, now)
+                        for row in rows:
                             await conn.execute(insert(cameras).values(row))
+                        if _seeded_max(rows):
+                            await conn.execute(select(func.setval(ID_SEQUENCE, _seeded_max(rows))))
                         log.info("cameras.seeded")
                 break
             except Exception:
@@ -369,7 +396,7 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
     _check(values)
     try:
         async with request.app.state.engine.begin() as conn:
-            # 并发新增串行化：否则可能分到同一编号，主键冲突被误报为 IP 重复
+            # 并发新增串行化：否则可能同时通过路数上限的检查
             await conn.execute(select(func.pg_advisory_xact_lock(CREATE_LOCK)))
             if len(await _rows(conn)) >= MAX_CAMERAS:
                 raise HTTPException(409, f"最多登记 {MAX_CAMERAS} 路摄像头")
