@@ -3,6 +3,7 @@
 import asyncio
 import json
 import threading
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
@@ -12,7 +13,7 @@ import yaml
 from correlator import service
 from correlator.behavior import BehaviorModel
 from correlator.eve import EveTail, Line
-from correlator.normalize import device_index, normalize
+from correlator.normalize import Ip, device_index, normalize
 from correlator.service import (
     STREAM,
     STREAM_MAX_AGE_S,
@@ -22,16 +23,27 @@ from correlator.service import (
     run,
 )
 from py_common.bus import Bus
-from py_contracts.config.site_schema import SiteConfig
+from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
 ROOT = Path(__file__).resolve().parents[3]
 LIVE = (Path(__file__).parent / "eve/live.json").read_text(encoding="utf-8").strip()
-DEVICES = device_index(
-    SiteConfig.model_validate(
-        yaml.safe_load((ROOT / "demo/scenarios/site.yaml").read_text(encoding="utf-8"))
-    )
+# 与 api-server 由 site.yaml 初始导入后下发的摄像头登记表一致（D-101）
+REGISTRY = ConfigCamerasV1.model_validate(
+    {
+        "schema_version": "1.0.0",
+        "event_id": "00000000-0000-4000-8000-000000000000",
+        "ts": "2026-11-05T00:00:00Z",
+        "cameras": [
+            {k: c.get(k, c["id"]) for k in ("id", "name", "ip", "pose")}
+            | {"calibration": [], "climb_lines": []}
+            for c in yaml.safe_load(
+                (ROOT / "demo/scenarios/site.yaml").read_text(encoding="utf-8")
+            )["cameras"]
+        ],
+    }
 )
+DEVICES = device_index(REGISTRY)
 
 
 def config(tmp_path: Path) -> CorrelatorConfig:
@@ -198,3 +210,21 @@ def test_behavior_window_saves_state_and_retries_publish(
     assert saved["devices"]["cam-02"]["learned"] == 0
     position = json.loads(cfg.conn_state_file.read_text(encoding="utf-8"))
     assert position["offset"] == cfg.conn_file.stat().st_size
+
+
+def test_follow_registry_waits_for_first_registry() -> None:
+    """登记表流已建但 api-server 尚未发布时，等到第一条再返回：行为模型不会按空设备表加载。"""
+
+    class LateBus:
+        async def js_subscribe(
+            self, subject: str, model: object, handler: Callable[..., object], since: object
+        ) -> None:
+            async def later() -> None:
+                await asyncio.sleep(0.05)
+                await cast(Callable[[ConfigCamerasV1], Awaitable[None]], handler)(REGISTRY)
+
+            self.task = asyncio.create_task(later())
+
+    devices: dict[Ip, str] = {}
+    asyncio.run(asyncio.wait_for(service.follow_registry(cast(Bus, LateBus()), devices, []), 5))
+    assert devices == DEVICES

@@ -19,7 +19,6 @@ from pathlib import Path
 
 import nats
 import nats.js.errors
-import yaml
 from pydantic import Field
 
 from correlator.behavior import WINDOW_S, BehaviorModel, save_state
@@ -30,7 +29,7 @@ from correlator.rules import MODELS, Event, load_rules
 from py_common.bus import Bus
 from py_common.config import ServiceConfig, load_config
 from py_common.log import configure_logging
-from py_contracts.config.site_schema import SiteConfig
+from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
@@ -56,9 +55,6 @@ class CorrelatorConfig(ServiceConfig):
     state_file: Path = Field(
         Path("/var/lib/correlator/eve-position.json"),
         description="EVE 已处理位置，须位于持久卷，重启后续读",
-    )
-    site_file: Path = Field(
-        Path("/etc/hyd/site.yaml"), description="站点配置 site.yaml：设备登记表（FR-203）"
     )
     poll_s: float = Field(0.5, gt=0, le=10, description="读到文件末尾后再次检查的间隔，单位秒")
     heartbeat_file: Path = Field(
@@ -243,8 +239,39 @@ async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
     )
 
 
+REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
+REGISTRY_RETRY_S = 2
+
+
+async def follow_registry(bus: Bus, devices: dict[Ip, str], model: list[BehaviorModel]) -> None:
+    """设备登记表随 api-server 下发的摄像头登记表原地更新（FR-203、FR-906）；返回时已取到最新一条。
+    登记表的流由 api-server 创建，它尚未启动时重试；流已建但尚无登记表时等到第一条，
+    行为模型不会按空设备表加载。"""
+    received = asyncio.Event()
+
+    async def on_registry(event: ConfigCamerasV1) -> None:
+        devices.clear()
+        devices.update(device_index(event))
+        if model:
+            model[0].sync({str(ip): device for ip, device in devices.items()})
+        log.info("correlator.devices", extra={"devices": sorted(devices.values())})
+        received.set()
+
+    while True:
+        try:
+            await bus.js_subscribe(
+                REGISTRY_SUBJECT, ConfigCamerasV1, on_registry, datetime.fromtimestamp(0, UTC)
+            )
+            break
+        except (nats.errors.Error, TimeoutError):
+            log.warning("correlator.registry_unavailable")
+            await asyncio.sleep(REGISTRY_RETRY_S)
+    if not received.is_set():
+        log.info("correlator.registry_waiting")
+        await received.wait()
+
+
 async def serve(config: CorrelatorConfig) -> None:
-    site = SiteConfig.model_validate(yaml.safe_load(config.site_file.read_text(encoding="utf-8")))
     rules = load_rules(config.rules_dir)
     engine = Engine(rules, json.loads(config.attack_file.read_text(encoding="utf-8")))
     bus = await Bus.connect(config.nats_url, name="correlator", timeout_s=config.nats_timeout_s)
@@ -255,14 +282,18 @@ async def serve(config: CorrelatorConfig) -> None:
         extra={"eve_file": str(config.eve_file), "rules": [r.id for r in rules]},
     )
     window = timedelta(seconds=max(r.window_s for r in rules))
-    devices = device_index(site)
+    devices: dict[Ip, str] = {}
+    model: list[BehaviorModel] = []  # 取到登记表后再加载：存盘状态按设备编号恢复
+    await follow_registry(bus, devices, model)
     tasks = [
         correlate(engine, bus, window),
         run(EveTail(config.eve_file, config.state_file), devices, bus, config),
     ]
     if config.behavior_enabled:
-        model = load_behavior(devices, config)
-        tasks.append(behave(model, EveTail(config.conn_file, config.conn_state_file), bus, config))
+        model.append(load_behavior(devices, config))
+        tasks.append(
+            behave(model[0], EveTail(config.conn_file, config.conn_state_file), bus, config)
+        )
     await asyncio.gather(*tasks)
 
 

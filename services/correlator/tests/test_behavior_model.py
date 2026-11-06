@@ -166,3 +166,15 @@ def test_invalid_unrelated_and_stale_records_ignored() -> None:
     traffic.model.close_window(traffic.t)
     saved = traffic.model.dump()["devices"]["cam-02"]
     assert saved["seen"] == [] and saved["history"][0][0] == 0
+
+
+def test_sync_follows_registry() -> None:
+    """D-101：新登记的设备从头学习，删除的丢弃，IP 与编号都未变的沿用学过的基线。"""
+    traffic = Traffic().learned()
+    model = traffic.model
+    before = model.learning()
+    assert "cam-02" not in before  # 已学完
+    model.sync({CAM: "cam-02", "10.0.0.9": "cam-09"})
+    assert model.learning() == {"cam-09": 0}
+    model.sync({"10.0.0.9": "cam-09"})
+    assert set(model.dump()["devices"]) == {"cam-09"}
