@@ -8,12 +8,14 @@ import {
   CircleGeometry,
   Color,
   CylinderGeometry,
+  Float32BufferAttribute,
   type InstancedMesh,
   Object3D,
   RingGeometry,
   SphereGeometry,
   Vector3,
 } from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { type TargetClass, useLive } from "../store/live";
 import { useSelection } from "../store/selection";
 import { useMotion } from "./DeviceMarkers";
@@ -29,8 +31,8 @@ const CAPACITY = 256;
 /** 人形的骨段与关节容量：每人至多 12 段（躯干、颈部、双肩、双髋与四肢），关节为每段两端加头部 */
 const BONE_CAPACITY = CAPACITY * 12;
 const JOINT_CAPACITY = CAPACITY * 25;
-/** 人员与车辆默认白色，带中性细描边（§5.1 L4） */
-const FILL = "#F7F8FA";
+/** 人员与车辆默认白灰哑光，带中性细描边（§5.1 L4、D-111） */
+const FILL = "#E4E4E7";
 const OUTLINE_M = 0.02;
 const UP = new Vector3(0, 1, 0);
 /** 转向角速度上限（弧度每秒）：车辆掉头约 1 s 完成，不瞬间翻转 */
@@ -59,8 +61,19 @@ const FIGURE_LAYERS: Layer[] = KINDS.flatMap((kind) => [
 /** 人形各部件要画的图层与半径：实体另画外扩 OUTLINE_M 的描边 */
 const outlined = (kind: Kind, radius: number): (readonly [Kind, number])[] =>
   kind === "solid" ? [["solid", radius], ["outline", radius + OUTLINE_M]] : [[kind, radius]];
-/** 不确定圆：单位半径，按 uncertainty_m 缩放（V-U1） */
-const DISC = new CircleGeometry(1, 32).rotateX(-Math.PI / 2).translate(0, 0.02, 0);
+/** 不确定圆：单位半径，按 uncertainty_m 缩放；中心向边缘渐隐（顶点透明度，V-U1） */
+const DISC = (() => {
+  const disc = new CircleGeometry(1, 32).rotateX(-Math.PI / 2).translate(0, 0.02, 0);
+  const position = disc.getAttribute("position");
+  const alpha = Array.from({ length: position.count }, (_, i) => [1, 1, 1, 1 - Math.hypot(position.getX(i), position.getZ(i))]).flat();
+  return disc.setAttribute("color", new Float32BufferAttribute(alpha, 4));
+})();
+/** 高误差（> 1 m）目标的虚线圈：单位半径的 24 段短弧（V-U1） */
+const DASHED = mergeGeometries(
+  Array.from({ length: 24 }, (_, i) => new RingGeometry(0.97, 1, 4, 1, (i * Math.PI) / 12, Math.PI / 24)),
+)
+  .rotateX(-Math.PI / 2)
+  .translate(0, 0.03, 0);
 /** 锁定环：新目标出现时由 0.4 扩散到 1.6 倍目标尺度（§5.1 L4） */
 const RING = new RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2).translate(0, 0.04, 0);
 /** 锁定环的基准半径：人员 0.6 m，车辆按车长 */
@@ -93,6 +106,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
   );
   const discs = useRef<InstancedMesh>(null);
   const rings = useRef<InstancedMesh>(null);
+  const dashes = useRef<InstancedMesh>(null);
   const headings = useRef(new Map<string, number>());
   const last = useRef(0);
   // 轨迹点写入预分配的实例：推送频繁时不重建几何体，也不触发 React 重渲染
@@ -171,6 +185,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     let hoverBounds: Box3 | null = null;
     let discCount = 0;
     let ringCount = 0;
+    let dashCount = 0;
     const seen = new Set<string>();
     // 仍有目标在两次实测之间移动、在转向或锁定环未结束时继续逐帧绘制；全部到位后停绘，等下一次推送
     // 轨迹尚未跟上最新推送时同样续帧
@@ -213,6 +228,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       o.scale.set(target.uncertainty_m, 1, target.uncertainty_m);
       o.updateMatrix();
       if (discCount < CAPACITY) discs.current?.setMatrixAt(discCount++, o.matrix);
+      if (target.uncertain && dashCount < CAPACITY) dashes.current?.setMatrixAt(dashCount++, o.matrix);
       const age = t - (target.trail[0]?.[2] ?? t);
       pending ||= age < LOCK_RING_MS;
       if (motion && age >= 0 && age < LOCK_RING_MS && ringCount < CAPACITY) {
@@ -227,6 +243,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     for (const { key } of layers) finish(meshes.current[key], counts[key] ?? 0);
     finish(discs.current, discCount);
     finish(rings.current, ringCount);
+    finish(dashes.current, dashCount);
     placeMarker(marker.el, bounds, camera, size);
     placeMarker(hoverMarker.el, hoverBounds, camera, size);
     if (motion && pending) invalidate();
@@ -252,13 +269,16 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         </instancedMesh>
       ))}
       <instancedMesh ref={discs} args={[DISC, undefined, CAPACITY]} frustumCulled={false}>
-        <meshBasicMaterial color={STATUS.uncertain} transparent opacity={0.2} depthWrite={false} />
+        <meshBasicMaterial color="#FFFFFF" vertexColors transparent opacity={0.1} depthWrite={false} />
+      </instancedMesh>
+      <instancedMesh ref={dashes} args={[DASHED, undefined, CAPACITY]} frustumCulled={false}>
+        <meshBasicMaterial color={STATUS.uncertain} transparent opacity={0.8} depthWrite={false} />
       </instancedMesh>
       <instancedMesh ref={rings} args={[RING, undefined, CAPACITY]} frustumCulled={false}>
-        <meshBasicMaterial color={STATUS.neutral} transparent opacity={0.6} depthWrite={false} />
+        <meshBasicMaterial color="#FFFFFF" transparent opacity={0.5} depthWrite={false} />
       </instancedMesh>
       <instancedMesh ref={dots} args={[DOT, undefined, DOT_CAPACITY]} frustumCulled={false}>
-        <meshBasicMaterial color={ACCENT} depthWrite={false} />
+        <meshBasicMaterial color={ACCENT} transparent opacity={0.3} depthWrite={false} />
       </instancedMesh>
     </>
   );

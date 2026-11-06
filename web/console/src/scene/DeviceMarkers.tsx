@@ -1,7 +1,6 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
-  AdditiveBlending,
   BoxGeometry,
   BufferGeometry,
   CylinderGeometry,
@@ -19,7 +18,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useLive } from "../store/live";
 import { useTheme } from "../theme/store";
 import { useViewpointCamera } from "./camera";
-import { BODY, type Camera, deviceLook, type Look, SANDBOX } from "./devices";
+import { BEAM, BODY, type Camera, deviceLook, type Look, POLE_COLOR } from "./devices";
 import { type Instance, Instanced } from "./Instanced";
 import { coneOpacity, detectingByCamera } from "./targets";
 
@@ -59,11 +58,11 @@ export function DeviceMarkers({ cameras }: { cameras: Camera[] }) {
   const detecting = useLive(useShallow((s) => detectingByCamera(s.targets)));
   const solid = placed.filter(({ look, shown }) => shown && look.fill && look.opacity === 1);
   const faded = placed.filter(({ look, shown }) => shown && look.fill && look.opacity < 1);
-  // 立杆随机身变色会使状态色块面积失真：立杆始终为白色（V-S1、D-104）
+  // 立杆随机身变色会使状态色块面积失真：立杆始终为浅灰（V-S1、D-111）
   const poles = placed.filter(({ shown }) => shown).map(({ camera: { pose } }): Instance => ({
     position: [pose.x, 0, pose.y],
     scale: [1, pose.height_m, 1],
-    color: BODY,
+    color: POLE_COLOR,
   }));
   return (
     <>
@@ -132,8 +131,9 @@ export function useMotion(): boolean {
 const ARC_SEGMENTS = 32;
 
 /**
- * 三维视场（04 §5.1 L3、D-104）：从镜头到可视距离处地面的扇形锥体。几何在世界坐标中生成：
- * faces 为两侧面与顶到弧的曲面，ground 为地面扇形，edges 为镜头到弧两端的棱线与弧线。
+ * 三维视场（04 §5.1 L3、D-111）：从镜头到可视距离处地面的扇形光束。几何在世界坐标中生成：
+ * faces 为两侧面与顶到弧的曲面，顶点透明度随距镜头的水平距离线性渐隐（镜头处 1、可视距离处 0）；
+ * ground 为地面扇形，edges 为地面投影的轮廓（扇形两边与弧线）。
  */
 export function coneGeometry(pose: Camera["pose"]): { faces: BufferGeometry; ground: BufferGeometry; edges: BufferGeometry } {
   const yaw = (pose.yaw_deg * Math.PI) / 180;
@@ -156,14 +156,22 @@ export function coneGeometry(pose: Camera["pose"]): { faces: BufferGeometry; gro
   });
   for (const end of [arc[0], arc.at(-1)] as P[]) {
     faces.push(...apex, ...base, ...end);
-    edges.push(...apex, ...end);
+    edges.push(...base, ...end);
   }
   const geometry = (values: number[]) => new BufferGeometry().setAttribute("position", new Float32BufferAttribute(values, 3));
-  return { faces: geometry(faces), ground: geometry(ground), edges: geometry(edges) };
+  const beam = geometry(faces);
+  // 白色顶点色 + 透明度（RGBA）：材质颜色与之相乘，透明度随水平距离渐隐
+  const alpha: number[] = [];
+  for (let i = 0; i < faces.length; i += 3) {
+    const d = Math.hypot((faces[i] ?? 0) - pose.x, (faces[i + 2] ?? 0) - pose.y);
+    alpha.push(1, 1, 1, Math.max(0, 1 - d / pose.range_m));
+  }
+  beam.setAttribute("color", new Float32BufferAttribute(alpha, 4));
+  return { faces: beam, ground: geometry(ground), edges: geometry(edges) };
 }
 
-/** 侧面、地面、棱线相对视场不透明度的倍数；叠加混合下俯视时侧面与地面相加，常态合计约 16% */
-const LAYERS = { faces: 0.5, ground: 0.8, edges: 3 } as const;
+/** 侧面（镜头处）、地面填充、地面轮廓相对视场不透明度的倍数：常态为 14%、6%、35%（04 §5.1 L3） */
+const LAYERS = { faces: 1, ground: 0.43, edges: 2.5 } as const;
 
 /** 视场：常态在该摄像头有检出目标时提亮（§5.1 L3）；critical / high 网络攻击时 1 Hz 呼吸（V-A1） */
 function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; severe: boolean }) {
@@ -172,7 +180,7 @@ function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullabl
   const ground = useRef<MeshBasicMaterial>(null);
   const edges = useRef<LineBasicMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
-  const opacity = cone.color === SANDBOX ? coneOpacity(cone.opacity, detecting) : cone.opacity;
+  const opacity = cone.color === BEAM ? coneOpacity(cone.opacity, detecting) : cone.opacity;
   const breathing = useMotion() && cone.breathe && severe;
   const set = (value: number) => {
     if (faces.current) faces.current.opacity = value * LAYERS.faces;
@@ -191,12 +199,12 @@ function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullabl
   });
   const geometry = useMemo(() => coneGeometry(pose), [pose]);
   useEffect(() => () => Object.values(geometry).forEach((g) => g.dispose()), [geometry]);
-  // 叠加混合：重叠处更亮，形成发光感；不写深度，不遮挡其后的目标
-  const common = { color: cone.color, transparent: true, depthWrite: false, blending: AdditiveBlending } as const;
+  // 普通混合、不发光（D-111）；不写深度，不遮挡其后的目标
+  const common = { color: cone.color, transparent: true, depthWrite: false } as const;
   return (
     <>
       <mesh geometry={geometry.faces}>
-        <meshBasicMaterial ref={faces} {...common} opacity={opacity * LAYERS.faces} side={DoubleSide} />
+        <meshBasicMaterial ref={faces} {...common} vertexColors opacity={opacity * LAYERS.faces} side={DoubleSide} />
       </mesh>
       <mesh geometry={geometry.ground}>
         <meshBasicMaterial ref={ground} {...common} opacity={opacity * LAYERS.ground} side={DoubleSide} />

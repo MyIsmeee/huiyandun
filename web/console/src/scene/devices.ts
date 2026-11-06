@@ -9,9 +9,10 @@ export const STATUS = {
   cyber: "#D03B3B",
   contained: "#0CA30C",
 } as const;
-/** 数字沙盘（04 §3.1、§5.2、D-104）：常态机身与立杆为白色，常态视场为沙盘青；二者都不表达状态 */
-export const BODY = "#E8F1F8";
-export const SANDBOX = "#3CC8F0";
+/** 实体数字孪生（04 §5.1 L2、L3，D-111）：常态机身白灰、立杆浅灰，常态视场为白色光束；都不表达状态 */
+export const BODY = "#E4E4E7";
+export const POLE_COLOR = "#D4D4D8";
+export const BEAM = "#FFFFFF";
 
 export type DeviceState = Device["state"];
 export type Camera = {
@@ -55,7 +56,7 @@ export interface Look {
   tags: { icon: TagIcon; text: string; color: string }[];
 }
 
-const CONE = { color: SANDBOX, opacity: 0.12, breathe: false };
+const CONE = { color: BEAM, opacity: 0.14, breathe: false };
 const CYBER_CONE = { color: STATUS.cyber, opacity: 0.25, breathe: true };
 /** 处置中、待联动：保持告警色，攻击已在处理，不再呼吸 */
 const HELD_CONE = { ...CYBER_CONE, breathe: false };

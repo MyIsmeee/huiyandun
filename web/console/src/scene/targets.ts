@@ -62,8 +62,8 @@ export function detectingByCamera(targets: Record<string, Target>): Record<strin
   return counts;
 }
 
-/** 沙盘青（V-S5、D-104）：只用于选中括框、胶囊标签与轨迹，不表达任何状态 */
-export const ACCENT = "#3CC8F0";
+/** 点缀色（D-111）：选中括框与轨迹为白色，不表达任何状态 */
+export const ACCENT = "#FFFFFF";
 
 export const CLASS_LABEL: Record<TargetClass, string> = {
   person: "人员",

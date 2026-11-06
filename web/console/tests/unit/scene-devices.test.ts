@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BODY, type DeviceState, deviceLook, SANDBOX, STATUS } from "../../src/scene/devices";
+import { BEAM, BODY, type DeviceState, deviceLook, STATUS } from "../../src/scene/devices";
 
 const STATES: DeviceState[] = [
   "normal",
@@ -23,8 +23,8 @@ describe("deviceLook（§5.2）", () => {
     for (const tag of look.tags) expect(tag.text).not.toBe("");
   });
 
-  it("正常态为白色机身、沙盘青视场、无标签（V-S1、D-104）", () => {
-    expect(deviceLook("normal")).toMatchObject({ fill: BODY, cone: { color: SANDBOX, opacity: 0.12 } });
+  it("正常态为白灰机身、白色视场光束、无标签（V-S1、D-111）", () => {
+    expect(deviceLook("normal")).toMatchObject({ fill: BODY, cone: { color: BEAM, opacity: 0.14 } });
     expect(deviceLook("normal").tags).toEqual([]);
   });
 
