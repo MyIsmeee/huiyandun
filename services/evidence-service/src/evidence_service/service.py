@@ -69,12 +69,15 @@ RECORDER_SYNC_S = 30
 
 
 async def follow_registry(
-    cameras: dict[str, str], recorder_api: httpx2.AsyncClient, bus: Bus, go2rtc_rtsp: str
+    cameras: dict[str, str],
+    recorder_api: httpx2.AsyncClient,
+    bus: Bus,
+    go2rtc_rtsp: str,
+    registered: asyncio.Event,
 ) -> None:
     """摄像头登记表变化时更新摄像头表，并让 recorder 只录登记的摄像头；之后每 30 s 按当前摄像头表
-    比对一次 recorder，其暂不可达或重启丢失路径时下轮补齐。"""
+    比对一次 recorder，其暂不可达或重启丢失路径时下轮补齐。收到第一条登记表时置位 registered。"""
     lock = asyncio.Lock()  # 登记表下发与定期比对不并发改 recorder
-    registered = asyncio.Event()  # 收到登记表之前不比对：空表会删掉全部录像路径
 
     async def sync() -> None:
         async with lock:
@@ -94,18 +97,20 @@ async def follow_registry(
     )
     while True:
         await asyncio.sleep(RECORDER_SYNC_S)
-        if registered.is_set():
+        if registered.is_set():  # 收到登记表之前不比对：空表会删掉全部录像路径
             await sync()
 
 
-async def follow(evidence: Evidence, bus: Bus) -> None:
-    """先订阅命中事件（缓存），再订阅关联事件：重放的关联事件能在缓存中找到命中事件。"""
+async def follow(evidence: Evidence, bus: Bus, registered: asyncio.Event) -> None:
+    """先订阅命中事件（缓存），再订阅关联事件：重放的关联事件能在缓存中找到命中事件。
+    收到摄像头登记表之后才订阅关联事件：存证只追加，按空摄像头表处理的事件会永久缺录像。"""
     since = datetime.now(UTC) - REPLAY
     events = [
         asyncio.create_task(_subscribe(bus, subject, model, _cacher(evidence, kind), since))
         for subject, (kind, model) in EVENTS.items()
     ]
     await asyncio.wait(events, timeout=SUBSCRIBE_WAIT_S)
+    await registered.wait()
     await _subscribe(bus, INCIDENT_SUBJECT, CorrelatorIncidentV1, evidence.on_incident, since)
     await asyncio.gather(*events)
 
@@ -165,10 +170,11 @@ async def serve(config: EvidenceConfig) -> None:
         config.nats_url, name="evidence-service", timeout_s=config.nats_timeout_s
     )
     # 登记表的流由 api-server 创建：在后台订阅，不推迟内部接口就绪
+    registered = asyncio.Event()
     registry_task = asyncio.create_task(
-        follow_registry(cameras, recorder_api, bus, config.go2rtc_rtsp)
+        follow_registry(cameras, recorder_api, bus, config.go2rtc_rtsp, registered)
     )
-    follow_task = asyncio.create_task(follow(evidence, bus))
+    follow_task = asyncio.create_task(follow(evidence, bus, registered))
     # log_config=None：uvicorn 的日志沿用根 logger 的 JSON 格式（CD-06）
     server = uvicorn.Server(
         uvicorn.Config(create_app(evidence), host="0.0.0.0", port=config.port, log_config=None)

@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import httpx2
@@ -299,6 +300,7 @@ def test_recorder_sync_retried_until_recorder_is_up(monkeypatch: pytest.MonkeyPa
                 cast(httpx2.AsyncClient, api),
                 cast(Bus, RegistryBus()),
                 "rtsp://go2rtc:8554",
+                asyncio.Event(),
             )
         )
         await asyncio.sleep(0.1)
@@ -309,3 +311,31 @@ def test_recorder_sync_retried_until_recorder_is_up(monkeypatch: pytest.MonkeyPa
     assert api.calls == [
         ("post", "/v3/config/paths/add/cam-01", {"source": "rtsp://go2rtc:8554/cam-01"})
     ]
+
+
+def test_incidents_wait_for_camera_registry() -> None:
+    """复核建议：收到摄像头登记表之前不订阅关联事件；否则补处理的关联事件按空摄像头表存证，永久缺录像。"""
+    subscribed: list[str] = []
+
+    class Subscriptions:
+        async def js_subscribe(self, subject: str, *_: object) -> None:
+            subscribed.append(subject)
+
+    async def main() -> list[str]:
+        registered = asyncio.Event()
+        task = asyncio.create_task(
+            service.follow(
+                cast(Evidence, SimpleNamespace(on_incident=None)),
+                cast(Bus, Subscriptions()),
+                registered,
+            )
+        )
+        await asyncio.sleep(0.05)
+        before = list(subscribed)
+        registered.set()
+        await asyncio.wait_for(task, 1)
+        return before
+
+    before = asyncio.run(main())
+    assert service.INCIDENT_SUBJECT not in before and len(before) == len(service.EVENTS)
+    assert subscribed[-1] == service.INCIDENT_SUBJECT
