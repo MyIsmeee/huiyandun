@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type DeviceState, deviceLook, STATUS } from "../../src/scene/devices";
+import { BODY, type DeviceState, deviceLook, SANDBOX, STATUS } from "../../src/scene/devices";
 
 const STATES: DeviceState[] = [
   "normal",
@@ -23,8 +23,8 @@ describe("deviceLook（§5.2）", () => {
     for (const tag of look.tags) expect(tag.text).not.toBe("");
   });
 
-  it("正常态为中性色、无标签（V-S1）", () => {
-    expect(deviceLook("normal")).toMatchObject({ fill: STATUS.neutral, cone: { color: STATUS.neutral, opacity: 0.12 } });
+  it("正常态为白色机身、沙盘青视场、无标签（V-S1、D-104）", () => {
+    expect(deviceLook("normal")).toMatchObject({ fill: BODY, cone: { color: SANDBOX, opacity: 0.12 } });
     expect(deviceLook("normal").tags).toEqual([]);
   });
 
@@ -46,9 +46,9 @@ describe("deviceLook（§5.2）", () => {
     expect(breathing).toEqual(["cyber_alert", "both"]);
   });
 
-  it("处置中只画绿色虚线轮廓不填充；已处置视场恢复中性", () => {
+  it("处置中只画绿色虚线轮廓不填充；已处置视场转绿（D-104）", () => {
     expect(deviceLook("pending_action")).toMatchObject({ fill: null, outline: { color: STATUS.contained, dashed: true } });
-    expect(deviceLook("contained").cone?.color).toBe(STATUS.neutral);
+    expect(deviceLook("contained").cone?.color).toBe(STATUS.contained);
   });
 
   it("旁路模式显示\"已通知 · 待联动\"，不显示\"已阻断\"（V-T1）", () => {
@@ -56,5 +56,18 @@ describe("deviceLook（§5.2）", () => {
 
     expect(texts).toContain("已通知 · 待联动");
     expect(texts.join()).not.toContain("阻断");
+  });
+});
+
+describe("三维视场（04 §5.1 L3）", () => {
+  it("顶点在镜头，弧在可视距离处的地面", async () => {
+    const { coneGeometry } = await import("../../src/scene/DeviceMarkers");
+    const pose = { x: 2, y: 3, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 10 };
+    const { faces, edges } = coneGeometry(pose);
+    const points = faces.getAttribute("position");
+    expect([points.getX(0), points.getY(0), points.getZ(0)]).toEqual([2, 3, 3]);
+    const e = edges.getAttribute("position");
+    const far = Array.from({ length: e.count }, (_, i) => ({ x: e.getX(i), z: e.getZ(i) })).filter((p) => Math.hypot(p.x - 2, p.z - 3) > 9.99);
+    expect(Math.max(...far.map((p) => p.x))).toBeCloseTo(12);
   });
 });

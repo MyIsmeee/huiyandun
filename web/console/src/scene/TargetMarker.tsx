@@ -30,7 +30,7 @@ export function TargetMarker() {
     >
       <Corners color={ACCENT} />
       <span
-        style={{ backgroundColor: ACCENT, color: "#FFFFFF" }}
+        style={{ backgroundColor: ACCENT, color: "#070B14" }}
         className="absolute bottom-1.5 left-[calc(var(--w)/2)] -translate-x-1/2 rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap tabular-nums"
       >
         {targetLabel(target)}

@@ -25,7 +25,7 @@ export function visibleTargets(
   const byId = new Map(cameras.map((c) => [c.id, c]));
   return Object.entries(targets).flatMap(([key, target]) => {
     const camera = byId.get(target.camera_id);
-    if (!camera?.calibrated) return [];
+    if (!camera?.mapped) return [];
     const physical = camera.state === "physical_alert" || camera.state === "both";
     const person = target.object_class === "person";
     const alert = person && physical && behaviors[target.camera_id]?.track_id === target.track_id;
@@ -64,8 +64,8 @@ export function detectingByCamera(targets: Record<string, Target>): Record<strin
   return counts;
 }
 
-/** 点缀蓝（V-S5）：只用于选中括框、胶囊标签与轨迹，不表达任何状态 */
-export const ACCENT = "#2F6FE4";
+/** 沙盘青（V-S5、D-104）：只用于选中括框、胶囊标签与轨迹，不表达任何状态 */
+export const ACCENT = "#3CC8F0";
 
 export const CLASS_LABEL: Record<TargetClass, string> = {
   person: "人员",

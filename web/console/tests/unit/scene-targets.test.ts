@@ -14,7 +14,7 @@ import {
 import type { Behavior, Target, TargetClass } from "../../src/store/live";
 
 const pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 10 };
-const cam = (state: DeviceState, calibrated = true): Camera => ({ id: "cam-01", state, calibrated, severe: false, pose });
+const cam = (state: DeviceState, mapped = true): Camera => ({ id: "cam-01", state, mapped, severe: false, pose });
 const target = (track_id: number, uncertainty_m = 0.4, camera_id = "cam-01", object_class: TargetClass = "person"): Target => ({
   camera_id,
   track_id,
