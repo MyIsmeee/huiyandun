@@ -30,7 +30,7 @@ export function KpiTile(props: {
   const { label, unit, data, since = "较 1 小时前", format = plain } = props;
   const stale = data.status === "stale";
   return (
-    <div className={cn("min-w-40 rounded-md border px-4 py-3", stale ? "border-dashed border-uncertain" : "border-transparent")}>
+    <div className={cn("min-w-36 rounded-md border px-4 py-3", stale ? "border-dashed border-uncertain" : "border-transparent")}>
       <p className="flex items-center gap-2 text-meta text-muted-foreground">
         {label}
         {stale && (

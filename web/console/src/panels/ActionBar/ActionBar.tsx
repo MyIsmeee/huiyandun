@@ -1,4 +1,5 @@
 import { CircleAlert, Lock, LockOpen } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
 import { type Execution, useLive } from "../../store/live";
@@ -94,32 +95,27 @@ export function ActionBar(props: { deviceId: string }) {
   }
 
   return (
-    <section aria-label="处置" className="flex flex-col gap-2 rounded-xl border border-line p-3 text-sm">
+    <section aria-label="处置" className="flex flex-col gap-2 text-sm">
       <p className="flex items-center gap-2">
         {contained ? <Lock aria-hidden className="size-4 text-contained" /> : <LockOpen aria-hidden className="size-4" />}
         <span className="font-medium">{STATE[execution.state]}</span>
-        <span className="text-fg-3 tabular-nums">{execution.target}</span>
+        <span className="text-subtle-foreground tabular-nums">{execution.target}</span>
         {contained && execution.expires_at && (
-          <span className="ml-auto text-fg-3 tabular-nums">剩余 {remaining(execution.expires_at, now)}</span>
+          <span className="ml-auto text-subtle-foreground tabular-nums">剩余 {remaining(execution.expires_at, now)}</span>
         )}
       </p>
       {details.map((text) => (
-        <p key={text} className="text-fg-2">
+        <p key={text} className="text-muted-foreground">
           {text}
         </p>
       ))}
       {contained && canContain(role) && (
-        <button
-          type="button"
-          onClick={() => void rollback(execution)}
-          disabled={current?.status === "pending"}
-          className="h-9 self-start rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40"
-        >
+        <Button variant="outline" size="sm" onClick={() => void rollback(execution)} disabled={current?.status === "pending"} className="self-start">
           {current?.status === "pending" ? "解封中…" : "立即解封"}
-        </button>
+        </Button>
       )}
       {current?.status === "failed" && (
-        <p role="alert" className="flex items-center gap-1 text-fg-2">
+        <p role="alert" className="flex items-center gap-1 text-muted-foreground">
           <CircleAlert aria-hidden className="size-4" />
           {current.message}
         </p>
