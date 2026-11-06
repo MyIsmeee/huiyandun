@@ -1,6 +1,6 @@
 # api-server
 
-对外 REST 与 WebSocket 接口，契约见 `contracts/openapi/api-server.v3.yaml`。
+对外 REST 与 WebSocket 接口，契约见 `contracts/openapi/api-server.v4.yaml`。
 
 ## 职责
 
