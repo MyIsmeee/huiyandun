@@ -403,6 +403,8 @@ services:
     image: huiyandun/attack-sim:local
     build: { context: ../.., dockerfile: agents/sim/attack-sim/Dockerfile }
     profiles: [demo]
+    # 只由队员执行 make attack / attack-slow 时运行（compose run），demo-up 不启动（D-105）
+    scale: 0
     labels: { hyd.oneshot: "true" }
     environment:
       HYD_TARGET: rtsp-target
