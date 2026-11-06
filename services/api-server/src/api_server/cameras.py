@@ -194,6 +194,7 @@ def _local(host: str) -> bool:
         ip = ipaddress.ip_address(name)
     except ValueError:
         return False
+    ip = getattr(ip, "ipv4_mapped", None) or ip  # ::ffff:127.0.0.1 同样是回环
     return ip.is_loopback or ip.is_unspecified
 
 

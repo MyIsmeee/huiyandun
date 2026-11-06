@@ -150,6 +150,7 @@ def test_create_password_write_only_and_audited(
         ({"source": GATE["source"] | {"host": "localhost"}}, 400),
         ({"source": GATE["source"] | {"host": "GO2RTC"}}, 400),
         ({"source": GATE["source"] | {"host": "[::1]"}}, 400),
+        ({"source": GATE["source"] | {"host": "[::ffff:127.0.0.1]"}}, 400),
         ({"source": GATE["source"] | {"host": "0.0.0.0"}}, 400),
         ({"pose": POSE | {"pitch_deg": 10}}, 400),
         ({"ip": "172.30.0.11"}, 409),  # 与 cam-01 重复
