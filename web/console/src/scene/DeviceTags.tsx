@@ -4,7 +4,7 @@ import { useViewpointCamera } from "./camera";
 import { type Camera, deviceLook, STATUS, type TagIcon } from "./devices";
 import type { View } from "./layout";
 
-const ICONS: Record<TagIcon, LucideIcon> = {
+export const ICONS: Record<TagIcon, LucideIcon> = {
   offline: WifiOff,
   uncalibrated: Crosshair,
   physical: TriangleAlert,
@@ -13,7 +13,7 @@ const ICONS: Record<TagIcon, LucideIcon> = {
   contained: Lock,
   notified: BellRing,
 };
-const BEHAVIOR: Record<Behavior["behavior"], string> = { fall: "跌倒", climb: "攀爬" };
+export const BEHAVIOR: Record<Behavior["behavior"], string> = { fall: "跌倒", climb: "攀爬" };
 /** 标签底边距机头的高度，单位米 */
 const ABOVE_M = 0.5;
 
