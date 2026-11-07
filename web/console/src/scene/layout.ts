@@ -1,16 +1,46 @@
-import type { Site } from "../lib/api";
-
 /** 平面图坐标 (x, y) 映射为场景 (x, 0, y)：y 为竖直方向，单位米 */
 export type Vec3 = readonly [number, number, number];
 export type Size = { width: number; height: number };
 type Point = readonly [number, number];
 
-/** 总览取景计入的高度：墙体默认高度（设计 §3.2），站点边缘的立面不被裁出画面 */
+/** 总览取景计入的高度：识别出的墙体默认高度与常见安装高度，覆盖范围边缘的立面与摄像头不被裁出画面 */
 export const WALL_HEIGHT_M = 2.8;
-/** 地面与栅格的边长，以站点中心为中心：远超任何机位的可见范围，看不到边缘，即无限延伸的底面（§5.1 L0） */
+/** 相机远裁剪面距离，单位米：远超任何机位的可见范围 */
 export const GROUND_M = 1000;
-/** 留出左上角 KPI 底板（§4.1 B 区）、底部断线提示（V-U3）与四周边距，单位像素 */
-const INSET = { top: 112, right: 24, bottom: 56, left: 24 };
+/** 留出左下视角控件、底部断线提示（V-U3）与四周边距，单位像素；画布上方不再有浮层（D-115） */
+const INSET = { top: 24, right: 24, bottom: 56, left: 24 };
+
+/** 平面上的取景区域：左上角 (x0, y0) 与宽高，单位米 */
+export interface Area {
+  x0: number;
+  y0: number;
+  width_m: number;
+  height_m: number;
+}
+/** 覆盖范围四周留白，单位米 */
+const COVERAGE_MARGIN_M = 1;
+/** 还没有摄像头时的取景区域 */
+const EMPTY_AREA: Area = { x0: -5, y0: -5, width_m: 10, height_m: 10 };
+
+/**
+ * 全部摄像头的覆盖范围（D-116）：安装位置与视场地面扇形（沿朝向 ± 半视场角、可视距离）的包围盒。
+ * 识别环境与目标只出现在视场内，已含在其中；不再使用 site.yaml 的站点尺寸。
+ */
+export function coverage(poses: { x: number; y: number; yaw_deg: number; hfov_deg: number; range_m: number }[]): Area {
+  const points = poses.flatMap(({ x, y, yaw_deg, hfov_deg, range_m }) => {
+    const fan: Point[] = [[x, y]];
+    for (let k = -4; k <= 4; k += 1) {
+      const a = ((yaw_deg + (hfov_deg / 2) * (k / 4)) * Math.PI) / 180;
+      fan.push([x + range_m * Math.cos(a), y + range_m * Math.sin(a)]);
+    }
+    return fan;
+  });
+  if (points.length === 0) return EMPTY_AREA;
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const [x0, y0] = [Math.min(...xs) - COVERAGE_MARGIN_M, Math.min(...ys) - COVERAGE_MARGIN_M];
+  return { x0, y0, width_m: Math.max(...xs) + COVERAGE_MARGIN_M - x0, height_m: Math.max(...ys) + COVERAGE_MARGIN_M - y0 };
+}
 
 /**
  * 相机姿态（V-I1）：俯仰角与投影方式固定，只允许绕竖轴旋转、缩放与平移。
@@ -109,22 +139,22 @@ export function sceneView(shot: Shot, size: Size, panLimit: Point = [0, 0]): Sce
 }
 
 /**
- * 透视总览（V-I1）：俯角 45°，取景中心为站点中心、对准可用区域中心；视点退到站点包围盒（含墙高）完整落在可用区域内的最近处。
+ * 透视总览（V-I1）：俯角 45°，取景中心为覆盖范围中心、对准可用区域中心；视点退到覆盖范围包围盒（含墙高）完整落在可用区域内的最近处。
  * 缩放按倍数拉近视点；平移在画面平面内移动相机，与取景中心同深度的内容每米移动 zoom 像素
  */
-export function overviewShot(site: Site, size: Size, pose: Pose = OVERVIEW): { shot: Shot; panLimit: Point } {
+export function overviewShot(area: Area, size: Size, pose: Pose = OVERVIEW): { shot: Shot; panLimit: Point } {
   const [back, right, up] = [turn(BACK, pose.azimuth), turn(RIGHT, pose.azimuth), turn(UP, pose.azimuth)];
-  const center: Vec3 = [site.width_m / 2, 0, site.height_m / 2];
+  const center: Vec3 = [area.x0 + area.width_m / 2, 0, area.y0 + area.height_m / 2];
   const offsets: Vec3[] = [];
-  for (const x of [0, site.width_m])
-    for (const y of [0, WALL_HEIGHT_M]) for (const z of [0, site.height_m]) offsets.push(sub([x, y, z], center));
-  const area = usable(size);
+  for (const x of [area.x0, area.x0 + area.width_m])
+    for (const y of [0, WALL_HEIGHT_M]) for (const z of [area.y0, area.y0 + area.height_m]) offsets.push(sub([x, y, z], center));
+  const view = usable(size);
   const focal = size.height / 2 / Math.tan(OVERVIEW_FOV / 2);
   // 角点沿视线方向比中心近 b、深度为 distance - b：横向与纵向都不超出可用区域的半宽、半高
   const fit = Math.max(
     ...offsets.map((v) => {
       const b = dot(v, back);
-      return Math.max(b + (focal * Math.abs(dot(v, right))) / (area.width / 2), b + (focal * Math.abs(dot(v, up))) / (area.height / 2));
+      return Math.max(b + (focal * Math.abs(dot(v, right))) / (view.width / 2), b + (focal * Math.abs(dot(v, up))) / (view.height / 2));
     }),
   );
   const look = along(along(center, right, pose.pan[0]), up, -pose.pan[1]);
@@ -134,7 +164,7 @@ export function overviewShot(site: Site, size: Size, pose: Pose = OVERVIEW): { s
       eye: along(look, back, fit / pose.zoom),
       look,
       fov: OVERVIEW_FOV,
-      center: [INSET.left + area.width / 2, INSET.top + area.height / 2],
+      center: [INSET.left + view.width / 2, INSET.top + view.height / 2],
     },
     panLimit: [span(right), span(up)],
   };
@@ -175,24 +205,25 @@ export function blendShot(a: Shot, b: Shot, t: number): Shot {
 }
 
 /** 2D 俯视视图（C-FE-08 降级）：总览时 x 向右、y 向下，等比缩放、完整落在可用区域内并居中 */
-export function planView(site: Site, size: Size, pose: Pose = OVERVIEW): PlanView {
+export function planView(area: Area, size: Size, pose: Pose = OVERVIEW): PlanView {
   const [c, s] = [Math.cos(pose.azimuth), Math.sin(pose.azimuth)];
-  const [w, h] = [site.width_m, site.height_m];
-  // 旋转后站点外接矩形的宽高
+  const [w, h] = [area.width_m, area.height_m];
+  const [mx, my] = [area.x0 + w / 2, area.y0 + h / 2];
+  // 旋转后覆盖范围外接矩形的宽高
   const [spanX, spanY] = [Math.abs(w * c) + Math.abs(h * s), Math.abs(w * s) + Math.abs(h * c)];
-  const area = usable(size);
-  const zoom = Math.min(area.width / spanX, area.height / spanY) * pose.zoom;
-  const cx = INSET.left + area.width / 2 - zoom * pose.pan[0];
-  const cy = INSET.top + area.height / 2 - zoom * pose.pan[1];
+  const view = usable(size);
+  const zoom = Math.min(view.width / spanX, view.height / spanY) * pose.zoom;
+  const cx = INSET.left + view.width / 2 - zoom * pose.pan[0];
+  const cy = INSET.top + view.height / 2 - zoom * pose.pan[1];
   return {
     zoom,
     panLimit: [spanX / 2, spanY / 2],
     scale: () => zoom,
     // 画面 y 轴向下，正角度为顺时针
     project: ([x, , z]) => {
-      const [vx, vz] = [x - w / 2, z - h / 2];
+      const [vx, vz] = [x - mx, z - my];
       return [cx + zoom * (vx * c - vz * s), cy + zoom * (vx * s + vz * c)];
     },
-    transform: `translate(${cx} ${cy}) rotate(${(pose.azimuth * 180) / Math.PI}) scale(${zoom}) translate(${-w / 2} ${-h / 2})`,
+    transform: `translate(${cx} ${cy}) rotate(${(pose.azimuth * 180) / Math.PI}) scale(${zoom}) translate(${-mx} ${-my})`,
   };
 }

@@ -27,7 +27,7 @@ export function CameraRail(props: { devices: Device[]; admin: boolean }) {
   const selectedId = useSelection((s) => s.deviceId);
   const [adding, setAdding] = useState(false);
   return (
-    <aside aria-label="摄像头栏" className={cn("flex min-h-0 flex-col border-r bg-card", collapsed ? "w-16" : "w-60")}>
+    <aside aria-label="摄像头栏" className={cn("flex min-h-0 flex-col border-r bg-card", collapsed ? "w-20" : "w-60")}>
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
         {!collapsed && (
           <>
@@ -94,7 +94,7 @@ function RailCard(props: { device: Device; collapsed: boolean; selected: boolean
       {!collapsed && <Thumbnail id={device.id} offline={device.state === "offline"} />}
       <span className={cn("flex items-center gap-1.5 px-1", collapsed && "flex-col")}>
         <Icon aria-hidden className="size-3.5 shrink-0" style={{ color: tag?.color }} />
-        <span className="font-mono text-xs">{device.id}</span>
+        <span className="font-mono text-xs whitespace-nowrap">{device.id}</span>
         {!collapsed && <span className="truncate text-meta">{device.name}</span>}
       </span>
       {!collapsed && (
