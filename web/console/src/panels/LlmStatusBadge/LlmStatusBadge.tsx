@@ -51,9 +51,9 @@ export function LlmStatusBadgeView(props: { load: LlmStatusLoad }) {
       role="status"
       aria-label="模型状态"
       title={title ?? text}
-      className={`flex h-9 max-w-64 items-center gap-2 rounded-full border px-3 text-sm whitespace-nowrap ${style}`}
+      className={`flex h-8 max-w-64 items-center gap-2 rounded-md border px-2.5 text-meta whitespace-nowrap ${style}`}
     >
-      <Icon aria-hidden className="size-4 shrink-0" />
+      <Icon aria-hidden className="size-3.5 shrink-0" />
       <span className="truncate">{text}</span>
     </p>
   );

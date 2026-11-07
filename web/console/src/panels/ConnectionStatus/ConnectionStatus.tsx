@@ -38,9 +38,9 @@ export function ConnectionStatus() {
     <p
       role="status"
       aria-label="连接状态"
-      className={`flex h-9 items-center gap-2 rounded-full border px-3 text-sm whitespace-nowrap ${STYLE[state]}`}
+      className={`flex h-8 items-center gap-2 rounded-md border px-2.5 text-meta whitespace-nowrap ${STYLE[state]}`}
     >
-      <Icon aria-hidden className="size-4" />
+      <Icon aria-hidden className="size-3.5" />
       {text}
     </p>
   );

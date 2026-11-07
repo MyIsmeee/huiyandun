@@ -52,12 +52,10 @@ export function KpiRow({ stale }: { stale: boolean }) {
     kpis === null && !failed && !stale
       ? { status: "loading" }
       : { status: failed || stale ? "stale" : "ready", value: kpis?.[key].value ?? null, delta: kpis?.[key].delta ?? null };
-  // 4 张卡共用一块半透明底板，计为一个浮层（V-L3）
+  // 4 格共用一块面板，计为一个浮层（V-L3）
   return (
-    <ul
-      aria-label="关键指标"
-      className="absolute top-3 left-3 flex divide-x divide-line rounded-2xl border border-line bg-panel/80 backdrop-blur"
-    >
+    <ul aria-label="关键指标" className="absolute top-3 left-3 flex divide-x rounded-lg border bg-card/90 p-1 backdrop-blur-sm">
+
       {KPIS.map(({ key, label, unit, since, format }) => (
         <li key={key}>
           <KpiTile label={label} unit={unit} since={since} format={format} data={data(key)} />

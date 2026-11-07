@@ -67,6 +67,8 @@ interface LiveState {
   executionTimes: Record<string, Partial<Record<Execution["state"], string>>>;
   /** 每个关联事件最近一帧调查流的 seq：面板据此重新读取调查记录（调查记录先落库后推送） */
   aiSeq: Record<string, number>;
+  /** 调查流已收到判定或失败帧的关联事件：时间线的"AI 判定"节点只在调查开始与结束时重读 */
+  aiDone: Record<string, true>;
 }
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
@@ -81,6 +83,7 @@ export const useLive = create<LiveState>()(() => ({
   executions: {},
   executionTimes: {},
   aiSeq: {},
+  aiDone: {},
 }));
 
 /** keep 为假时去掉 id 对应的项 */
@@ -141,8 +144,11 @@ export function receive(frame: Frame, now: number): void {
     });
   }
   if (frame.channel === "ai") {
-    const { incident_id, seq } = data as AiFrame;
-    useLive.setState((s) => ({ aiSeq: { ...s.aiSeq, [incident_id]: seq } }));
+    const { incident_id, seq, kind } = data as AiFrame;
+    useLive.setState((s) => ({
+      aiSeq: { ...s.aiSeq, [incident_id]: seq },
+      aiDone: kind === "step" ? s.aiDone : { ...s.aiDone, [incident_id]: true },
+    }));
   }
 }
 
