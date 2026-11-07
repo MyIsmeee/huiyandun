@@ -174,6 +174,7 @@
 | react-style-singleton | 2.2.3 | MIT |
 | react-use-measure | 2.1.7 | MIT |
 | scheduler | 0.28.0 | MIT |
+| simplify-js | 1.2.4 | BSD-2-Clause |
 | suspend-react | 0.1.3 | MIT |
 | tailwind-merge | 3.7.0 | MIT |
 | three | 0.186.1 | MIT |
