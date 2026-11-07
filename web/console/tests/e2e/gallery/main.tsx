@@ -12,6 +12,7 @@ import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LlmStatusBadgeView } from "../../../src/panels/LlmStatusBadge/LlmStatusBadge";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
+import { type TileProps, VideoTileView } from "../../../src/panels/VideoWall/VideoTile";
 import { type EditorForm, type Pending, ProviderEditorView, type TestResult } from "../../../src/panels/ProviderEditor/ProviderEditor";
 import { type Provider, type ProviderLoad, ProviderListView } from "../../../src/panels/ProviderList/ProviderList";
 import { type Report, ReportBarView, ReportPage, type ReportRequest, type ReportsLoad } from "../../../src/panels/ReportBar/ReportBar";
@@ -60,6 +61,25 @@ function testStream(): MediaStream {
 }
 const STREAM = testStream();
 const video = (node: ReactNode) => <div className="w-72">{node}</div>;
+/** 监控墙瓦片（V-W2、V-W3）：固定 16:9 尺寸，与连接逻辑分开 */
+function tile(state: TileProps["device"]["state"], extra: Partial<TileProps & { status: Parameters<typeof VideoTileView>[0]["status"] }> = {}) {
+  return (
+    <div className="h-[203px] w-[360px]">
+      <VideoTileView
+        device={{ id: "cam-02", name: "街道", state }}
+        selected={false}
+        persons={0}
+        vehicles={0}
+        unmapped={false}
+        onSelect={() => {}}
+        onZoom={() => {}}
+        style={{ width: "100%", height: "100%" }}
+        status={{ kind: "playing", stream: STREAM }}
+        {...extra}
+      />
+    </div>
+  );
+}
 /** 没有视频流的设备：详情面板截图不依赖 WebRTC 连接 */
 const SWITCH = {
   id: "sw-01",
@@ -233,6 +253,17 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
   DetailPanel: {
     device: drawer(<DetailPanel device={SWITCH} stale={false} onClose={() => {}} />),
     disconnected: drawer(<DetailPanel device={SWITCH} stale onClose={() => {}} />),
+  },
+  VideoTile: {
+    normal: tile("normal", { persons: 3, vehicles: 1 }),
+    loading: tile("normal", { status: { kind: "connecting" } }),
+    error: tile("normal", { status: { kind: "unavailable", reason: "视频服务不可用" } }),
+    physical: tile("physical_alert", { behavior: "攀爬", persons: 1 }),
+    cyber: tile("cyber_alert"),
+    contained: tile("contained"),
+    selected: tile("normal", { selected: true, persons: 2 }),
+    disconnected: tile("offline", { status: { kind: "interrupted", stream: STREAM } }),
+    unmapped: tile("uncalibrated", { unmapped: true }),
   },
   AlertList: {
     normal: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale={false} lastFrameAt={LAST_FRAME} />),

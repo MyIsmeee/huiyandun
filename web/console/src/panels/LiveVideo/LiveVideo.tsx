@@ -1,5 +1,6 @@
 import { Clock, RotateCw, Video, VideoOff } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 import { ApiError, api } from "../../lib/api";
 
 /** 连接中 / 播放 / 媒体中断（保留最后画面，等待恢复）/ 不可用 / 设备没有视频流（HYD-UIX-004 §8） */
@@ -25,7 +26,8 @@ export function LiveVideo({ deviceId }: { deviceId: string }) {
   return <LiveVideoView status={status} onRetry={retry} />;
 }
 
-function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
+/** 建立并维护一路实时画面连接（监控墙瓦片与详情共用）；deviceId 变化时由调用方以 key 重建 */
+export function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
   const [status, setStatus] = useState<VideoStatus>({ kind: "connecting" });
   const [attempt, setAttempt] = useState(0);
   const retry = () => {
@@ -102,9 +104,10 @@ function gathered(pc: RTCPeerConnection): Promise<void> {
 }
 
 /** 按状态呈现；与连接逻辑分开，供组件展示页截图（V-G3） */
-export function LiveVideoView({ status, onRetry }: { status: VideoStatus; onRetry?: () => void }) {
+export function LiveVideoView(props: { status: VideoStatus; onRetry?: () => void; className?: string; children?: ReactNode }) {
+  const { status, onRetry, className, children } = props;
   return (
-    <div data-video={status.kind} className="relative aspect-video overflow-hidden rounded-md border border-border bg-secondary">
+    <div data-video={status.kind} className={cn("relative aspect-video overflow-hidden rounded-md border border-border bg-secondary", className)}>
       {"stream" in status && <Stream stream={status.stream} />}
       {status.kind === "connecting" && (
         <Center>
@@ -130,11 +133,12 @@ export function LiveVideoView({ status, onRetry }: { status: VideoStatus; onRetr
         </Center>
       )}
       {status.kind === "interrupted" && (
-        <p className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-dashed border-uncertain bg-card/80 px-3 py-1 text-xs whitespace-nowrap text-uncertain backdrop-blur">
+        <p className="absolute top-2 right-2 flex items-center gap-1.5 rounded-full border border-dashed border-uncertain bg-card/80 px-3 py-1 text-xs whitespace-nowrap text-uncertain backdrop-blur">
           <Clock aria-hidden className="size-3.5" />
           画面中断 · 正在重连
         </p>
       )}
+      {children}
     </div>
   );
 }
