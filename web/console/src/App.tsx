@@ -49,17 +49,17 @@ export function App() {
   if (gate.kind === "login") return <LoginPage onLogin={probe} />;
   if (gate.kind === "unreachable") return <Notice text="无法连接服务器" onRetry={probe} />;
   if (gate.kind === "ready") return <Shell site={gate.site} onLogout={logout} onRejected={recheck} />;
-  return <main className="h-full bg-page" />;
+  return <main className="h-full bg-background" />;
 }
 
 function Notice({ text, onRetry }: { text: string; onRetry?: () => void }) {
   return (
-    <main className="flex h-full flex-col items-center justify-center gap-4 bg-page">
-      <p className="text-fg-2">{text}</p>
+    <main className="flex h-full flex-col items-center justify-center gap-4 bg-background">
+      <p className="text-muted-foreground">{text}</p>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="h-10 rounded-full border border-line px-5 transition-colors hover:bg-raised"
+          className="h-10 rounded-full border border-border px-5 transition-colors hover:bg-secondary"
         >
           重试
         </button>

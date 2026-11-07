@@ -49,17 +49,17 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
   }
 
   return (
-    <div className="relative flex min-h-full items-center justify-center overflow-hidden bg-page p-6">
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden bg-background p-6">
       <div
         aria-hidden
         className="bg-dots absolute inset-0 [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]"
       />
       <main className="animate-enter relative grid w-full max-w-[1080px] gap-6 lg:grid-cols-[1.1fr_1fr]">
-        <section className="hidden flex-col gap-12 rounded-3xl border border-line bg-panel p-10 lg:flex">
+        <section className="hidden flex-col gap-12 rounded-3xl border border-border bg-card p-10 lg:flex">
           <Brand />
           <div>
-            <p className="text-sm tracking-[0.2em] text-fg-3">边缘智能防护系统</p>
-            <h1 className="mt-4 text-4xl leading-tight font-black">
+            <p className="text-sm tracking-[0.2em] text-subtle-foreground">边缘智能防护系统</p>
+            <h1 className="mt-4 text-4xl leading-tight font-medium">
               物理安防与网络攻防
               <br />
               一屏联动
@@ -67,24 +67,24 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
             <ul className="mt-10 space-y-6">
               {CAPABILITIES.map(({ icon: Icon, title, text }) => (
                 <li key={title} className="flex gap-4">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-full border border-line bg-raised">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-full border border-border bg-secondary">
                     <Icon aria-hidden className="size-[18px]" />
                   </span>
                   <span>
-                    <span className="block font-semibold">{title}</span>
-                    <span className="mt-1 block text-sm text-fg-2">{text}</span>
+                    <span className="block font-medium">{title}</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">{text}</span>
                   </span>
                 </li>
               ))}
             </ul>
           </div>
-          <p className="mt-auto text-sm text-fg-3">离线运行 · 不访问任何外部地址</p>
+          <p className="mt-auto text-sm text-subtle-foreground">离线运行 · 不访问任何外部地址</p>
         </section>
 
         <section className="mx-auto flex w-full max-w-md flex-col justify-center py-6 lg:max-w-none lg:px-12">
           <Brand className="mb-10 lg:hidden" />
-          <h2 className="text-3xl font-black">欢迎回来</h2>
-          <p className="mt-2 text-fg-2">使用本地账户登录控制台</p>
+          <h2 className="text-3xl font-medium">欢迎回来</h2>
+          <p className="mt-2 text-muted-foreground">使用本地账户登录控制台</p>
           <form onSubmit={submit} className="mt-8 space-y-4">
             <Field
               id="username"
@@ -108,7 +108,7 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
                   type="button"
                   aria-label={showPassword ? "隐藏密码" : "显示密码"}
                   onClick={() => setShowPassword(!showPassword)}
-                  className="mr-2 grid size-10 place-items-center rounded-full text-fg-3 transition-colors hover:text-fg"
+                  className="mr-2 grid size-10 place-items-center rounded-full text-subtle-foreground transition-colors hover:text-foreground"
                 >
                   {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
@@ -117,7 +117,7 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
             {error && (
               <p
                 role="alert"
-                className="flex items-center gap-2 rounded-2xl border border-line bg-raised px-4 py-3 text-sm"
+                className="flex items-center gap-2 rounded-lg border border-border bg-secondary px-4 py-3 text-sm"
               >
                 <CircleAlert aria-hidden className="size-4 shrink-0" />
                 {error}
@@ -126,13 +126,13 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
             <button
               type="submit"
               disabled={pending || !username || !password}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-fg font-semibold text-page transition hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground font-medium text-background transition hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
             >
               {pending && <LoaderCircle aria-hidden className="size-4 animate-spin" />}
               {pending ? "登录中…" : "登录"}
             </button>
           </form>
-          <p className="mt-8 text-center text-sm text-fg-3">仅限授权人员使用</p>
+          <p className="mt-8 text-center text-sm text-subtle-foreground">仅限授权人员使用</p>
         </section>
       </main>
     </div>
@@ -142,12 +142,12 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
 function Brand({ className = "" }: { className?: string }) {
   return (
     <div className={`flex items-center gap-3 ${className}`}>
-      <span className="grid size-10 place-items-center rounded-xl bg-fg text-page">
+      <span className="grid size-10 place-items-center rounded-lg bg-foreground text-background">
         <ShieldCheck aria-hidden className="size-5" />
       </span>
       <span>
-        <span className="block text-lg leading-tight font-black">慧眼盾</span>
-        <span className="block text-xs tracking-[0.3em] text-fg-3">HUIYANDUN</span>
+        <span className="block text-lg leading-tight font-medium">慧眼盾</span>
+        <span className="block text-xs tracking-[0.3em] text-subtle-foreground">HUIYANDUN</span>
       </span>
     </div>
   );
@@ -163,18 +163,18 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
 /** 标签在框内：空且未聚焦时居中，聚焦或有值时上移（借鉴 uiverse 浮动标签） */
 function Field({ id, label, icon: Icon, trailing, ...input }: FieldProps) {
   return (
-    <div className="group flex h-14 items-center rounded-2xl border border-line bg-raised transition-colors focus-within:border-fg-3">
-      <Icon aria-hidden className="ml-4 size-4 shrink-0 text-fg-3 transition-colors group-focus-within:text-fg" />
+    <div className="group flex h-14 items-center rounded-lg border border-border bg-secondary transition-colors focus-within:border-subtle-foreground">
+      <Icon aria-hidden className="ml-4 size-4 shrink-0 text-subtle-foreground transition-colors group-focus-within:text-foreground" />
       <div className="relative h-full flex-1">
         <input
           id={id}
           placeholder=" "
-          className="peer h-full w-full bg-transparent px-3 pt-5 pb-1 outline-none [&:-webkit-autofill]:shadow-[inset_0_0_0_100px_var(--color-raised)] [&:-webkit-autofill]:[-webkit-text-fill-color:var(--color-fg)]"
+          className="peer h-full w-full bg-transparent px-3 pt-5 pb-1 outline-none [&:-webkit-autofill]:shadow-[inset_0_0_0_100px_var(--color-secondary)] [&:-webkit-autofill]:[-webkit-text-fill-color:var(--color-foreground)]"
           {...input}
         />
         <label
           htmlFor={id}
-          className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-fg-3 transition-all peer-focus:top-4 peer-focus:text-sm peer-[:not(:placeholder-shown)]:top-4 peer-[:not(:placeholder-shown)]:text-sm"
+          className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-subtle-foreground transition-all peer-focus:top-4 peer-focus:text-sm peer-[:not(:placeholder-shown)]:top-4 peer-[:not(:placeholder-shown)]:text-sm"
         >
           {label}
         </label>

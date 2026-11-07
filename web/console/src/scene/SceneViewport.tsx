@@ -189,7 +189,7 @@ export function SceneViewport({ site }: { site: Site }) {
           场景加载失败
           <button
             onClick={() => location.reload()}
-            className="pointer-events-auto h-8 rounded-full border border-line px-3 transition-colors hover:bg-raised"
+            className="pointer-events-auto h-8 rounded-full border border-border px-3 transition-colors hover:bg-secondary"
           >
             重新加载
           </button>
@@ -201,7 +201,7 @@ export function SceneViewport({ site }: { site: Site }) {
 
 function Note({ children }: { children: ReactNode }) {
   return (
-    <p className="pointer-events-none absolute inset-0 m-auto flex h-fit items-center justify-center gap-2 text-sm text-fg-3">
+    <p className="pointer-events-none absolute inset-0 m-auto flex h-fit items-center justify-center gap-2 text-sm text-subtle-foreground">
       {children}
     </p>
   );

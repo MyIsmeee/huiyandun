@@ -285,14 +285,18 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
   },
 };
 
-const states = GALLERY[new URLSearchParams(location.search).get("component") ?? ""] ?? {};
+const params = new URLSearchParams(location.search);
+const all = GALLERY[params.get("component") ?? ""] ?? {};
+// 指定 state 时只渲染这一个状态：对话框经 Radix 渲染到 body 并居中，同时打开多个会互相叠盖
+const only = params.get("state");
+const states = only ? Object.fromEntries(Object.entries(all).filter(([state]) => state === only)) : all;
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html 缺少 #root");
 
 createRoot(root).render(
   <main className="flex flex-wrap items-start gap-4 p-6">
     {Object.entries(states).map(([state, node]) => (
-      <figure key={state} data-state={state} className="rounded-2xl bg-panel">
+      <figure key={state} data-state={state} className="rounded-lg bg-card">
         {node}
       </figure>
     ))}

@@ -45,7 +45,7 @@ export function DeviceTags({ cameras, view }: { cameras: Camera[]; view: View })
             <span
               key={icon}
               style={{ borderColor: color }}
-              className="flex items-center gap-1 rounded-full border bg-panel/90 px-2 py-0.5 text-xs whitespace-nowrap text-fg"
+              className="flex items-center gap-1 rounded-full border bg-card/90 px-2 py-0.5 text-xs whitespace-nowrap text-foreground"
             >
               <Icon aria-hidden className="size-3.5" style={{ color }} />
               {text}
@@ -64,13 +64,13 @@ function EventCard({ camera, behavior }: { camera: string; behavior: Behavior })
     <span
       role="status"
       style={{ borderColor: STATUS.physical }}
-      className="flex flex-col rounded-xl border bg-panel/90 px-3 py-1.5 whitespace-nowrap text-fg"
+      className="flex flex-col rounded-lg border bg-card/90 px-3 py-1.5 whitespace-nowrap text-foreground"
     >
       <span className="flex items-center gap-1.5 text-sm">
         <TriangleAlert aria-hidden className="size-4" style={{ color: STATUS.physical }} />
         物理告警 · {BEHAVIOR[behavior.behavior]}
       </span>
-      <span className="text-xs text-fg-2 tabular-nums">
+      <span className="text-xs text-muted-foreground tabular-nums">
         {camera} · {time}
       </span>
     </span>

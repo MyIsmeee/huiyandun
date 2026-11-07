@@ -1,4 +1,11 @@
 import { ArrowLeft, CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { buttonVariants } from "@/components/ui/button";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
 import { useLive } from "../../store/live";
@@ -7,7 +14,7 @@ import { type Camera, CameraEditor, PUSH_USER, pushUrl } from "../CameraEditor/C
 export type CameraLoad = { status: "loading" } | { status: "failed"; message: string } | { status: "ready"; cameras: Camera[] };
 
 const errorMessage = (e: unknown) => (e instanceof ApiError ? e.message : "无法连接服务器，请重试");
-const button = "h-8 rounded-full border border-line px-3 transition-colors hover:bg-raised disabled:opacity-40";
+const button = buttonVariants({ variant: "outline", size: "sm" });
 const PROTOCOL = { rtsp: "RTSP", rtmp: "RTMP", http: "HTTP", onvif: "ONVIF" } as const;
 
 /** 不含凭据的拉流地址；推流为推流地址与用户名（V-CAM1） */
@@ -82,26 +89,26 @@ export function CameraListView(props: {
   const { load, notice, deleting } = props;
   const devices = useLive((s) => s.devices);
   return (
-    <section aria-label="摄像头" className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6 text-sm">
+    <section aria-label="摄像头" className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-6 py-8 text-sm">
       <header className="flex items-center gap-3">
         <button type="button" onClick={props.onClose} className={`${button} flex items-center gap-1`}>
           <ArrowLeft aria-hidden className="size-4" />
           返回
         </button>
-        <h1 className="text-base font-semibold">摄像头</h1>
-        <button type="button" onClick={props.onAdd} className={`${button} ml-auto flex items-center gap-1`}>
+        <h1 className="text-xl font-semibold">摄像头</h1>
+        <button type="button" onClick={props.onAdd} className={buttonVariants({ size: "sm", className: "ml-auto" })}>
           <Plus aria-hidden className="size-4" />
           添加
         </button>
       </header>
-      <p className="text-fg-3">保存后立即生效：大屏出现视场锥体，视觉引擎开始识别，网络告警按设备 IP 关联。</p>
+      <p className="text-subtle-foreground">保存后立即生效：大屏出现视场光束，视觉引擎开始识别，网络告警按设备 IP 关联。</p>
       {notice && (
         <p role="alert" className="flex items-center gap-1">
           <CircleAlert aria-hidden className="size-4" />
           {notice}
         </p>
       )}
-      {load.status === "loading" && <p className="text-fg-3">加载中…</p>}
+      {load.status === "loading" && <p className="text-subtle-foreground">加载中…</p>}
       {load.status === "failed" && (
         <p className="flex items-center gap-2">
           {load.message}
@@ -110,26 +117,26 @@ export function CameraListView(props: {
           </button>
         </p>
       )}
-      {load.status === "ready" && load.cameras.length === 0 && <p className="text-fg-3">还没有摄像头，点"添加"登记第一路。</p>}
+      {load.status === "ready" && load.cameras.length === 0 && <p className="text-subtle-foreground">还没有摄像头，点"添加"登记第一路。</p>}
       {load.status === "ready" && load.cameras.length > 0 && (
         <ul aria-label="摄像头列表" className="flex flex-col gap-2">
           {load.cameras.map((camera) => {
             const offline = devices[camera.id]?.state === "offline";
             return (
-              <li key={camera.id} className="flex items-center gap-3 rounded-xl border border-line bg-panel px-4 py-3">
-                <span className="w-14 font-mono text-fg-2">{camera.id}</span>
+              <li key={camera.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+                <span className="w-14 font-mono text-muted-foreground">{camera.id}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">{camera.name}</span>
-                  <span className="block truncate text-xs text-fg-3">
+                  <span className="block truncate text-xs text-subtle-foreground">
                     {address(camera)} · 口令 {camera.password_set ? "已设置" : "未设置"}
                   </span>
                 </span>
-                <span className="text-xs text-fg-2">
+                <span className="text-xs text-muted-foreground">
                   {camera.source ? `拉流 · ${PROTOCOL[camera.source.protocol]}` : "推流"} · {camera.ip}
                 </span>
                 {/* 在线状态以图标形状 + 文字表达，不使用状态色（V-CAM1） */}
                 <span className="w-16 text-xs">{offline ? "○ 离线" : "● 在线"}</span>
-                <span className="w-24 text-xs text-fg-3">{camera.calibration.length >= 4 ? "已标定" : "按安装参数估算"}</span>
+                <span className="w-24 text-xs text-subtle-foreground">{camera.calibration.length >= 4 ? "已标定" : "按安装参数估算"}</span>
                 <button type="button" aria-label={`编辑 ${camera.name}`} onClick={() => props.onEdit(camera)} className={button}>
                   <Pencil aria-hidden className="size-4" />
                 </button>
@@ -142,19 +149,22 @@ export function CameraListView(props: {
         </ul>
       )}
       {deleting && (
-        <div role="alertdialog" aria-label="确认删除" className="rounded-xl border border-line bg-raised p-4">
-          <p>
-            删除摄像头"{deleting.name}"（{deleting.id}）？该摄像头的告警历史保留，实时识别与录像停止。
-          </p>
-          <div className="mt-3 flex justify-end gap-2">
-            <button type="button" onClick={props.onCancelDelete} className={button}>
-              取消
-            </button>
-            <button type="button" onClick={() => props.onConfirmDelete(deleting)} className={`${button} font-semibold`}>
-              删除
-            </button>
-          </div>
-        </div>
+        <AlertDialog open onOpenChange={(open) => !open && props.onCancelDelete()}>
+          <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogTitle className="text-base font-medium">删除摄像头</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除摄像头"{deleting.name}"（{deleting.id}）？该摄像头的告警历史保留，实时识别与录像停止。
+            </AlertDialogDescription>
+            <p className="flex justify-end gap-2">
+              <button type="button" onClick={props.onCancelDelete} className={button}>
+                取消
+              </button>
+              <button type="button" onClick={() => props.onConfirmDelete(deleting)} className={buttonVariants({ size: "sm" })}>
+                删除
+              </button>
+            </p>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
       {props.editor}
     </section>

@@ -59,7 +59,7 @@ export function AttackLines({ site, cameras, view }: { site: Site; cameras: Came
           key={id}
           data-attacker={id}
           style={{ left: from[0], top: from[1], borderColor: STATUS.cyber }}
-          className={`pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-panel/90 px-2 py-0.5 text-xs whitespace-nowrap text-fg ${contained ? "animate-fade-out" : ""}`}
+          className={`pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/90 px-2 py-0.5 text-xs whitespace-nowrap text-foreground ${contained ? "animate-fade-out" : ""}`}
         >
           <ShieldAlert aria-hidden className="size-3.5" style={{ color: STATUS.cyber }} />
           外部攻击源 <span className="tabular-nums">{ip}</span>

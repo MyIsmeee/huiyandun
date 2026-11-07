@@ -72,7 +72,7 @@ describe("ProviderPage", () => {
     const update = vi.spyOn(api, "updateProvider").mockResolvedValue({ ...PUBLIC, enabled: true });
     render(<ProviderPage onClose={() => {}} />);
     fireEvent.click(await screen.findByRole("switch", { name: "启用 DeepSeek 官方" }));
-    const dialog = screen.getByRole("dialog", { name: "启用公网供应商" });
+    const dialog = screen.getByRole("alertdialog", { name: "启用公网供应商" });
     expect(dialog.textContent).toContain("脱敏后发送至 api.deepseek.com；视频、图片、流量包不会发送");
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(update).not.toHaveBeenCalled();
@@ -80,7 +80,7 @@ describe("ProviderPage", () => {
     fireEvent.click(screen.getByRole("switch", { name: "启用 DeepSeek 官方" }));
     fireEvent.click(screen.getByRole("button", { name: "确认启用" }));
     await waitFor(() => expect(update).toHaveBeenCalledWith("p-2", { enabled: true }));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("全局禁止公网时公网卡片置灰并注明原因，不可启用、不可测试（V-M2、D-085）", async () => {
@@ -130,7 +130,7 @@ describe("ProviderPage", () => {
     render(<ProviderPage onClose={() => {}} />);
     await screen.findByText("供应商 p-1");
     fireEvent.click(within(card("供应商 p-1")).getByRole("button", { name: "删除" }));
-    expect(screen.getByRole("dialog", { name: "删除供应商" }).textContent).toContain("删除供应商“供应商 p-1”？");
+    expect(screen.getByRole("alertdialog", { name: "删除供应商" }).textContent).toContain("删除供应商“供应商 p-1”？");
     expect(remove).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(remove).toHaveBeenCalledWith("p-1"));
