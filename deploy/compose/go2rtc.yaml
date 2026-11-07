@@ -1,9 +1,11 @@
 # 流接入（REUSE-03、C-CV-10）：每路只拉流一次，分发给检测与浏览器。
 # 流不写在这里：由 api-server 按摄像头登记表经 API 增删，流名即摄像头编号（D-101）
+# API 无鉴权且可新建 exec 源，RTSP 不带口令：只监听宿主没有地址的内部网络，edge-net、camera-net 上不监听（#97）。
+# 地址与 compose 中 go2rtc 的固定地址一致
 api:
-  listen: ":1984"
+  listen: "172.30.11.2:1984"  # video-net：api-server 转发信令、取帧、增删流
 rtsp:
-  listen: ":8554"
+  listen: "172.30.12.2:8554"  # demo-net：vision-engine 与 recorder 取流
 webrtc:
   listen: ":8555"
   ice_servers: []  # 清空 go2rtc 默认的公网 STUN 服务器，运行时不访问外部地址（G-05），不得删除

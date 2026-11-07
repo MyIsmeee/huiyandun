@@ -244,17 +244,18 @@ services:
     tmpfs: [/config]
     command: ["sh", "-c", "cp /base/go2rtc.yaml /config/go2rtc.yaml && exec go2rtc -config /config/go2rtc.yaml"]
     # 只开放 WebRTC 媒体端口（C-OPS-05、D-02）。API（1984）无鉴权且可新建 exec 源：
-    # 不接入 core-net，只经 video-net 供 api-server 转发信令、经 demo-net 供 vision-engine 取流
+    # 不接入 core-net，只经 video-net 供 api-server 转发信令、经 demo-net 供 vision-engine 取流；
+    # API 与 RTSP 只监听这两个网络的固定地址（go2rtc.yaml），宿主经 edge-net、camera-net 访问不到（#97）
     ports: ["8555:8555/tcp", "8555:8555/udp"]
     # camera-net：拉取摄像头登记表中的局域网摄像头（D-103，G-05 例外）；ingest-net：从 ingest 取推流
     networks:
-      video-net: {}
-      demo-net: {}
+      video-net: { ipv4_address: 172.30.11.2 }
+      demo-net: { ipv4_address: 172.30.12.2 }
       edge-net: {}
       camera-net: {}
       ingest-net: { ipv4_address: 172.30.10.2 }
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:1984/api"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://172.30.11.2:1984/api"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -494,10 +495,19 @@ networks:
     driver_opts:
       com.docker.network.bridge.name: hyd-demo
       com.docker.network.bridge.gateway_mode_ipv4: isolated
-  # api-server 经此转发 WebRTC 信令到 go2rtc；go2rtc 不接入 core-net，碰不到数据库与事件总线
+    ipam:  # 固定网段供 go2rtc 的 RTSP 只监听本网络地址（#97）；自动分配的地址避开固定地址，否则先启动的容器会占用它
+      config:
+        - subnet: 172.30.12.0/24
+          ip_range: 172.30.12.128/25
+  # api-server 经此转发 WebRTC 信令到 go2rtc；go2rtc 不接入 core-net，碰不到数据库与事件总线。
+  # 固定网段供 go2rtc 的 API 只监听本网络地址（#97）
   video-net:
     internal: true
     driver_opts: { com.docker.network.bridge.gateway_mode_ipv4: isolated }
+    ipam:
+      config:
+        - subnet: 172.30.11.0/24
+          ip_range: 172.30.11.128/25
   # 探针网络：只有探针，只接收 capture-tap 镜像进来的流量；探针之间也不互通
   tap-net:
     internal: true
@@ -522,6 +532,7 @@ networks:
     ipam:
       config:
         - subnet: 172.30.9.0/24
+          ip_range: 172.30.9.128/25
   # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
   edge-net:
     driver_opts:

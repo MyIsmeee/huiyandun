@@ -135,6 +135,32 @@ def test_go2rtc_api_reachable_only_by_its_clients() -> None:
     assert "core-net" not in internal
 
 
+@pytest.mark.parametrize(("module", "network"), [("api", "video-net"), ("rtsp", "demo-net")])
+def test_go2rtc_listens_only_on_internal_network(module: str, network: str) -> None:
+    """#97：edge-net、camera-net 有宿主网关，宿主进程经它们可访问 go2rtc。API（信令、取帧、增删流）
+    只监听 video-net、RTSP（视觉引擎与录像取流）只监听 demo-net 的固定地址，宿主在这两个网络里没有地址。"""
+    config = yaml.safe_load((ROOT / "deploy/compose/go2rtc.yaml").read_text(encoding="utf-8"))
+    host = config[module]["listen"].rsplit(":", 1)[0]
+    assert host == SERVICES["go2rtc"]["networks"][network]["ipv4_address"]
+    options = COMPOSE["networks"][network]["driver_opts"]
+    assert options["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
+
+
+def test_fixed_addresses_outside_auto_range() -> None:
+    """同一网络里固定地址与自动分配混用时，自动分配须限定在 ip_range 内且不含固定地址：
+    否则先连上网络的容器可能拿到固定地址，固定地址的服务启动报 Address already in use。"""
+    for name, network in COMPOSE["networks"].items():
+        joined = [s["networks"] for s in SERVICES.values() if name in s.get("networks", [])]
+        members = [n[name] or {} if isinstance(n, dict) else {} for n in joined]
+        fixed = [ipaddress.ip_address(m["ipv4_address"]) for m in members if "ipv4_address" in m]
+        if not fixed or len(fixed) == len(members):
+            continue
+        (config,) = network["ipam"]["config"]
+        auto = ipaddress.ip_network(config["ip_range"])
+        assert auto.subnet_of(ipaddress.ip_network(config["subnet"])), name
+        assert not any(address in auto for address in fixed), name
+
+
 SENSORS = {"suricata", "zeek"}
 TAP = "capture-tap"
 TAP_NET = "tap-net"
