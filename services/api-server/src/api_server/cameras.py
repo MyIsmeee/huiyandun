@@ -21,6 +21,7 @@ import httpx2
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Integer,
@@ -59,13 +60,15 @@ SYNC_S = 30  # go2rtc 重启会丢掉动态添加的流：定期比对补齐
 RETRY_S = 2
 CREATE_LOCK = 0x48594431  # 新增摄像头的事务级咨询锁：并发新增时路数上限不被同时突破
 ID_SEQUENCE = "camera_id_seq"  # 编号只增不复用（D-108）
-# 取流主机不能指向 go2rtc 自身：它的接口无鉴权（D-103）
-FORBIDDEN_HOSTS = {"localhost", "go2rtc"}
+# 取流主机不能指向 go2rtc 或 ingest 自身：取流请求会落到视频服务自己身上（D-103、D-117）
+FORBIDDEN_HOSTS = {"localhost", "go2rtc", "ingest"}
 SNAPSHOT_TIMEOUT_S = 8.0  # 首帧须等关键帧，摄像头的关键帧间隔常为 2～4 s
 SNAPSHOT_ERRORS = {
     404: "视频服务中没有这路流：拉流地址尚未同步，稍后重试",
     500: "取不到画面：检查地址、端口、口令，以及摄像头是否在线",
 }
+# go2rtc 连上了但不认这路流的编码（如 SDP 把媒体标为 sendonly）：提示打开兼容模式（04 V-CAM8、D-117）
+SNAPSHOT_UNRECOGNIZED = "视频服务无法识别这路流的编码：可在编辑中打开兼容模式（经中继拉流）"
 
 metadata = MetaData()
 cameras = Table(
@@ -81,6 +84,7 @@ cameras = Table(
     Column("path", Text),
     Column("username", Text),
     Column("password_enc", LargeBinary),
+    Column("relay", Boolean),
     Column("pose", JSONB),
     Column("calibration", JSONB),
     Column("climb_lines", JSONB),
@@ -90,10 +94,15 @@ cameras = Table(
 
 
 def source_url(row: Any, password: str | None) -> str:
-    """go2rtc 的取流地址。拉流按协议拼出，用户名与口令按 URL 规则转义；推流的设备推到 ingest，
-    go2rtc 从 ingest 按摄像头编号取（D-103，ingest 只放行 go2rtc 读取）。"""
-    if row["ingest"] != "pull":
+    """go2rtc 的取流地址。拉流按协议拼出；推流的设备推到 ingest，兼容模式由 ingest 中继拉流，
+    这两种 go2rtc 都从 ingest 按摄像头编号取（D-103、D-117，ingest 只放行 go2rtc 读取）。"""
+    if row["ingest"] != "pull" or row["relay"]:
         return f"{INGEST_RTSP}/{row['id']}"
+    return camera_url(row, password)
+
+
+def camera_url(row: Any, password: str | None) -> str:
+    """拉流摄像头本身的地址：按协议、主机、端口、路径拼出，用户名与口令按 URL 规则转义（D-103）。"""
     auth = ""
     if row["username"]:
         auth = quote(row["username"], safe="")
@@ -122,7 +131,9 @@ def view(row: Any) -> Camera:
             "name": row["name"],
             "ip": str(row["ip"]),
             "ingest": row["ingest"],
-            "source": ({k: row[k] for k in ("protocol", "host", "port", "path")} if pull else None),
+            "source": (
+                {k: row[k] for k in ("protocol", "host", "port", "path", "relay")} if pull else None
+            ),
             "username": row["username"],
             "password_set": row["password_enc"] is not None,
             "pose": row["pose"],
@@ -191,6 +202,8 @@ def _check(values: dict[str, Any]) -> None:
         raise HTTPException(400, "source: 拉流方式须填写协议、主机、端口与路径")
     if values["ingest"] == "pull" and _local(values["host"]):
         raise HTTPException(400, "source.host: 不能是本机或视频服务自身的地址")
+    if values.get("relay") and values["protocol"] not in RELAY_PROTOCOLS:
+        raise HTTPException(400, "source.relay: 兼容模式只支持 RTSP、RTMP 拉流")
     for i, (u1, _, u2, _) in enumerate(values["climb_lines"]):
         if u1 == u2:
             raise HTTPException(400, f"climb_lines.{i}: 警戒线不能是竖直线段")
@@ -210,13 +223,14 @@ def _local(host: str) -> bool:
 
 
 SOURCE_FIELDS = ("protocol", "host", "port", "path")
+RELAY_PROTOCOLS = {"rtsp", "rtmp"}  # MediaMTX 能作为来源拉取的协议（D-117）
 
 
 def _source_columns(source: dict[str, Any] | None, ingest: str) -> dict[str, Any]:
-    """推流不保存拉流地址。"""
+    """推流不保存拉流地址，也没有兼容模式。"""
     if ingest != "pull" or source is None:
-        return dict.fromkeys(SOURCE_FIELDS)
-    return {k: source[k] for k in SOURCE_FIELDS}
+        return dict.fromkeys(SOURCE_FIELDS) | {"relay": False}
+    return {k: source[k] for k in SOURCE_FIELDS} | {"relay": bool(source.get("relay"))}
 
 
 async def _rows(conn: AsyncConnection) -> list[Any]:
@@ -299,7 +313,13 @@ class Registry:
                 continue
             try:
                 async with self._lock:
-                    await self._sync_go2rtc(await self._load())
+                    rows = await self._load()
+                    try:
+                        await self._sync_ingest(rows)
+                    except (httpx2.HTTPError, ValueError):
+                        # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
+                        log.exception("cameras.ingest_unavailable")
+                    await self._sync_go2rtc(rows)
             except Exception:
                 log.exception("cameras.sync_failed")
 
@@ -330,12 +350,49 @@ class Registry:
                 WsFrame(channel="site", data=self._state.site.model_dump(mode="json"))
             )
         try:
+            await self._sync_ingest(rows)
+        except (httpx2.HTTPError, ValueError):
+            log.exception("cameras.ingest_unavailable")
+        try:
             await self._sync_go2rtc(rows)
         except (httpx2.HTTPError, ValueError):
             # 视频服务暂不可达：登记表照常下发，定期比对时补齐
             log.exception("cameras.go2rtc_unavailable")
         await self._state.bus.js_publish(SUBJECT, registry(rows))
         log.info("cameras.published", extra={"cameras": [r["id"] for r in rows]})
+
+    async def _sync_ingest(self, rows: list[Any]) -> None:
+        """兼容模式（D-117）：ingest 中每台开启兼容模式的摄像头一条同名中继路径，来源为摄像头本身的地址；
+        其余 cam-NN 显式路径删除（推流走正则路径，不受影响）。口令只在内存中解密后写入 MediaMTX 配置。"""
+        client = self._state.ingest
+        res = await client.get("/v3/config/paths/list")
+        res.raise_for_status()
+        current = {
+            item["name"]: item.get("source")
+            for item in res.json().get("items") or []
+            if re.fullmatch(r"cam-\d+", item["name"])
+        }
+        key_file = self._state.config.device_key_file
+        desired = {}
+        for r in rows:
+            if r["ingest"] == "pull" and r["relay"]:
+                password = unseal(key_file, r["password_enc"]) if r["password_enc"] else None
+                desired[r["id"]] = camera_url(r, password)
+        for name in current.keys() - desired.keys():
+            (await client.delete(f"/v3/config/paths/delete/{name}")).raise_for_status()
+            log.info("cameras.relay_removed", extra={"camera_id": name})
+        for name, url in desired.items():
+            if current.get(name) == url:
+                continue
+            conf = {"source": url, "sourceOnDemand": False, "rtspTransport": "tcp"}
+            action = "patch" if name in current else "add"
+            res = await client.request(
+                "PATCH" if action == "patch" else "POST",
+                f"/v3/config/paths/{action}/{name}",
+                json=conf,
+            )
+            res.raise_for_status()
+            log.info("cameras.relay_synced", extra={"camera_id": name})
 
     async def _sync_go2rtc(self, rows: list[Any]) -> None:
         """go2rtc 只按登记表拉流；登记表外的流删除。go2rtc 的 PATCH 只改地址不重连，修改时先删再加。"""
@@ -518,5 +575,7 @@ async def snapshot(camera_id: str, request: Request) -> Response:
         log.warning(
             "cameras.snapshot_failed", extra={"camera_id": camera_id, "status": res.status_code}
         )
+        if b"codecs not matched" in res.content:
+            raise HTTPException(502, SNAPSHOT_UNRECOGNIZED)
         raise HTTPException(502, SNAPSHOT_ERRORS.get(res.status_code, SNAPSHOT_ERRORS[500]))
     return Response(res.content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})

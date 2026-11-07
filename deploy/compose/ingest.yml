@@ -4,7 +4,7 @@
 logLevel: info
 
 api: true
-apiAddress: 127.0.0.1:9997
+apiAddress: 172.30.11.3:9997
 rtmp: false
 hls: false
 webrtc: false
@@ -13,7 +13,7 @@ rtspTransports: [tcp]
 
 authInternalUsers:
   - user: any
-    ips: ["127.0.0.1", "::1"]
+    ips: ["172.30.11.4", "172.30.11.3"]  # api-server 维护兼容模式中继路径（D-117）；ingest 自身的健康检查
     permissions: [{ action: api }]
   # 推流须带口令；只能推到摄像头编号格式的路径
   - user: hyd

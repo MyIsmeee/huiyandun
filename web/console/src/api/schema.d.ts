@@ -585,6 +585,11 @@ export interface components {
             port: number;
             /** @description 流路径，可含查询串；不含空白与 #（# 在 go2rtc 源中表示参数） */
             path: string;
+            /**
+             * @description 兼容模式：经 MediaMTX（ingest）中继拉流，只对 rtsp / rtmp 有效（D-117）
+             * @default false
+             */
+            relay: boolean;
         };
         /** @description 禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）；不能是竖直线段 */
         ClimbLine: number[];
