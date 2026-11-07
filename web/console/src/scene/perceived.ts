@@ -45,6 +45,8 @@ export interface Palette {
   earth: string;
   /** 立面、物体与树干 */
   facade: string;
+  /** 立面顶盖：俯视时看清平面轮廓 */
+  cap: string;
   /** 家具模型（D-059） */
   furniture: string;
   canopy: string;
@@ -60,6 +62,7 @@ export const PALETTE: Record<Theme, Palette> = {
     grass: "#283027",
     earth: "#342E26",
     facade: "#52525B",
+    cap: "#71717A",
     furniture: "#A1A1AA",
     canopy: "#3F4A3C",
     board: "#27272A",
@@ -195,6 +198,16 @@ function paint(geometry: BufferGeometry, color: string): BufferGeometry {
   return flat.setAttribute("color", new BufferAttribute(colors, 3));
 }
 
+/** 着色后把顶面（法线朝上的顶点）改为顶盖色 */
+function paintCapped(geometry: BufferGeometry, side: string, cap: string): BufferGeometry {
+  const painted = paint(geometry, side);
+  const normal = painted.getAttribute("normal");
+  const color = painted.getAttribute("color");
+  const { r, g, b } = new Color(cap);
+  for (let i = 0; i < normal.count; i += 1) if (normal.getY(i) > 0.5) color.setXYZ(i, r, g, b);
+  return painted;
+}
+
 /** 材质不用贴图：去掉 uv，家具模型（无 uv）可与程序化几何体合并 */
 const merge = (parts: BufferGeometry[]) =>
   parts.length === 0 ? null : mergeGeometries(parts.map((g) => g.deleteAttribute("uv")));
@@ -239,7 +252,7 @@ export function sceneGeometry(frame: SceneFrame, palette: Palette, furnishing: F
       const box = new BoxGeometry(Math.hypot(x2 - x1, y2 - y1), height_m, thickness)
         .rotateY(-Math.atan2(y2 - y1, x2 - x1))
         .translate((x1 + x2) / 2, base + height_m / 2, (y1 + y2) / 2);
-      return paint(box, color);
+      return kind === "board" ? paint(box, color) : paintCapped(box, color, palette.cap);
     });
   });
   const objects = frame.objects.flatMap(({ class: kind, polygon, height_m }) =>

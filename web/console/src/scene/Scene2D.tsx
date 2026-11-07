@@ -2,6 +2,7 @@ import type { Site } from "../lib/api";
 import type { SceneFrame } from "../store/live";
 import { useTheme } from "../theme/store";
 import type { Camera } from "./devices";
+import { isFurniture } from "./furniture";
 import { GROUND_M, type PlanView } from "./layout";
 import { largestFirst, PALETTE, type Palette, STALE_OPACITY, useScenes } from "./perceived";
 
@@ -48,14 +49,20 @@ function TopDown({ frame, palette }: { frame: SceneFrame; palette: Palette }) {
       {frame.walls.map((w, i) => (
         <g key={`w${i}`} fill="none" strokeLinejoin="round">
           <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M + EDGE_M * 2} className="stroke-grid" />
-          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M} stroke={w.class === "board" ? palette.road : palette.facade} />
+          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M} stroke={w.class === "board" ? palette.board : palette.facade} />
         </g>
       ))}
       {frame.objects.map((o, i) => (
-        <polygon key={`o${i}`} points={points(o.polygon)} fill={palette.facade} strokeWidth={EDGE_M} className="stroke-grid" />
+        <polygon
+          key={`o${i}`}
+          points={points(o.polygon)}
+          fill={isFurniture(o.class) ? palette.furniture : palette.facade}
+          strokeWidth={EDGE_M}
+          className="stroke-grid"
+        />
       ))}
       {frame.trees.map((t, i) => (
-        <circle key={`t${i}`} cx={t.x} cy={t.y} r={t.height_m * CROWN_RATIO} fill={palette.grass} strokeWidth={EDGE_M} className="stroke-grid" />
+        <circle key={`t${i}`} cx={t.x} cy={t.y} r={t.height_m * CROWN_RATIO} fill={palette.canopy} strokeWidth={EDGE_M} className="stroke-grid" />
       ))}
     </>
   );

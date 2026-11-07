@@ -1,6 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { BufferGeometry, Float32BufferAttribute, type Mesh, MeshLambertMaterial } from "three";
+import { BufferGeometry, Float32BufferAttribute, type Material, type Mesh, MeshLambertMaterial } from "three";
 import type { Site } from "../lib/api";
 import { WALL_HEIGHT_M } from "./layout";
 
@@ -82,6 +82,19 @@ export function Sandbox({ site }: { site: Site }) {
   );
 }
 
+/**
+ * 切换墙段的近侧半透明。transparent 在编译着色器时写定（为假时片元不透明度恒为 1），
+ * 改变后须标记 needsUpdate 重新编译，否则半透明不生效
+ */
+export function setNearSide(materials: Iterable<Material>, near: boolean): void {
+  for (const material of materials) {
+    material.opacity = near ? NEAR_WALL_OPACITY : 1;
+    material.transparent = near;
+    material.depthWrite = !near;
+    material.needsUpdate = true;
+  }
+}
+
 /** 一段实体墙：相机在墙外侧（墙挡在相机与站点中心之间）时半透明 */
 function Wall({ segment: [x1, y1, x2, y2], center }: { segment: Segment; center: [number, number] }) {
   const length = Math.hypot(x2 - x1, y2 - y1);
@@ -99,13 +112,13 @@ function Wall({ segment: [x1, y1, x2, y2], center }: { segment: Segment; center:
     return [side, side, cap, side, side, side];
   }, []);
   useEffect(() => () => new Set(materials).forEach((m) => m.dispose()), [materials]);
+  // 只在近远状态变化时切换（切换会重新编译着色器）
+  const wasNear = useRef<boolean | null>(null);
   useFrame(({ camera }) => {
     const near = (camera.position.x - mx) * (n[0] ?? 0) + (camera.position.z - my) * (n[1] ?? 0) > 0;
-    for (const material of new Set(materials)) {
-      material.opacity = near ? NEAR_WALL_OPACITY : 1;
-      material.transparent = near;
-      material.depthWrite = !near;
-    }
+    if (near === wasNear.current) return;
+    wasNear.current = near;
+    setNearSide(new Set(materials), near);
     if (mesh.current) mesh.current.castShadow = !near;
   });
   return (
