@@ -118,8 +118,8 @@ function RailCard(props: { device: Device; collapsed: boolean; selected: boolean
   );
 }
 
-/** 16:9 缩略图：只在卡片可见且页面未隐藏时每 10 s 取一帧，失败退避到 60 s；离线时去饱和 */
-function Thumbnail({ id, offline }: { id: string; offline: boolean }) {
+/** 16:9 缩略图：只在可见且页面未隐藏时按间隔（默认 10 s）取一帧，失败退避到 60 s；离线时去饱和。空间态势的画面引线卡同样使用 */
+export function Thumbnail({ id, offline, refreshMs = REFRESH_MS }: { id: string; offline: boolean; refreshMs?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -138,7 +138,7 @@ function Thumbnail({ id, offline }: { id: string; offline: boolean }) {
         if (current) URL.revokeObjectURL(current);
         current = next;
       }
-      timer = setTimeout(() => void load(), blob ? REFRESH_MS : BACKOFF_MS);
+      timer = setTimeout(() => void load(), blob ? refreshMs : BACKOFF_MS);
     }
     const observer = new IntersectionObserver(([entry]) => {
       visible = entry?.isIntersecting ?? false;
@@ -154,7 +154,7 @@ function Thumbnail({ id, offline }: { id: string; offline: boolean }) {
       document.removeEventListener("visibilitychange", onVisibility);
       if (current) URL.revokeObjectURL(current);
     };
-  }, [id]);
+  }, [id, refreshMs]);
   return (
     <div ref={ref} className="relative aspect-video overflow-hidden rounded-md bg-black">
       {url ? (

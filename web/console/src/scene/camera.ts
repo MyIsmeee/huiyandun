@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { create } from "zustand";
 import { useLive } from "../store/live";
 import type { Camera } from "./devices";
-import { blendShot, cameraShot, followShot, OVERVIEW, type Pose, type Shot, type Size, ZOOM_MAX, ZOOM_MIN } from "./layout";
+import { blendShot, cameraShot, followShot, OVERVIEW, type Pose, type Shot, type Size, VIEW_PRESETS, type ViewPreset, ZOOM_MAX, ZOOM_MIN } from "./layout";
 import { renderedPosition, renderTime } from "./smoothing";
 import { turnToward } from "./targets";
 
@@ -57,6 +57,7 @@ const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 export function interpolate(from: Pose, to: Pose, t: number): Pose {
   return {
     azimuth: mix(from.azimuth, to.azimuth, t),
+    tilt: mix(from.tilt, to.tilt, t),
     zoom: mix(from.zoom, to.zoom, t),
     pan: [mix(from.pan[0], to.pan[0], t), mix(from.pan[1], to.pan[1], t)],
   };
@@ -92,9 +93,20 @@ export function zoomed(goal: Pose, direction: 1 | -1): Pose {
   return { ...goal, zoom, pan: zoom === ZOOM_MIN ? [0, 0] : goal.pan };
 }
 
-/** 旋转一档（90°）：direction 为 1 时场景顺时针转动；平移以画面为参照，旋转后归零 */
-export function rotated(goal: Pose, direction: 1 | -1): Pose {
-  return { ...goal, azimuth: goal.azimuth + (direction * Math.PI) / 2, pan: [0, 0] };
+/** 切到命名视角（V-I5）：方位取离当前最近的等价角，不多转；缩放保留，平移以画面为参照、切换后归零 */
+export function preset(goal: Pose, name: ViewPreset): Pose {
+  const { azimuth, tilt } = VIEW_PRESETS[name];
+  const turns = Math.round((goal.azimuth - azimuth) / (2 * Math.PI));
+  return { ...goal, azimuth: azimuth + turns * 2 * Math.PI, tilt, pan: [0, 0] };
+}
+
+/** 当前姿态对应的命名视角；转场途中或不在任何预设上时为 null */
+export function presetOf(goal: Pose): ViewPreset | null {
+  const whole = (x: number) => Math.abs(x - Math.round(x)) < 1e-6;
+  const entry = Object.entries(VIEW_PRESETS).find(
+    ([, p]) => Math.abs(p.tilt - goal.tilt) < 1e-6 && whole((goal.azimuth - p.azimuth) / (2 * Math.PI)),
+  );
+  return (entry?.[0] as ViewPreset | undefined) ?? null;
 }
 
 /** 返回总览（V-I5）：方位角回到最近的整圈，避免多转 */

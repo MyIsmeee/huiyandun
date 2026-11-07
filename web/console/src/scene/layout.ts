@@ -43,24 +43,35 @@ export function coverage(poses: { x: number; y: number; yaw_deg: number; hfov_de
 }
 
 /**
- * 相机姿态（V-I1）：俯仰角与投影方式固定，只允许绕竖轴旋转、缩放与平移。
+ * 相机姿态（V-I1、V-I5）：投影方式固定，方位与俯角取命名视角预设，另可缩放与平移。
  * - azimuth：方位角（弧度），0 为默认的东南机位，增大时场景在画面上顺时针转动
+ * - tilt：俯角（弧度），轴测 45°、俯视 85°
  * - zoom：相对总览的倍数，1～4
  * - pan：取景中心沿画面向右、向下的偏移，单位米
  */
 export interface Pose {
   azimuth: number;
+  tilt: number;
   zoom: number;
   pan: Point;
 }
-export const OVERVIEW: Pose = { azimuth: 0, zoom: 1, pan: [0, 0] };
+const AXO_TILT = Math.PI / 4;
+export const OVERVIEW: Pose = { azimuth: 0, tilt: AXO_TILT, zoom: 1, pan: [0, 0] };
+
+/** 命名视角预设（V-I5，借鉴 Dilum Sanjaya 的 AXO R / AXO L / TOP）：方位与俯角；取代按 90° 旋转 */
+export const VIEW_PRESETS = {
+  axoRight: { label: "轴测（东南）", azimuth: 0, tilt: AXO_TILT },
+  axoLeft: { label: "轴测（西南）", azimuth: Math.PI / 2, tilt: AXO_TILT },
+  top: { label: "俯视", azimuth: 0, tilt: (85 * Math.PI) / 180 },
+} as const;
+export type ViewPreset = keyof typeof VIEW_PRESETS;
 export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 4;
 
-// V-I1：透视总览，俯角 45°，默认相机位于 (+x, +y, +z) 方向
-const BACK: Vec3 = [0.5, Math.SQRT1_2, 0.5];
+// V-I1：透视总览，默认相机位于 (+x, +y, +z) 方向；俯角 tilt 时视线方向与画面上方
+const back = (tilt: number): Vec3 => [Math.cos(tilt) * Math.SQRT1_2, Math.sin(tilt), Math.cos(tilt) * Math.SQRT1_2];
 const RIGHT: Vec3 = [Math.SQRT1_2, 0, -Math.SQRT1_2];
-const UP: Vec3 = [-0.5, Math.SQRT1_2, -0.5];
+const upOf = (tilt: number): Vec3 => [-Math.sin(tilt) * Math.SQRT1_2, Math.cos(tilt), -Math.sin(tilt) * Math.SQRT1_2];
 /** 总览的竖直视场角：视场越小越接近等距，越大近大远小越明显 */
 const OVERVIEW_FOV = (35 * Math.PI) / 180;
 const CAMERA_NEAR_M = 0.5;
@@ -143,7 +154,7 @@ export function sceneView(shot: Shot, size: Size, panLimit: Point = [0, 0]): Sce
  * 缩放按倍数拉近视点；平移在画面平面内移动相机，与取景中心同深度的内容每米移动 zoom 像素
  */
 export function overviewShot(area: Area, size: Size, pose: Pose = OVERVIEW): { shot: Shot; panLimit: Point } {
-  const [back, right, up] = [turn(BACK, pose.azimuth), turn(RIGHT, pose.azimuth), turn(UP, pose.azimuth)];
+  const [behind, right, up] = [turn(back(pose.tilt), pose.azimuth), turn(RIGHT, pose.azimuth), turn(upOf(pose.tilt), pose.azimuth)];
   const center: Vec3 = [area.x0 + area.width_m / 2, 0, area.y0 + area.height_m / 2];
   const offsets: Vec3[] = [];
   for (const x of [area.x0, area.x0 + area.width_m])
@@ -153,7 +164,7 @@ export function overviewShot(area: Area, size: Size, pose: Pose = OVERVIEW): { s
   // 角点沿视线方向比中心近 b、深度为 distance - b：横向与纵向都不超出可用区域的半宽、半高
   const fit = Math.max(
     ...offsets.map((v) => {
-      const b = dot(v, back);
+      const b = dot(v, behind);
       return Math.max(b + (focal * Math.abs(dot(v, right))) / (view.width / 2), b + (focal * Math.abs(dot(v, up))) / (view.height / 2));
     }),
   );
@@ -161,7 +172,7 @@ export function overviewShot(area: Area, size: Size, pose: Pose = OVERVIEW): { s
   const span = (axis: Vec3) => Math.max(...offsets.map((v) => Math.abs(dot(v, axis))));
   return {
     shot: {
-      eye: along(look, back, fit / pose.zoom),
+      eye: along(look, behind, fit / pose.zoom),
       look,
       fov: OVERVIEW_FOV,
       center: [INSET.left + view.width / 2, INSET.top + view.height / 2],

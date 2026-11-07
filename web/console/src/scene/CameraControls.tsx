@@ -1,9 +1,9 @@
-import { House, type LucideIcon, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { House, type LucideIcon, Minus, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useConnection } from "../store/connection";
 import { prefersReducedMotion } from "../theme/store";
-import { focusOn, moveCamera, overview, rotated, useCamera, zoomed } from "./camera";
-import { type Pose, ZOOM_MAX, ZOOM_MIN } from "./layout";
+import { focusOn, moveCamera, overview, preset, presetOf, useCamera, zoomed } from "./camera";
+import { type Pose, VIEW_PRESETS, type ViewPreset, ZOOM_MAX, ZOOM_MIN } from "./layout";
 
 /** 转场是否播放：降低动效或断线时瞬时切换（V-A4、C-FE-05）；取调用时的状态 */
 function canAnimate(): boolean {
@@ -18,7 +18,7 @@ export function useAnimate(): () => boolean {
 }
 
 /**
- * 相机控件组（V-I1、V-I5）：缩小、放大、左转、右转、返回总览，位于场景左下角，详情抽屉展开时不被遮挡。
+ * 相机控件组（V-I1、V-I5）：缩小、放大、命名视角（轴测东南 / 轴测西南 / 俯视）、返回总览，位于场景左下角。
  * 2D 降级说明并入同一浮层，场景内同时可见的浮层不超过 4 个（V-L3）。
  */
 export function CameraControls({ notice }: { notice?: { text: string; title: string } }) {
@@ -29,10 +29,9 @@ export function CameraControls({ notice }: { notice?: { text: string; title: str
   const buttons: [string, LucideIcon, (pose: Pose) => Pose, boolean][] = [
     ["缩小", Minus, (p) => zoomed(p, -1), focused || goal.zoom <= ZOOM_MIN],
     ["放大", Plus, (p) => zoomed(p, 1), focused || goal.zoom >= ZOOM_MAX],
-    ["向左旋转 90°", RotateCcw, (p) => rotated(p, -1), focused],
-    ["向右旋转 90°", RotateCw, (p) => rotated(p, 1), focused],
-    ["返回总览", House, overview, false],
   ];
+  const current = presetOf(goal);
+  const presets = Object.entries(VIEW_PRESETS) as [ViewPreset, (typeof VIEW_PRESETS)[ViewPreset]][];
   return (
     <div
       role="toolbar"
@@ -45,10 +44,28 @@ export function CameraControls({ notice }: { notice?: { text: string; title: str
         </span>
       )}
       {buttons.map(([label, Icon, next, disabled]) => (
-        <ControlButton key={label} label={label} disabled={disabled} onClick={() => (focused ? focusOn(null, animate()) : moveCamera(next(goal), animate()))}>
+        <ControlButton key={label} label={label} disabled={disabled} onClick={() => moveCamera(next(goal), animate())}>
           <Icon aria-hidden className="size-4" />
         </ControlButton>
       ))}
+      <span aria-hidden className="mx-1 h-5 w-px bg-border" />
+      {presets.map(([name, { label }]) => (
+        <button
+          key={name}
+          aria-label={label}
+          aria-pressed={!focused && current === name}
+          disabled={focused}
+          onClick={() => moveCamera(preset(goal, name), animate())}
+          className="h-8 rounded-md px-2 whitespace-nowrap transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-accent aria-pressed:text-foreground"
+        >
+          {label}
+        </button>
+      ))}
+      <span aria-hidden className="mx-1 h-5 w-px bg-border" />
+      {/* 跟随视角下机位由目标或摄像头决定，只有"返回总览"可用（D-058） */}
+      <ControlButton label="返回总览" disabled={false} onClick={() => (focused ? focusOn(null, animate()) : moveCamera(overview(goal), animate()))}>
+        <House aria-hidden className="size-4" />
+      </ControlButton>
     </div>
   );
 }
