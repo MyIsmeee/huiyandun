@@ -4,8 +4,6 @@ import type { View } from "./layout";
 
 /** 不确定半径超过此值时目标模型改为半透明（V-U1） */
 export const HIGH_ERROR_M = 1;
-/** 渲染时间轴落后于最新实测的时长：在相邻两次实测之间插值，不外推（FR-102） */
-export const RENDER_DELAY_MS = 200;
 /** 新目标被锁定时的扩散环时长（§5.1 L4） */
 export const LOCK_RING_MS = 600;
 
@@ -89,11 +87,16 @@ export function targetLabel({ object_class, track_id, speed_mps }: Target): stri
 const MIN_HIT_PX = 20;
 const HIT_M: Record<TargetClass, number> = { person: 0.9, bicycle: 0.9, motorcycle: 1.1, car: 2.3, bus: 4, truck: 3.3 };
 
-/** 单击命中的目标：在渲染时刻 t 的位置（模型中部）投影到视口，取命中半径内最近的一个；没有命中为 null */
-export function pickTarget(list: Visible[], view: View, [px, py]: readonly [number, number], t: number): string | null {
+/** 单击命中的目标：画面上的位置（positionOf，模型中部）投影到视口，取命中半径内最近的一个；没有命中为 null */
+export function pickTarget(
+  list: Visible[],
+  view: View,
+  [px, py]: readonly [number, number],
+  positionOf: (target: Visible) => [number, number],
+): string | null {
   let best: { key: string; distance: number } | null = null;
   for (const target of list) {
-    const [x, y] = positionAt(target.trail, t);
+    const [x, y] = positionOf(target);
     const center = [x, 0.9, y] as const;
     const screen = view.project(center);
     if (!screen) continue;

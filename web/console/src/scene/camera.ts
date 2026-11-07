@@ -3,7 +3,8 @@ import { create } from "zustand";
 import { useLive } from "../store/live";
 import type { Camera } from "./devices";
 import { blendShot, cameraShot, followShot, OVERVIEW, type Pose, type Shot, type Size, ZOOM_MAX, ZOOM_MIN } from "./layout";
-import { positionAt, RENDER_DELAY_MS, turnToward } from "./targets";
+import { renderedPosition, renderTime } from "./smoothing";
+import { turnToward } from "./targets";
 
 /** 相机转场时长，V-A2 要求 ≤ 600 ms */
 export const TRANSITION_MS = 400;
@@ -151,8 +152,8 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
       if (size && focus?.kind === "target") {
         const target = useLive.getState().targets[focus.key];
         if (!target) return focusOn(null, motion);
-        const t = motion ? now - RENDER_DELAY_MS : Number.POSITIVE_INFINITY;
-        const [x, y] = positionAt(target.trail, t);
+        const t = renderTime(target, now, motion);
+        const [x, y] = renderedPosition(focus.key, target, now, motion);
         const camera = cameras.find((c) => c.id === target.camera_id)?.pose;
         const toCamera = camera && (camera.x !== x || camera.y !== y) ? Math.atan2(camera.y - y, camera.x - x) : 0;
         const last = bearing.current?.key === focus.key ? bearing.current : null;

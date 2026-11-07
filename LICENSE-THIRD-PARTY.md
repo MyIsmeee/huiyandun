@@ -85,6 +85,7 @@
 
 | 包 | 版本 | 许可证 |
 |---|---|---|
+| 1eurofilter | 1.3.0 | BSD-3-Clause |
 | @babel/runtime | 7.29.10 | MIT |
 | @floating-ui/core | 1.8.0 | MIT |
 | @floating-ui/dom | 1.8.0 | MIT |
