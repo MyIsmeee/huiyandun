@@ -1,4 +1,5 @@
 import { ArrowLeft, CircleAlert, FileText } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { components } from "../../api/schema";
@@ -21,8 +22,8 @@ const MINUTE = { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit
 const row = (report: Report) =>
   `${new Date(report.created_at).toLocaleString("zh-CN", MINUTE)} · ${source(report)} · ${report.reviewed_by ? "已复核" : "未复核"}`;
 
-const button = "h-9 rounded-full border border-line px-4 transition-colors hover:bg-raised disabled:opacity-40";
-const link = "underline underline-offset-4 hover:text-fg";
+const button = buttonVariants({ variant: "outline", size: "sm" });
+const link = "underline underline-offset-4 hover:text-foreground";
 
 /** 导出接口是 POST，不能用 <a download> 直接下载：取回后交给浏览器保存 */
 function save(blob: Blob, filename: string) {
@@ -134,7 +135,7 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (i
       {/* 与供应商页相同，盖在主界面之上而不替换它；挂到 body 下，不受详情面板的布局约束 */}
       {open &&
         createPortal(
-          <div className="fixed inset-0 z-10 bg-page">
+          <div className="fixed inset-0 z-10 bg-background">
             <ReportPage
               report={open}
               canReview={canEdit}
@@ -161,19 +162,19 @@ export function ReportBarView(props: {
 }) {
   const { incident, load, request, exporting, canEdit, onGenerate, onExport, onOpen } = props;
   return (
-    <section aria-label="报告" className="flex flex-col gap-2 rounded-xl border border-line p-3 text-sm">
+    <section aria-label="报告" className="flex flex-col gap-2.5 border-t pt-4 text-sm">
       <p className="flex items-center gap-2">
         <FileText aria-hidden className="size-4 shrink-0" />
         <span className="shrink-0 font-medium">溯源报告</span>
-        <span className="min-w-0 truncate text-fg-3" title={incident.title}>
+        <span className="min-w-0 truncate text-subtle-foreground" title={incident.title}>
           {incident.title}
         </span>
       </p>
-      {load.status === "loading" && <p className="text-fg-3">读取历史报告…</p>}
-      {load.status === "failed" && <p className="text-fg-3">历史报告读取失败</p>}
+      {load.status === "loading" && <p className="text-subtle-foreground">读取历史报告…</p>}
+      {load.status === "failed" && <p className="text-subtle-foreground">历史报告读取失败</p>}
       {load.status === "ready" &&
         (load.reports.length === 0 ? (
-          <p className="text-fg-3">尚无报告</p>
+          <p className="text-subtle-foreground">尚无报告</p>
         ) : (
           <ul aria-label="历史报告" className="flex max-h-32 flex-col overflow-y-auto">
             {load.reports.map((r) => (
@@ -182,7 +183,7 @@ export function ReportBarView(props: {
                   type="button"
                   onClick={() => onOpen(r)}
                   title={describe(r)}
-                  className="w-full truncate rounded-lg px-2 py-1 text-left text-fg-2 transition-colors hover:bg-raised hover:text-fg"
+                  className="w-full truncate rounded-md px-2 py-1 text-left text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 >
                   {row(r)}
                 </button>
@@ -225,19 +226,19 @@ export function ReportPage(props: {
           <ArrowLeft aria-hidden className="size-4" />
           返回
         </button>
-        <h1 className="min-w-0 flex-1 truncate text-base font-semibold" title={report.facts.incident.title}>
+        <h1 className="min-w-0 flex-1 truncate text-base font-medium" title={report.facts.incident.title}>
           溯源报告：{report.facts.incident.title}
         </h1>
-        <span className="text-fg-2">{describe(report)}</span>
+        <span className="text-muted-foreground">{describe(report)}</span>
         {canReview && !report.reviewed_by && (
           <button type="button" onClick={onReview} disabled={review.status === "pending"} className={button}>
             {review.status === "pending" ? "提交中…" : "标记已复核"}
           </button>
         )}
-        <a href={exportUrl(report, "md")} download className={`${link} text-fg-2`}>
+        <a href={exportUrl(report, "md")} download className={`${link} text-muted-foreground`}>
           下载 Markdown
         </a>
-        <a href={exportUrl(report, "html")} target="_blank" rel="noopener noreferrer" className={`${link} text-fg-2`}>
+        <a href={exportUrl(report, "html")} target="_blank" rel="noopener noreferrer" className={`${link} text-muted-foreground`}>
           新标签页打开
         </a>
       </header>
@@ -247,7 +248,7 @@ export function ReportPage(props: {
         title="报告内容"
         src={exportUrl(report, "html")}
         sandbox=""
-        className="min-h-0 flex-1 rounded-2xl border border-line bg-white"
+        className="min-h-0 flex-1 rounded-lg border border-border bg-white"
       />
     </div>
   );
@@ -255,7 +256,7 @@ export function ReportPage(props: {
 
 function Failure(props: { message: string }) {
   return (
-    <p role="alert" className="flex items-center gap-1 text-fg-2">
+    <p role="alert" className="flex items-center gap-1 text-muted-foreground">
       <CircleAlert aria-hidden className="size-4" />
       {props.message}
     </p>

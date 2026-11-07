@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Wrench,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Fragment, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -138,30 +139,29 @@ export function AiInvestigationView(props: {
 }) {
   const { incident, load, stale, now, confirm } = props;
   return (
-    <section aria-label="AI 安全值班员" className="flex flex-col gap-3 rounded-xl border border-line p-3 text-sm">
-      <section aria-label="规则结论" className="flex flex-col gap-2">
-        <h3 className="font-semibold">规则结论</h3>
+    <section aria-label="AI 安全值班员" className="flex flex-col gap-4 text-sm">
+      <section aria-label="规则结论" className="flex flex-col gap-2 border-t pt-4">
+        <h3 className="font-medium">规则结论</h3>
         <p>{incident.title}</p>
-        <p className="text-fg-2">
+        <p className="text-muted-foreground">
           等级 {SEVERITY[incident.severity]}
           {incident.techniques.length > 0 && ` · ${incident.techniques.join(" ")}`}
           {incident.source_ip && <span className="tabular-nums"> · 来源 {incident.source_ip}</span>}
         </p>
-        {incident.requires_confirmation && <p className="text-fg-2">含模型证据，处置须人工确认</p>}
+        {incident.requires_confirmation && <p className="text-muted-foreground">含模型证据，处置须人工确认</p>}
         {confirm && (
           <>
-            <button
-              type="button"
+            <Button
               onClick={confirm.onConfirm}
               disabled={confirm.request.status === "pending"}
-              className="min-h-9 self-start rounded-2xl border border-line px-4 py-1.5 text-left transition-colors hover:bg-raised disabled:opacity-40"
+              className="h-auto min-h-9 self-start py-1.5 text-left whitespace-normal"
             >
               {confirm.request.status === "pending"
                 ? "确认中…"
                 : `确认处置：${confirm.execution.playbook_id} 封禁 ${confirm.execution.target}`}
-            </button>
+            </Button>
             {confirm.request.status === "failed" && (
-              <p role="alert" className="flex items-start gap-1 text-fg-2">
+              <p role="alert" className="flex items-start gap-1 text-muted-foreground">
                 <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
                 <span className="min-w-0">{confirm.request.message}</span>
               </p>
@@ -169,10 +169,10 @@ export function AiInvestigationView(props: {
           </>
         )}
       </section>
-      <section aria-label="AI 研判" className={`flex flex-col gap-2 border-t border-line pt-3 ${stale ? "opacity-60" : ""}`}>
-        <header className="sticky top-0 flex flex-wrap items-center gap-x-2 bg-panel">
-          <h3 className="font-semibold">AI 研判</h3>
-          <span className="text-xs text-fg-3">AI 生成 · 需人工复核</span>
+      <section aria-label="AI 研判" className={`flex flex-col gap-2 rounded-lg bg-secondary p-3 ${stale ? "opacity-60" : ""}`}>
+        <header className="sticky top-0 z-10 -mx-3 -mt-3 flex flex-wrap items-center gap-x-2 rounded-t-lg bg-secondary px-3 pt-3 pb-1">
+          <h3 className="font-medium">AI 研判</h3>
+          <span className="text-xs text-subtle-foreground">AI 生成 · 需人工复核</span>
           {stale && (
             <span className="ml-auto inline-flex items-center gap-1 text-xs text-uncertain">
               <Clock aria-hidden className="size-3.5" />
@@ -188,15 +188,15 @@ export function AiInvestigationView(props: {
 
 function InvestigationBody(props: { load: InvestigationLoad; now: number }) {
   const { load, now } = props;
-  if (load.status !== "ready") return <p className="text-fg-3">{NO_RECORD[load.status]}</p>;
+  if (load.status !== "ready") return <p className="text-subtle-foreground">{NO_RECORD[load.status]}</p>;
   const { steps, verdict, error, provider, started_at, finished_at } = load.investigation;
   return (
     <>
       {provider && (
-        <p className="flex items-center gap-1.5 text-fg-2">
+        <p className="flex items-center gap-1.5 text-muted-foreground">
           {provider.location === "public" ? <Globe aria-hidden className="size-4" /> : <House aria-hidden className="size-4" />}
           {provider.name}
-          <span className="rounded-full border border-line px-2 text-xs">
+          <span className="rounded-full border border-border px-2 text-xs">
             {provider.location === "public" ? "公网 · 已脱敏" : "内网"}
           </span>
         </p>
@@ -208,12 +208,12 @@ function InvestigationBody(props: { load: InvestigationLoad; now: number }) {
             return (
               <li key={i}>
                 <details className="group">
-                  <summary className="flex cursor-pointer items-start gap-2 hover:text-fg-2">
-                    <Icon aria-label={step.tool} className="mt-0.5 size-4 shrink-0 text-fg-2" />
+                  <summary className="flex cursor-pointer items-start gap-2 hover:text-muted-foreground">
+                    <Icon aria-label={step.tool} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1">{step.reason}</span>
-                    <ChevronDown aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-3 transition-transform group-open:rotate-180" />
+                    <ChevronDown aria-hidden className="mt-0.5 size-4 shrink-0 text-subtle-foreground transition-transform group-open:rotate-180" />
                   </summary>
-                  <p className="mt-1 ml-6 text-fg-2">
+                  <p className="mt-1 ml-6 text-muted-foreground">
                     <span className="font-mono text-xs">
                       {step.tool}({step.args_summary})
                     </span>
@@ -226,13 +226,13 @@ function InvestigationBody(props: { load: InvestigationLoad; now: number }) {
         </ol>
       )}
       {finished_at === null && (
-        <p className="text-fg-3 tabular-nums">
+        <p className="text-subtle-foreground tabular-nums">
           调查中 · 已用 {Math.max(0, Math.floor((now - Date.parse(started_at)) / 1000))} s
         </p>
       )}
       {verdict && <VerdictCard verdict={verdict} />}
       {error && (
-        <p className="flex items-start gap-1 text-fg-2">
+        <p className="flex items-start gap-1 text-muted-foreground">
           <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span className="min-w-0">AI 研判不可用：{error}</span>
         </p>
@@ -246,13 +246,13 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
   const percent = Math.round(verdict.confidence * 100);
   const Icon = verdict.is_attack ? ShieldAlert : ShieldCheck;
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-line p-3">
+    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
       <p className="flex items-center gap-2">
         <Icon aria-hidden className="size-5 shrink-0" />
-        <span className="font-semibold">{verdict.is_attack ? "判定为攻击" : "判定非攻击"}</span>
-        <span className="ml-auto flex items-center gap-1.5 text-fg-2 tabular-nums">
+        <span className="font-medium">{verdict.is_attack ? "判定为攻击" : "判定非攻击"}</span>
+        <span className="ml-auto flex items-center gap-1.5 text-muted-foreground tabular-nums">
           <svg aria-hidden viewBox="0 0 20 20" className="size-5 -rotate-90">
-            <circle cx="10" cy="10" r="8" fill="none" strokeWidth="3" className="stroke-grid" />
+            <circle cx="10" cy="10" r="8" fill="none" strokeWidth="3" className="stroke-accent" />
             <circle
               cx="10"
               cy="10"
@@ -261,7 +261,7 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
               strokeWidth="3"
               pathLength="100"
               strokeDasharray={`${percent} 100`}
-              className="stroke-fg-2"
+              className="stroke-muted-foreground"
             />
           </svg>
           可信度 {percent}%
@@ -270,7 +270,7 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
       {verdict.techniques.length > 0 && (
         <p className="flex flex-wrap gap-1.5">
           {verdict.techniques.map((t) => (
-            <span key={t} className="rounded-full border border-line px-2 font-mono text-xs">
+            <span key={t} className="rounded-full border border-border px-2 font-mono text-xs">
               <Marked text={t} unverified={verdict.unverified} />
             </span>
           ))}
@@ -279,7 +279,7 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
       <p>
         <Marked text={verdict.narrative} unverified={verdict.unverified} />
       </p>
-      <p className="text-fg-2">
+      <p className="text-muted-foreground">
         处置建议：
         <Marked text={verdict.recommendation} unverified={verdict.unverified} />
       </p>
@@ -298,7 +298,7 @@ function Marked({ text, unverified }: { text: string; unverified: string[] }) {
   return text.split(pattern).map((part, i) =>
     // split 带捕获组：奇数位是匹配到的实体
     i % 2 === 1 ? (
-      <span key={i} title={UNVERIFIED} className="text-fg-3 underline decoration-dashed underline-offset-4">
+      <span key={i} title={UNVERIFIED} className="text-subtle-foreground underline decoration-dashed underline-offset-4">
         {part}
       </span>
     ) : (

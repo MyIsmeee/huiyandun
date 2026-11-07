@@ -104,7 +104,7 @@ function gathered(pc: RTCPeerConnection): Promise<void> {
 /** 按状态呈现；与连接逻辑分开，供组件展示页截图（V-G3） */
 export function LiveVideoView({ status, onRetry }: { status: VideoStatus; onRetry?: () => void }) {
   return (
-    <div data-video={status.kind} className="relative aspect-video overflow-hidden rounded-xl border border-line bg-raised">
+    <div data-video={status.kind} className="relative aspect-video overflow-hidden rounded-md border border-border bg-secondary">
       {"stream" in status && <Stream stream={status.stream} />}
       {status.kind === "connecting" && (
         <Center>
@@ -115,14 +115,14 @@ export function LiveVideoView({ status, onRetry }: { status: VideoStatus; onRetr
       {status.kind === "none" && <Center>该设备没有视频流</Center>}
       {status.kind === "unavailable" && (
         <Center>
-          <span className="flex items-center gap-1.5 text-fg">
+          <span className="flex items-center gap-1.5 text-foreground">
             <VideoOff aria-hidden className="size-4" />
             实时画面不可用
           </span>
           <span className="px-4 text-center text-xs">{status.reason}</span>
           <button
             onClick={onRetry}
-            className="mt-1 flex h-8 items-center gap-1.5 rounded-full border border-line px-3 text-fg-2 transition-colors hover:bg-panel hover:text-fg"
+            className="mt-1 flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
           >
             <RotateCw aria-hidden className="size-3.5" />
             重试
@@ -130,7 +130,7 @@ export function LiveVideoView({ status, onRetry }: { status: VideoStatus; onRetr
         </Center>
       )}
       {status.kind === "interrupted" && (
-        <p className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-dashed border-uncertain bg-panel/80 px-3 py-1 text-xs whitespace-nowrap text-uncertain backdrop-blur">
+        <p className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-dashed border-uncertain bg-card/80 px-3 py-1 text-xs whitespace-nowrap text-uncertain backdrop-blur">
           <Clock aria-hidden className="size-3.5" />
           画面中断 · 正在重连
         </p>
@@ -148,5 +148,5 @@ function Stream({ stream }: { stream: MediaStream }) {
 }
 
 function Center({ children }: { children: ReactNode }) {
-  return <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-fg-3">{children}</div>;
+  return <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-subtle-foreground">{children}</div>;
 }

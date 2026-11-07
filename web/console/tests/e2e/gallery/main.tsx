@@ -104,7 +104,10 @@ const EXECUTIONS = {
   },
 } as Record<string, Execution>; // prettier-ignore
 const LAST_FRAME = Date.parse("2026-10-27T06:29:45Z");
-const alertList = (node: ReactNode) => <div className="flex h-80 w-80 flex-col">{node}</div>;
+// 与告警栏同宽（04 §3.5）
+const alertList = (node: ReactNode) => <div className="flex h-96 w-[360px] flex-col bg-card">{node}</div>;
+// 详情抽屉相对场景定位（D-112）：放进一块场景大小的容器
+const drawer = (node: ReactNode) => <div className="relative h-[640px] w-[480px]">{node}</div>;
 const REPORT: Report = {
   id: "rep-1", incident_id: INCIDENT.id,
   facts: { incident: INCIDENT, devices: [], timeline: [], executions: [] },
@@ -228,8 +231,8 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
     disconnected: video(<LiveVideoView status={{ kind: "interrupted", stream: STREAM }} />),
   },
   DetailPanel: {
-    device: <div className="w-80"><DetailPanel device={SWITCH} stale={false} onClose={() => {}} /></div>,
-    disconnected: <div className="w-80"><DetailPanel device={SWITCH} stale onClose={() => {}} /></div>,
+    device: drawer(<DetailPanel device={SWITCH} stale={false} onClose={() => {}} />),
+    disconnected: drawer(<DetailPanel device={SWITCH} stale onClose={() => {}} />),
   },
   AlertList: {
     normal: alertList(<AlertListView alerts={ALERTS} incidents={INCIDENTS} executions={EXECUTIONS} stale={false} lastFrameAt={LAST_FRAME} />),
