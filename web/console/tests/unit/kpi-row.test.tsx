@@ -29,16 +29,17 @@ afterEach(() => {
 });
 
 describe("KpiRow", () => {
-  it("拉取前为加载态，拉取后显示数值与较 1 小时前的变化；无数据显示 —（04 §4.1 B 区）", async () => {
+  it("拉取前为加载态，拉取后显示数值与较 1 小时前的变化；无数据显示 —（04 §4.1 C 区）", async () => {
     vi.spyOn(api, "getKpis").mockResolvedValue(KPIS);
     render(<KpiRow stale={false} />);
     expect(within(tile("在线设备")).getByLabelText("加载中")).toBeTruthy();
 
     await flush();
 
-    expect(tile("在线设备").textContent).toBe("在线设备3台较 1 小时前 ↓ 1");
-    expect(tile("活跃告警").textContent).toBe("活跃告警0条较 1 小时前 持平");
-    expect(tile("今日已处置").textContent).toBe("今日已处置2起较 1 小时前 ↑ 2");
+    expect(tile("在线设备").textContent).toBe("在线设备3台↓ 1");
+    expect(tile("在线设备").querySelector("[title]")?.getAttribute("title")).toBe("较 1 小时前");
+    expect(tile("活跃告警").textContent).toBe("活跃告警0条持平");
+    expect(tile("今日已处置").textContent).toBe("今日已处置2起↑ 2");
     expect(tile("最近处置用时").textContent).toBe("最近处置用时—");
   });
 
@@ -47,7 +48,8 @@ describe("KpiRow", () => {
     render(<KpiRow stale={false} />);
     await flush();
 
-    expect(tile("最近处置用时").textContent).toBe("最近处置用时12.3秒较上一次 ↓ 2.5");
+    expect(tile("最近处置用时").textContent).toBe("最近处置用时12.3秒↓ 2.5");
+    expect(tile("最近处置用时").querySelector("[title]")?.getAttribute("title")).toBe("较上一次");
   });
 
   it("按浏览器本地当天 0 点起算今日（D-100）", async () => {
@@ -69,9 +71,9 @@ describe("KpiRow", () => {
     await flush();
 
     await act(() => vi.advanceTimersByTimeAsync(5_000));
-    expect(tile("在线设备").textContent).toBe("在线设备非实时3台较 1 小时前 ↓ 1");
+    expect(tile("在线设备").textContent).toBe("在线设备3台↓ 1非实时");
     await act(() => vi.advanceTimersByTimeAsync(5_000));
-    expect(tile("在线设备").textContent).toBe("在线设备4台较 1 小时前 持平");
+    expect(tile("在线设备").textContent).toBe("在线设备4台持平");
     expect(get).toHaveBeenCalledTimes(3);
   });
 
@@ -80,7 +82,7 @@ describe("KpiRow", () => {
     render(<KpiRow stale={false} />);
     await flush();
 
-    expect(tile("活跃告警").textContent).toBe("活跃告警非实时—");
+    expect(tile("活跃告警").textContent).toBe("活跃告警—非实时");
   });
 
   it("断线时保留数值并标为非实时（C-FE-05）", async () => {
@@ -89,7 +91,7 @@ describe("KpiRow", () => {
     await flush();
     rerender(<KpiRow stale />);
 
-    expect(tile("今日已处置").textContent).toBe("今日已处置非实时2起较 1 小时前 ↑ 2");
+    expect(tile("今日已处置").textContent).toBe("今日已处置2起↑ 2非实时");
   });
 
   it("卸载后不再拉取", async () => {

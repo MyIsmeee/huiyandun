@@ -1,4 +1,4 @@
-import { Clock, X } from "lucide-react";
+import { ArrowLeft, Clock } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { deviceLook } from "../../scene/devices";
@@ -13,9 +13,9 @@ import { ReportBar } from "../ReportBar/ReportBar";
 const TYPE: Record<Device["type"], string> = { camera: "摄像头", nvr: "录像机", switch: "交换机" };
 
 /**
- * D 详情抽屉（HYD-UIX-004 §4.1、§8，D-112）：选中设备时从右侧盖在场景上，Esc 或关闭按钮收起（V-I2）。
+ * 检查栏详情（HYD-UIX-004 §4.1 D 区、§8，D-115）：选中设备时取代告警栏，Esc 或"返回告警"回到告警栏（V-I2）。
  * 自上而下为概要、处置时间线（FR-304）、规则结论与 AI 研判（AiInvestigation，TK-117）、报告（ReportBar，TK-070）、
- * 实时画面；处置操作（ActionBar，TK-052）固定在抽屉底部。
+ * 实时画面；处置操作（ActionBar，TK-052）固定在底部。
  * stale 为推送连接已断开：状态是断开前的最后值，弱化显示并标注（UP-3、V-U3）。
  */
 export function DetailPanel(props: { device: Device; stale: boolean; onClose: () => void }) {
@@ -84,7 +84,7 @@ function Stale() {
   );
 }
 
-/** 抽屉中的分区：分区标题 + 内容（面板内层级 ≤ 3，V-L4） */
+/** 详情中的分区：分区标题 + 内容（面板内层级 ≤ 3，V-L4） */
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2.5 border-t pt-4">
@@ -103,16 +103,14 @@ function Drawer(props: { title: string; onClose: () => void; footer?: ReactNode;
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    // 内容一栏在抽屉内滚动，页面不随之撑高（V-L2）；底部操作区无内容时不占位
-    <section
-      aria-label="详情"
-      className="absolute inset-y-3 right-3 z-10 flex w-[min(440px,40vw)] min-w-80 flex-col rounded-lg border bg-card shadow-[0_8px_24px_rgb(0_0_0/0.45)] animate-in fade-in slide-in-from-right-4"
-    >
-      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b pr-2 pl-4">
-        <h2 className="truncate text-base font-medium">{title}</h2>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭详情" className="size-8 text-muted-foreground">
-          <X aria-hidden />
+    // 占满检查栏（D-115）：内容一栏在栏内滚动，页面不随之撑高（V-L2）；底部操作区无内容时不占位
+    <section aria-label="详情" className="flex min-h-0 flex-1 flex-col animate-in fade-in">
+      <header className="flex h-11 shrink-0 items-center gap-1 border-b pr-4 pl-2">
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="返回告警" className="text-muted-foreground">
+          <ArrowLeft aria-hidden />
+          告警
         </Button>
+        <h2 className="ml-auto truncate text-base font-medium">{title}</h2>
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
       {footer && <div className="shrink-0 border-t p-3 empty:hidden">{footer}</div>}

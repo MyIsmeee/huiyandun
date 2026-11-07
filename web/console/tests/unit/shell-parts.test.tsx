@@ -12,19 +12,20 @@ describe("KpiTile", () => {
 
     expect(screen.getByText("—")).toBeTruthy();
     expect(screen.queryByText("条")).toBeNull();
-    expect(screen.queryByText(/较 1 小时前/)).toBeNull();
+    expect(screen.queryByTitle("较 1 小时前")).toBeNull();
   });
 
   it.each([
-    [3, "较 1 小时前 ↑ 3"],
-    [-2, "较 1 小时前 ↓ 2"],
-    [0, "较 1 小时前 持平"],
+    [3, "↑ 3"],
+    [-2, "↓ 2"],
+    [0, "持平"],
   ])("显示数值、单位与较 1 小时前的变化（%i）", (delta, trend) => {
     render(<KpiTile label="活跃告警" unit="条" data={{ status: "ready", value: 0, delta }} />);
 
     expect(screen.getByText("0")).toBeTruthy();
     expect(screen.getByText("条")).toBeTruthy();
-    expect(screen.getByText(trend)).toBeTruthy();
+    // 比较基准在悬停提示中，工具条一行放得下（D-115）
+    expect(screen.getByText(trend).getAttribute("title")).toBe("较 1 小时前");
   });
 
   it("加载中只显示占位", () => {
