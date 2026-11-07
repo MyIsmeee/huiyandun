@@ -1,7 +1,7 @@
 import { Bot, CircleCheck, Lock, ShieldAlert, TriangleAlert, Unlock } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { components } from "../../api/schema";
-import { api } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import { type Alert, type Execution, type Incident, useLive } from "../../store/live";
 import { useSelection } from "../../store/selection";
 import { formatTime } from "../ConnectionStatus/ConnectionStatus";
@@ -99,12 +99,33 @@ function pick(incidents: Incident[], deviceId: string | null): Incident | undefi
   return deviceId ? incidents.find((i) => i.device_ids.includes(deviceId)) : incidents[0];
 }
 
-/** 关联事件的五个节点：调查结果按事件读取，调查有新步骤时重读 */
+type Phase = "unknown" | "running" | "done";
+
+/**
+ * 每个关联事件在每个调查阶段只读一次调查记录：告警栏各行的进度点与抽屉中的时间线共用，
+ * 调查的中间步骤不改变"AI 判定"节点，不重读。读取失败（非 404）不缓存，下次挂载时重试
+ */
+const reads = new Map<string, { phase: Phase; result: Promise<Investigation> }>();
+function readInvestigation(id: string, phase: Phase): Promise<Investigation> {
+  const hit = reads.get(id);
+  if (hit?.phase === phase) return hit.result;
+  const result = api.getInvestigation(id);
+  reads.set(id, { phase, result });
+  result.catch((e: unknown) => {
+    if (!(e instanceof ApiError && e.status === 404) && reads.get(id)?.result === result) reads.delete(id);
+  });
+  return result;
+}
+
+/** 关联事件的五个节点：调查记录在打开时、调查开始时与调查结束时读取 */
 export function useTimeline(incident: Incident | undefined): TimelineNode[] | null {
   const alerts = useLive((s) => s.alerts);
   const executions = useLive((s) => s.executions);
   const executionTimes = useLive((s) => s.executionTimes);
-  const seq = useLive((s) => (incident ? s.aiSeq[incident.id] : undefined));
+  const phase = useLive((s): Phase => {
+    if (!incident || s.aiSeq[incident.id] === undefined) return "unknown";
+    return s.aiDone[incident.id] ? "done" : "running";
+  });
   // 记下读到的是哪个事件的调查：切换事件后不显示上一个事件的判定
   const [loaded, setLoaded] = useState<Investigation | null>(null);
 
@@ -112,14 +133,14 @@ export function useTimeline(incident: Incident | undefined): TimelineNode[] | nu
   useEffect(() => {
     if (!id) return;
     let current = true;
-    api.getInvestigation(id).then(
+    readInvestigation(id, phase).then(
       (i) => current && setLoaded(i),
       () => undefined, // 未调查（404）或读取失败：节点显示"未调查"
     );
     return () => {
       current = false;
     };
-  }, [id, seq]);
+  }, [id, phase]);
   const investigation = loaded?.incident_id === id ? loaded : null;
 
   return useMemo(() => {

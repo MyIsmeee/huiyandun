@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { formatOffset, timelineOf } from "../../src/panels/IncidentTimeline/IncidentTimeline";
-import type { Alert, Execution, Incident } from "../../src/store/live";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { components } from "../../src/api/schema";
+import { api } from "../../src/lib/api";
+import { formatOffset, IncidentTimeline, TimelineDots, timelineOf } from "../../src/panels/IncidentTimeline/IncidentTimeline";
+import { type Alert, type Execution, type Incident, receive, useLive } from "../../src/store/live";
 
 const HIT = "00000000-0000-4000-8000-000000000001";
 const incident = {
@@ -78,5 +81,38 @@ describe("formatOffset（04 §4.1 时长格式）", () => {
     expect(formatOffset(38_800)).toBe("+39 秒");
     expect(formatOffset(1_800_100)).toBe("+30 分 0 秒");
     expect(formatOffset(3_725_000)).toBe("+1 小时 2 分");
+  });
+});
+
+describe("调查记录的读取", () => {
+  type Frame = components["schemas"]["WsFrame"];
+  const ai = (seq: number, kind: "step" | "verdict") =>
+    ({ channel: "ai", data: { incident_id: "inc-reads", seq, kind } }) as unknown as Frame;
+
+  beforeEach(() => useLive.setState(useLive.getInitialState()));
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("进度点与抽屉时间线共用一次读取；中间步骤不重读，调查开始与结束各重读一次", async () => {
+    const own = { ...incident, id: "inc-reads" } as Incident;
+    const read = vi.spyOn(api, "getInvestigation").mockResolvedValue({ ...verdict, incident_id: "inc-reads" });
+    useLive.setState({ incidents: [own] });
+    render(
+      <>
+        <TimelineDots incident={own} />
+        <TimelineDots incident={own} />
+        <IncidentTimeline />
+      </>,
+    );
+    expect(await screen.findAllByRole("img", { name: "处置进度 2/5：AI 判定" })).toHaveLength(2);
+    expect(read).toHaveBeenCalledTimes(1);
+
+    act(() => receive(ai(0, "step"), 0));
+    act(() => receive(ai(1, "step"), 0));
+    act(() => receive(ai(2, "verdict"), 0));
+    await act(async () => undefined);
+    expect(read).toHaveBeenCalledTimes(3);
   });
 });
