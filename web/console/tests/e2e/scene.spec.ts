@@ -1,5 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetTheme, SITE, sceneSettled, signedIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetTheme, presetView, SITE, sceneSettled, signedIn } from "./helpers";
 import { SCENES } from "./scenes";
 
 test.beforeEach(({ page }) => freezeClock(page));
@@ -373,6 +373,7 @@ test.describe("感知场景", () => {
   test("无 WebGL2 时 2D 俯视视图同样绘制感知场景（C-FE-08）", async ({ page }) => {
     await withoutWebGL2(page);
     await presetTheme(page, "light", true);
+    await presetView(page, "space");
     await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices: [cam01()] } }));
     await mockKpis(page);
     const sockets = await mockSocket(page); // 页面连上后才有服务端一侧
