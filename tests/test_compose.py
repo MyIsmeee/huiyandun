@@ -88,9 +88,20 @@ def test_only_llm_gateway_reaches_outside() -> None:
     assert {n for n, s in SERVICES.items() if EGRESS in s.get("networks", [])} == {"llm-gateway"}
 
 
-def test_only_go2rtc_pulls_cameras_outside() -> None:
-    """D-103：只有 go2rtc 接入可出站的 camera-net，取流地址只由 api-server 按登记表下发。"""
-    assert {n for n, s in SERVICES.items() if CAMERA_NET in s.get("networks", [])} == {"go2rtc"}
+def test_only_go2rtc_and_ingest_pull_cameras_outside() -> None:
+    """D-103、D-117：只有 go2rtc 与兼容模式的中继 ingest 接入可出站的 camera-net，取流地址只由 api-server 按登记表下发。"""
+    pullers = {n for n, s in SERVICES.items() if CAMERA_NET in s.get("networks", [])}
+    assert pullers == {"go2rtc", "ingest"}
+
+
+def test_ingest_control_api_only_for_api_server() -> None:
+    """D-117：ingest 的控制接口只监听 video-net 固定地址，api 权限只给 api-server 的固定地址与自身健康检查。"""
+    conf = yaml.safe_load((ROOT / "deploy/compose/ingest.yml").read_text(encoding="utf-8"))
+    ingest_ip = SERVICES["ingest"]["networks"]["video-net"]["ipv4_address"]
+    api_ip = SERVICES["api-server"]["networks"]["video-net"]["ipv4_address"]
+    assert conf["apiAddress"] == f"{ingest_ip}:9997"
+    api_users = [u for u in conf["authInternalUsers"] if {"action": "api"} in u["permissions"]]
+    assert [sorted(u["ips"]) for u in api_users] == [sorted([api_ip, ingest_ip])]
 
 
 def test_ingest_publishes_push_port_only_and_feeds_only_go2rtc() -> None:
