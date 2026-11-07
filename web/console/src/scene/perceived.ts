@@ -11,6 +11,7 @@ import {
   ShapeGeometry,
   Vector2,
 } from "three";
+import simplify from "simplify-js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { type SceneFrame, useLive } from "../store/live";
 import type { Theme } from "../theme/store";
@@ -21,8 +22,8 @@ import { arrange, type Furniture, isFurniture, widthOf } from "./furniture";
 export const STALE_MS = 10_000;
 /** 陈旧场景的不透明度，与"不确定 / 非实时"同为 50%（§3.2） */
 export const STALE_OPACITY = 0.5;
-/** 新识别帧到达时渐变替换的时长（§5.1 L1） */
-export const FADE_MS = 300;
+/** 识别结果变化时交叉渐变的时长（04 §5.1 L1、V-A9） */
+export const FADE_MS = 600;
 /** 立面沿墙脚线挤出的厚度 */
 const WALL_THICKNESS_M = 0.2;
 /** 黑板（D-059）：离地 0.9 m，比墙厚 4 cm，两面各凸出墙面 2 cm */
@@ -66,6 +67,78 @@ export const PALETTE: Record<Theme, Palette> = {
  */
 export function layerOpacity(target: number, k: number, from: number | null): number {
   return from === null ? target * k : from * (1 - k);
+}
+
+/** 识别环境去噪（V-A9）：简化容差（米）、丢弃过短的墙段与过小的地面块、视为未变化的最大偏移（米） */
+const SIMPLIFY_M = 0.25;
+const MIN_WALL_M = 0.6;
+const MIN_SURFACE_M2 = 0.5;
+export const SAME_SCENE_M = 0.3;
+
+/** Douglas-Peucker 简化：去掉分割边缘的锯齿 */
+const clean = (points: number[][]) =>
+  simplify(
+    points.map(([x = 0, y = 0]) => ({ x, y })),
+    SIMPLIFY_M,
+    true,
+  ).map(({ x, y }) => [x, y]);
+
+const length = (line: number[][]) =>
+  line.slice(1).reduce((sum, [x = 0, y = 0], i) => sum + Math.hypot(x - (line[i]?.[0] ?? x), y - (line[i]?.[1] ?? y)), 0);
+
+/** 识别帧去噪（V-A9）：分割结果原样挤出会出现锯齿尖刺；碎片丢弃 */
+export function simplifyFrame(frame: SceneFrame): SceneFrame {
+  const polygon = <T extends { polygon: number[][] }>(item: T) => ({ ...item, polygon: clean(item.polygon) });
+  return {
+    ...frame,
+    surfaces: frame.surfaces.map(polygon).filter((s) => s.polygon.length >= 3 && area(s.polygon) >= MIN_SURFACE_M2),
+    walls: frame.walls.map((w) => ({ ...w, line: clean(w.line) })).filter((w) => length(w.line) >= MIN_WALL_M),
+    objects: frame.objects.map(polygon).filter((o) => o.polygon.length >= 3),
+    markings: frame.markings.map(polygon).filter((m) => m.polygon.length >= 3),
+  };
+}
+
+/** 点到折线（closed 为闭合多边形）的最短距离 */
+function distance([px = 0, py = 0]: number[], line: number[][], closed: boolean): number {
+  let best = Number.POSITIVE_INFINITY;
+  const n = closed ? line.length : line.length - 1;
+  for (let i = 0; i < Math.max(n, 1); i += 1) {
+    const [ax = 0, ay = 0] = line[i] ?? [];
+    const [bx = ax, by = ay] = line[(i + 1) % line.length] ?? [];
+    const [dx, dy] = [bx - ax, by - ay];
+    const k = dx === 0 && dy === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+    best = Math.min(best, Math.hypot(px - (ax + dx * k), py - (ay + dy * k)));
+  }
+  return best;
+}
+
+type Outline = { kind: string; points: number[][]; closed: boolean };
+
+function shapes(frame: SceneFrame): Outline[] {
+  return [
+    ...frame.surfaces.map((s) => ({ kind: `s/${s.class}`, points: s.polygon, closed: true })),
+    ...frame.walls.map((w) => ({ kind: `w/${w.class}`, points: w.line, closed: false })),
+    ...frame.objects.map((o) => ({ kind: `o/${o.class}`, points: o.polygon, closed: true })),
+    ...frame.markings.map((m) => ({ kind: "m", points: m.polygon, closed: true })),
+    ...frame.trees.map((t) => ({ kind: "t", points: [[t.x, t.y]], closed: false })),
+  ];
+}
+
+/** a 的每个顶点都在 b 中同类轮廓的 SAME_SCENE_M 以内 */
+function covered(a: Outline[], b: Outline[]): boolean {
+  return a.every(({ kind, points }) => {
+    const near = b.filter((s) => s.kind === kind);
+    return points.every((p) => near.some((s) => distance(p, s.points, s.closed) <= SAME_SCENE_M));
+  });
+}
+
+/**
+ * 两帧是否为同一场景（V-A9）：双向检查每个顶点都在另一帧同类轮廓的 0.3 m 以内。
+ * 相同即沿用上一帧的几何体，不重建、不渐变；逐帧缓慢漂移累积超出 0.3 m 时才替换
+ */
+export function sameScene(a: SceneFrame, b: SceneFrame): boolean {
+  const [sa, sb] = [shapes(a), shapes(b)];
+  return covered(sa, sb) && covered(sb, sa);
 }
 
 export function isStale(frame: SceneFrame, now: number): boolean {

@@ -14,6 +14,8 @@ import {
   type SceneGeometry,
   STALE_OPACITY,
   sceneGeometry,
+  sameScene,
+  simplifyFrame,
   useScenes,
 } from "./perceived";
 
@@ -46,7 +48,10 @@ interface Layer {
   retired: boolean;
 }
 
-/** 一台摄像头的场景：新帧到达时新旧两层交叉渐变 300 ms；降低动效或断线时瞬时替换（V-A4、V-U3）。x、y 为摄像头平面位置 */
+/**
+ * 一台摄像头的场景：识别结果变化时新旧两层交叉渐变 600 ms，与上一帧为同一场景时不重建、不渐变（V-A9）；
+ * 降低动效或断线时瞬时替换（V-A4、V-U3）。x、y 为摄像头平面位置
+ */
 function CameraScene(props: {
   frame: SceneFrame;
   palette: Palette;
@@ -56,7 +61,14 @@ function CameraScene(props: {
   y: number;
 }) {
   const { frame, palette, stale, models, x, y } = props;
-  const geometry = useMemo(() => sceneGeometry(frame, palette, { models, camera: [x, y] }), [frame, palette, models, x, y]);
+  // 随属性变化调整状态：与上一份是同一场景时沿用它，几何体随之不变
+  const next = useMemo(() => simplifyFrame(frame), [frame]);
+  const [stable, setStable] = useState(next);
+  if (stable !== next && !sameScene(stable, next)) setStable(next);
+  const geometry = useMemo(
+    () => sceneGeometry(stable, palette, { models, camera: [x, y] }),
+    [stable, palette, models, x, y],
+  );
   const motion = useMotion();
   const [layers, setLayers] = useState<Layer[]>([{ id: 0, geometry, retired: false }]);
   // 帧变化时在渲染中调整状态（React 推荐的"随属性变化调整状态"写法），不经副作用

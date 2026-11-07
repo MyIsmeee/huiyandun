@@ -2,7 +2,17 @@ import { Box3, BoxGeometry, BufferAttribute, type BufferGeometry, Color } from "
 import { describe, expect, it } from "vitest";
 import type { Camera } from "../../src/scene/devices";
 import type { Furniture } from "../../src/scene/furniture";
-import { area, isStale, largestFirst, layerOpacity, PALETTE, sceneGeometry, visibleScenes } from "../../src/scene/perceived";
+import {
+  area,
+  isStale,
+  largestFirst,
+  layerOpacity,
+  PALETTE,
+  sameScene,
+  sceneGeometry,
+  simplifyFrame,
+  visibleScenes,
+} from "../../src/scene/perceived";
 import type { SceneFrame } from "../../src/store/live";
 
 const NOW = Date.parse("2026-10-27T06:30:00Z");
@@ -163,5 +173,52 @@ describe("立面、物体与树（§5.1 L1）", () => {
 
   it("没有识别结果时不生成几何体", () => {
     expect(sceneGeometry(frame("cam-01"), PALETTE.dark, FURNISHING)).toEqual({ flat: null, solid: null });
+  });
+});
+
+describe("识别环境去噪（V-A9、V-P4）", () => {
+  /** 可复现的均匀噪声，幅度 ±amplitude */
+  const jitter = (seed: number, amplitude: number) => {
+    let n = seed;
+    return () => {
+      n = (n * 1664525 + 1013904223) % 2 ** 32;
+      return ((n / 2 ** 32) * 2 - 1) * amplitude;
+    };
+  };
+  /** 一段 6 m 长、每 0.2 m 一个顶点的墙线与一块 4 m × 3 m 的地面，叠加噪声 */
+  const noisy = (seed: number, amplitude = 0.1) => {
+    const r = jitter(seed, amplitude);
+    return frame("cam-01", {
+      surfaces: [{ class: "floor", polygon: [[0, 0], [4, 0], [4, 3], [0, 3]].map(([x = 0, y = 0]) => [x + r(), y + r()]) }],
+      walls: [{ class: "wall", line: Array.from({ length: 31 }, (_, i) => [i * 0.2 + r(), 5 + r()]), height_m: 2.8 }],
+    });
+  };
+
+  it("沿墙脚线的锯齿被简化：顶点数大幅减少，仍覆盖整段墙", () => {
+    const wall = simplifyFrame(noisy(1)).walls[0];
+    expect(wall?.line.length).toBeLessThan(6);
+    expect(wall?.line[0]?.[0]).toBeLessThan(0.2);
+    expect(wall?.line.at(-1)?.[0]).toBeGreaterThan(5.8);
+  });
+
+  it("丢弃短于 0.6 m 的墙段与小于 0.5 m² 的地面块", () => {
+    const tiny = simplifyFrame(
+      frame("cam-01", {
+        surfaces: [{ class: "floor", polygon: [[0, 0], [0.5, 0], [0.5, 0.5]] }],
+        walls: [{ class: "wall", line: [[0, 0], [0.4, 0]], height_m: 2.8 }],
+      }),
+    );
+    expect(tiny.surfaces).toEqual([]);
+    expect(tiny.walls).toEqual([]);
+  });
+
+  it("相邻两帧 ±10 cm 噪声视为同一场景，不重建；墙移动 1 m 或新增物体视为变化", () => {
+    const base = simplifyFrame(noisy(1));
+    for (const seed of [2, 3, 4, 5]) expect(sameScene(base, simplifyFrame(noisy(seed)))).toBe(true);
+    const moved = simplifyFrame(noisy(2));
+    const shifted = { ...moved, walls: moved.walls.map((w) => ({ ...w, line: w.line.map(([x = 0, y = 0]) => [x, y + 1]) })) };
+    expect(sameScene(base, shifted)).toBe(false);
+    const added = { ...moved, objects: [{ class: "table" as const, polygon: [[1, 1], [2, 1], [2, 2]], height_m: 0.75 }] };
+    expect(sameScene(base, added)).toBe(false);
   });
 });
