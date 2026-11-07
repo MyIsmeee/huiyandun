@@ -11,7 +11,7 @@ export function CanvasToolbar(props: { canvas: RefObject<HTMLElement | null>; st
   const { canvas, stale, children } = props;
   const full = useFullscreen(canvas);
   return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-card px-2">
+    <div className="@container flex h-11 shrink-0 items-center gap-2 border-b bg-card px-2">
       {children}
       <div className="ml-auto flex items-center gap-1">
         <KpiRow stale={stale} />

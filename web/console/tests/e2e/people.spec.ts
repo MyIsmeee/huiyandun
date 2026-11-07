@@ -236,7 +236,7 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   // 人员斜向走过 2 s、轿车向 +x 驶过，留下蓝色虚线点轨迹
   for (let i = 0; i < 5; i += 1) {
     const person = { ...BASE, ...TARGET, camera_id: "cam-01", track_id: 7, x: 17 + i * 0.6, y: 12 - i * 0.3, uncertainty_m: 0.4, speed_mps: 1.3 };
-    const car = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, x: 10 + i * 1.5, y: 8, uncertainty_m: 0.4, heading_deg: 0, speed_mps: 7.5 };
+    const car = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, x: 15.5 + i * 0.5, y: 9, uncertainty_m: 0.4, heading_deg: 0, speed_mps: 7.5 };
     for (const data of [person, car]) ws?.send(JSON.stringify({ channel: "tracks", data }));
     await page.clock.runFor(500);
   }
@@ -276,7 +276,7 @@ test("单击人员：四角括框与胶囊标签，详情播放所属摄像头�
   await expect(panel).toHaveCount(0);
   await expect(scene(page).locator("[data-target]")).toHaveCount(0);
   // 收起即取消选中：同一跟踪号再次出现时不会自动重新选中
-  const back = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, x: 16, y: 8, uncertainty_m: 0.4 };
+  const back = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, x: 16.5, y: 9, uncertainty_m: 0.4 };
   ws?.send(JSON.stringify({ channel: "tracks", data: back }));
   await page.clock.runFor(100);
   await expect(panel).toHaveCount(0);
@@ -311,9 +311,10 @@ test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再�
 test("跟随的车辆离开画面：详情收起，镜头飞回总览", async ({ page }) => {
   await still(page);
   const [ws] = await open(page, [camera("normal")]);
-  const car = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, y: 8, uncertainty_m: 0.4, heading_deg: 0 };
+  const car = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, y: 9.5, uncertainty_m: 0.4, heading_deg: 0 };
+  // 轿车只会出现在摄像头视场内（取景按覆盖范围，D-116）：cam-01 位于 (16, 14)、朝 300°、可视 6 m
   for (let i = 0; i < 5; i += 1) {
-    ws?.send(JSON.stringify({ channel: "tracks", data: { ...car, x: 10 + i * 1.5 } }));
+    ws?.send(JSON.stringify({ channel: "tracks", data: { ...car, x: 16 + i } }));
     await page.clock.runFor(500);
   }
   await zoomIn(page);
@@ -350,13 +351,17 @@ test("悬停人员显示中性灰括框；单击空白处收起详情", async ({
   await expect(panel).toHaveCount(1);
   await scene(page).click({ position: { x: 200, y: 600 } });
   await expect(panel).toHaveCount(0);
+  // 放大后机头在视口外（取景按覆盖范围，D-116）：回到总览再点摄像头
+  await page.getByRole("button", { name: "返回总览" }).click();
+  await page.clock.runFor(600);
   await page.getByRole("button", { name: "查看 cam-01 详情" }).click();
   await expect(panel).toHaveCount(1);
   await scene(page).click({ position: { x: 200, y: 600 } });
   await expect(panel).toHaveCount(0);
 
-  // 悬停的人员离开画面（2 s 无更新即移除，V-U4）：括框消失，指针恢复，不必等鼠标再动
-  await at(person.x, person.y);
+  // 悬停的人员离开画面（2 s 无更新即移除，V-U4）：括框消失，指针恢复，不必等鼠标再动；已回到总览，按当前取景重新取位置
+  const overviewed = await targetAt(page, "cam-01/7");
+  await at(overviewed.x, overviewed.y);
   await expect(page.locator("[data-scene]")).toHaveCSS("cursor", "pointer");
   await page.clock.runFor(2500);
   await expect(scene(page).locator("[data-hover]")).toHaveCount(0);

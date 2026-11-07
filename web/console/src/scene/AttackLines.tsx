@@ -1,10 +1,9 @@
 import { ShieldAlert } from "lucide-react";
 import { useMemo } from "react";
-import type { Site } from "../lib/api";
 import { useLive } from "../store/live";
 import { ATTACKED, attackerAnchor } from "./attack";
 import { type Camera, STATUS } from "./devices";
-import type { View } from "./layout";
+import type { Area, View } from "./layout";
 
 /** 断开处的缺口占连线长度的比例 */
 const GAP = 0.2;
@@ -14,7 +13,7 @@ const GAP = 0.2;
  * 最近一条网络告警的源地址）画红色虚线到设备；已处置时虚线断开并淡出（降低动效或断线时瞬时消失，V-A4、V-U3）。
  * 以视口像素绘制，3D 与 2D 降级视图共用；状态色同时配图标与文字（V-S3）。
  */
-export function AttackLines({ site, cameras, view }: { site: Site; cameras: Camera[]; view: View }) {
+export function AttackLines({ area, cameras, view }: { area: Area; cameras: Camera[]; view: View }) {
   const alerts = useLive((s) => s.alerts);
   const sources = useMemo(() => {
     const latest = new Map<string, string>();
@@ -27,7 +26,7 @@ export function AttackLines({ site, cameras, view }: { site: Site; cameras: Came
   const lines = cameras.flatMap(({ id, state, pose }) => {
     const ip = sources.get(id);
     if (!ip || !(ATTACKED.has(state) || state === "contained")) return [];
-    const [ax, ay] = attackerAnchor([pose.x, pose.y], site.width_m, site.height_m);
+    const [ax, ay] = attackerAnchor([pose.x, pose.y], area);
     const from = view.project([ax, 0, ay]);
     const to = view.project([pose.x, pose.height_m, pose.y]);
     if (!from || !to) return [];

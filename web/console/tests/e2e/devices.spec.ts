@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, open, zoomIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, open } from "./helpers";
 
 // HYD-UIX-004 §5.2：DeviceMarker 全部 9 种状态的截图基线（V-P2）
 const STATES = [
@@ -26,7 +26,7 @@ for (const [state, label] of STATES) {
     if (label) await expect(tags).toContainText(label);
     else await expect(tags).toHaveCount(0);
     await expectNoOverflow(page);
-    await zoomIn(page);
+    // 取景已按覆盖范围贴近摄像头（D-116），不再放大：放大后机头在视口外
     await expect(scene(page)).toHaveScreenshot(`device-${state}.png`);
   });
 }

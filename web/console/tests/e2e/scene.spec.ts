@@ -96,8 +96,11 @@ test.describe("相机控件", () => {
 
   let sockets: WebSocketRoute[] = [];
 
+  // 另一台摄像头装在远处：覆盖范围与原站点相当（取景按覆盖范围，D-116），视差量级与相机距离一致
+  const far = { ...camera("normal", "cam-02"), camera: { ...camera("normal").camera, pose: { x: 36, y: 4, height_m: 3, yaw_deg: 135, pitch_deg: -30, hfov_deg: 90, range_m: 6 } } };
+
   test.beforeEach(async ({ page }) => {
-    sockets = await open(page, [camera("uncalibrated")]);
+    sockets = await open(page, [camera("uncalibrated"), far]);
   });
 
   test("四个旋转档位，返回总览回到默认机位", async ({ page }) => {
