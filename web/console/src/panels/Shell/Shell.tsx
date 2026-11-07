@@ -10,6 +10,7 @@ import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AlertList } from "../AlertList/AlertList";
 import { CameraPage } from "../CameraList/CameraList";
+import { CameraRail } from "../CameraRail/CameraRail";
 import { CanvasToolbar } from "../CanvasToolbar/CanvasToolbar";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
@@ -70,9 +71,9 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   return (
     <div
       data-live={!offline}
-      className="grid h-full grid-cols-[minmax(0,1fr)_360px] grid-rows-[48px_minmax(0,1fr)] bg-background 2xl:grid-cols-[minmax(0,1fr)_400px]"
+      className="grid h-full grid-cols-[auto_minmax(0,1fr)_360px] grid-rows-[48px_minmax(0,1fr)] bg-background 2xl:grid-cols-[auto_minmax(0,1fr)_400px]"
     >
-      <header className="col-span-2 flex items-center gap-4 border-b px-3">
+      <header className="col-span-3 flex items-center gap-4 border-b px-3">
         <span className="flex items-center gap-2 text-[15px] font-semibold">
           <span className="grid size-7 place-items-center rounded-md bg-foreground text-background">
             <ShieldCheck aria-hidden className="size-4" />
@@ -100,6 +101,9 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </Button>
         </div>
       </header>
+
+      {/* B 摄像头栏（D-115） */}
+      <CameraRail devices={site.devices} admin={admin} />
 
       {/* C 主画布：工具条 + 当前视图；断线时饱和度降至 50%（V-U3） */}
       <section ref={canvas} aria-label="主画布" className="flex min-h-0 flex-col bg-background">

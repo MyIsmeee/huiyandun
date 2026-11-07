@@ -393,7 +393,7 @@ def test_snapshot(
     status: int,
     detail: str | None,
 ) -> None:
-    """V-CAM4：取一帧只返回给管理员浏览器、不缓存；超时、视频服务不可用、无此流、空画面各有提示。"""
+    """V-CAM4：取一帧只返回给浏览器、不缓存；超时、视频服务不可用、无此流、空画面各有提示。"""
     monkeypatch.setattr(cast(Any, client.app).state, "go2rtc", FrameGo2rtc(frame))
     r = client.get("/api/cameras/cam-01/snapshot", headers=headers())
     assert r.status_code == status, r.text
@@ -404,7 +404,17 @@ def test_snapshot(
         assert detail in r.text
 
 
-def test_snapshot_unknown_camera_and_viewer(client: TestClient, password: str) -> None:
+def test_snapshot_unknown_camera_and_viewer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, password: str
+) -> None:
+    """D-115：摄像头栏缩略图对所有角色可见，viewer 也能取帧；未登录仍被拒。"""
     assert client.get("/api/cameras/cam-99/snapshot", headers=headers()).status_code == 404
+    monkeypatch.setattr(
+        cast(Any, client.app).state,
+        "go2rtc",
+        FrameGo2rtc(httpx2.Response(200, content=b"\xff\xd8jpeg")),
+    )
     login(client, "viewer", password)
-    assert client.get("/api/cameras/cam-01/snapshot", headers=headers()).status_code == 403
+    assert client.get("/api/cameras/cam-01/snapshot", headers=headers()).status_code == 200
+    client.cookies.clear()
+    assert client.get("/api/cameras/cam-01/snapshot", headers=headers()).status_code == 401
