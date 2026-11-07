@@ -20,7 +20,8 @@ import { useMotion } from "./DeviceMarkers";
 import { type Camera, STATUS } from "./devices";
 import { facing, type Figure, figure, HEAD_R } from "./pose";
 import { hoverMarker, marker } from "./TargetMarker";
-import { ACCENT, LOCK_RING_MS, positionAt, RENDER_DELAY_MS, turnToward, type Visible, visibleTargets } from "./targets";
+import { forget, renderTime, smoothed } from "./smoothing";
+import { ACCENT, LOCK_RING_MS, turnToward, type Visible, visibleTargets } from "./targets";
 import { useVehicleModels, type Vehicle } from "./vehicles";
 
 /** 每个图层的实例上限：C-FE-04 的 200 个目标，固定容量免得目标数变化时重建网格 */
@@ -113,11 +114,10 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     last.current = now;
     const { targets, behaviors } = useLive.getState();
     const list = visibleTargets(targets, cameras, behaviors);
-    const t = motion ? now - RENDER_DELAY_MS : Number.POSITIVE_INFINITY;
     const source = trailSource.current;
     const stale = source?.[0] !== targets || source?.[1] !== behaviors;
     if (stale && (!motion || now - trailBuilt.current >= TRAIL_REBUILD_MS)) {
-      writeDots(dots.current, list);
+      writeDots(dots.current, list.map((target) => smoothed(target.key, target)));
       trailSource.current = [targets, behaviors];
       trailBuilt.current = now;
     }
@@ -177,19 +177,23 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
     let pending = trailSource.current?.[0] !== targets || trailSource.current?.[1] !== behaviors;
     for (const target of list) {
       seen.add(target.key);
-      const [x, y] = positionAt(target.trail, t);
-      const desired = target.heading_deg === null ? undefined : (-target.heading_deg * Math.PI) / 180;
+      // 位置、朝向与姿态取平滑后的实测，在相邻两次之间插值（V-A7、V-A8）
+      const smoother = smoothed(target.key, target);
+      const t = renderTime(target, now, motion);
+      const [x, y] = smoother.position(t);
+      const desired = smoother.angle ?? undefined;
       const previous = headings.current.get(target.key);
       const angle =
         desired === undefined ? (previous ?? 0) : previous === undefined || !motion ? desired : turnToward(previous, desired, TURN_RATE * dt);
       headings.current.set(target.key, angle);
-      pending ||= t < (target.trail.at(-1)?.[2] ?? 0) || (desired !== undefined && Math.abs(angle - desired) > 1e-3);
+      pending ||= t < (smoother.trail.at(-1)?.[2] ?? 0) || (desired !== undefined && Math.abs(angle - desired) > 1e-3);
       const kind = target.uncertain ? "ghost" : "solid";
       const base = new Color(colorOf(target));
       const pose = poses.get(target.camera_id);
       const { object_class } = target;
       if (object_class === "person") {
-        const f = pose && figure(target.keypoints, target.bbox, facing(pose, x, y));
+        const shape = smoother.pose(t);
+        const f = pose && shape && figure(shape.keypoints, shape.bbox, facing(pose, x, y));
         if (f) drawFigure(f, x, y, target.uncertain, base);
         if (f && target.key === selected) bounds = figureBounds(f, x, y);
         if (f && target.key === hoveredKey) hoverBounds = figureBounds(f, x, y);
@@ -219,6 +223,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       }
     }
     for (const key of headings.current.keys()) if (!seen.has(key)) headings.current.delete(key);
+    forget(seen);
     for (const { key } of layers) finish(meshes.current[key], counts[key] ?? 0);
     finish(discs.current, discCount);
     finish(rings.current, ringCount);
@@ -281,7 +286,7 @@ function finish(mesh: InstancedMesh | null | undefined, written: number) {
 }
 
 /** 把各目标近 10 s 的实测轨迹按 0.4 m 间隔写成虚线点（V-A5），合并为一次绘制、与目标数无关（V-P1）；超出容量的不画 */
-function writeDots(mesh: InstancedMesh | null, list: Visible[]) {
+function writeDots(mesh: InstancedMesh | null, list: Pick<Visible, "trail">[]) {
   if (!mesh) return;
   const o = new Object3D();
   let n = 0;

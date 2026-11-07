@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FLIGHT_MS, focusOn, moveCamera, rotated, useCamera, useFocusShot } from "../../src/scene/camera";
 import type { Camera } from "../../src/scene/devices";
 import { cameraShot, followShot, OVERVIEW, type Shot } from "../../src/scene/layout";
-import { RENDER_DELAY_MS } from "../../src/scene/targets";
 import { type Target, useLive } from "../../src/store/live";
 
 const SIZE = { width: 1000, height: 600 };
@@ -90,10 +89,11 @@ describe("跟随视角（V-I1、D-058）", () => {
     const { result } = render();
     act(() => focusOn({ kind: "target", key: KEY }, false));
     advance(400);
-    // 渲染时刻 start + 400 - 200：两次实测的正中
+    // 实测间隔 400 ms，自适应渲染延迟取上限 400 ms（V-A7）：渲染时刻 start + 400 - 400 为第一次实测
+    expect(result.current?.eye[0]).toBeCloseTo(10 - 8, 1);
+    advance(200);
     expect(result.current?.eye[0]).toBeCloseTo(11 - 8, 1);
-    expect(RENDER_DELAY_MS).toBe(200);
-    advance(400);
+    advance(200);
     expect(result.current?.eye[0]).toBeCloseTo(12 - 8);
   });
 

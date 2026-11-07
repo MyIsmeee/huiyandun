@@ -138,20 +138,22 @@ describe("pickTarget", () => {
     {},
   );
 
+  const at0 = (target: (typeof list)[number]) => positionAt(target.trail, 0);
+
   it("命中半径内取最近的目标；人员半径不足 20 像素时按 20 像素", () => {
-    expect(pickTarget(list, view, [10 + 19, 20], 0)).toBe("cam-01/1");
-    expect(pickTarget(list, view, [10 + 21, 20], 0)).toBeNull();
+    expect(pickTarget(list, view, [10 + 19, 20], at0)).toBe("cam-01/1");
+    expect(pickTarget(list, view, [10 + 21, 20], at0)).toBeNull();
   });
 
   it("车辆按模型半长命中", () => {
-    expect(pickTarget(list, view, [100 + 39, 20], 0)).toBe("cam-01/2");
+    expect(pickTarget(list, view, [100 + 39, 20], at0)).toBe("cam-01/2");
   });
 
   it("透视：命中半径按目标处的每米像素数；在相机身后的目标不命中", () => {
     const perspective: View = { ...view, scale: ([x]) => (x > 5 ? 5 : 10) };
-    expect(pickTarget(list, perspective, [100 + 19, 20], 0)).toBe("cam-01/2");
-    expect(pickTarget(list, perspective, [100 + 21, 20], 0)).toBeNull();
+    expect(pickTarget(list, perspective, [100 + 19, 20], at0)).toBe("cam-01/2");
+    expect(pickTarget(list, perspective, [100 + 21, 20], at0)).toBeNull();
     const behind: View = { ...view, project: ([x, y, z]) => (x > 5 ? null : view.project([x, y, z])) };
-    expect(pickTarget(list, behind, [100, 20], 0)).toBeNull();
+    expect(pickTarget(list, behind, [100, 20], at0)).toBeNull();
   });
 });

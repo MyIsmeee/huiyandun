@@ -25,7 +25,8 @@ import { useCameras } from "./devices";
 import { OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
 import { Scene2D } from "./Scene2D";
 import { HoverMarker, TargetMarker } from "./TargetMarker";
-import { pickTarget, RENDER_DELAY_MS, visibleTargets } from "./targets";
+import { renderedPosition } from "./smoothing";
+import { pickTarget, visibleTargets } from "./targets";
 
 // 降级说明须简短：1366 宽下与 KPI 底板同处顶部一行（V-P3）
 const DEGRADED = { text: "2D 视图 · 不支持 WebGL2", title: "浏览器不支持 WebGL2，已降级为 2D 俯视视图（C-FE-08）" };
@@ -120,7 +121,10 @@ export function SceneViewport({ site }: { site: Site }) {
     const { targets, behaviors } = useLive.getState();
     const box = e.currentTarget.getBoundingClientRect();
     const point = [e.clientX - box.left, e.clientY - box.top] as const;
-    return pickTarget(visibleTargets(targets, cameras, behaviors), view3d, point, Date.now() - RENDER_DELAY_MS);
+    const now = Date.now();
+    return pickTarget(visibleTargets(targets, cameras, behaviors), view3d, point, (target) =>
+      renderedPosition(target.key, target, now, true),
+    );
   };
   // 单击：选中并展开详情，镜头不动（V-I2、D-054）；单击空白处取消选中并收起详情（D-058）。双击：飞入跟随视角（V-I1）
   const pick = (e: MouseEvent<HTMLDivElement>) => {
