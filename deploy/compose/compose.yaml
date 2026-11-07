@@ -495,9 +495,10 @@ networks:
     driver_opts:
       com.docker.network.bridge.name: hyd-demo
       com.docker.network.bridge.gateway_mode_ipv4: isolated
-    ipam:  # 固定网段供 go2rtc 的 RTSP 只监听本网络地址（#97）
+    ipam:  # 固定网段供 go2rtc 的 RTSP 只监听本网络地址（#97）；自动分配的地址避开固定地址，否则先启动的容器会占用它
       config:
         - subnet: 172.30.12.0/24
+          ip_range: 172.30.12.128/25
   # api-server 经此转发 WebRTC 信令到 go2rtc；go2rtc 不接入 core-net，碰不到数据库与事件总线。
   # 固定网段供 go2rtc 的 API 只监听本网络地址（#97）
   video-net:
@@ -506,6 +507,7 @@ networks:
     ipam:
       config:
         - subnet: 172.30.11.0/24
+          ip_range: 172.30.11.128/25
   # 探针网络：只有探针，只接收 capture-tap 镜像进来的流量；探针之间也不互通
   tap-net:
     internal: true
@@ -530,6 +532,7 @@ networks:
     ipam:
       config:
         - subnet: 172.30.9.0/24
+          ip_range: 172.30.9.128/25
   # 开放端口的服务所在网络（DP-05 例外）：端口映射需要非 internal 网络；关闭 IP 伪装，容器无法出站（G-05）
   edge-net:
     driver_opts:
