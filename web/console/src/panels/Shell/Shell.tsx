@@ -16,6 +16,9 @@ import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { ProviderPage } from "../ProviderList/ProviderList";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
+import { VideoWall } from "../VideoWall/VideoWall";
+import { WallControls } from "../VideoWall/WallControls";
+import { useWall } from "../../store/wall";
 
 const deselect = () => select(null);
 
@@ -48,6 +51,8 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   const selected = pushed ?? site.devices.find((d) => d.id === selectedId);
   const targetKey = useSelection((s) => s.targetKey);
   const canvas = useRef<HTMLElement>(null);
+  const view = useWall((s) => s.view);
+  const cameraCount = site.devices.filter((d) => d.camera).length;
   const target = useLive((s) => (targetKey ? s.targets[targetKey] : undefined));
   // 选中的目标离开画面（2 s 无更新被移除，V-U4）即取消选中、收起详情（D-054）
   useEffect(() => {
@@ -98,9 +103,16 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
 
       {/* C 主画布：工具条 + 当前视图；断线时饱和度降至 50%（V-U3） */}
       <section ref={canvas} aria-label="主画布" className="flex min-h-0 flex-col bg-background">
-        <CanvasToolbar canvas={canvas} stale={offline} />
-        <div aria-label="场景" role="region" className={cn("relative min-h-0 flex-1 overflow-hidden", offline && "saturate-50")}>
-          <SceneViewport site={site} />
+        <CanvasToolbar canvas={canvas} stale={offline}>
+          <WallControls cameras={cameraCount} />
+        </CanvasToolbar>
+        <div
+          aria-label={view === "wall" ? "监控墙视图" : "场景"}
+          role="region"
+          className={cn("relative min-h-0 flex-1 overflow-hidden", offline && "saturate-50")}
+        >
+          {/* 只挂载当前视图：监控墙下不占用 3D 渲染，空间态势下不保持多路实时画面连接 */}
+          {view === "wall" ? <VideoWall devices={site.devices} /> : <SceneViewport site={site} />}
           {offline && (
             <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-uncertain backdrop-blur-sm">
               <Clock aria-hidden className="size-4" />
