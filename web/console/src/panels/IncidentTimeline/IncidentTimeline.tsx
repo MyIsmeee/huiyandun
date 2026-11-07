@@ -2,7 +2,7 @@ import { Bot, CircleCheck, Lock, ShieldAlert, TriangleAlert, Unlock } from "luci
 import { useEffect, useMemo, useState } from "react";
 import type { components } from "../../api/schema";
 import { api, ApiError } from "../../lib/api";
-import { type Alert, type Execution, type Incident, useLive } from "../../store/live";
+import { type Alert, type Execution, type Incident, MAX_INCIDENTS, useLive } from "../../store/live";
 import { useSelection } from "../../store/selection";
 import { formatTime } from "../ConnectionStatus/ConnectionStatus";
 
@@ -99,18 +99,24 @@ function pick(incidents: Incident[], deviceId: string | null): Incident | undefi
   return deviceId ? incidents.find((i) => i.device_ids.includes(deviceId)) : incidents[0];
 }
 
-type Phase = "unknown" | "running" | "done";
+export type Phase = "unknown" | "running" | "done";
 
 /**
  * 每个关联事件在每个调查阶段只读一次调查记录：告警栏各行的进度点与抽屉中的时间线共用，
  * 调查的中间步骤不改变"AI 判定"节点，不重读。读取失败（非 404）不缓存，下次挂载时重试
  */
 const reads = new Map<string, { phase: Phase; result: Promise<Investigation> }>();
-function readInvestigation(id: string, phase: Phase): Promise<Investigation> {
+export function readInvestigation(id: string, phase: Phase): Promise<Investigation> {
   const hit = reads.get(id);
   if (hit?.phase === phase) return hit.result;
   const result = api.getInvestigation(id);
+  reads.delete(id); // 重新插入到末尾：按最近读取的先后淘汰
   reads.set(id, { phase, result });
+  // 页面最多保留 MAX_INCIDENTS 个关联事件，缓存同样只留最近读取的这么多个，长时间值班不增长
+  for (const key of reads.keys()) {
+    if (reads.size <= MAX_INCIDENTS) break;
+    reads.delete(key);
+  }
   result.catch((e: unknown) => {
     if (!(e instanceof ApiError && e.status === 404) && reads.get(id)?.result === result) reads.delete(id);
   });

@@ -2,8 +2,8 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../src/api/schema";
 import { api } from "../../src/lib/api";
-import { formatOffset, IncidentTimeline, TimelineDots, timelineOf } from "../../src/panels/IncidentTimeline/IncidentTimeline";
-import { type Alert, type Execution, type Incident, receive, useLive } from "../../src/store/live";
+import { formatOffset, IncidentTimeline, readInvestigation, TimelineDots, timelineOf } from "../../src/panels/IncidentTimeline/IncidentTimeline";
+import { type Alert, type Execution, type Incident, MAX_INCIDENTS, receive, useLive } from "../../src/store/live";
 
 const HIT = "00000000-0000-4000-8000-000000000001";
 const incident = {
@@ -114,5 +114,16 @@ describe("调查记录的读取", () => {
     act(() => receive(ai(2, "verdict"), 0));
     await act(async () => undefined);
     expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it("缓存只保留最近读取的 MAX_INCIDENTS 个事件", async () => {
+    const read = vi.spyOn(api, "getInvestigation").mockResolvedValue(verdict);
+    for (let i = 0; i <= MAX_INCIDENTS; i += 1) await readInvestigation(`inc-cap-${i}`, "unknown");
+    expect(read).toHaveBeenCalledTimes(MAX_INCIDENTS + 1);
+
+    await readInvestigation(`inc-cap-${MAX_INCIDENTS}`, "unknown"); // 仍在缓存中
+    expect(read).toHaveBeenCalledTimes(MAX_INCIDENTS + 1);
+    await readInvestigation("inc-cap-0", "unknown"); // 最早的已淘汰，重新读取
+    expect(read).toHaveBeenCalledTimes(MAX_INCIDENTS + 2);
   });
 });
