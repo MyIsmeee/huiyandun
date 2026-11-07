@@ -500,9 +500,12 @@ async def delete_camera(camera_id: str, request: Request, principal: Admin) -> R
     return Response(status_code=204)
 
 
-@router.get("/cameras/{camera_id}/snapshot", dependencies=[Depends(require("admin"))])
+@router.get("/cameras/{camera_id}/snapshot", dependencies=[Depends(require("viewer"))])
 async def snapshot(camera_id: str, request: Request) -> Response:
-    """经 go2rtc 取一帧 JPEG（V-CAM4），只返回给管理员浏览器，不落盘、不进入事件或 LLM（C-LLM-04）。"""
+    """经 go2rtc 取一帧 JPEG（编辑框预览 V-CAM4、摄像头栏缩略图 D-115），只返回给浏览器，不落盘、不进入事件或 LLM（C-LLM-04）。
+
+    viewer 即可：同一路画面 viewer 本就能经 WebRTC 观看（FR-106），截帧不增加暴露面。
+    """
     async with request.app.state.engine.connect() as conn:
         if await conn.scalar(select(cameras.c.id).where(cameras.c.id == camera_id)) is None:
             raise HTTPException(404, "摄像头不存在")
