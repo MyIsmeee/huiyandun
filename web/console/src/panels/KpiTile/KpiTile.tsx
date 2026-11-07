@@ -31,10 +31,10 @@ export function KpiTile(props: {
   const stale = data.status === "stale";
   const delta = data.status !== "loading" && data.value !== null ? data.delta : null;
   return (
-    <div className="flex h-8 items-baseline gap-1.5 px-3 pt-1.5 whitespace-nowrap">
+    <div className="flex h-8 items-baseline gap-1.5 px-2.5 pt-1.5 whitespace-nowrap">
       <span className="text-meta text-muted-foreground">{label}</span>
       {data.status === "loading" ? (
-        <Skeleton aria-label="加载中" className="h-4 w-8 self-center" />
+        <Skeleton aria-label="加载中" className="h-4 w-4 self-center" />
       ) : (
         <span className={cn("text-base font-semibold tabular-nums", stale && "text-subtle-foreground")}>
           {data.value === null ? "—" : format(data.value)}
