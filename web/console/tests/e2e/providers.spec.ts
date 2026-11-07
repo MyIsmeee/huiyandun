@@ -30,7 +30,7 @@ test("admin 打开供应商页，启用公网供应商前确认（V-M2）", asyn
   await page.getByRole("button", { name: "模型供应商" }).click();
   await page.getByRole("switch", { name: "启用 DeepSeek 官方" }).click();
 
-  const dialog = page.getByRole("dialog", { name: "启用公网供应商" });
+  const dialog = page.getByRole("alertdialog", { name: "启用公网供应商" });
   await expect(dialog).toContainText("脱敏后发送至 api.deepseek.com");
   await expectNoOverflow(page);
   await expect(page).toHaveScreenshot("providers-confirm.png");
@@ -38,4 +38,19 @@ test("admin 打开供应商页，启用公网供应商前确认（V-M2）", asyn
   await dialog.getByRole("button", { name: "取消" }).click();
   await page.getByRole("button", { name: "返回", exact: true }).click();
   await expect(page.getByRole("region", { name: "模型供应商" })).toHaveCount(0);
+});
+
+test("编辑框点对话框外不关闭，未保存的填写不丢；Esc 关闭", async ({ page }) => {
+  await page.route("/api/auth/session", (route) => route.fulfill({ json: { username: "admin", role: "admin", expires_at: "2026-11-08T00:00:00Z" } }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "模型供应商" }).click();
+  await page.getByRole("button", { name: "添加", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "添加供应商" });
+  await dialog.getByRole("textbox", { name: "名称" }).fill("本地模型");
+  await page.mouse.click(5, 5);
+  await expect(dialog.getByRole("textbox", { name: "名称" })).toHaveValue("本地模型");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
 });

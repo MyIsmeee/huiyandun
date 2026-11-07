@@ -2,6 +2,7 @@ import { Check, CircleAlert, X } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -38,7 +39,6 @@ const CHECKS = { connectivity: "连通", model: "模型存在", structured_outpu
 const LOOPBACK = /^\s*https?:\/\/(127\.|localhost(?=[:/]|\s*$)|\[::1\])/i;
 const button = buttonVariants({ variant: "outline", size: "sm" });
 /** 原生下拉框：与 Input 同样式（04 §3.6） */
-const field = "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 const initialForm = (p: Provider | null): EditorForm => ({
   preset: p?.preset ?? "llama_cpp",
@@ -159,7 +159,8 @@ export function ProviderEditorView(props: {
   const network = provider && (provider.network === "internal" ? "内网" : "公网");
   return (
     <Dialog open onOpenChange={(open) => !open && props.onClose()}>
-      <DialogContent aria-describedby={undefined} showCloseButton={false} className="max-h-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-[34rem]">
+      {/* 点对话框外不关闭，避免丢掉未保存的填写；Esc 与取消按钮照常关闭 */}
+      <DialogContent aria-describedby={undefined} showCloseButton={false} onInteractOutside={(e) => e.preventDefault()} className="max-h-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-[34rem]">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -169,16 +170,19 @@ export function ProviderEditorView(props: {
       >
         <DialogTitle className="text-base font-medium">{provider ? "编辑供应商" : "添加供应商"}</DialogTitle>
         <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
-          <label className="contents">
-            预设
-            <select value={form.preset} onChange={(e) => props.onPreset(e.target.value as Preset)} className={field}>
+          <label htmlFor="provider-preset">预设</label>
+          <Select value={form.preset} onValueChange={(value) => props.onPreset(value as Preset)}>
+            <SelectTrigger id="provider-preset" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
               {Object.entries(PRESETS).map(([value, [label]]) => (
-                <option key={value} value={value}>
+                <SelectItem key={value} value={value}>
                   {label}
-                </option>
+                </SelectItem>
               ))}
-            </select>
-          </label>
+            </SelectContent>
+          </Select>
           <label className="contents">
             名称
             <Input value={form.name} onChange={(e) => onChange({ name: e.target.value })} />
@@ -205,12 +209,12 @@ export function ProviderEditorView(props: {
           {/* 按钮不放进 label，否则成为输入框名称的一部分 */}
           <label htmlFor="provider-model">模型</label>
           <span className="flex gap-2">
-            <input
+            <Input
               id="provider-model"
               list="provider-models"
               value={form.model}
               onChange={(e) => onChange({ model: e.target.value })}
-              className={`${field} flex-1`}
+              className="flex-1"
             />
             <button type="button" onClick={props.onFetchModels} disabled={pending !== null} className={button}>
               {pending === "models" ? "获取中…" : "获取列表"}
@@ -224,29 +228,28 @@ export function ProviderEditorView(props: {
           <label className="contents">
             超时
             <span className="flex items-center gap-2">
-              <input
+              <Input
                 type="number"
                 min={1}
                 step={1}
                 value={Number.isNaN(form.timeout_s) ? "" : form.timeout_s}
                 onChange={(e) => onChange({ timeout_s: e.target.valueAsNumber })}
-                className={`${field} w-24`}
+                className="w-24"
               />
               秒
             </span>
           </label>
-          <label className="contents">
-            网络位置
-            <select
-              value={form.network}
-              onChange={(e) => onChange({ network: e.target.value as EditorForm["network"] })}
-              className={field}
-            >
-              <option value="auto">自动判定{network && `（当前：${network}）`}</option>
-              <option value="internal">内网</option>
-              <option value="public">公网</option>
-            </select>
-          </label>
+          <label htmlFor="provider-network">网络位置</label>
+          <Select value={form.network} onValueChange={(value) => onChange({ network: value as EditorForm["network"] })}>
+            <SelectTrigger id="provider-network" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">自动判定{network && `（当前：${network}）`}</SelectItem>
+              <SelectItem value="internal">内网</SelectItem>
+              <SelectItem value="public">公网</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         {result && <Result result={result} onChange={onChange} />}
         {props.message && (

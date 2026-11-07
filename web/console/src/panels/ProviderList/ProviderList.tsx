@@ -162,7 +162,7 @@ export function ProviderListView(props: {
       {load.status === "ready" && <Cards {...props} providers={load.providers} blockPublic={load.blockPublic} />}
       {confirm && (
         <AlertDialog open onOpenChange={(open) => !open && props.onCancel()}>
-          <AlertDialogContent role="dialog" className="sm:max-w-md">
+          <AlertDialogContent className="sm:max-w-md">
             <AlertDialogTitle className="text-base font-medium">
               {confirm.kind === "enable" ? "启用公网供应商" : "删除供应商"}
             </AlertDialogTitle>

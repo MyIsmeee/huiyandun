@@ -17,6 +17,14 @@ const RESULT: TestResult = {
 
 const field = (name: string) => screen.getByRole("textbox", { name }) as HTMLInputElement;
 const type = (el: HTMLElement, value: string) => fireEvent.change(el, { target: { value } });
+// Radix Select 依赖 jsdom 未实现的指针捕获与滚动定位
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.scrollIntoView ??= () => undefined;
+/** 用键盘展开下拉框，再点选项 */
+function choose(name: string, option: string) {
+  fireEvent.keyDown(screen.getByRole("combobox", { name }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("option", { name: option }));
+}
 function open(provider: Provider | null) {
   const handlers = { onClose: vi.fn(), onSaved: vi.fn() };
   render(<ProviderEditor provider={provider} {...handlers} />);
@@ -32,7 +40,7 @@ describe("ProviderEditor", () => {
   it("选择预设后填入地址模板与名称；只提交填写了的 Key 与改判的网络位置（V-M3、V-M5）", async () => {
     const create = vi.spyOn(api, "createProvider").mockResolvedValue(SAVED);
     const { onClose, onSaved } = open(null);
-    fireEvent.change(screen.getByRole("combobox", { name: "预设" }), { target: { value: "ollama" } });
+    choose("预设", "Ollama");
     expect(field("地址").value).toBe("http://192.168.1.50:11434/v1");
     expect(field("名称").value).toBe("Ollama");
     type(screen.getByRole("combobox", { name: "模型" }), "qwen3");
@@ -57,7 +65,7 @@ describe("ProviderEditor", () => {
     const update = vi.spyOn(api, "updateProvider").mockResolvedValue(SAVED);
     open(SAVED);
     expect(screen.getByPlaceholderText("已保存 ••••3f9a，留空不修改")).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "网络位置" }), { target: { value: "internal" } });
+    choose("网络位置", "内网");
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0]?.[1]).not.toHaveProperty("api_key");

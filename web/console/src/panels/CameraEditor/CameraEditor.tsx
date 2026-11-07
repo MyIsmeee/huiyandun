@@ -2,6 +2,7 @@ import { CircleAlert, Eraser, X } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type MouseEvent, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -29,7 +30,6 @@ const POSE_FIELDS: [key: keyof Pose, label: string, unit: string][] = [
 const DEFAULT_POSE: Pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
 const button = buttonVariants({ variant: "outline", size: "sm" });
 /** 原生下拉框：与 Input 同样式（04 §3.6） */
-const field = "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 export type CameraForm = {
   name: string;
@@ -145,7 +145,8 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
 
   return (
     <Dialog open onOpenChange={(open) => !open && props.onClose()}>
-      <DialogContent aria-describedby={undefined} showCloseButton={false} className="max-h-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-3xl">
+      {/* 点对话框外不关闭，避免丢掉未保存的填写；Esc 与取消按钮照常关闭 */}
+      <DialogContent aria-describedby={undefined} showCloseButton={false} onInteractOutside={(e) => e.preventDefault()} className="max-h-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-3xl">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -184,21 +185,24 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           ) : (
             <>
           <label htmlFor="cam-protocol">协议</label>
-          <select
-            id="cam-protocol"
-            className={field}
+          <Select
             value={form.protocol}
-            onChange={(e) => {
-              const protocol = e.target.value as Protocol;
+            onValueChange={(value) => {
+              const protocol = value as Protocol;
               set({ protocol, port: PROTOCOLS[protocol][1] });
             }}
           >
-            {Object.entries(PROTOCOLS).map(([key, [label]]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id="cam-protocol" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(PROTOCOLS).map(([key, [label]]) => (
+                <SelectItem key={key} value={key}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <label htmlFor="cam-port">端口</label>
           <Input id="cam-port" type="number" min={1} max={65535} required value={form.port} onChange={(e) => set({ port: Number(e.target.value) })} />
           <label htmlFor="cam-host">主机</label>
@@ -234,12 +238,11 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             {POSE_FIELDS.map(([key, label, unit]) => (
               <label key={key} className="flex items-center gap-2">
                 <span className="w-20 shrink-0">{label}</span>
-                <input
+                <Input
                   type="number"
                   step="any"
                   required
                   aria-label={label}
-                  className={`${field} w-full`}
                   value={form.pose[key]}
                   onChange={(e) => set({ pose: { ...form.pose, [key]: Number(e.target.value) } })}
                 />
@@ -325,9 +328,9 @@ function SnapshotView(props: {
       {size && (
         <svg aria-hidden viewBox={`0 0 ${size[0]} ${size[1]}`} className="pointer-events-none absolute inset-0 size-full">
           {lines.map(([u1, v1, u2, v2], i) => (
-            <line key={i} x1={u1} y1={v1} x2={u2} y2={v2} stroke="#3cc8f0" strokeWidth={size[0] / 250} />
+            <line key={i} x1={u1} y1={v1} x2={u2} y2={v2} stroke="#FFFFFF" strokeWidth={size[0] / 250} />
           ))}
-          {point && <circle cx={point[0]} cy={point[1]} r={size[0] / 120} fill="#3cc8f0" />}
+          {point && <circle cx={point[0]} cy={point[1]} r={size[0] / 120} fill="#FFFFFF" />}
         </svg>
       )}
     </div>
