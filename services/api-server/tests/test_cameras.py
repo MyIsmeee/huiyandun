@@ -151,6 +151,11 @@ def test_create_password_write_only_and_audited(
         ({"source": GATE["source"] | {"host": "127.0.0.1", "port": 1984}}, 400),  # go2rtc 自身
         ({"source": GATE["source"] | {"host": "localhost"}}, 400),
         ({"source": GATE["source"] | {"host": "GO2RTC"}}, 400),
+        ({"source": GATE["source"] | {"host": "ingest"}}, 400),
+        (
+            {"source": GATE["source"] | {"protocol": "http", "relay": True}},
+            400,
+        ),  # 兼容模式只支持 RTSP、RTMP
         ({"source": GATE["source"] | {"host": "[::1]"}}, 400),
         ({"source": GATE["source"] | {"host": "[::ffff:127.0.0.1]"}}, 400),
         ({"source": GATE["source"] | {"host": "0.0.0.0"}}, 400),
@@ -204,7 +209,7 @@ def test_delete_and_roles(client: TestClient, password: str) -> None:
 
 def row(**over: Any) -> dict[str, Any]:
     return {"ingest": "pull", "protocol": "rtsp", "host": "192.168.8.31", "port": 554,
-            "path": "/Streaming/Channels/101", "username": None} | over  # fmt: skip
+            "path": "/Streaming/Channels/101", "username": None, "relay": False} | over  # fmt: skip
 
 
 @pytest.mark.parametrize(
@@ -279,6 +284,66 @@ def test_sync_go2rtc_adds_replaces_and_removes(tmp_path: Path, key_file: Path) -
     ]
 
 
+class FakeIngest:
+    """MediaMTX 的路径配置接口：记下增删改调用；列表中另有推流用的正则路径，不应被动到。"""
+
+    def __init__(self, paths: dict[str, str]) -> None:
+        self.paths = paths
+        self.calls: list[tuple[str, str, Any]] = []
+
+    async def get(self, path: str, **_: Any) -> Any:
+        items = [{"name": "~^cam-[0-9]+$", "source": "publisher"}]
+        items += [{"name": n, "source": s} for n, s in self.paths.items()]
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"items": items})
+
+    async def delete(self, path: str, **_: Any) -> Any:
+        self.calls.append(("delete", path, None))
+        self.paths.pop(path.rsplit("/", 1)[1])
+        return SimpleNamespace(raise_for_status=lambda: None)
+
+    async def request(self, method: str, path: str, json: dict[str, Any]) -> Any:
+        self.calls.append((method, path, json))
+        self.paths[path.rsplit("/", 1)[1]] = json["source"]
+        return SimpleNamespace(raise_for_status=lambda: None)
+
+
+def test_relay_camera_is_pulled_through_ingest(key_file: Path) -> None:
+    """D-117：兼容模式的摄像头由 ingest 中继拉流，go2rtc 从 ingest 取；关闭后中继路径删除，推流的正则路径不动。"""
+    site_file = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
+    config = SimpleNamespace(site_file=site_file, device_key_file=key_file)
+    ingest = FakeIngest({"cam-07": "rtsp://old", "cam-08": "rtsp://stale"})
+    state = SimpleNamespace(config=config, ingest=ingest)
+    blob = cameras.seal(key_file, "pw")
+    relay = {"id": "cam-07", "password_enc": blob} | row(username="admin", relay=True)
+    plain = {"id": "cam-09", "password_enc": None} | row(host="192.168.8.32")
+    camera = "rtsp://admin:pw@192.168.8.31:554/Streaming/Channels/101"
+
+    assert cameras.source_url(relay, "pw") == "rtsp://172.30.10.10:8554/cam-07"
+    asyncio.run(cameras.Registry(state)._sync_ingest([relay, plain]))
+    conf = {"source": camera, "sourceOnDemand": False, "rtspTransport": "tcp"}
+    assert ingest.calls == [
+        ("delete", "/v3/config/paths/delete/cam-08", None),
+        ("PATCH", "/v3/config/paths/patch/cam-07", conf),
+    ]
+    ingest.calls.clear()
+    asyncio.run(cameras.Registry(state)._sync_ingest([relay, plain]))
+    assert ingest.calls == []  # 未变化不重复下发
+
+    asyncio.run(cameras.Registry(state)._sync_ingest([relay | {"relay": False}]))
+    assert ingest.calls == [("delete", "/v3/config/paths/delete/cam-07", None)]
+    assert ingest.paths == {}
+
+
+def test_create_relay_camera_round_trip(client: TestClient) -> None:
+    """兼容模式随拉流地址保存并返回；默认关闭。"""
+    body = GATE | {"source": GATE["source"] | {"relay": True}}
+    created = client.post("/api/cameras", json=body, headers=headers())
+    assert created.status_code == 201, created.text
+    assert created.json()["source"]["relay"] is True
+    other = client.post("/api/cameras", json=GATE | {"ip": "192.168.8.40"}, headers=headers())
+    assert other.json()["source"]["relay"] is False
+
+
 def test_sync_compares_masked_credentials(key_file: Path) -> None:
     """go2rtc 把地址中的凭据显示为 ***：带口令的流不应每次比对都被删了重加。"""
     site_file = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
@@ -327,6 +392,7 @@ def test_apply_failure_does_not_raise_and_retries(key_file: Path) -> None:
     state = SimpleNamespace(
         config=SimpleNamespace(site_file=site_file, device_key_file=key_file),
         go2rtc=FakeGo2rtc({}),
+        ingest=FakeIngest({}),
         bus=SimpleNamespace(js_publish=js_publish),
         hub=SimpleNamespace(broadcast=lambda _: None),
         devices=SimpleNamespace(sync=lambda *_: None),
@@ -384,6 +450,11 @@ class FrameGo2rtc(FakeGo2rtc):
         (httpx2.Response(404), 502, "视频服务中没有这路流"),
         (httpx2.Response(500), 502, "取不到画面"),
         (httpx2.Response(200, content=b""), 502, "取不到画面"),
+        (
+            httpx2.Response(500, content=b"streams: codecs not matched:  => video:JPEG"),
+            502,
+            "兼容模式",
+        ),
     ],
 )
 def test_snapshot(

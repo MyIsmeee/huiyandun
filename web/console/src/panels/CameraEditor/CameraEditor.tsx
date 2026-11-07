@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { type MouseEvent, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -41,6 +42,8 @@ export type CameraForm = {
   host: string;
   port: number;
   path: string;
+  /** 兼容模式：经 MediaMTX 中继拉流，只对 RTSP / RTMP 有效（D-117） */
+  relay: boolean;
   username: string;
   password: string;
   pose: Pose;
@@ -55,6 +58,7 @@ const initialForm = (c: Camera | null): CameraForm => ({
   host: c?.source?.host ?? "",
   port: c?.source?.port ?? PROTOCOLS.rtsp[1],
   path: c?.source?.path ?? "",
+  relay: c?.source?.relay ?? false,
   username: c?.username ?? "",
   password: "",
   pose: c?.pose ?? DEFAULT_POSE,
@@ -65,6 +69,8 @@ const initialForm = (c: Camera | null): CameraForm => ({
 export const pushUrl = (id: string) => `rtsp://${location.hostname}:8554/${id}`;
 export const PUSH_USER = "hyd";
 
+const RELAYABLE = new Set<Protocol>(["rtsp", "rtmp"]);
+
 /** 主机留空时取设备 IP（常见情况：摄像头本身提供取流服务）；推流不带拉流地址与凭据 */
 export function body(form: CameraForm): Schemas["CameraCreate"] {
   const common = { name: form.name.trim(), ip: form.ip.trim(), pose: form.pose, climb_lines: form.climb_lines };
@@ -72,7 +78,13 @@ export function body(form: CameraForm): Schemas["CameraCreate"] {
   return {
     ...common,
     ingest: "pull",
-    source: { protocol: form.protocol, host: form.host.trim() || form.ip.trim(), port: form.port, path: form.path.trim() },
+    source: {
+      protocol: form.protocol,
+      host: form.host.trim() || form.ip.trim(),
+      port: form.port,
+      path: form.path.trim(),
+      relay: form.relay && RELAYABLE.has(form.protocol),
+    },
     username: form.username.trim() || null,
     ...(form.password ? { password: form.password } : {}),
   };
@@ -223,6 +235,21 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             value={form.path}
             onChange={(e) => set({ path: e.target.value })}
           />
+          {form.protocol === "http" && (
+            <p className="col-span-2 flex items-center gap-1.5 text-xs text-subtle-foreground">
+              <CircleAlert aria-hidden className="size-3.5 shrink-0" />
+              MJPEG 等 HTTP 画面不能在浏览器实时播放，请尽量改用 RTSP
+            </p>
+          )}
+          {RELAYABLE.has(form.protocol) && (
+            <>
+              <Label htmlFor="cam-relay">兼容模式</Label>
+              <div className="flex items-center gap-2">
+                <Switch id="cam-relay" checked={form.relay} onCheckedChange={(relay) => set({ relay })} />
+                <span className="text-xs text-subtle-foreground">经中继拉流：部分手机或 ONVIF 设备的画面无法识别时打开</span>
+              </div>
+            </>
+          )}
           <Label htmlFor="cam-user">用户名</Label>
           <Input id="cam-user" autoComplete="off" value={form.username} onChange={(e) => set({ username: e.target.value })} />
           <Label htmlFor="cam-pass">口令</Label>
