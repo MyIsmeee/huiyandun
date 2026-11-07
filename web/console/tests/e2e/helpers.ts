@@ -116,6 +116,13 @@ export async function open(page: Page, devices: object[]) {
 }
 
 /** 放大到设备清晰可辨；放大后区域名称移出视口，文字溢出检查须在此之前（V-P3） */
+/** 目标在场景区域内的像素位置（e2e 构建提供的 __hydTargetAt），用于点选与悬停 */
+export async function targetAt(page: Page, key: string): Promise<{ x: number; y: number }> {
+  const point = await page.evaluate((k) => window.__hydTargetAt?.(k) ?? null, key);
+  if (!point) throw new Error(`场景中没有目标 ${key}`);
+  return { x: Math.round(point[0]), y: Math.round(point[1]) };
+}
+
 export async function zoomIn(page: Page) {
   for (let i = 0; i < 3; i += 1) await page.getByRole("button", { name: "放大" }).click();
   await page.clock.runFor(600);

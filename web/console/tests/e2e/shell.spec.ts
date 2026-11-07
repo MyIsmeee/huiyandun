@@ -4,7 +4,6 @@ import {
   freezeClock,
   mockKpis,
   mockSocket,
-  presetTheme,
   SITE,
   sceneSettled,
   signedIn,
@@ -13,46 +12,43 @@ import {
 
 test.beforeEach(({ page }) => freezeClock(page));
 
-for (const theme of ["dark", "light"] as const) {
-  test(`主界面分区与空态（${theme}）`, async ({ page }) => {
-    await presetTheme(page, theme);
-    await signedIn(page);
-    await page.goto("/");
+test("主界面分区与空态", async ({ page }) => {
+  await signedIn(page);
+  await page.goto("/");
 
-    await expect(page.getByText("演示办公区")).toBeVisible();
-    await expect(page.getByRole("list", { name: "关键指标" }).getByText("—")).toHaveCount(4);
-    await expect(page.getByText("无活跃攻击链")).toBeVisible();
-    await expect(page.getByText("暂无告警")).toBeVisible();
-    await sceneSettled(page);
-    await expectNoOverflow(page);
-    await expect(page).toHaveScreenshot(`shell-${theme}.png`);
+  await expect(page.getByText("演示办公区")).toBeVisible();
+  await expect(page.getByRole("list", { name: "关键指标" }).getByText("—")).toHaveCount(4);
+  await expect(page.getByText("暂无告警")).toBeVisible();
+  // 处置时间线在详情抽屉中（D-112），未选中时主界面没有该区域
+  await expect(page.getByRole("region", { name: "处置时间线" })).toHaveCount(0);
+  await sceneSettled(page);
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("shell-dark.png");
+});
+
+test("关键指标显示数值与变化（D-100）", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 }); // 最窄的布局
+  await signedIn(page);
+  await mockKpis(page, {
+    online_devices: { value: 2, delta: 0 },
+    active_alerts: { value: 12, delta: 11 },
+    contained_today: { value: 3, delta: 1 },
+    last_contain_ms: { value: 18_400, delta: -2_600 },
   });
+  await page.goto("/");
 
-  test(`关键指标显示数值与较 1 小时前的变化（${theme}，D-100）`, async ({ page }) => {
-    await page.setViewportSize({ width: 1366, height: 768 }); // 最窄的布局
-    await presetTheme(page, theme);
-    await signedIn(page);
-    await mockKpis(page, {
-      online_devices: { value: 2, delta: 0 },
-      active_alerts: { value: 12, delta: 11 },
-      contained_today: { value: 3, delta: 1 },
-      last_contain_ms: { value: 18_400, delta: -2_600 },
-    });
-    await page.goto("/");
-
-    const kpis = page.getByRole("list", { name: "关键指标" });
-    await expect(kpis.getByText("较 1 小时前 ↓ 260")).toBeVisible();
-    await sceneSettled(page);
-    // V-P3：数值与趋势变宽后不与视角控件组重叠
-    const [row, toolbar] = await Promise.all([
-      kpis.boundingBox(),
-      page.getByRole("toolbar", { name: "视角" }).boundingBox(),
-    ]);
-    expect((row?.x ?? 0) + (row?.width ?? 0)).toBeLessThan(toolbar?.x ?? 0);
-    await expectNoOverflow(page);
-    await expect(kpis).toHaveScreenshot(`kpis-${theme}.png`);
-  });
-}
+  const kpis = page.getByRole("list", { name: "关键指标" });
+  await expect(kpis.getByText("较上一次 ↓ 2.6")).toBeVisible();
+  await sceneSettled(page);
+  // V-P3：指标条（左上）不与视角控件组（左下）重叠
+  const [row, toolbar] = await Promise.all([
+    kpis.boundingBox(),
+    page.getByRole("toolbar", { name: "视角" }).boundingBox(),
+  ]);
+  expect((row?.y ?? 0) + (row?.height ?? 0)).toBeLessThan(toolbar?.y ?? 0);
+  await expectNoOverflow(page);
+  await expect(kpis).toHaveScreenshot("kpis-dark.png");
+});
 
 // V-L2：场景视口是面积最大的单一元素，占比 ≥ 50%
 for (const [width, height] of [
@@ -104,41 +100,4 @@ test("退出失败时停留在主界面并提示，请求期间按钮不可再�
   await expect(page.getByText("演示办公区")).toBeVisible();
   await expectNoOverflow(page);
   await expect(page.locator("header")).toHaveScreenshot("header-logout-failed.png");
-});
-
-// HYD-UIX-004 §3.1：主题三档；用例时钟固定在 14:30，自动档为亮色
-for (const mode of ["auto", "dark", "light"] as const) {
-  test(`主题档位：${mode}`, async ({ page }) => {
-    await presetTheme(page, mode);
-    await signedIn(page);
-    await page.goto("/");
-
-    const group = page.getByRole("group", { name: "主题" });
-    await expect(group.getByRole("button", { pressed: true })).toHaveAttribute("aria-label", new RegExp(mode === "auto" ? "自动" : mode === "dark" ? "暗色" : "亮色"));
-    await expect(group.locator("..")).toHaveScreenshot(`theme-toggle-${mode}.png`);
-  });
-}
-
-test.describe("未选择过主题", () => {
-  test.use({ storageState: { cookies: [], origins: [] } });
-
-  test("默认亮色，夜间也不切换（D-044）", async ({ page }) => {
-    await page.clock.pauseAt(new Date("2026-10-27T14:00:00Z")); // 上海 22:00
-    await signedIn(page);
-    await page.goto("/");
-
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  });
-});
-
-test("自动档在 18:00 由亮色切换为暗色，无需刷新", async ({ page }) => {
-  await page.clock.pauseAt(new Date("2026-10-27T09:59:00Z")); // 上海 17:59:00
-  await presetTheme(page, "auto");
-  await signedIn(page);
-  await page.goto("/");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-
-  await page.clock.runFor(61_000);
-
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });

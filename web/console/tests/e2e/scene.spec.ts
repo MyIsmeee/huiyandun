@@ -52,13 +52,13 @@ test("无 WebGL2 时降级为 2D 俯视视图（C-FE-08）", async ({ page }) =>
   await sceneSettled(page, "2d");
 
   await expect(scene(page).getByText("2D 视图 · 不支持 WebGL2")).toBeVisible();
-  // V-P3：最窄的 1366 宽下，含降级说明的控件组不与 KPI 底板重叠
+  // V-P3：最窄的 1366 宽下，含降级说明的控件组（左下）不与指标条（左上）重叠
   await page.setViewportSize({ width: 1366, height: 768 });
   const [kpi, toolbar] = await Promise.all([
     page.getByRole("list", { name: "关键指标" }).boundingBox(),
     page.getByRole("toolbar", { name: "视角" }).boundingBox(),
   ]);
-  expect((kpi?.x ?? 0) + (kpi?.width ?? 0)).toBeLessThan(toolbar?.x ?? 0);
+  expect((kpi?.y ?? 0) + (kpi?.height ?? 0)).toBeLessThan(toolbar?.y ?? 0);
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(scene(page).getByText("设备间外墙")).toHaveCount(0);
   await expectNoOverflow(page);
@@ -224,7 +224,7 @@ test.describe("感知场景", () => {
   const cam01 = (state = "normal", calibrated = true) => {
     const device = camera(state);
     const pose = { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
-    return { ...device, camera: { ...device.camera, pose, calibration: calibrated ? device.camera.calibration : [] } };
+    return { ...device, camera: { ...device.camera, pose, calibration: calibrated ? device.camera.calibration : [], mapping: calibrated ? device.camera.mapping : "none" } };
   };
   const push = (ws: WebSocketRoute | undefined, frame: object, ts = "2026-10-27T06:30:00Z") =>
     ws?.send(JSON.stringify({ channel: "scene", data: { ...BASE, ts, ...frame } }));
@@ -295,13 +295,14 @@ test.describe("感知场景", () => {
   });
 
   test("飞入摄像头视角途中断线：立即到位，不再继续（V-U3）", async ({ page }) => {
-    await presetTheme(page, "light");
     const [ws] = await open(page, [cam01("cyber_alert")]);
     await shown(page, ws, SCENES.street);
-    await expect(scene(page).getByText("网络攻击")).toBeVisible();
+    // 只看设备旁的状态标签：详情抽屉（D-112）同在场景区域内，也写着状态
+    const tag = scene(page).locator('[data-device="cam-01"]');
+    await expect(tag.getByText("网络攻击")).toBeVisible();
 
     await scene(page).getByRole("button", { name: "查看 cam-01 详情" }).dblclick();
-    await expect(scene(page).getByText("网络攻击")).toHaveCount(0); // 视点一侧的摄像头不画，状态标签随之不画，不悬空
+    await expect(tag).toHaveCount(0); // 视点一侧的摄像头不画，状态标签随之不画，不悬空
     await page.clock.runFor(100); // 飞行途中
     await ws?.close({ code: 1011 });
     await expect(page.getByRole("status", { name: "连接状态" })).toHaveText("断线 · 重连中");
@@ -314,8 +315,10 @@ test.describe("感知场景", () => {
   });
 
   test("未标定摄像头不重建环境，只显示设备与未标定提示（V-U2）", async ({ page }) => {
-    await presetTheme(page, "light", true);
+    await presetTheme(page, "dark", true);
     const [ws] = await open(page, [cam01("uncalibrated", false)]);
+    await expect(scene(page).getByText("未标定")).toBeVisible();
+    await page.clock.runFor(100);
     const before = await scene(page).screenshot();
     await shown(page, ws, ELEMENTS);
 
