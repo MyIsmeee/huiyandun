@@ -42,7 +42,7 @@ export function KpiTile(props: {
         </span>
       )}
       {delta !== null && (
-        <span title={since} className="text-xs text-subtle-foreground tabular-nums">
+        <span title={since} className="hidden text-xs text-subtle-foreground tabular-nums @5xl:inline">
           {trend(delta, format)}
         </span>
       )}

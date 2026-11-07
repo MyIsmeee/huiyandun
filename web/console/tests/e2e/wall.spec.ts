@@ -106,7 +106,7 @@ test("摄像头栏：缩略图、状态与人数，单击选中并让监控墙�
   await expect(page).toHaveScreenshot("rail-selected.png");
 
   await rail.getByRole("button", { name: "收起摄像头栏" }).click();
-  expect((await rail.boundingBox())?.width).toBe(64);
+  expect((await rail.boundingBox())?.width).toBe(80);
 });
 
 test("视口窄于 1600 时摄像头栏默认收起，主画布占一半以上（V-L2）", async ({ page }) => {

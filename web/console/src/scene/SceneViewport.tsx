@@ -22,7 +22,7 @@ import { AttackLines } from "./AttackLines";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
-import { OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
+import { coverage, OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
 import { Scene2D } from "./Scene2D";
 import { HoverMarker, TargetMarker } from "./TargetMarker";
 import { renderedPosition } from "./smoothing";
@@ -78,14 +78,17 @@ export function SceneViewport({ site }: { site: Site }) {
   const [failed, setFailed] = useState(false);
   const pose = useCamera((s) => s.pose);
   const cameras = useCameras(site.devices);
+  // 取景按摄像头覆盖范围，不再用站点尺寸（D-116）；只随摄像头登记表变化，目标与告警不影响取景
+  const poses = useMemo(() => site.devices.flatMap((d) => (d.camera ? [d.camera.pose] : [])), [site.devices]);
+  const area = useMemo(() => coverage(poses), [poses]);
   const animate = useAnimate();
-  const overviewed = useMemo(() => (size && webgl2 ? overviewShot(site, size, pose) : null), [site, size, webgl2, pose]);
+  const overviewed = useMemo(() => (size && webgl2 ? overviewShot(area, size, pose) : null), [area, size, webgl2, pose]);
   const shot = useFocusShot(overviewed?.shot ?? null, size, cameras, animate());
   const view3d = useMemo(
     () => (size && shot && overviewed ? sceneView(shot, size, overviewed.panLimit) : null),
     [size, shot, overviewed],
   );
-  const plan = useMemo(() => (size && !webgl2 ? planView(site, size, pose) : null), [site, size, webgl2, pose]);
+  const plan = useMemo(() => (size && !webgl2 ? planView(area, size, pose) : null), [area, size, webgl2, pose]);
   const view = view3d ?? plan;
   const state = failed ? "error" : !webgl2 ? "2d" : ready ? "ready" : "loading";
   const { dragged, ...drag } = useDragPan(view);
@@ -175,14 +178,14 @@ export function SceneViewport({ site }: { site: Site }) {
       {view3d && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene3D site={site} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
+            <Scene3D area={area} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
           </Suspense>
         </Boundary>
       )}
-      {plan && <Scene2D site={site} cameras={cameras} view={plan} />}
+      {plan && <Scene2D cameras={cameras} view={plan} />}
       {view && (state === "ready" || state === "2d") && (
         <>
-          <AttackLines site={site} cameras={cameras} view={view} />
+          <AttackLines area={area} cameras={cameras} view={view} />
           <DeviceTags cameras={cameras} view={view} />
           <DevicePicker
             cameras={cameras}

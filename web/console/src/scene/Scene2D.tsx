@@ -1,9 +1,8 @@
-import type { Site } from "../lib/api";
 import type { SceneFrame } from "../store/live";
 import { useTheme } from "../theme/store";
 import type { Camera } from "./devices";
 import { isFurniture } from "./furniture";
-import { GROUND_M, type PlanView } from "./layout";
+import type { PlanView } from "./layout";
 import { largestFirst, PALETTE, type Palette, STALE_OPACITY, useScenes } from "./perceived";
 
 /** 立面俯视为线条：外圈取栅格色勾边，在浅色地面上可辨 */
@@ -14,18 +13,13 @@ const CROWN_RATIO = 0.35;
 
 const points = (polygon: number[][]) => polygon.map(([x, y]) => `${x},${y}`).join(" ");
 
-/** 无 WebGL2 时的 2D 俯视视图（C-FE-08），图层与配色同 3D 场景（§5.1）；平面图不显示，随相机旋转与缩放 */
-export function Scene2D({ site, cameras, view }: { site: Site; cameras: Camera[]; view: PlanView }) {
+/** 无 WebGL2 时的 2D 俯视视图（C-FE-08），图层与配色同 3D 场景（§5.1）；不画站点底板与栅格（D-116），随相机旋转与缩放 */
+export function Scene2D({ cameras, view }: { cameras: Camera[]; view: PlanView }) {
   const palette = PALETTE[useTheme((s) => s.theme)];
   const scenes = useScenes(cameras);
-  const [x0, y0] = [Math.round(site.width_m / 2 - GROUND_M / 2), Math.round(site.height_m / 2 - GROUND_M / 2)];
-  const grid: string[] = [];
-  for (let k = 0; k <= GROUND_M; k += 1) grid.push(`M${x0 + k} ${y0}v${GROUND_M}M${x0} ${y0 + k}h${GROUND_M}`);
   return (
     <svg aria-hidden className="absolute inset-0 size-full">
       <g transform={view.transform}>
-        <rect x={x0} y={y0} width={GROUND_M} height={GROUND_M} className="fill-card" />
-        <path d={grid.join("")} vectorEffect="non-scaling-stroke" className="fill-none stroke-accent" />
         {scenes.map(({ frame, stale }) => (
           <g key={frame.camera_id} opacity={stale ? STALE_OPACITY : 1}>
             <TopDown frame={frame} palette={palette} />
