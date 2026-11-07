@@ -11,6 +11,8 @@ import { AlertListView } from "../../../src/panels/AlertList/AlertList";
 import { DetailPanel } from "../../../src/panels/DetailPanel/DetailPanel";
 import { KpiTile } from "../../../src/panels/KpiTile/KpiTile";
 import { LlmStatusBadgeView } from "../../../src/panels/LlmStatusBadge/LlmStatusBadge";
+import { paint } from "../../../src/panels/DetectionOverlay/DetectionOverlay";
+import { contentRect } from "../../../src/panels/DetectionOverlay/overlay";
 import { LiveVideoView } from "../../../src/panels/LiveVideo/LiveVideo";
 import { type TileProps, VideoTileView } from "../../../src/panels/VideoWall/VideoTile";
 import { type EditorForm, type Pending, ProviderEditorView, type TestResult } from "../../../src/panels/ProviderEditor/ProviderEditor";
@@ -78,6 +80,32 @@ function tile(state: TileProps["device"]["state"], extra: Partial<TileProps & { 
         {...extra}
       />
     </div>
+  );
+}
+/** 站立人员的 COCO 17 点（画面归一化，分数已按滞回化为 0 / 1）：头、肩、肘、腕、髋、膝、踝 */
+const STANDING: [number, number, number][] = [
+  [0.3, 0.2, 1], [0.31, 0.19, 1], [0.29, 0.19, 1], [0.32, 0.2, 1], [0.28, 0.2, 1],
+  [0.34, 0.28, 1], [0.26, 0.28, 1], [0.36, 0.4, 1], [0.24, 0.4, 1], [0.37, 0.5, 1], [0.23, 0.5, 0],
+  [0.32, 0.52, 1], [0.28, 0.52, 1], [0.33, 0.68, 1], [0.27, 0.68, 1], [0.33, 0.84, 1], [0.27, 0.84, 1],
+];
+const person = { camera_id: "cam-02", track_id: 12, object_class: "person" as const, x: 0, y: 0, uncertainty_m: 0.3, heading_deg: null, speed_mps: null, bbox: [0.21, 0.15, 0.4, 0.87], keypoints: STANDING, trail: [] };
+const car = { ...person, track_id: 7, object_class: "car" as const, bbox: [0.55, 0.45, 0.92, 0.8], keypoints: null };
+
+/** 画面叠加（FR-107）：在灰色画面上按选中与否画一人一车；实时组件依赖 300 ms 内的实测，展示页直接调用绘制函数 */
+function overlay(selected: boolean) {
+  return (
+    <canvas
+      width={360}
+      height={203}
+      className="block rounded-lg bg-[#3a3a3e]"
+      ref={(el) => {
+        const ctx = el?.getContext("2d");
+        if (!ctx) return;
+        const rect = contentRect(360, 203, 16 / 9);
+        paint(ctx, person, person, rect, selected);
+        paint(ctx, car, car, rect, false);
+      }}
+    />
   );
 }
 /** 没有视频流的设备：详情面板截图不依赖 WebRTC 连接 */
@@ -253,6 +281,10 @@ const GALLERY: Record<string, Record<string, ReactNode>> = {
   DetailPanel: {
     device: drawer(<DetailPanel device={SWITCH} stale={false} onClose={() => {}} />),
     disconnected: drawer(<DetailPanel device={SWITCH} stale onClose={() => {}} />),
+  },
+  DetectionOverlay: {
+    normal: overlay(false),
+    selected: overlay(true),
   },
   VideoTile: {
     normal: tile("normal", { persons: 3, vehicles: 1 }),
