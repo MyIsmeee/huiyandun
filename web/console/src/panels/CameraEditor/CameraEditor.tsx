@@ -2,6 +2,8 @@ import { CircleAlert, Eraser, X } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type MouseEvent, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
@@ -162,29 +164,34 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
         </header>
 
         <div className="grid grid-cols-[6rem_minmax(0,1fr)_6rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
-          <label htmlFor="cam-name">名称</label>
+          <Label htmlFor="cam-name">名称</Label>
           <Input id="cam-name" required maxLength={40} value={form.name} onChange={(e) => set({ name: e.target.value })} />
-          <label htmlFor="cam-ip">设备 IP</label>
+          <Label htmlFor="cam-ip">设备 IP</Label>
           <Input id="cam-ip" required placeholder="192.168.8.31" value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
           <span>接入方式</span>
-          <div role="radiogroup" aria-label="接入方式" className="col-span-3 flex gap-4">
+          <RadioGroup
+            aria-label="接入方式"
+            value={form.ingest}
+            onValueChange={(value) => set({ ingest: value as typeof form.ingest })}
+            className="col-span-3 flex gap-4"
+          >
             {(
               [
                 ["pull", "拉流（系统从摄像头取流）"],
                 ["push", "推流（设备推到本机）"],
               ] as const
             ).map(([value, label]) => (
-              <label key={value} className="flex items-center gap-1.5">
-                <input type="radio" name="ingest" checked={form.ingest === value} onChange={() => set({ ingest: value })} />
+              <Label key={value}>
+                <RadioGroupItem value={value} />
                 {label}
-              </label>
+              </Label>
             ))}
-          </div>
+          </RadioGroup>
           {form.ingest === "push" ? (
             <PushInfo id={saved?.id ?? null} password={pushPassword} />
           ) : (
             <>
-          <label htmlFor="cam-protocol">协议</label>
+          <Label htmlFor="cam-protocol">协议</Label>
           <Select
             value={form.protocol}
             onValueChange={(value) => {
@@ -203,11 +210,11 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
               ))}
             </SelectContent>
           </Select>
-          <label htmlFor="cam-port">端口</label>
+          <Label htmlFor="cam-port">端口</Label>
           <Input id="cam-port" type="number" min={1} max={65535} required value={form.port} onChange={(e) => set({ port: Number(e.target.value) })} />
-          <label htmlFor="cam-host">主机</label>
+          <Label htmlFor="cam-host">主机</Label>
           <Input id="cam-host" placeholder="留空即设备 IP" value={form.host} onChange={(e) => set({ host: e.target.value })} />
-          <label htmlFor="cam-path">流路径</label>
+          <Label htmlFor="cam-path">流路径</Label>
           <Input
             id="cam-path"
             disabled={form.protocol === "onvif"}
@@ -216,9 +223,9 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             value={form.path}
             onChange={(e) => set({ path: e.target.value })}
           />
-          <label htmlFor="cam-user">用户名</label>
+          <Label htmlFor="cam-user">用户名</Label>
           <Input id="cam-user" autoComplete="off" value={form.username} onChange={(e) => set({ username: e.target.value })} />
-          <label htmlFor="cam-pass">口令</label>
+          <Label htmlFor="cam-pass">口令</Label>
           <Input
             id="cam-pass"
             type="password"
@@ -236,7 +243,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           <p className="text-xs text-subtle-foreground">朝向自平面 x 轴正方向逆时针计；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。</p>
           <div className="grid grid-cols-4 gap-x-3 gap-y-2">
             {POSE_FIELDS.map(([key, label, unit]) => (
-              <label key={key} className="flex items-center gap-2">
+              <Label key={key} className="flex items-center gap-2">
                 <span className="w-20 shrink-0">{label}</span>
                 <Input
                   type="number"
@@ -247,7 +254,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
                   onChange={(e) => set({ pose: { ...form.pose, [key]: Number(e.target.value) } })}
                 />
                 <span className="text-subtle-foreground">{unit}</span>
-              </label>
+              </Label>
             ))}
           </div>
         </fieldset>

@@ -2,6 +2,7 @@ import { Check, CircleAlert, X } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState } from "react";
 import type { components } from "../../api/schema";
@@ -170,7 +171,7 @@ export function ProviderEditorView(props: {
       >
         <DialogTitle className="text-base font-medium">{provider ? "编辑供应商" : "添加供应商"}</DialogTitle>
         <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
-          <label htmlFor="provider-preset">预设</label>
+          <Label htmlFor="provider-preset">预设</Label>
           <Select value={form.preset} onValueChange={(value) => props.onPreset(value as Preset)}>
             <SelectTrigger id="provider-preset" className="w-full">
               <SelectValue />
@@ -183,20 +184,20 @@ export function ProviderEditorView(props: {
               ))}
             </SelectContent>
           </Select>
-          <label className="contents">
+          <Label className="contents">
             名称
             <Input value={form.name} onChange={(e) => onChange({ name: e.target.value })} />
-          </label>
-          <label className="contents">
+          </Label>
+          <Label className="contents">
             地址
             <Input value={form.base_url} onChange={(e) => onChange({ base_url: e.target.value })} />
-          </label>
+          </Label>
           {LOOPBACK.test(form.base_url) && (
             <p role="alert" className="col-start-2 text-muted-foreground">
               容器内 127.0.0.1、localhost 指向网关自身：改填模型服务所在主机的局域网 IP，如 http://192.168.1.50:8080/v1（DP-07）
             </p>
           )}
-          <label className="contents">
+          <Label className="contents">
             API Key
             <Input
               type="password"
@@ -205,9 +206,9 @@ export function ProviderEditorView(props: {
               placeholder={provider?.api_key_last4 ? `已保存 ••••${provider.api_key_last4}，留空不修改` : "可选"}
               onChange={(e) => onChange({ api_key: e.target.value })}
             />
-          </label>
+          </Label>
           {/* 按钮不放进 label，否则成为输入框名称的一部分 */}
-          <label htmlFor="provider-model">模型</label>
+          <Label htmlFor="provider-model">模型</Label>
           <span className="flex gap-2">
             <Input
               id="provider-model"
@@ -225,7 +226,7 @@ export function ProviderEditorView(props: {
               <option key={m} value={m} />
             ))}
           </datalist>
-          <label className="contents">
+          <Label className="contents">
             超时
             <span className="flex items-center gap-2">
               <Input
@@ -238,8 +239,8 @@ export function ProviderEditorView(props: {
               />
               秒
             </span>
-          </label>
-          <label htmlFor="provider-network">网络位置</label>
+          </Label>
+          <Label htmlFor="provider-network">网络位置</Label>
           <Select value={form.network} onValueChange={(value) => onChange({ network: value as EditorForm["network"] })}>
             <SelectTrigger id="provider-network" className="w-full">
               <SelectValue />

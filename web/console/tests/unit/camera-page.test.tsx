@@ -4,6 +4,13 @@ import { ApiError, api } from "../../src/lib/api";
 import { type Camera, CameraEditor, body } from "../../src/panels/CameraEditor/CameraEditor";
 import { CameraListView, address } from "../../src/panels/CameraList/CameraList";
 
+// Radix RadioGroup 依赖 jsdom 未实现的 ResizeObserver
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
 const POSE = { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
 const CAM: Camera = {
   id: "cam-03",
@@ -111,5 +118,16 @@ describe("添加与编辑（04 §7.4）", () => {
     render(<CameraEditor camera={CAM} onClose={() => {}} onSaved={() => {}} />);
     await flush();
     expect(screen.getByText(/取不到画面：取画面超时/)).toBeTruthy();
+  });
+
+  it("接入方式选推流：隐藏拉流地址，显示推流地址（FR-907）", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockRejectedValue(new ApiError(502, "无画面"));
+    render(<CameraEditor camera={CAM} onClose={() => {}} onSaved={() => {}} />);
+    await flush();
+    expect(screen.getByRole("combobox", { name: "协议" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: "推流（设备推到本机）" }));
+    expect(screen.queryByRole("combobox", { name: "协议" })).toBeNull();
+    expect(screen.getByText("推流地址")).toBeTruthy();
   });
 });

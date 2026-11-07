@@ -1,11 +1,14 @@
-import { ArrowLeft, Check, Circle, CircleAlert, CircleDot, Clock, Globe, GripVertical, House, Minus, Plus, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock, Globe, GripVertical, House, Minus, Plus, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -134,12 +137,12 @@ export function ProviderListView(props: {
         </button>
         <h1 className="text-xl font-semibold">模型供应商</h1>
         {load.status === "ready" && (
-          <Switch
+          <Toggle
             label="禁止公网供应商"
             text="禁止公网供应商"
             on={load.blockPublic}
             disabled={busy}
-            onClick={() => props.onBlockPublic(!load.blockPublic)}
+            onChange={() => props.onBlockPublic(!load.blockPublic)}
             className="ml-auto"
           />
         )}
@@ -224,18 +227,18 @@ function Cards(props: Parameters<typeof ProviderListView>[0] & { providers: Prov
               <span className="min-w-0 truncate font-medium" title={p.name}>
                 {p.name}
               </span>
-              <span className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs text-muted-foreground">
-                {p.network === "public" ? <Globe aria-hidden className="size-3" /> : <House aria-hidden className="size-3" />}
+              <Badge variant="outline" className="text-muted-foreground">
+                {p.network === "public" ? <Globe aria-hidden /> : <House aria-hidden />}
                 {p.network === "public" ? "公网" : "内网"}
                 {p.network_overridden && "（手动）"}
-              </span>
+              </Badge>
               <Health provider={p} />
-              <Switch
+              <Toggle
                 label={`启用 ${p.name}`}
                 text={p.enabled ? "启用" : "停用"}
                 on={p.enabled}
                 disabled={busy || blocked}
-                onClick={() => props.onToggle(p)}
+                onChange={() => props.onToggle(p)}
               />
             </div>
             <p className="truncate pl-10 text-muted-foreground" title={p.base_url}>
@@ -311,29 +314,15 @@ function Health(props: { provider: Provider }) {
   );
 }
 
-/** label 给读屏，text 为可见文字（卡片开关显示当前状态） */
-function Switch(props: {
-  label: string;
-  text: string;
-  on: boolean;
-  disabled: boolean;
-  onClick: () => void;
-  className?: string;
-}) {
-  const { on, text } = props;
+/** shadcn 开关 + 可见文字：label 给读屏，text 为可见文字（卡片开关显示当前状态） */
+function Toggle(props: { label: string; text: string; on: boolean; disabled: boolean; onChange: () => void; className?: string }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={props.label}
-      disabled={props.disabled}
-      onClick={props.onClick}
-      className={`${button} flex shrink-0 items-center gap-1.5 ${props.className ?? ""}`}
-    >
-      {on ? <CircleDot aria-hidden className="size-4" /> : <Circle aria-hidden className="size-4" />}
-      {text}
-    </button>
+    <span className={cn("flex shrink-0 items-center gap-2", props.className)}>
+      <Switch aria-label={props.label} checked={props.on} disabled={props.disabled} onCheckedChange={props.onChange} />
+      <span aria-hidden className="text-muted-foreground">
+        {props.text}
+      </span>
+    </span>
   );
 }
 

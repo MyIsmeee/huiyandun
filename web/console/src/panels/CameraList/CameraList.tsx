@@ -1,4 +1,10 @@
 import { ArrowLeft, CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
@@ -143,19 +149,22 @@ export function CameraListView(props: {
         </ul>
       )}
       {deleting && (
-        <div role="alertdialog" aria-label="确认删除" className="rounded-lg border border-border bg-secondary p-4">
-          <p>
-            删除摄像头"{deleting.name}"（{deleting.id}）？该摄像头的告警历史保留，实时识别与录像停止。
-          </p>
-          <div className="mt-3 flex justify-end gap-2">
-            <button type="button" onClick={props.onCancelDelete} className={button}>
-              取消
-            </button>
-            <button type="button" onClick={() => props.onConfirmDelete(deleting)} className={`${button} font-medium`}>
-              删除
-            </button>
-          </div>
-        </div>
+        <AlertDialog open onOpenChange={(open) => !open && props.onCancelDelete()}>
+          <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogTitle className="text-base font-medium">删除摄像头</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除摄像头"{deleting.name}"（{deleting.id}）？该摄像头的告警历史保留，实时识别与录像停止。
+            </AlertDialogDescription>
+            <p className="flex justify-end gap-2">
+              <button type="button" onClick={props.onCancelDelete} className={button}>
+                取消
+              </button>
+              <button type="button" onClick={() => props.onConfirmDelete(deleting)} className={buttonVariants({ size: "sm" })}>
+                删除
+              </button>
+            </p>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
       {props.editor}
     </section>
