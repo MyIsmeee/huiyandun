@@ -1,6 +1,6 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { BufferGeometry, MeshBasicMaterial, MeshLambertMaterial } from "three";
+import type { BufferGeometry, MeshLambertMaterial } from "three";
 import type { SceneFrame } from "../store/live";
 import { useTheme } from "../theme/store";
 import { useMotion } from "./DeviceMarkers";
@@ -91,7 +91,7 @@ function CameraScene(props: {
 
 function FadingLayer(props: Omit<Layer, "id"> & { opacity: number; fade: boolean; onGone: (geometry: SceneGeometry) => void }) {
   const { geometry, retired, opacity, fade, onGone } = props;
-  const flat = useRef<MeshBasicMaterial>(null);
+  const flat = useRef<MeshLambertMaterial>(null);
   const solid = useRef<MeshLambertMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
   /** 渐变起点（秒，渲染时钟）：首次绘制或被取代后的首帧记录 */
@@ -121,9 +121,9 @@ function FadingLayer(props: Omit<Layer, "id"> & { opacity: number; fade: boolean
   return (
     <>
       {geometry.flat && (
-        // 先于阴影与视场绘制：地面色块不写深度，阴影与视场叠在其上
-        <mesh geometry={geometry.flat} renderOrder={-1}>
-          <meshBasicMaterial ref={flat} vertexColors transparent opacity={0} depthWrite={false} />
+        // 先于视场绘制：地面色块不写深度，视场叠在其上；受光并接收阴影（D-111）
+        <mesh geometry={geometry.flat} renderOrder={-1} receiveShadow>
+          <meshLambertMaterial ref={flat} vertexColors transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
       {geometry.solid && (
