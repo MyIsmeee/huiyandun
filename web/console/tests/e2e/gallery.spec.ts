@@ -5,6 +5,8 @@ const COMPONENTS = {
   KpiTile: ["normal", "empty", "loading", "stale"],
   Scene2D: ["empty"],
   LiveVideo: ["normal", "empty", "loading", "error", "disconnected"],
+  // 画面叠加（FR-107）：无目标即不画；超过 300 ms 隐藏与断线不画由单元测试覆盖
+  DetectionOverlay: ["normal", "selected"],
   // 监控墙瓦片（V-W2、V-W3）：断线态为设备离线、保留最后画面；空态为宫格空位，由监控墙用例覆盖
   VideoTile: ["normal", "loading", "error", "physical", "cyber", "contained", "selected", "disconnected", "unmapped"],
   // 空态即未选中时面板收起；错误态由 LiveVideo 覆盖

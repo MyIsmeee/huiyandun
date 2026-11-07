@@ -1,7 +1,8 @@
 import { Clock, RotateCw, Video, VideoOff } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ApiError, api } from "../../lib/api";
+import { DetectionOverlay } from "../DetectionOverlay/DetectionOverlay";
 
 /** 连接中 / 播放 / 媒体中断（保留最后画面，等待恢复）/ 不可用 / 设备没有视频流（HYD-UIX-004 §8） */
 export type VideoStatus =
@@ -23,7 +24,16 @@ const NO_MEDIA = "无法取得画面：浏览器须能访问本机 8555 端口";
  */
 export function LiveVideo({ deviceId }: { deviceId: string }) {
   const [status, retry] = useLiveVideo(deviceId);
-  return <LiveVideoView status={status} onRetry={retry} />;
+  const root = useRef<HTMLDivElement>(null);
+  const video = useCallback(() => root.current?.querySelector("video") ?? null, []);
+  // 画面上叠加该路的检测框与骨骼（FR-107）；无跟踪数据的摄像头叠加层不画任何东西
+  return (
+    <div ref={root}>
+      <LiveVideoView status={status} onRetry={retry}>
+        {status.kind === "playing" && <DetectionOverlay cameraId={deviceId} video={video} />}
+      </LiveVideoView>
+    </div>
+  );
 }
 
 /** 建立并维护一路实时画面连接（监控墙瓦片与详情共用）；deviceId 变化时由调用方以 key 重建 */
