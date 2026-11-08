@@ -1,6 +1,5 @@
 import { type MouseEvent, useEffect, useRef } from "react";
-import { prefersReducedMotion } from "../../theme/store";
-import { renderTime, smoothed, smoothers } from "../../scene/smoothing";
+import { smoothed, smoothers } from "../../scene/smoothing";
 import { CLASS_LABEL } from "../../scene/targets";
 import { useConnection } from "../../store/connection";
 import { type Target, useLive } from "../../store/live";
@@ -15,7 +14,8 @@ const LABEL_BG = "rgb(19 19 22 / 0.8)";
 
 /**
  * 实时画面上的检测框与骨骼（FR-107、04 V-W5）：取与 3D 人形同一份滤波后的检测框与关键点（V-A8），
- * 在相邻实测之间插值；某目标最近一次实测超过 300 ms 即不画。只画可见关节，不补全（画面上看得见）。
+ * 直接画最近一次实测：不加 3D 的渲染延迟（V-A7 的 150～400 ms），否则叠加会比画面更晚。
+ * 某目标最近一次实测超过 300 ms 即不画。只画可见关节，不补全（画面上看得见）。
  * 以 canvas 逐帧绘制、不经 React 重渲染；单击检测框选中该目标（D-054），其余点击交给瓦片。
  */
 export function DetectionOverlay({ cameraId, video }: { cameraId: string; video: () => HTMLVideoElement | null }) {
@@ -47,10 +47,9 @@ export function DetectionOverlay({ cameraId, video }: { cameraId: string; video:
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, w, h);
       painted = fresh.length > 0;
-      const motion = !prefersReducedMotion();
       const selected = useSelection.getState().targetKey;
       for (const [key, target] of fresh) {
-        const shape = smoothed(key, target).pose(renderTime(target, now, motion));
+        const shape = smoothed(key, target).pose(Number.POSITIVE_INFINITY);
         if (shape) paint(ctx, target, shape, rect.current, key === selected);
       }
     };
