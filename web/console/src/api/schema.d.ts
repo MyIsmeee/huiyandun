@@ -112,7 +112,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 经 go2rtc 取一帧 JPEG 供编辑框预览与画警戒线（V-CAM4、V-CAM7），不落盘 */
+        /** @description 经 go2rtc 取一帧 JPEG 供编辑框预览、画警戒线（V-CAM4、V-CAM7）与摄像头栏缩略图（D-115），不落盘；viewer 本就可经 WebRTC 观看同一路画面 */
         get: operations["getCameraSnapshot"];
         put?: never;
         post?: never;
@@ -1607,7 +1607,6 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description 取不到画面，message 为白话原因 */
             502: {

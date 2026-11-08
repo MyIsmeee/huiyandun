@@ -37,7 +37,7 @@ ENDPOINTS = [
     ("post", "/api/cameras", "admin"),
     ("patch", "/api/cameras/{id}", "admin"),
     ("delete", "/api/cameras/{id}", "admin"),
-    ("get", "/api/cameras/{id}/snapshot", "admin"),
+    ("get", "/api/cameras/{id}/snapshot", "viewer"),  # D-115：摄像头栏缩略图
     ("get", "/api/devices/{id}", "viewer"),
     ("post", "/api/devices/{id}/webrtc", "viewer"),
     ("get", "/api/incidents", "viewer"),

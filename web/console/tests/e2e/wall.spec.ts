@@ -1,5 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
-import { camera, expectNoOverflow, mockKpis, mockLlmStatus, mockSocket, presetView, SITE } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, mockKpis, mockLlmStatus, mockSocket, presetView, SITE } from "./helpers";
+
+// 告警栏空态显示"最后更新"时刻：固定时钟，截图稳定
+test.beforeEach(({ page }) => freezeClock(page));
 
 /** 以给定摄像头打开监控墙（D-115）；实时画面信令返回不可用，瓦片显示原因而不是一直连接中 */
 async function openWall(page: Page, ids: string[], layout = "auto") {
@@ -83,4 +86,33 @@ test("切换到空间态势后显示 3D 场景，宫格控件隐藏，所选视�
   await expect(page.getByRole("group", { name: "宫格" })).toHaveCount(0);
   // 预置脚本每次导航都会重写，刷新验证不了：直接核对写入本地的视图（V-L1 位置记忆）
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("hyd-wall") ?? "{}").state?.view)).toBe("space");
+});
+
+/** 充当截帧的灰色图片：浏览器按内容识别格式 */
+const FRAME = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="9"><rect width="16" height="9" fill="#666"/></svg>';
+
+test("摄像头栏：缩略图、状态与人数，单击选中并让监控墙翻到所在页（04 §4.1 B 区、V-W1）", async ({ page }) => {
+  await page.setViewportSize({ width: 1700, height: 900 }); // ≥ 1600 时摄像头栏默认展开
+  await page.route(/\/api\/cameras\/.+\/snapshot/, (route) => route.fulfill({ contentType: "image/svg+xml", body: FRAME }));
+  await openWall(page, ["cam-01", "cam-02", "cam-03", "cam-04", "cam-05"], "4");
+  const rail = page.getByRole("complementary", { name: "摄像头栏" });
+  await expect(rail.getByRole("button", { name: /^cam-02 / })).toContainText("物理告警");
+  await expect(rail.locator("img")).toHaveCount(5);
+
+  await rail.getByRole("button", { name: /^cam-05 / }).click();
+  await expect(page.getByText("2 / 2")).toBeVisible();
+  await expect(tile(page, "cam-05")).toHaveAttribute("aria-pressed", "true");
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("rail-selected.png");
+
+  await rail.getByRole("button", { name: "收起摄像头栏" }).click();
+  expect((await rail.boundingBox())?.width).toBe(64);
+});
+
+test("视口窄于 1600 时摄像头栏默认收起，主画布占一半以上（V-L2）", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await openWall(page, ["cam-01", "cam-02"]);
+  const rail = page.getByRole("complementary", { name: "摄像头栏" });
+  await expect(rail.getByRole("button", { name: "展开摄像头栏" })).toBeVisible();
+  await expectNoOverflow(page);
 });
