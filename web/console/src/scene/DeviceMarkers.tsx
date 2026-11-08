@@ -170,8 +170,6 @@ export function coneGeometry(pose: Camera["pose"]): { faces: BufferGeometry; gro
   return { faces: beam, ground: geometry(ground), edges: geometry(edges) };
 }
 
-/** 侧面（镜头处）、地面填充、地面轮廓相对视场不透明度的倍数：常态为 14%、6%、35%（ui.md §5.2） */
-
 /** 视场：常态在该摄像头有检出目标时提亮（§5.1 L3）；critical / high 网络攻击时 1 Hz 呼吸（V-A1） */
 function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; severe: boolean }) {
   const { detecting, pose, cone, severe } = props;

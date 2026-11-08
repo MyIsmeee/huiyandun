@@ -13,7 +13,7 @@ export const STATUS = {
 export const BODY = "#E4E4E7";
 export const POLE_COLOR = "#D4D4D8";
 export const BEAM = "#374151";
-/** 视场各层相对视场不透明度的倍数：侧面、落地扇形、轮廓线 */
+/** 侧面（镜头处）、地面填充、地面轮廓相对视场不透明度的倍数：常态为 14%、6%、35%（ui.md §5.2） */
 export const CONE_LAYERS = { faces: 1, ground: 0.43, edges: 2.5 } as const;
 
 export type DeviceState = Device["state"];
