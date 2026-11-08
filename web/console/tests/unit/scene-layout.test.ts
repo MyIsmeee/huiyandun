@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Site } from "../../src/lib/api";
 import {
+  type Area,
   blendShot,
+  coverage,
   cameraShot,
   followShot,
   OVERVIEW,
@@ -13,10 +14,10 @@ import {
   WALL_HEIGHT_M,
 } from "../../src/scene/layout";
 
-const SITE: Site = { id: "s", name: "站点", width_m: 40, height_m: 24, walls: [], doors: [], zones: [], devices: [] };
+const SITE: Area = { x0: 0, y0: 0, width_m: 40, height_m: 24 };
 const SIZE = { width: 1100, height: 700 };
-// 与 layout.ts 的 INSET 一致：顶部留出 KPI 底板，底部留出断线提示
-const AREA = { left: 24, top: 112, right: SIZE.width - 24, bottom: SIZE.height - 56 };
+// 与 layout.ts 的 INSET 一致：画布上方不再有浮层（D-115），底部留出断线提示
+const AREA = { left: 24, top: 24, right: SIZE.width - 24, bottom: SIZE.height - 56 };
 
 function bounds(points: (readonly [number, number])[]) {
   const xs = points.map(([x]) => x);
@@ -25,7 +26,7 @@ function bounds(points: (readonly [number, number])[]) {
 }
 
 /** 透视总览视图 */
-const overviewView = (site: Site, size: typeof SIZE, pose: Pose = OVERVIEW) => {
+const overviewView = (site: Area, size: typeof SIZE, pose: Pose = OVERVIEW) => {
   const { shot, panLimit } = overviewShot(site, size, pose);
   return sceneView(shot, size, panLimit);
 };
@@ -241,5 +242,38 @@ describe("跟随与摄像头机位", () => {
     expect(blendShot(a, b, 0)).toEqual(a);
     expect(blendShot(a, b, 1).eye).toEqual(b.eye);
     expect(blendShot(a, b, 0.5).fov).toBeCloseTo((a.fov + b.fov) / 2);
+  });
+});
+
+describe("coverage：取景按摄像头覆盖范围（D-116）", () => {
+  it("包含安装位置与视场扇形，四周留 1 m", () => {
+    // 位于 (10, 10)、朝 +x、视场 90°、可视 6 m：扇形最远到 x = 16，上下各约 ±4.24 m
+    const area = coverage([{ x: 10, y: 10, yaw_deg: 0, hfov_deg: 90, range_m: 6 }]);
+    expect(area.x0).toBeCloseTo(9);
+    expect(area.x0 + area.width_m).toBeCloseTo(17);
+    expect(area.y0).toBeCloseTo(10 - 6 * Math.SQRT1_2 - 1);
+    expect(area.y0 + area.height_m).toBeCloseTo(10 + 6 * Math.SQRT1_2 + 1);
+  });
+
+  it("两台摄像头取并集，与站点尺寸无关", () => {
+    const area = coverage([
+      { x: 0, y: 0, yaw_deg: 90, hfov_deg: 60, range_m: 5 },
+      { x: 30, y: 0, yaw_deg: 90, hfov_deg: 60, range_m: 5 },
+    ]);
+    expect(area.x0).toBeLessThan(0);
+    expect(area.x0 + area.width_m).toBeGreaterThan(30);
+    expect(area.y0).toBeCloseTo(-1);
+  });
+
+  it("没有摄像头时为原点附近 10 m 见方", () => {
+    expect(coverage([])).toEqual({ x0: -5, y0: -5, width_m: 10, height_m: 10 });
+  });
+
+  it("覆盖范围不在原点时，总览与 2D 视图都以其中心为取景中心", () => {
+    const area: Area = { x0: 100, y0: 50, width_m: 20, height_m: 10 };
+    const [cx, cy] = planView(area, SIZE).project([110, 0, 55]);
+    expect(cx).toBeCloseTo(AREA.left + (AREA.right - AREA.left) / 2);
+    expect(cy).toBeCloseTo(AREA.top + (AREA.bottom - AREA.top) / 2);
+    expect(overviewShot(area, SIZE).shot.look).toEqual([110, 0, 55]);
   });
 });
