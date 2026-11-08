@@ -1,4 +1,4 @@
-// 提交规范见 HYD-PROC-002 §2.2；pre-commit 与 CI-01 共用本配置（CM-05）
+// 提交规范见 engineering.md；pre-commit 与 CI-01 共用本配置（CM-05）
 const ISSUE_REF = /^(Refs|Closes): #\d+$/m;
 
 export default {

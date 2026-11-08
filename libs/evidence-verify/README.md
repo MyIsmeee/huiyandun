@@ -1,6 +1,6 @@
 # evidence-verify
 
-离线校验工具 `hyd-evidence verify`（C-EVD-03、FR-703）：在不运行慧眼盾的机器上校验 evidence-service 导出的证据包。包格式见 docs 仓库 `docs/design/080-evidence.md` §4。只读包内文件，不访问网络；只依赖 `cryptography`，不 import 慧眼盾的其他代码。
+离线校验工具 `hyd-evidence verify`（C-EVD-03、FR-703）：在不运行慧眼盾的机器上校验 evidence-service 导出的证据包。包格式见 docs 仓库 `docs/archive/design/080-evidence.md` §4。只读包内文件，不访问网络；只依赖 `cryptography`，不 import 慧眼盾的其他代码。
 
 ## 用法
 

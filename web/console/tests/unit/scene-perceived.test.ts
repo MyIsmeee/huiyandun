@@ -125,7 +125,7 @@ describe("立面、物体与树（§5.1 L1）", () => {
     close([object.min.y, object.max.y, object.min.x, object.min.z, object.max.x, object.max.z], [0, 0.8, 2, 2, 3, 3]);
   });
 
-  it("立面着立面色，顶面着顶盖色（04 §5.1 L1）", () => {
+  it("立面着立面色，顶面着顶盖色（ui.md §5.2）", () => {
     const walls = [{ class: "wall" as const, line: [[0, 5], [10, 5]], height_m: 2.8 }];
     const solid = sceneGeometry(frame("cam-01", { walls }), PALETTE.dark, FURNISHING).solid;
     const position = solid?.getAttribute("position") as BufferAttribute;

@@ -63,14 +63,14 @@ SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
 SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
-# 持久化的视觉事件（HYD-PLAN-007 §2）。
-# 保留期取检测事件的默认值 180 天（HYD-ARCH-001 §10.2）
+# 持久化的视觉事件（architecture.md §12）。
+# 保留期取检测事件的默认值 180 天（architecture.md §10）
 STREAM = "HYD_VISION"
 STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, INTEGRITY_SUBJECT]
 STREAM_MAX_AGE_S = 180 * 86400
 SCHEMA_VERSION = "1.0.0"
-INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（HYD-PLAN-007 v1.9）
-TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（HYD-PLAN-007 v1.9）
+INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（architecture.md §12）
+TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（architecture.md §12）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
 STOP_WAIT_S = 2 * TIMEOUT_MS / 1000 + 1  # 停止一路时等读帧线程退出的上限

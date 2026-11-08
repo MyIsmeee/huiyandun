@@ -3,7 +3,7 @@
 用法：python tools/dev/attack_table.py <enterprise STIX> <ics STIX> <输出 JSON>
 输入取自 MITRE 的 attack-stix-data 仓库对应版本（如 enterprise-attack-20.0.json、ics-attack-20.0.json），
 只在生成时使用、不入库；输出随代码版本化，ATT&CK 升级时重新生成并更新 deploy/third-party.yaml 的哈希。
-关联事件按 techniques 查战术（HYD-PLAN-007 §1），值班员按编号查名称；已撤销与已弃用的技术不收录。
+关联事件按 techniques 查战术（architecture.md §12），值班员按编号查名称；已撤销与已弃用的技术不收录。
 """
 
 import json

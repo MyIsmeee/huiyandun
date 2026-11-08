@@ -1,6 +1,6 @@
 # vision-engine
 
-视觉引擎（HYD-ARCH-001 §8）：经 go2rtc 拉流，检测人体与骨骼并跟踪、识别环境，输出 `contracts/events/hyd.vision.*` 结构化事件；不输出人员裁剪图（C-CV-02）。
+视觉引擎（architecture.md §8）：经 go2rtc 拉流，检测人体与骨骼并跟踪、识别环境，输出 `contracts/events/hyd.vision.*` 结构化事件；不输出人员裁剪图（C-CV-02）。
 
 ## 职责
 

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-/** 只有暗色一套主题（HYD-UIX-004 §3.1、D-104）：数字沙盘的发光线框只在深色底上成立 */
+/** 只有石墨暗色一套主题（ui.md §3、D-110；将按 D-121 改为浅色） */
 export type Theme = "dark";
 
 interface ThemeState {

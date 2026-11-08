@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { KpiRow } from "../KpiTile/KpiRow";
 
 /**
- * 主画布工具条（HYD-UIX-004 §4.1 C 区、D-115）：左侧为视图相关控件，右侧为关键指标与全屏。
+ * 主画布工具条（ui.md §4、D-115）：左侧为视图相关控件，右侧为关键指标与全屏。
  * 全屏只作用于主画布（监控室投屏，V-W4）。
  */
 export function CanvasToolbar(props: { canvas: RefObject<HTMLElement | null>; stale: boolean; children?: ReactNode }) {

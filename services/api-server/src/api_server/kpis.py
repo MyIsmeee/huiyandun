@@ -1,4 +1,4 @@
-"""大屏关键指标（HYD-UIX-004 §4.1 B 区，D-100、D-106）：前三项附较 1 小时前的变化，最近处置用时附较上一次的变化；
+"""大屏关键指标（ui.md §4，D-100、D-106）：前三项附较 1 小时前的变化，最近处置用时附较上一次的变化；
 只保存在内存中，时刻一律为墙上时钟。
 
 活跃告警取自启动时重放的近 24 小时历史，今日已处置与处置用时随重放的处置执行重建；在线设备从启动起记录，
@@ -101,7 +101,7 @@ class KpiTracker:
         )
 
     def _active(self, at: datetime) -> int:
-        """at 时仍在保持期内的告警条数，保持时长与设备告警态一致（04 §5.2）。"""
+        """at 时仍在保持期内的告警条数，保持时长与设备告警态一致（ui.md §5.1）。"""
         return sum(
             at - (PHYSICAL_HOLD if isinstance(e, VisionBehaviorV1) else CYBER_HOLD) < e.ts <= at
             for e in self._history.alerts_since(at - CYBER_HOLD)

@@ -27,7 +27,7 @@ const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
 const button = buttonVariants({ variant: "outline", size: "sm" });
 
 /**
- * 模型供应商页（04 §7.1），只对 admin 渲染入口（C-FE-07）。每次变更后重新读取列表：
+ * 模型供应商页（ui.md §7.1），只对 admin 渲染入口（C-FE-07）。每次变更后重新读取列表：
  * 启用、排序、全局禁止公网的结果以服务端为准（如开启禁止公网时服务端同时停用全部公网供应商）。
  */
 export function ProviderPage(props: { onClose: () => void }) {

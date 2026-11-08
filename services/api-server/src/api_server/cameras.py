@@ -53,7 +53,7 @@ SUBJECT = "hyd.config.cameras.v1"
 STREAM = "HYD_CONFIG"
 STREAM_MAX_AGE_S = 0  # 永久：每主题只保留最新一条
 SCHEMA_VERSION = "1.0.0"
-MAX_CAMERAS = 16  # D0 档位规划 4～8 路（01 §12.1），留余量；超出拒绝（125 设计 §8）
+MAX_CAMERAS = 16  # D0 档位规划 4～8 路（architecture.md §11），留余量；超出拒绝（125 设计 §8）
 # 推流接收（TK-129）的 ingest-net 固定地址：两者同在 edge-net，按名称会走 edge-net，而 ingest 只放行 ingest-net 上的 go2rtc
 INGEST_RTSP = "rtsp://172.30.10.10:8554"
 SYNC_S = 30  # go2rtc 重启会丢掉动态添加的流：定期比对补齐

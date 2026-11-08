@@ -22,7 +22,7 @@ import { arrange, type Furniture, isFurniture, widthOf } from "./furniture";
 export const STALE_MS = 10_000;
 /** 陈旧场景的不透明度，与"不确定 / 非实时"同为 50%（§3.2） */
 export const STALE_OPACITY = 0.5;
-/** 识别结果变化时交叉渐变的时长（04 §5.1 L1、V-A9） */
+/** 识别结果变化时交叉渐变的时长（ui.md §5.2、V-A9） */
 export const FADE_MS = 600;
 /** 立面沿墙脚线挤出的厚度 */
 const WALL_THICKNESS_M = 0.2;
@@ -53,7 +53,7 @@ export interface Palette {
   board: string;
   marking: string;
 }
-/** 地面类别低饱和；立面、物体与家具为中性灰实体，受光并投射阴影（04 §5.1 L1、D-111） */
+/** 地面类别低饱和；立面、物体与家具为中性灰实体，受光并投射阴影（ui.md §5.2、D-111） */
 export const PALETTE: Record<Theme, Palette> = {
   dark: {
     road: "#40454C",

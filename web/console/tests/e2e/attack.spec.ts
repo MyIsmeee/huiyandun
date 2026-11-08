@@ -24,7 +24,7 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-test("已处置：虚线断开并淡出；降低动效时瞬时消失（04 §5.2、V-A4）", async ({ page }) => {
+test("已处置：虚线断开并淡出；降低动效时瞬时消失（ui.md §5.1、V-A4）", async ({ page }) => {
   await presetTheme(page, "light", true);
   await freezeClock(page);
   const sockets = await open(page, [camera("normal")]);

@@ -9,5 +9,5 @@ export const useSession = create<{ role: Role | null }>()(() => ({ role: null })
 /** 可执行处置的角色（C-BE-07：viewer ⊂ operator ⊂ admin，auditor 只读审计） */
 export const canContain = (role: Role | null) => role === "operator" || role === "admin";
 
-/** 模型供应商页只对 admin 可见（04 §7、C-FE-07） */
+/** 模型供应商页只对 admin 可见（ui.md §7、C-FE-07） */
 export const canManageProviders = (role: Role | null) => role === "admin";

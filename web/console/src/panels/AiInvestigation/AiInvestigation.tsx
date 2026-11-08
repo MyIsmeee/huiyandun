@@ -44,7 +44,7 @@ const UNVERIFIED = "该实体未能在证据中溯源";
 const NO_RECORD = { loading: "读取调查记录…", none: "尚未开始调查", failed: "无法读取调查记录" } as const;
 
 /**
- * AI 安全值班员面板（HYD-UIX-004 §6.2、§8 AiInvestigation）：所选设备最近一个关联事件的规则结论与 AI 研判，分区显示
+ * AI 安全值班员面板（ui.md §6.2 AiInvestigation）：所选设备最近一个关联事件的规则结论与 AI 研判，分区显示
  * （V-AI1、V-AI8）。调查记录读 GET 接口，每收到该事件的 ai 推送或推送连接恢复时重新读取（FR-1102）。
  * 规则结论下方是"确认处置"：事件须人工确认、有待确认的执行且角色为 operator 及以上时渲染（V-AI9、C-FE-07）。
  */

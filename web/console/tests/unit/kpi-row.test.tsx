@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 describe("KpiRow", () => {
-  it("拉取前为加载态，拉取后显示数值与较 1 小时前的变化；无数据显示 —（04 §4.1 C 区）", async () => {
+  it("拉取前为加载态，拉取后显示数值与较 1 小时前的变化；无数据显示 —（ui.md §4）", async () => {
     vi.spyOn(api, "getKpis").mockResolvedValue(KPIS);
     render(<KpiRow stale={false} />);
     expect(within(tile("在线设备")).getByLabelText("加载中")).toBeTruthy();

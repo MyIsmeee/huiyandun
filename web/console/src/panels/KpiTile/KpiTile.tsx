@@ -15,7 +15,7 @@ function trend(delta: number, format: (value: number) => string): string {
 }
 
 /**
- * 工具条指标中的一项（HYD-UIX-004 §4.1 C 区、D-115）：标签、数值 + 单位、趋势排成一行，不放图表；
+ * 工具条指标中的一项（ui.md §4、D-115）：标签、数值 + 单位、趋势排成一行，不放图表；
  * 无数据显示 —，不显示 0。陈旧数据按 §3.2"不确定 / 非实时"呈现：弱化并配图标与文字（V-S3）。
  */
 export function KpiTile(props: {

@@ -1,6 +1,6 @@
 # evidence-service
 
-存证唯一写入方（D-04、G-07）。设计见 docs 仓库 `docs/design/080-evidence.md`。
+存证唯一写入方（D-04、G-07）。设计见 docs 仓库 `docs/archive/design/080-evidence.md`。
 
 ## 职责
 

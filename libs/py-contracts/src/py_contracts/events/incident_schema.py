@@ -19,7 +19,7 @@ class Technique(RootModel[str]):
 
 class Incident(ContractModel):
     """
-    关联事件实体（HYD-PLAN-007 §1），事件与 API 共用
+    关联事件实体（architecture.md §12），事件与 API 共用
     """
 
     id: str

@@ -1,12 +1,12 @@
 [project]
 name = "llm-gateway"
 version = "0.0.0"
-description = "LLM 接入网关：唯一访问模型供应商的组件（HYD-ARCH-001 §5、C-LLM-01）"
+description = "LLM 接入网关：唯一访问模型供应商的组件（architecture.md §5、C-LLM-01）"
 requires-python = "==3.12.*"
 dependencies = [
     "fastapi>=0.162.0,<0.163",
     "httpx2>=2.16.0,<3",
-    "openai>=3.42.0,<4",  # 只用官方 SDK，base_url 取自供应商配置（01 §5.2）
+    "openai>=3.42.0,<4",  # 只用官方 SDK，base_url 取自供应商配置（architecture.md §5）
     "py-common",
     "py-contracts",
     "pydantic>=2.14,<3",

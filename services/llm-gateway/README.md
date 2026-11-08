@@ -1,6 +1,6 @@
 # llm-gateway
 
-LLM 接入网关（HYD-ARCH-001 §5），系统中唯一访问模型供应商的组件（C-LLM-01）。实现测试连接与模型列表（TK-060，设计 `060-llm-providers.md`）与调用链（TK-062，设计 `062-llm-call-chain.md`）。
+LLM 接入网关（architecture.md §5），系统中唯一访问模型供应商的组件（C-LLM-01）。实现测试连接与模型列表（TK-060，设计 `060-llm-providers.md`）与调用链（TK-062，设计 `062-llm-call-chain.md`）。
 
 ## 职责
 

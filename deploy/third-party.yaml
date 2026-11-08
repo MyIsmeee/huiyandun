@@ -103,7 +103,7 @@ rulesets:
     file: rules/vendor/et-open/emerging-all.rules.tar.gz
     sha256: 212bc2f7c27c0f372a66e77eb2f86335ecb4c93c1c46714393cfcf495503286b
     license: BSD-3-Clause  # 只含 ET 自有规则（sid 2000000～2799999），不含 GPL 规则；许可证文本同目录
-    purpose: Suricata 签名规则：扫描、爆破、常见利用（01 §6.1）
+    purpose: Suricata 签名规则：扫描、爆破、常见利用（architecture.md §6）
     owner: MyIsmeee
 
   - name: MITRE ATT&CK 精简查表（Enterprise、ICS）
@@ -113,7 +113,7 @@ rulesets:
     # ATT&CK 使用条款：允许复制与再分发，须保留 MITRE 版权声明与署名（01 REUSE-11）
     license: LicenseRef-MITRE-ATTACK-Terms-of-Use
     # 由 tools/dev/attack_table.py 从 MITRE attack-stix-data 仓库 v20.0 的 STIX 数据抽取（D-070）
-    purpose: 技术编号 → 名称、战术：关联事件的战术阶段、值班员查表（HYD-PLAN-007 §1）
+    purpose: 技术编号 → 名称、战术：关联事件的战术阶段、值班员查表（architecture.md §12）
     owner: MyIsmeee
 
 # Python 包自带的二进制库（wheel 内 *.libs/）：随 wheel 分发、进程内动态链接、未经修改（G-08）
@@ -179,7 +179,7 @@ assets:
     sha256: bf00f2f0386a25aa310abc0424d22586e46a59ee6c737e6b375c97c9f01bd462
     license: CC0-1.0
     source: Poly Pizza 模型页 m/Cz6yDaUcM9（Quaternius Cars 包）
-    purpose: 轿车模型（04 §5.1 L4）
+    purpose: 轿车模型（ui.md §5.2）
     owner: MyIsmeee
   - name: Quaternius Truck
     file: web/console/public/models/quaternius-truck.glb
@@ -214,7 +214,7 @@ assets:
     sha256: 230ac925ef408b64f3b215eb64c9999e2cd81a82c6d114b2cd50ea6d6d5e0cbe
     license: CC0-1.0
     source: Poly Pizza 模型页 m/yYEEJzKxb4
-    purpose: 桌（04 §5.1 L1，D-059）
+    purpose: 桌（ui.md §5.2，D-059）
     owner: MyIsmeee
   - name: Quaternius · Chair
     file: web/console/public/models/quaternius-chair.glb

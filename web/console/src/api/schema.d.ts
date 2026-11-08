@@ -453,7 +453,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 大屏关键指标（HYD-UIX-004 §4.1 B 区、D-100），按边缘主机时钟计算 */
+        /** @description 大屏关键指标（ui.md §4、D-100），按边缘主机时钟计算 */
         get: operations["getKpis"];
         put?: never;
         post?: never;
@@ -567,11 +567,11 @@ export interface components {
             /** @enum {unknown} */
             mode: "bypass" | "host_probe";
             /**
-             * @description HYD-UIX-004 §5.2，由 api-server 计算
+             * @description ui.md §5.1，由 api-server 计算
              * @enum {unknown}
              */
             state: "normal" | "offline" | "uncalibrated" | "physical_alert" | "cyber_alert" | "both" | "pending_action" | "contained" | "notify_only";
-            /** @description state 为 cyber_alert 或 both 期间收到的最高告警等级，其余状态为 null（HYD-UIX-004 §5.2、V-A1） */
+            /** @description state 为 cyber_alert 或 both 期间收到的最高告警等级，其余状态为 null（ui.md §5.1、V-A1） */
             alert_severity: ("critical" | "high" | "medium" | "low") | null;
             /** @description type 为 camera 时必有 */
             camera: components["schemas"]["CameraInfo"] | null;
@@ -744,7 +744,7 @@ export interface components {
             event: components["schemas"]["hyd.security.alert.v1.schema"] | components["schemas"]["hyd.vision.behavior.v1.schema"] | components["schemas"]["hyd.vision.integrity.v1.schema"] | null;
         };
         /**
-         * @description 选择后由前端填入地址模板与默认端口（HYD-ARCH-001 §5.3）
+         * @description 选择后由前端填入地址模板与默认端口（architecture.md §5）
          * @enum {unknown}
          */
         Preset: "llama_cpp" | "ollama" | "lm_studio" | "vllm" | "deepseek" | "bailian" | "kimi" | "zhipu" | "siliconflow" | "custom";
@@ -915,7 +915,7 @@ export interface components {
             data: Record<string, never>;
         };
         AiInvestigation: components["schemas"]["hyd.ai.investigation.v1.schema"];
-        /** @description AI 安全值班员调查记录（HYD-PLAN-007 §1 AiInvestigation）；verdict 为 null 表示进行中或失败 */
+        /** @description AI 安全值班员调查记录（architecture.md §12 AiInvestigation）；verdict 为 null 表示进行中或失败 */
         Investigation: {
             incident_id: string;
             steps: components["schemas"]["InvestigationStep"][];
@@ -934,7 +934,7 @@ export interface components {
         VisionIntegrity: components["schemas"]["hyd.vision.integrity.v1.schema"];
         /**
          * Incident
-         * @description 关联事件实体（HYD-PLAN-007 §1），事件与 API 共用
+         * @description 关联事件实体（architecture.md §12），事件与 API 共用
          */
         "incident.schema": {
             id: string;
@@ -995,7 +995,7 @@ export interface components {
         };
         /**
          * EventBase
-         * @description 所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
+         * @description 所有事件的公共字段（architecture.md §12、C-BE-02）
          */
         "event_base.schema": {
             /** @description 语义化版本，主版本与文件名中的 v1 一致 */
@@ -1080,14 +1080,14 @@ export interface components {
         } & components["schemas"]["event_base.schema"];
         /**
          * PlaybookExecution
-         * @description 处置执行实体（HYD-PLAN-007 §1），事件与 API 共用
+         * @description 处置执行实体（architecture.md §12），事件与 API 共用
          */
         "playbook_execution.schema": {
             id: string;
             playbook_id: string;
             playbook_version: string;
             incident_id: string;
-            /** @description 来自关联事件，供设备状态计算（HYD-UIX-004 §5.2） */
+            /** @description 来自关联事件，供设备状态计算（ui.md §5.1） */
             device_ids: string[];
             target: string;
             /**
@@ -1126,7 +1126,7 @@ export interface components {
         };
         /**
          * IncidentReport
-         * @description 溯源报告 AI 区（HYD-PLAN-007 §6、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
+         * @description 溯源报告 AI 区（architecture.md §12、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
          */
         "incident_report.v1.schema": {
             summary: string;
@@ -1158,7 +1158,7 @@ export interface components {
         };
         /**
          * InvestigationFrame
-         * @description AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（HYD-REQ-006 US-11）
+         * @description AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（spec.md US-11）
          */
         "investigation_frame.schema": {
             incident_id: string;
@@ -1211,7 +1211,7 @@ export interface components {
         "hyd.ai.investigation.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["investigation_frame.schema"];
         /**
          * Track
-         * @description 检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）
+         * @description 检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（architecture.md §12）
          */
         "track.schema": {
             camera_id: string;
@@ -1246,7 +1246,7 @@ export interface components {
         Line: components["schemas"]["Point"][];
         /**
          * SceneFrame
-         * @description 摄像头实时识别的环境，已投影到平面（HYD-REQ-006 FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（HYD-PLAN-007 §1）。地面、物体与标线的多边形合计不超过 64 个
+         * @description 摄像头实时识别的环境，已投影到平面（spec.md FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
          */
         "scene_frame.schema": {
             camera_id: string;

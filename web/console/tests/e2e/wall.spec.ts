@@ -91,7 +91,7 @@ test("切换到空间态势后显示 3D 场景，宫格控件隐藏，所选视�
 /** 充当截帧的灰色图片：浏览器按内容识别格式 */
 const FRAME = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="9"><rect width="16" height="9" fill="#666"/></svg>';
 
-test("摄像头栏：缩略图、状态与人数，单击选中并让监控墙翻到所在页（04 §4.1 B 区、V-W1）", async ({ page }) => {
+test("摄像头栏：缩略图、状态与人数，单击选中并让监控墙翻到所在页（ui.md §4、V-W1）", async ({ page }) => {
   await page.setViewportSize({ width: 1700, height: 900 }); // ≥ 1600 时摄像头栏默认展开
   await page.route(/\/api\/cameras\/.+\/snapshot/, (route) => route.fulfill({ contentType: "image/svg+xml", body: FRAME }));
   await openWall(page, ["cam-01", "cam-02", "cam-03", "cam-04", "cam-05"], "4");

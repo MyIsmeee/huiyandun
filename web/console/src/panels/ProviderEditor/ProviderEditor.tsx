@@ -23,7 +23,7 @@ export type EditorForm = {
 };
 export type Pending = "save" | "test" | "models" | null;
 
-// 本地服务填局域网 IP（04 §7 的示例主机），端口为各服务默认值；域名一律判为公网（C-LLM-13），故不用 host.docker.internal
+// 本地服务填局域网 IP（ui.md §7 的示例主机），端口为各服务默认值；域名一律判为公网（C-LLM-13），故不用 host.docker.internal
 const PRESETS: Record<Preset, [label: string, url: string]> = {
   llama_cpp: ["llama.cpp", "http://192.168.1.50:8080/v1"],
   ollama: ["Ollama", "http://192.168.1.50:11434/v1"],
@@ -39,7 +39,7 @@ const PRESETS: Record<Preset, [label: string, url: string]> = {
 const CHECKS = { connectivity: "连通", model: "模型存在", structured_output: "结构化输出" } as const;
 const LOOPBACK = /^\s*https?:\/\/(127\.|localhost(?=[:/]|\s*$)|\[::1\])/i;
 const button = buttonVariants({ variant: "outline", size: "sm" });
-/** 原生下拉框：与 Input 同样式（04 §3.6） */
+/** 原生下拉框：与 Input 同样式（ui.md §2） */
 
 const initialForm = (p: Provider | null): EditorForm => ({
   preset: p?.preset ?? "llama_cpp",
@@ -52,7 +52,7 @@ const initialForm = (p: Provider | null): EditorForm => ({
 });
 
 /**
- * 添加与编辑供应商（04 §7.2）。测试连接只能针对已保存的供应商，故"保存并测试"先保存再测试；
+ * 添加与编辑供应商（ui.md §7.1）。测试连接只能针对已保存的供应商，故"保存并测试"先保存再测试；
  * 保存后对话框转为编辑该供应商。Key 只写不读：留空表示不修改（V-M5）。
  */
 export function ProviderEditor(props: { provider: Provider | null; onClose: () => void; onSaved: () => void }) {

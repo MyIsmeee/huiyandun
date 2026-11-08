@@ -32,7 +32,7 @@ const POSE_FIELDS: [key: keyof Pose, label: string, unit: string][] = [
 ];
 const DEFAULT_POSE: Pose = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
 const button = buttonVariants({ variant: "outline", size: "sm" });
-/** 原生下拉框：与 Input 同样式（04 §3.6） */
+/** 原生下拉框：与 Input 同样式（ui.md §2） */
 
 export type CameraForm = {
   name: string;
@@ -100,7 +100,7 @@ const snapshotOf = (id: string): Promise<Snapshot> =>
 type Snapshot = { status: "none" } | { status: "loading" } | { status: "ready"; url: string } | { status: "failed"; message: string };
 
 /**
- * 添加与编辑摄像头（04 §7.4）。保存后自动取一帧预览（V-CAM4），可在预览上点两点画禁止攀爬警戒线（V-CAM7），
+ * 添加与编辑摄像头（ui.md §7.2）。保存后自动取一帧预览（V-CAM4），可在预览上点两点画禁止攀爬警戒线（V-CAM7），
  * 画完再保存。口令只写不读：留空表示不修改（V-CAM2）。推流方式显示推流地址，推流口令只在保存为推流后显示一次。
  */
 export function CameraEditor(props: { camera: Camera | null; onClose: () => void; onSaved: () => void }) {

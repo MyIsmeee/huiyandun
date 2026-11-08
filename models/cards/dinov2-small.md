@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 版本 | `dinov2-small@8b1f705a+hyd.1`（未修改上游权重） |
-| 用途 | 画面可信度：整帧画面嵌入序列判定画面重放（HYD-REQ-006 FR-302，REUSE-23）。只取整帧的 CLS 嵌入，不检测、不区分人员；嵌入只在内存中保留 190 s，不持久化（G-04） |
+| 用途 | 画面可信度：整帧画面嵌入序列判定画面重放（spec.md FR-302，REUSE-23）。只取整帧的 CLS 嵌入，不检测、不区分人员；嵌入只在内存中保留 190 s，不持久化（G-04） |
 | 上游 | Meta DINOv2 ViT-S/14（`facebook/dinov2-small`）；ONNX 为 Hugging Face `onnx-community/dinov2-small` 的导出（提交 `8b1f705`，`onnx/model.onnx`） |
 | 许可证 | Apache-2.0 |
 | 训练数据 | LVD-142M（上游自监督预训练，无标注） |

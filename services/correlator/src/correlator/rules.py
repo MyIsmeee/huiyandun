@@ -1,4 +1,4 @@
-"""关联规则（HYD-PLAN-007 §4）：rules/correlator/<规则 ID>.yaml，启动时全部加载并校验。"""
+"""关联规则（architecture.md §12）：rules/correlator/<规则 ID>.yaml，启动时全部加载并校验。"""
 
 from pathlib import Path
 from typing import Annotated, Literal

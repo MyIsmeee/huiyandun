@@ -417,7 +417,7 @@ def test_each_track_published_at_least_2_hz() -> None:
 def test_behavior_publish_failure_is_logged_and_detection_continues(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """行为事件经 JetStream 持久化（HYD-PLAN-007 §2）；发布失败记录错误，位置照常发布。"""
+    """行为事件经 JetStream 持久化（architecture.md §12）；发布失败记录错误，位置照常发布。"""
     camera, _ = pipeline(MAPPING, lying=True)
     bus = FakeBus()
 

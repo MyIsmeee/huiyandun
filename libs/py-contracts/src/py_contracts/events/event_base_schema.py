@@ -12,7 +12,7 @@ from py_contracts.base import ContractModel
 
 class EventBase(ContractModel):
     """
-    所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
+    所有事件的公共字段（architecture.md §12、C-BE-02）
     """
 
     schema_version: str = Field(..., pattern="^1[.][0-9]+[.][0-9]+$")

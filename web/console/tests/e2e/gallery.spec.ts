@@ -41,7 +41,7 @@ for (const [component, states] of Object.entries(COMPONENTS)) {
       // 视频须已有首帧，否则截到空白
       await page.waitForFunction(() => [...document.querySelectorAll("video")].every((v) => v.readyState >= 2));
 
-      // 编辑对话框经 Radix 渲染到 body（04 §3.6）：截对话框本身
+      // 编辑对话框经 Radix 渲染到 body（ui.md §2）：截对话框本身
       const shot = DIALOGS.has(component) ? page.getByRole("dialog") : page.locator(`[data-state="${state}"]`);
       await expect(shot).toHaveScreenshot(`${component}-${state}.png`);
     });

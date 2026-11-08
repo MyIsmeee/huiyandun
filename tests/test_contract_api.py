@@ -1,4 +1,4 @@
-"""api-server 接口契约：接口清单、最低角色、写操作 X-Request-ID 与关键模型（HYD-PLAN-007 §3）。"""
+"""api-server 接口契约：接口清单、最低角色、写操作 X-Request-ID 与关键模型（architecture.md §12）。"""
 
 from pathlib import Path
 
@@ -27,7 +27,7 @@ SPEC = yaml.safe_load(
 )
 WRITE_METHODS = {"post", "put", "patch", "delete"}
 
-# HYD-PLAN-007 §3：(方法, 路径, 最低角色)；None 表示无需登录
+# architecture.md §12：(方法, 路径, 最低角色)；None 表示无需登录
 ENDPOINTS = [
     ("post", "/api/auth/login", None),
     ("post", "/api/auth/logout", "viewer"),
@@ -318,7 +318,7 @@ INVESTIGATION = {
 
 
 def test_investigation_in_progress_and_finished() -> None:
-    """调查进行中 verdict 为 null；结束后带判定与供应商（HYD-PLAN-007 §1 AiInvestigation）。"""
+    """调查进行中 verdict 为 null；结束后带判定与供应商（architecture.md §12 AiInvestigation）。"""
     Investigation.model_validate(INVESTIGATION)
     verdict = {
         "is_attack": True,

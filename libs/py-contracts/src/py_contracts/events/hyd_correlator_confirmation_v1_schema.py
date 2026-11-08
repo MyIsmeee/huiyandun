@@ -8,7 +8,7 @@ from .event_base_schema import EventBase
 
 class CorrelatorConfirmationV1(EventBase):
     """
-    操作员确认处置（生产者 api-server，消费者 playbook-executor，HYD-REQ-006 FR-407）
+    操作员确认处置（生产者 api-server，消费者 playbook-executor，spec.md FR-407）
     """
 
     incident_id: str

@@ -52,7 +52,7 @@ def test_online_devices_excludes_offline_and_compares_hour_ago(
 def test_online_devices_counts_stream_lost_under_containment(
     devices: Devices, history: History
 ) -> None:
-    """已处置在画面上覆盖离线（04 §5.2），在线台数仍按断流计。"""
+    """已处置在画面上覆盖离线（ui.md §5.1），在线台数仍按断流计。"""
     kpis = tracker(devices, history)
     now = time.monotonic()
     devices.on_execution(execution("exe-1", "contained", NOW), now)  # 处置 cam-02

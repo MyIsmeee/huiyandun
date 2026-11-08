@@ -34,7 +34,7 @@ override-dependencies = [
 [tool.uv.workspace]
 members = ["services/*", "libs/*"]
 
-# CI-06（HYD-PROC-002 §4.1）：模块依赖边界，G-03 的机械保障
+# CI-06（engineering.md）：模块依赖边界，G-03 的机械保障
 [tool.importlinter]
 root_packages = [
     "api_server",

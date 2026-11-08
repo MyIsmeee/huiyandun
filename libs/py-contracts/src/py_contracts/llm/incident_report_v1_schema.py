@@ -43,7 +43,7 @@ class Recommendation(ContractModel):
 
 class IncidentReport(ContractModel):
     """
-    溯源报告 AI 区（HYD-PLAN-007 §6、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
+    溯源报告 AI 区（architecture.md §12、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
     """
 
     summary: str = Field(..., max_length=300)

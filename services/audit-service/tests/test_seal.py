@@ -1,4 +1,4 @@
-"""每日哈希链封存与校验（HYD-ARCH-001 §10.1、G-13）。每个用例使用独立的新数据库。"""
+"""每日哈希链封存与校验（architecture.md §10、G-13）。每个用例使用独立的新数据库。"""
 
 import asyncio
 import logging

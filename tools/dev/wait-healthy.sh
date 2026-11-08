@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 等待全部服务 healthy 并打印就绪耗时（HYD-DEP-005 §5.2）
+# 等待全部服务 healthy 并打印就绪耗时（ops.md §5）
 # 用法：wait-healthy.sh <compose 命令...>；超时秒数取 HEALTH_TIMEOUT，默认 120
 # 以 config --services 为应有清单：未创建、未定义健康检查或已退出的服务均按未就绪处理
 # 例外：标签 hyd.oneshot=true 的一次性服务（如数据库迁移）以退出码 0 视为就绪

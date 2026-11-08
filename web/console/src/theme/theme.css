@@ -1,10 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* 只有一套暗色主题：shadcn 组件的 dark: 变体始终生效（04 §3.1） */
+/* 只有一套暗色主题：shadcn 组件的 dark: 变体始终生效（ui.md §3） */
 @custom-variant dark (&);
 
-/* HYD-UIX-004 §3.1：石墨中性灰（D-110），变量名沿用 shadcn/ui */
+/* ui.md §3：石墨中性灰（D-110），变量名沿用 shadcn/ui */
 :root {
   color-scheme: dark;
   --background: #0a0a0b;
@@ -116,7 +116,7 @@
   animation: enter var(--duration-slow) var(--ease-out) both;
 }
 
-/* 一次性淡出（攻击连线断开，04 §5.2）：终态即不可见，动效停止时瞬时消失 */
+/* 一次性淡出（攻击连线断开，ui.md §5.1）：终态即不可见，动效停止时瞬时消失 */
 @keyframes fade-out {
   from {
     opacity: 1;

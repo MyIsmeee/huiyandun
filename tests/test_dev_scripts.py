@@ -1,4 +1,4 @@
-"""tools/dev 下 make doctor 与 make demo-health 调用的脚本（HYD-DEP-005 §2、§5.2）。"""
+"""tools/dev 下 make doctor 与 make demo-health 调用的脚本（ops.md §1）。"""
 
 import os
 import shutil

@@ -7,12 +7,12 @@ import { setPage, toggleZoom, useWall } from "../../store/wall";
 import { type Grid, pageCount, pageItems, pageOf, tileSize, wallGrid } from "./grid";
 import { VideoTile } from "./VideoTile";
 
-/** 格间距与四周留白（04 §3.5） */
+/** 格间距与四周留白（ui.md §3） */
 const GAP = 8;
 const ZOOMED: Grid = { cols: 1, rows: 1, capacity: 1, featured: false, fixed: false };
 
 /**
- * 监控墙（HYD-UIX-004 §4.3、D-115）：登记顺序的摄像头按宫格分页播放实时画面；
+ * 监控墙（ui.md §4、D-115）：登记顺序的摄像头按宫格分页播放实时画面；
  * 不在当前页的摄像头不建立连接（V-W3）。选中的摄像头不在当前页时自动翻到所在页（V-W1）。
  */
 export function VideoWall({ devices }: { devices: Device[] }) {

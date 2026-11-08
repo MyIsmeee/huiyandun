@@ -1,4 +1,4 @@
-# M0 必选检查 CI-01～CI-11（HYD-PROC-002 §4.1）
+# M0 必选检查 CI-01～CI-11（engineering.md）
 # 检查对象尚未建立时输出 notice 注明接入任务后跳过；Action 按 commit SHA 锁定，下载的二进制校验 sha256（G-15）
 name: ci-m0
 

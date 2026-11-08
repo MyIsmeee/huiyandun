@@ -31,7 +31,7 @@ EXECUTION_SUBJECT = "hyd.playbook.execution.v1"
 CONFIRMATION_SUBJECT = "hyd.correlator.confirmation.v1"
 ROLLBACK_SUBJECT = "hyd.playbook.rollback.v1"
 INCIDENT_SUBJECT = "hyd.correlator.incident.v1"
-# 处置记录与操作员命令保留 365 天（HYD-ARCH-001 §10.2）
+# 处置记录与操作员命令保留 365 天（architecture.md §10）
 EXECUTION_STREAM, COMMAND_STREAM = "HYD_PLAYBOOK", "HYD_COMMAND"
 MAX_AGE_S = 365 * 86400
 # 重启重放范围：执行记录覆盖 TTL 上限（C-BE-05）；停机期间的关联事件只补近 5 分钟，避免很久以前的攻击

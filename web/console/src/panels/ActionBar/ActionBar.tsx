@@ -5,7 +5,7 @@ import { ApiError, api } from "../../lib/api";
 import { type Execution, useLive } from "../../store/live";
 import { canContain, useSession } from "../../store/session";
 
-/** 处置状态的说明（04 §5.2、V-T1）；原因或拦截证据另起一行 */
+/** 处置状态的说明（ui.md §5.1、V-T1）；原因或拦截证据另起一行 */
 const STATE: Record<Execution["state"], string> = {
   pending: "待确认处置",
   executing: "处置中",
@@ -51,7 +51,7 @@ function remaining(expiresAt: string, now: number): string {
 }
 
 /**
- * 处置操作（HYD-UIX-004 §8 ActionBar）：执行状态、原因或拦截证据（D-072）、到期剩余时间；已处置且角色为
+ * 处置操作（ui.md ActionBar）：执行状态、原因或拦截证据（D-072）、到期剩余时间；已处置且角色为
  * operator 及以上时渲染"立即解封"，请求期间不可再点（FR-405）；无权限时不渲染（C-FE-07、V-T2）。
  */
 export function ActionBar(props: { deviceId: string }) {

@@ -1,7 +1,7 @@
 [project]
 name = "audit-service"
 version = "0.0.0"
-description = "审计日志每日哈希链封存与校验（HYD-ARCH-001 §10.1、G-13）"
+description = "审计日志每日哈希链封存与校验（architecture.md §10、G-13）"
 requires-python = "==3.12.*"
 dependencies = ["api-server"]
 

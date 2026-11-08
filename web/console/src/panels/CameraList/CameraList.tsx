@@ -26,7 +26,7 @@ export function address(camera: Camera): string {
 }
 
 /**
- * 摄像头页（04 §7.4），只对 admin 渲染入口（C-FE-07）。保存后各服务即时生效（FR-906），列表以服务端为准重新读取。
+ * 摄像头页（ui.md §7.2），只对 admin 渲染入口（C-FE-07）。保存后各服务即时生效（FR-906），列表以服务端为准重新读取。
  */
 export function CameraPage(props: { onClose: () => void }) {
   const [load, setLoad] = useState<CameraLoad>({ status: "loading" });
