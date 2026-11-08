@@ -544,7 +544,7 @@ networks:
   edge-net:
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
-  # go2rtc 拉取局域网摄像头的出站网络（D-103）：只有 go2rtc 接入，只拉登记表中的地址
+  # 拉取局域网摄像头的出站网络（D-103、D-117）：只有 go2rtc 与兼容模式中继 ingest 接入，只拉登记表中的地址
   camera-net: {}
   # go2rtc 从 ingest 取设备推来的流；固定网段供 ingest 按地址只放行 go2rtc 读取
   ingest-net:

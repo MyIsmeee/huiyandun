@@ -62,6 +62,9 @@ CREATE_LOCK = 0x48594431  # 新增摄像头的事务级咨询锁：并发新增�
 ID_SEQUENCE = "camera_id_seq"  # 编号只增不复用（D-108）
 # 取流主机不能指向 go2rtc 或 ingest 自身：取流请求会落到视频服务自己身上（D-103、D-117）
 FORBIDDEN_HOSTS = {"localhost", "go2rtc", "ingest"}
+# go2rtc 与 ingest 在内部网络的固定地址（compose.yaml，tests/test_compose.py 核对一致）：
+# 填成拉流来源会让它们拉自己，形成回环
+SELF_ADDRESSES = {"172.30.10.2", "172.30.11.2", "172.30.12.2", "172.30.10.10", "172.30.11.3"}
 SNAPSHOT_TIMEOUT_S = 8.0  # 首帧须等关键帧，摄像头的关键帧间隔常为 2～4 s
 SNAPSHOT_ERRORS = {
     404: "视频服务中没有这路流：拉流地址尚未同步，稍后重试",
@@ -210,16 +213,16 @@ def _check(values: dict[str, Any]) -> None:
 
 
 def _local(host: str) -> bool:
-    """回环、未指定地址、localhost 与 go2rtc：取流请求会落到 go2rtc 自身。"""
+    """回环、未指定地址、localhost、go2rtc 与 ingest 的名称或固定地址：取流请求会落到视频服务自身。"""
     name = host.strip("[]").lower().rstrip(".")
-    if name in FORBIDDEN_HOSTS or name.endswith(".localhost"):
+    if name in FORBIDDEN_HOSTS or name in SELF_ADDRESSES or name.endswith(".localhost"):
         return True
     try:
         ip = ipaddress.ip_address(name)
     except ValueError:
         return False
     ip = getattr(ip, "ipv4_mapped", None) or ip  # ::ffff:127.0.0.1 同样是回环
-    return ip.is_loopback or ip.is_unspecified
+    return ip.is_loopback or ip.is_unspecified or str(ip) in SELF_ADDRESSES
 
 
 SOURCE_FIELDS = ("protocol", "host", "port", "path")

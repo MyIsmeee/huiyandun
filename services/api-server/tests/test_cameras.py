@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import httpx2
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, text
 
@@ -153,6 +154,11 @@ def test_create_password_write_only_and_audited(
         ({"source": GATE["source"] | {"host": "GO2RTC"}}, 400),
         ({"source": GATE["source"] | {"host": "ingest"}}, 400),
         (
+            {"source": GATE["source"] | {"host": "172.30.10.10"}},
+            400,
+        ),  # ingest 的固定地址：中继拉自己
+        ({"source": GATE["source"] | {"host": "[::ffff:172.30.11.2]"}}, 400),  # go2rtc 的固定地址
+        (
             {"source": GATE["source"] | {"protocol": "http", "relay": True}},
             400,
         ),  # 兼容模式只支持 RTSP、RTMP
@@ -205,6 +211,19 @@ def test_delete_and_roles(client: TestClient, password: str) -> None:
     login(client, "viewer", password)
     assert client.get("/api/cameras").status_code == 403
     assert client.post("/api/cameras", json=GATE, headers=headers()).status_code == 403
+
+
+def test_self_addresses_match_compose() -> None:
+    """go2rtc 与 ingest 在 compose.yaml 中的全部固定地址都不能作为拉流来源（中继回环）。"""
+    compose = Path(__file__).resolve().parents[3] / "deploy/compose/compose.yaml"
+    services = yaml.safe_load(compose.read_text(encoding="utf-8"))["services"]
+    fixed = {
+        net["ipv4_address"]
+        for name in ("go2rtc", "ingest")
+        for net in services[name]["networks"].values()
+        if net and "ipv4_address" in net
+    }
+    assert fixed == cameras.SELF_ADDRESSES
 
 
 def row(**over: Any) -> dict[str, Any]:
