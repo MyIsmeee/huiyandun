@@ -66,7 +66,10 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       nats: { condition: service_healthy }  # 订阅事件转发到 WS 各频道
-    networks: [core-net, video-net, llm-net]  # 经 llm-net 调 llm-gateway 的内部接口
+    networks:  # 经 llm-net 调 llm-gateway 的内部接口
+      core-net: {}
+      video-net: { ipv4_address: 172.30.11.4 }  # 固定地址：ingest 的控制接口只放行它（D-117）
+      llm-net: {}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
       interval: 5s
@@ -272,15 +275,19 @@ services:
       - sed "s|__PUSH_PASS__|$$(cat /run/secrets/push_password)|" /base/ingest.yml > /tmp/ingest.yml && exec /mediamtx /tmp/ingest.yml
     volumes: ["./ingest.yml:/base/ingest.yml:ro"]
     ports: ["8554:8554/tcp"]
+    # video-net：控制接口只监听此固定地址、只放行 api-server（兼容模式中继路径，D-117）；
+    # camera-net：兼容模式下代为拉取登记表中的摄像头（D-103、D-117，G-05 例外）
     networks:
       edge-net: {}
       ingest-net: { ipv4_address: 172.30.10.10 }
+      video-net: { ipv4_address: 172.30.11.3 }
+      camera-net: {}
     restart: unless-stopped
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9997/v3/paths/list"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://172.30.11.3:9997/v3/paths/list"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -537,7 +544,7 @@ networks:
   edge-net:
     driver_opts:
       com.docker.network.bridge.enable_ip_masquerade: "false"
-  # go2rtc 拉取局域网摄像头的出站网络（D-103）：只有 go2rtc 接入，只拉登记表中的地址
+  # 拉取局域网摄像头的出站网络（D-103、D-117）：只有 go2rtc 与兼容模式中继 ingest 接入，只拉登记表中的地址
   camera-net: {}
   # go2rtc 从 ingest 取设备推来的流；固定网段供 ingest 按地址只放行 go2rtc 读取
   ingest-net:

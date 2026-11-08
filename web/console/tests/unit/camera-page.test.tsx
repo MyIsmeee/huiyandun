@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api } from "../../src/lib/api";
 import { type Camera, CameraEditor, body } from "../../src/panels/CameraEditor/CameraEditor";
@@ -17,7 +17,7 @@ const CAM: Camera = {
   name: "大门口",
   ip: "192.168.8.31",
   ingest: "pull",
-  source: { protocol: "rtsp", host: "192.168.8.31", port: 554, path: "/Streaming/Channels/101" },
+  source: { protocol: "rtsp", host: "192.168.8.31", port: 554, path: "/Streaming/Channels/101", relay: false },
   username: "admin",
   password_set: true,
   pose: POSE,
@@ -69,18 +69,19 @@ describe("摄像头列表（04 §7.4）", () => {
   });
 
   it("地址：ONVIF 不带路径，IPv6 加方括号", () => {
-    expect(address({ ...CAM, source: { protocol: "onvif", host: "fe80::1", port: 80, path: "" } })).toBe("onvif://[fe80::1]:80");
+    expect(address({ ...CAM, source: { protocol: "onvif", host: "fe80::1", port: 80, path: "", relay: false } })).toBe("onvif://[fe80::1]:80");
   });
 });
 
 describe("添加与编辑（04 §7.4）", () => {
   it("请求体：主机留空取设备 IP；口令为空不发送（只写不读）", () => {
-    const form = { name: " 后门 ", ip: "10.0.0.5", ingest: "pull" as const, protocol: "http" as const, host: "", port: 80, path: "video.mjpg", username: "", password: "", pose: POSE, climb_lines: [] };
+    const form = { name: " 后门 ", ip: "10.0.0.5", ingest: "pull" as const, protocol: "http" as const, host: "", port: 80, path: "video.mjpg", relay: true, username: "", password: "", pose: POSE, climb_lines: [] };
     expect(body(form)).toEqual({
       name: "后门",
       ip: "10.0.0.5",
       ingest: "pull",
-      source: { protocol: "http", host: "10.0.0.5", port: 80, path: "video.mjpg" },
+      // 兼容模式只对 RTSP / RTMP 有效（D-117）：HTTP 即使勾选也不发送
+      source: { protocol: "http", host: "10.0.0.5", port: 80, path: "video.mjpg", relay: false },
       username: null,
       pose: POSE,
       climb_lines: [],
@@ -88,7 +89,7 @@ describe("添加与编辑（04 §7.4）", () => {
   });
 
   it("推流：不带拉流地址与凭据；列表显示推流地址与用户名（FR-907）", () => {
-    const form = { name: "手机", ip: "10.0.0.6", ingest: "push" as const, protocol: "rtsp" as const, host: "x", port: 554, path: "p", username: "u", password: "pw", pose: POSE, climb_lines: [] };
+    const form = { name: "手机", ip: "10.0.0.6", ingest: "push" as const, protocol: "rtsp" as const, host: "x", port: 554, path: "p", relay: false, username: "u", password: "pw", pose: POSE, climb_lines: [] };
     expect(body(form)).toEqual({ name: "手机", ip: "10.0.0.6", ingest: "push", source: null, username: null, pose: POSE, climb_lines: [] });
     expect(address({ ...CAM, ingest: "push", source: null })).toBe(`推流地址 rtsp://${location.hostname}:8554/cam-03 · 用户 hyd`);
   });
@@ -129,5 +130,24 @@ describe("添加与编辑（04 §7.4）", () => {
     fireEvent.click(screen.getByRole("radio", { name: "推流（设备推到本机）" }));
     expect(screen.queryByRole("combobox", { name: "协议" })).toBeNull();
     expect(screen.getByText("推流地址")).toBeTruthy();
+  });
+});
+
+describe("兼容模式（D-117、V-CAM8）", () => {
+  it("RTSP 显示开关并随请求体发送；HTTP 不显示开关、提示改用 RTSP", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockResolvedValue(new Blob(["jpeg"]));
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:frame");
+    const update = vi.spyOn(api, "updateCamera").mockResolvedValue(CAM);
+    render(<CameraEditor camera={CAM} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.click(screen.getByRole("switch", { name: "兼容模式" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0]?.[1]).toMatchObject({ source: { protocol: "rtsp", relay: true } });
+    cleanup();
+
+    const http = { ...CAM, source: { protocol: "http" as const, host: "192.168.8.31", port: 8080, path: "mjpeg", relay: false } };
+    render(<CameraEditor camera={http} onClose={() => {}} onSaved={() => {}} />);
+    expect(screen.queryByRole("switch", { name: "兼容模式" })).toBeNull();
+    expect(screen.getByText(/请尽量改用 RTSP/)).toBeTruthy();
   });
 });

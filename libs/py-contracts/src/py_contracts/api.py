@@ -76,6 +76,10 @@ class CameraSource(ContractModel):
     """
     流路径，可含查询串；不含空白与 #（# 在 go2rtc 源中表示参数）
     """
+    relay: bool | None = False
+    """
+    兼容模式：经 MediaMTX（ingest）中继拉流，只对 rtsp / rtmp 有效（D-117）
+    """
 
 
 class ClimbLine(RootModel[list[float]]):

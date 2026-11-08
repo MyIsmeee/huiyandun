@@ -118,6 +118,9 @@ def create_app(config: ApiConfig) -> FastAPI:
         app.state.go2rtc = httpx2.AsyncClient(
             base_url=config.go2rtc_url, timeout=config.go2rtc_timeout_s
         )
+        app.state.ingest = httpx2.AsyncClient(
+            base_url=config.ingest_url, timeout=config.ingest_timeout_s
+        )
         # 超时按供应商配置逐次给出（llm_probe.forward）
         app.state.llm_gateway = httpx2.AsyncClient(base_url=config.llm_gateway_url)
         app.state.evidence = httpx2.AsyncClient(
@@ -154,6 +157,7 @@ def create_app(config: ApiConfig) -> FastAPI:
                     await task
             await bus.close()
             await app.state.go2rtc.aclose()
+            await app.state.ingest.aclose()
             await app.state.llm_gateway.aclose()
             await app.state.evidence.aclose()
             await app.state.engine.dispose()
