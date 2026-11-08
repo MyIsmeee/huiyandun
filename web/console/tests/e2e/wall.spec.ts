@@ -11,9 +11,10 @@ async function openWall(page: Page, ids: string[], layout = "auto") {
   );
   await mockLlmStatus(page);
   await mockKpis(page);
-  await mockSocket(page);
+  const sockets = await mockSocket(page);
   await page.goto("/");
   await expect(page.getByRole("list", { name: "监控墙" })).toBeVisible();
+  return { devices, sockets };
 }
 
 const wall = (page: Page) => page.getByRole("list", { name: "监控墙" });
@@ -61,6 +62,17 @@ test("超出容量分页，前后翻页（V-W1；选中自动翻页随摄像头�
   await page.getByRole("button", { name: "下一页" }).click();
   await expect(wall(page).getByRole("listitem").first()).toContainText("cam-05");
   await page.getByRole("button", { name: "上一页" }).click();
+  await expect(page.getByText("1 / 2")).toBeVisible();
+});
+
+test("放大的摄像头被删除：还原宫格，分页恢复（V-W4）", async ({ page }) => {
+  const { devices, sockets } = await openWall(page, ["cam-01", "cam-02", "cam-03", "cam-04", "cam-05", "cam-06"], "4");
+  await tile(page, "cam-01").dblclick();
+  await expect(wall(page).getByRole("listitem")).toHaveCount(1);
+  await expect(page.getByText("1 / 2")).toHaveCount(0);
+
+  sockets[0]?.send(JSON.stringify({ channel: "site", data: { ...SITE, devices: devices.slice(1) } }));
+  await expect(wall(page).getByRole("listitem")).toHaveCount(4);
   await expect(page.getByText("1 / 2")).toBeVisible();
 });
 

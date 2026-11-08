@@ -36,6 +36,10 @@ export function VideoWall({ devices }: { devices: Device[] }) {
 
   const [ref, size] = useSize();
   const zoomedCamera = zoomed ? cameras.find((c) => c.id === zoomed) : undefined;
+  // 放大的摄像头被删除：清掉放大状态，宫格与分页一并恢复
+  useEffect(() => {
+    if (zoomed && !zoomedCamera) useWall.setState({ zoomed: null });
+  }, [zoomed, zoomedCamera]);
   const shown = zoomedCamera ? ZOOMED : grid;
   const items = zoomedCamera ? [zoomedCamera] : pageItems(cameras, grid, current, selectedId);
   const tile = size ? tileSize(size.w, size.h, shown, GAP) : null;
