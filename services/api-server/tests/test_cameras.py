@@ -386,12 +386,17 @@ def test_registry_event_has_no_credentials() -> None:
 
 class FakeSite:
     devices: list[Any] = ["变化前"]
+    areas: list[Any] = []
 
     def model_copy(self, update: dict[str, Any]) -> "FakeSite":
         return self
 
     def model_dump(self, mode: str) -> dict[str, Any]:
         return {}
+
+
+async def no_areas() -> list[Any]:
+    return []
 
 
 def test_apply_failure_does_not_raise_and_retries(key_file: Path) -> None:
@@ -419,6 +424,7 @@ def test_apply_failure_does_not_raise_and_retries(key_file: Path) -> None:
     )
     registry = cameras.Registry(state)
     registry._load = load  # type: ignore[method-assign]
+    registry._areas = no_areas  # type: ignore[method-assign]
 
     async def twice() -> list[bool]:
         pending = []
@@ -447,7 +453,7 @@ def test_ingest_down_does_not_block_go2rtc(key_file: Path) -> None:
         published.append(event)
 
     camera = {"id": "cam-01", "name": "东门", "ip": "172.30.0.11", "pose": POSE, "calibration": [],
-              "climb_lines": [], "password_enc": None}  # fmt: skip
+              "climb_lines": [], "password_enc": None, "area_id": None}  # fmt: skip
     rows = [camera | row(host="mediamtx", port=8554, path="cam-01")]
 
     async def load() -> list[Any]:
@@ -465,6 +471,7 @@ def test_ingest_down_does_not_block_go2rtc(key_file: Path) -> None:
     )
     registry = cameras.Registry(state)
     registry._load = load  # type: ignore[method-assign]
+    registry._areas = no_areas  # type: ignore[method-assign]
     put = ("put", {"name": "cam-01", "src": "rtsp://mediamtx:8554/cam-01"})
 
     asyncio.run(registry.apply())

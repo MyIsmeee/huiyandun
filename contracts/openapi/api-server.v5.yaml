@@ -1,12 +1,12 @@
 # api-server 对外接口（architecture.md §12、C-BE-01）
-# 主版本编码在文件名中；破坏性变更须新建 api-server.v4.yaml（CI-08）
-# v3：PlaybookExecution 增加只通知、跳过、过期状态（TK-050），回滚接口的返回取值增加
+# 主版本编码在文件名中；破坏性变更须升主版本并改文件名（CI-08）
+# v5：站点去掉平面图墙体、门洞与 zones，改为场景区域（D-124、TK-152）
 # x-min-role：最低角色（C-BE-07）；写操作要求 X-Request-ID（C-BE-08）
 # 会话凭证只经 HttpOnly Cookie 传递，浏览器脚本不可读（C-FE-06、DP-12）
 openapi: 3.1.0
 info:
   title: 慧眼盾 api-server
-  version: 4.0.0
+  version: 5.0.0
 security:
   - session: []
 
@@ -60,11 +60,91 @@ paths:
       x-min-role: viewer
       responses:
         "200":
-          description: 平面图、区域、设备、标定状态（FR-901）
+          description: 站点、场景区域、设备、标定状态（FR-901、FR-908）
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Site" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/scene/areas:
+    get:
+      operationId: listSceneAreas
+      x-min-role: viewer
+      responses:
+        "200":
+          description: 全部场景区域及其物体，按编号排列
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SceneAreaList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createSceneArea
+      description: 新建空区域；写审计（G-13），经 WS site 频道推送
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SceneAreaCreate" }
+      responses:
+        "201":
+          description: 已新建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SceneArea" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/scene/areas/{id}:
+    put:
+      operationId: saveSceneArea
+      description: |
+        整体保存区域：名称、尺寸、物体与本区域摄像头的位置和朝向（FR-908）。cameras 即保存后位于本区域的全部摄像头：
+        未列出的原有摄像头移出区域，列出的其他区域摄像头移入（其原区域的 updated_at 随之更新）。
+        摄像头的位置与朝向写回登记表，各服务按 FR-906 热更新。写审计（G-13），经 WS site 频道推送
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SceneAreaUpdate" }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SceneArea" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: updated_at 与库中不一致：场景已被其他人修改
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      operationId: deleteSceneArea
+      description: 写审计（G-13），经 WS site 频道推送
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      responses:
+        "204": { description: 已删除 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 区域内仍有摄像头
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/cameras:
     get:
       operationId: listCameras
@@ -706,33 +786,68 @@ components:
         expires_at: { type: string, format: date-time }
     Site:
       type: object
-      required: [id, name, width_m, height_m, walls, doors, zones, devices]
+      required: [id, name, width_m, height_m, areas, devices]
       properties:
         id: { type: string }
         name: { type: string }
         width_m: { type: number, exclusiveMinimum: 0 }
         height_m: { type: number, exclusiveMinimum: 0 }
-        walls:
-          type: array
-          description: 线段 [x1, y1, x2, y2]，单位米
-          items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
-        doors:
-          type: array
-          description: 门洞线段 [x1, y1, x2, y2]，单位米，位于某段墙体上
-          items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
-        zones: { type: array, items: { $ref: "#/components/schemas/Zone" } }
+        areas: { type: array, items: { $ref: "#/components/schemas/SceneArea" } }
         devices: { type: array, items: { $ref: "#/components/schemas/Device" } }
-    Zone:
+    SceneItem:
       type: object
-      required: [id, name, polygon, no_climb]
+      description: 区域内放置的一个成品模型（FR-908）
+      required: [asset, x, y, rot, len]
+      properties:
+        asset: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$", description: 资产目录中的编号 }
+        x: { type: number, minimum: 0, maximum: 500, description: 米，区域左下为原点，按网格吸附 }
+        y: { type: number, minimum: 0, maximum: 500 }
+        rot: { enum: [0, 90, 180, 270], description: 旋转角（度） }
+        len:
+          anyOf: [{ type: integer, minimum: 1, maximum: 500 }, { type: "null" }]
+          description: 线状资产（墙、围栏、道路）的长度，单位格；其余为 null
+    SceneArea:
+      type: object
+      description: 场景区域（D-124）：一张独立的搭建式场景，摄像头的 pose.x、pose.y 为区域内坐标
+      required: [id, name, width_m, depth_m, items, updated_at]
+      properties:
+        id: { type: string, description: area-NN，只增不复用 }
+        name: { type: string }
+        width_m: { type: integer, minimum: 1, maximum: 500 }
+        depth_m: { type: integer, minimum: 1, maximum: 500 }
+        items: { type: array, items: { $ref: "#/components/schemas/SceneItem" } }
+        updated_at: { type: string, format: date-time, description: 保存时原样带回，用于防并发覆盖 }
+    SceneAreaList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/SceneArea" } }
+    SceneAreaCreate:
+      type: object
+      required: [name, width_m, depth_m]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        width_m: { type: integer, minimum: 1, maximum: 500 }
+        depth_m: { type: integer, minimum: 1, maximum: 500 }
+    CameraPlacement:
+      type: object
+      description: 摄像头在区域内的位置与朝向；安装高度、俯角、视场角在摄像头页编辑
+      required: [id, x, y, yaw_deg]
       properties:
         id: { type: string }
-        name: { type: string }
-        polygon:
-          type: array
-          minItems: 3
-          items: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
-        no_climb: { type: boolean }
+        x: { type: number, minimum: 0, maximum: 500 }
+        y: { type: number, minimum: 0, maximum: 500 }
+        yaw_deg: { type: number, minimum: 0, exclusiveMaximum: 360 }
+    SceneAreaUpdate:
+      type: object
+      required: [name, width_m, depth_m, items, cameras, updated_at]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        width_m: { type: integer, minimum: 1, maximum: 500 }
+        depth_m: { type: integer, minimum: 1, maximum: 500 }
+        items: { type: array, maxItems: 2000, items: { $ref: "#/components/schemas/SceneItem" } }
+        cameras: { type: array, items: { $ref: "#/components/schemas/CameraPlacement" } }
+        updated_at: { type: string, format: date-time, description: 读取时的 updated_at }
     Device:
       type: object
       required: [id, name, type, ip, mode, state, alert_severity, camera]
@@ -786,9 +901,10 @@ components:
       maxItems: 4
     Camera:
       type: object
-      required: [id, name, ip, ingest, source, username, password_set, pose, calibration, climb_lines, created_at, updated_at]
+      required: [id, name, ip, ingest, source, username, password_set, area_id, pose, calibration, climb_lines, created_at, updated_at]
       properties:
         id: { type: string, description: cam-NN，也是 go2rtc 与录像中的流名 }
+        area_id: { anyOf: [{ type: string }, { type: "null" }], description: 所在场景区域；null 表示未放入任何区域，3D 中不出现（D-124） }
         name: { type: string }
         ip:
           anyOf: [{ type: string, format: ipv4 }, { type: string, format: ipv6 }]
@@ -840,9 +956,10 @@ components:
         climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
     CameraInfo:
       type: object
-      required: [stream, pose, calibration, mapping, homography, reproj_error_m]
+      required: [stream, area_id, pose, calibration, mapping, homography, reproj_error_m]
       properties:
         stream: { type: string, description: go2rtc 流名 }
+        area_id: { anyOf: [{ type: string }, { type: "null" }], description: 所在场景区域，null 表示未放置 }
         mapping:
           enum: [calibrated, estimated, none]
           description: 地面映射：calibrated 按 ≥ 4 组标定点；estimated 按安装参数估算（D-102）；none 时 state 为 uncalibrated
@@ -1160,7 +1277,8 @@ components:
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
         alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
         （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；scene 为 VisionScene
-        （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；system 为系统消息（如心跳）。
+        （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；site 为 Site（摄像头登记表或场景区域
+        变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
         连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
         各自的最新状态），按发生先后排列（D-077）
       required: [channel, data]

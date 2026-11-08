@@ -20,6 +20,7 @@ const CAM: Camera = {
   source: { protocol: "rtsp", host: "192.168.8.31", port: 554, path: "/Streaming/Channels/101", relay: false },
   username: "admin",
   password_set: true,
+  area_id: null,
   pose: POSE,
   calibration: [],
   climb_lines: [],

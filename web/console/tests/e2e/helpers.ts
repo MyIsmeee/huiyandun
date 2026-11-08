@@ -6,17 +6,7 @@ export const SITE = {
   name: "演示办公区",
   width_m: 40,
   height_m: 24,
-  walls: [
-    [0, 0, 40, 0],
-    [40, 0, 40, 24],
-    [40, 24, 0, 24],
-    [0, 24, 0, 0],
-  ],
-  doors: [
-    [18, 0, 20, 0],
-    [0, 10, 0, 12],
-  ],
-  zones: [{ id: "z-01", name: "设备间外墙", polygon: [[30, 0], [40, 0], [40, 6], [30, 6]], no_climb: true }],
+  areas: [],
   devices: [],
 };
 export const UNAUTHORIZED = { code: "unauthorized", message: "未登录或会话失效", request_id: "r" };

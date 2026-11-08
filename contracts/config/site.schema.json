@@ -1,23 +1,11 @@
 {
   "title": "SiteConfig",
-  "description": "站点配置 site.yaml：平面图、门洞、区域、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（spec.md FR-901）",
+  "description": "站点配置 site.yaml：站点尺寸（首次启动时建默认场景区域，D-124）、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（spec.md FR-901）",
   "type": "object",
   "additionalProperties": false,
-  "required": ["site", "walls", "zones", "cameras", "whitelist"],
+  "required": ["site", "cameras", "whitelist"],
   "properties": {
     "site": { "$ref": "#/$defs/SiteInfo" },
-    "walls": {
-      "type": "array",
-      "description": "线段 [x1, y1, x2, y2]，单位米",
-      "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
-    },
-    "doors": {
-      "type": "array",
-      "description": "门洞线段 [x1, y1, x2, y2]，单位米；须位于某段墙体上（FR-904）",
-      "default": [],
-      "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
-    },
-    "zones": { "type": "array", "items": { "$ref": "#/$defs/ZoneConfig" } },
     "cameras": { "type": "array", "items": { "$ref": "#/$defs/CameraConfig" } },
     "whitelist": {
       "type": "array",
@@ -44,22 +32,6 @@
           "enum": ["bypass", "host_probe"],
           "description": "部署模式，整个站点统一（architecture.md §6）；设备的 mode 取此值"
         }
-      }
-    },
-    "ZoneConfig": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "name", "polygon", "no_climb"],
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "polygon": {
-          "type": "array",
-          "description": "平面坐标 [x, y]，单位米",
-          "minItems": 3,
-          "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
-        },
-        "no_climb": { "type": "boolean" }
       }
     },
     "CameraConfig": {

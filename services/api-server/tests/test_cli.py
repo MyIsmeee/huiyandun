@@ -36,4 +36,4 @@ def test_serve_refuses_invalid_site(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "site.width_m:" in result.stderr
-    assert "walls: Field required" in result.stderr
+    assert "cameras: Field required" in result.stderr

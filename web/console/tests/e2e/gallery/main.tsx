@@ -29,17 +29,7 @@ const SITE: Site = {
   name: "演示办公区",
   width_m: 40,
   height_m: 24,
-  walls: [
-    [0, 0, 40, 0],
-    [40, 0, 40, 24],
-    [40, 24, 0, 24],
-    [0, 24, 0, 0],
-  ],
-  doors: [
-    [18, 0, 20, 0],
-    [0, 10, 0, 12],
-  ],
-  zones: [{ id: "z-01", name: "设备间外墙", polygon: [[30, 0], [40, 0], [40, 6], [30, 6]], no_climb: true }],
+  areas: [],
   devices: [],
 };
 const PLAN_SIZE = { width: 640, height: 400 };
