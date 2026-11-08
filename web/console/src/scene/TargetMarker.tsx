@@ -29,7 +29,7 @@ export function TargetMarker() {
       className="pointer-events-none absolute top-0 left-0"
     >
       <Corners color={ACCENT} />
-      <span className="absolute bottom-1.5 left-[calc(var(--w)/2)] -translate-x-1/2 rounded-full border border-white/15 bg-card px-2.5 py-0.5 text-xs whitespace-nowrap text-foreground tabular-nums">
+      <span className="absolute bottom-1.5 left-[calc(var(--w)/2)] -translate-x-1/2 rounded-full border bg-card px-2.5 py-0.5 text-xs whitespace-nowrap text-foreground tabular-nums">
         {targetLabel(target)}
       </span>
     </div>

@@ -9,10 +9,12 @@ export const STATUS = {
   cyber: "#D03B3B",
   contained: "#0CA30C",
 } as const;
-/** 实体数字孪生（ui.md §5.2，D-111）：常态机身白灰、立杆浅灰，常态视场为白色光束；都不表达状态 */
+/** 实体数字孪生（ui.md §5.2，D-111）：常态机身白灰、立杆浅灰，常态视场为与人员同色的中性深灰光束（浅色地面上可见）；都不表达状态 */
 export const BODY = "#E4E4E7";
 export const POLE_COLOR = "#D4D4D8";
-export const BEAM = "#FFFFFF";
+export const BEAM = "#374151";
+/** 视场各层相对视场不透明度的倍数：侧面、落地扇形、轮廓线 */
+export const CONE_LAYERS = { faces: 1, ground: 0.43, edges: 2.5 } as const;
 
 export type DeviceState = Device["state"];
 export type Camera = {
@@ -57,7 +59,7 @@ export interface Look {
   tags: { icon: TagIcon; text: string; color: string }[];
 }
 
-const CONE = { color: BEAM, opacity: 0.14, breathe: false };
+export const CONE = { color: BEAM, opacity: 0.14, breathe: false };
 const CYBER_CONE = { color: STATUS.cyber, opacity: 0.25, breathe: true };
 /** 处置中、待联动：保持告警色，攻击已在处理，不再呼吸 */
 const HELD_CONE = { ...CYBER_CONE, breathe: false };

@@ -23,7 +23,7 @@ import { type Camera, STATUS } from "./devices";
 import { facing, type Figure, figure, HEAD_R } from "./pose";
 import { hoverMarker, marker } from "./TargetMarker";
 import { forget, renderTime, smoothed } from "./smoothing";
-import { ACCENT, FILL, LOCK_RING_MS, turnToward, type Visible, visibleTargets } from "./targets";
+import { ACCENT, FILL, LOCK_RING_MS, MARK_OPACITY, turnToward, type Visible, visibleTargets } from "./targets";
 import { useVehicleModels, type Vehicle } from "./vehicles";
 
 /** 每个图层的实例上限：C-FE-04 的 200 个目标，固定容量免得目标数变化时重建网格 */
@@ -267,16 +267,16 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         </instancedMesh>
       ))}
       <instancedMesh ref={discs} args={[DISC, undefined, CAPACITY]} frustumCulled={false}>
-        <meshBasicMaterial color={FILL} vertexColors transparent opacity={0.1} depthWrite={false} />
+        <meshBasicMaterial color={FILL} vertexColors transparent opacity={MARK_OPACITY.disc} depthWrite={false} />
       </instancedMesh>
       <instancedMesh ref={dashes} args={[DASHED, undefined, CAPACITY]} frustumCulled={false}>
         <meshBasicMaterial color={STATUS.uncertain} transparent opacity={0.8} depthWrite={false} />
       </instancedMesh>
       <instancedMesh ref={rings} args={[RING, undefined, CAPACITY]} frustumCulled={false}>
-        <meshBasicMaterial color={ACCENT} transparent opacity={0.5} depthWrite={false} />
+        <meshBasicMaterial color={ACCENT} transparent opacity={MARK_OPACITY.ring} depthWrite={false} />
       </instancedMesh>
       <instancedMesh ref={dots} args={[DOT, undefined, DOT_CAPACITY]} frustumCulled={false}>
-        <meshBasicMaterial color={ACCENT} transparent opacity={0.3} depthWrite={false} />
+        <meshBasicMaterial color={ACCENT} transparent opacity={MARK_OPACITY.dots} depthWrite={false} />
       </instancedMesh>
     </>
   );

@@ -66,6 +66,8 @@ export function detectingByCamera(targets: Record<string, Target>): Record<strin
 export const FILL = "#374151";
 /** 点缀色（D-111）：选中括框与轨迹取强调色 --primary（D-121），不表达任何状态 */
 export const ACCENT = "#2563EB";
+/** 叠在地面上的半透明标注：定位误差圆（FILL）、新目标锁定环与轨迹点（ACCENT）的不透明度 */
+export const MARK_OPACITY = { disc: 0.1, ring: 0.5, dots: 0.3 } as const;
 
 export const CLASS_LABEL: Record<TargetClass, string> = {
   person: "人员",

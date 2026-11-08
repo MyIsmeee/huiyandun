@@ -1,6 +1,7 @@
 import { ChevronDown, Clock, Cpu, Shield, ShieldAlert, TriangleAlert } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Item } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
@@ -264,17 +265,10 @@ function AlertRow(props: { alert: Alert; selected: string | null; count: number 
 function Row(props: { device: string | null; selected: boolean; children: ReactNode }) {
   const { device, selected, children } = props;
   return (
-    <button
-      type="button"
-      disabled={device === null}
-      onClick={() => device && select(device)}
-      aria-current={selected || undefined}
-      className={cn(
-        "mx-1 flex min-w-0 flex-1 items-start gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-secondary disabled:cursor-default",
-        selected && "bg-accent hover:bg-accent",
-      )}
-    >
-      {children}
-    </button>
+    <Item asChild size="sm" className={cn("mx-1 min-w-0 flex-1 flex-nowrap items-start px-3 py-2 text-left hover:bg-secondary disabled:cursor-default", selected && "bg-accent hover:bg-accent")}>
+      <button type="button" disabled={device === null} onClick={() => device && select(device)} aria-current={selected || undefined}>
+        {children}
+      </button>
+    </Item>
   );
 }

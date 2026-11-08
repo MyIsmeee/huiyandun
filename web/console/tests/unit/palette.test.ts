@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import css from "../../src/theme/theme.css?raw";
-import { BODY, POLE_COLOR, STATUS } from "../../src/scene/devices";
+import { BEAM, BODY, CONE, CONE_LAYERS, POLE_COLOR, STATUS } from "../../src/scene/devices";
 import { PALETTE } from "../../src/scene/perceived";
-import { FILL } from "../../src/scene/targets";
+import { ACCENT, coneOpacity, FILL, MARK_OPACITY } from "../../src/scene/targets";
 
 // 配色校验（V-S5、V-G2、设计 150 §4）：令牌直接取自 theme.css，场景材质取自代码
 
@@ -72,7 +72,10 @@ function deltaE2000(c1: string, c2: string): number {
 
 /** 三个语义状态色；"不确定"本身是中性灰，以虚线 + 半透明区分，不参与材质色差校验 */
 const STATES = { physical: STATUS.physical, cyber: STATUS.cyber, contained: STATUS.contained };
-const MATERIALS = { ...PALETTE.light, body: BODY, pole: POLE_COLOR, target: FILL, background: token("background") };
+const MATERIALS = { ...PALETTE.light, body: BODY, pole: POLE_COLOR, target: FILL, beam: BEAM, background: token("background") };
+/** 场景中的地面类：叠加标注落在这些颜色上 */
+const { floor, road, sidewalk, grass, earth } = PALETTE.light;
+const GROUNDS = Object.entries({ floor, road, sidewalk, grass, earth, background: token("background") });
 const SURFACES = ["card", "background", "secondary"].map(token);
 
 describe("配色校验（V-S5）", () => {
@@ -111,6 +114,22 @@ describe("配色校验（V-S5）", () => {
   it("强调色：主按钮文字 ≥ 4.5:1，选中描边对卡片 ≥ 3:1", () => {
     expect(contrast(token("primary-foreground"), token("primary"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(token("primary"), token("card"))).toBeGreaterThanOrEqual(3);
+  });
+
+  // 叠在地面上的半透明标注按实际不透明度混色后与地面比较：ΔE2000 ≥ 3 明显可见（恰可察觉差约 2.3）
+  it.each(GROUNDS)("常态视场在地面 %s 上可见：侧面 ΔE ≥ 5、轮廓线 ΔE ≥ 10，有检出时加深可察觉", (_, ground) => {
+    const face = (opacity: number) => mix(BEAM, opacity * CONE_LAYERS.faces, ground);
+    expect(deltaE2000(face(CONE.opacity), ground)).toBeGreaterThanOrEqual(5);
+    expect(deltaE2000(mix(BEAM, CONE.opacity * CONE_LAYERS.edges, ground), ground)).toBeGreaterThanOrEqual(10);
+    expect(deltaE2000(face(coneOpacity(CONE.opacity, 1)), face(CONE.opacity))).toBeGreaterThanOrEqual(2.3);
+  });
+
+  it.each(GROUNDS)("选中括框、画面引线（强调色实线）在地面 %s 上 ≥ 3:1；定位误差圆、锁定环、轨迹点 ΔE ≥ 3", (_, ground) => {
+    expect(ACCENT.toLowerCase()).toBe(token("primary"));
+    expect(contrast(ACCENT, ground)).toBeGreaterThanOrEqual(3);
+    expect(deltaE2000(mix(FILL, MARK_OPACITY.disc, ground), ground)).toBeGreaterThanOrEqual(3);
+    expect(deltaE2000(mix(ACCENT, MARK_OPACITY.ring, ground), ground)).toBeGreaterThanOrEqual(3);
+    expect(deltaE2000(mix(ACCENT, MARK_OPACITY.dots, ground), ground)).toBeGreaterThanOrEqual(3);
   });
 
   it("校验函数与参考值一致（WCAG 黑白 21:1、纯红与纯绿 ΔE2000 约 86.6）", () => {

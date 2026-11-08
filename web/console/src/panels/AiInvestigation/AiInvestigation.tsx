@@ -15,6 +15,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { Fragment, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
@@ -208,11 +209,13 @@ function InvestigationBody(props: { load: InvestigationLoad; now: number }) {
             return (
               <li key={i}>
                 <details className="group">
-                  <summary className="flex cursor-pointer items-start gap-2 hover:text-muted-foreground">
-                    <Icon aria-label={step.tool} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1">{step.reason}</span>
-                    <ChevronDown aria-hidden className="mt-0.5 size-4 shrink-0 text-subtle-foreground transition-transform group-open:rotate-180" />
-                  </summary>
+                  <Item asChild className="cursor-pointer flex-nowrap items-start gap-2 p-0 hover:text-muted-foreground">
+                    <summary>
+                      <Icon aria-label={step.tool} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1">{step.reason}</span>
+                      <ChevronDown aria-hidden className="mt-0.5 size-4 shrink-0 text-subtle-foreground transition-transform group-open:rotate-180" />
+                    </summary>
+                  </Item>
                   <p className="mt-1 ml-6 text-muted-foreground">
                     <span className="font-mono text-xs">
                       {step.tool}({step.args_summary})

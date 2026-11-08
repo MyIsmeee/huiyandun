@@ -54,15 +54,6 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* shadcn Sidebar 区块沿用卡片与悬停色 */
-  --color-sidebar: var(--card);
-  --color-sidebar-foreground: var(--foreground);
-  --color-sidebar-primary: var(--primary);
-  --color-sidebar-primary-foreground: var(--primary-foreground);
-  --color-sidebar-accent: var(--accent);
-  --color-sidebar-accent-foreground: var(--foreground);
-  --color-sidebar-border: var(--border);
-  --color-sidebar-ring: var(--ring);
   /* §3.2 状态色：固定语义、不随主题变化，只用于表达状态且必须配图标与文字（V-S2、V-S3） */
   --color-physical: #fab219;
   --color-cyber: #d03b3b;

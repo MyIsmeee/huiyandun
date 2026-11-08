@@ -1,12 +1,14 @@
 import { LayoutGrid } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Thumbnail } from "../panels/CameraRail/CameraRail";
 import { useSelection } from "../store/selection";
 import { setView, toggleZoom, useWall } from "../store/wall";
 import { useCamera } from "./camera";
 import type { Camera } from "./devices";
 import type { View } from "./layout";
+import { ACCENT } from "./targets";
 
 /** 引线卡的宽度与距场景右上角的边距，单位像素 */
 const CARD_W = 240;
@@ -45,8 +47,8 @@ export function CameraCallout({ cameras, view }: { cameras: Camera[]; view: View
     <>
       {elbow && (
         <svg aria-hidden className="pointer-events-none absolute inset-0 size-full">
-          <polyline points={elbow} fill="none" stroke="rgb(255 255 255 / 0.5)" strokeWidth={1} />
-          <circle cx={head?.[0]} cy={head?.[1]} r={3} fill="rgb(255 255 255 / 0.8)" />
+          <polyline points={elbow} fill="none" stroke={ACCENT} strokeWidth={1} />
+          <circle cx={head?.[0]} cy={head?.[1]} r={3} fill={ACCENT} />
         </svg>
       )}
       <div
@@ -54,7 +56,7 @@ export function CameraCallout({ cameras, view }: { cameras: Camera[]; view: View
         role="group"
         aria-label={`${camera.id} 画面`}
         style={{ width: CARD_W, top: MARGIN, right: MARGIN }}
-        className="absolute flex flex-col gap-2 rounded-lg border bg-card p-2 shadow-[0_8px_24px_rgb(0_0_0/0.45)]"
+        className="absolute flex flex-col gap-2 rounded-lg border bg-card p-2 shadow-[0_8px_24px_rgb(15_23_42/0.08)]"
       >
         <Thumbnail id={camera.id} offline={camera.state === "offline"} refreshMs={REFRESH_MS} />
         <div className="flex items-center gap-2 px-1">
@@ -63,19 +65,23 @@ export function CameraCallout({ cameras, view }: { cameras: Camera[]; view: View
             <span className="truncate text-muted-foreground">· {camera.name}</span>
           </span>
           {/* 只放图标：给"编号 · 名称"留出宽度，说明见悬停提示 */}
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="在监控墙中查看"
-            title="在监控墙中查看"
-            className="ml-auto size-7 shrink-0 text-muted-foreground"
-            onClick={() => {
-              setView("wall");
-              if (useWall.getState().zoomed !== camera.id) toggleZoom(camera.id);
-            }}
-          >
-            <LayoutGrid aria-hidden />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="在监控墙中查看"
+                className="ml-auto size-7 shrink-0 text-muted-foreground"
+                onClick={() => {
+                  setView("wall");
+                  if (useWall.getState().zoomed !== camera.id) toggleZoom(camera.id);
+                }}
+              >
+                <LayoutGrid aria-hidden />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>在监控墙中查看</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </>
