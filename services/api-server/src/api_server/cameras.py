@@ -312,16 +312,20 @@ class Registry:
                 await self.apply()
                 continue
             try:
-                async with self._lock:
-                    rows = await self._load()
-                    try:
-                        await self._sync_ingest(rows)
-                    except (httpx2.HTTPError, ValueError):
-                        # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
-                        log.exception("cameras.ingest_unavailable")
-                    await self._sync_go2rtc(rows)
+                await self.reconcile()
             except Exception:
                 log.exception("cameras.sync_failed")
+
+    async def reconcile(self) -> None:
+        """定期比对：按库补齐 ingest 的中继路径与 go2rtc 的流。"""
+        async with self._lock:
+            rows = await self._load()
+            try:
+                await self._sync_ingest(rows)
+            except (httpx2.HTTPError, ValueError):
+                # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
+                log.exception("cameras.ingest_unavailable")
+            await self._sync_go2rtc(rows)
 
     async def _load(self) -> list[Any]:
         async with self._state.engine.connect() as conn:

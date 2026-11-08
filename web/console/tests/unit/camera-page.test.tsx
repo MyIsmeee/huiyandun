@@ -143,5 +143,11 @@ describe("兼容模式（D-117、V-CAM8）", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0]?.[1]).toMatchObject({ source: { protocol: "rtsp", relay: true } });
+    cleanup();
+
+    const http = { ...CAM, source: { protocol: "http" as const, host: "192.168.8.31", port: 8080, path: "mjpeg", relay: false } };
+    render(<CameraEditor camera={http} onClose={() => {}} onSaved={() => {}} />);
+    expect(screen.queryByRole("switch", { name: "兼容模式" })).toBeNull();
+    expect(screen.getByText(/请尽量改用 RTSP/)).toBeTruthy();
   });
 });

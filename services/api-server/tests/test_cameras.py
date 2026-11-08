@@ -412,6 +412,51 @@ def test_apply_failure_does_not_raise_and_retries(key_file: Path) -> None:
     assert len(published) == 1
 
 
+class DownIngest(FakeIngest):
+    """ingest 不可达：任何请求都连不上。"""
+
+    async def get(self, path: str, **_: Any) -> Any:
+        raise httpx2.ConnectError("ingest")
+
+
+def test_ingest_down_does_not_block_go2rtc(key_file: Path) -> None:
+    """D-117：ingest 不可达时，下发与定期比对照常同步 go2rtc、发布登记表；中继路径待其恢复后补齐。"""
+    site_file = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
+    published: list[object] = []
+
+    async def js_publish(subject: str, event: object) -> None:
+        published.append(event)
+
+    camera = {"id": "cam-01", "name": "东门", "ip": "172.30.0.11", "pose": POSE, "calibration": [],
+              "climb_lines": [], "password_enc": None}  # fmt: skip
+    rows = [camera | row(host="mediamtx", port=8554, path="cam-01")]
+
+    async def load() -> list[Any]:
+        return rows
+
+    go2rtc = FakeGo2rtc({})
+    state = SimpleNamespace(
+        config=SimpleNamespace(site_file=site_file, device_key_file=key_file),
+        go2rtc=go2rtc,
+        ingest=DownIngest({}),
+        bus=SimpleNamespace(js_publish=js_publish),
+        hub=SimpleNamespace(broadcast=lambda _: None),
+        devices=SimpleNamespace(sync=lambda *_: None),
+        site=FakeSite(),
+    )
+    registry = cameras.Registry(state)
+    registry._load = load  # type: ignore[method-assign]
+    put = ("put", {"name": "cam-01", "src": "rtsp://mediamtx:8554/cam-01"})
+
+    asyncio.run(registry.apply())
+    assert (go2rtc.calls, len(published), registry._pending) == ([put], 1, False)
+
+    go2rtc.streams.clear()  # go2rtc 重启丢掉了动态添加的流
+    go2rtc.calls.clear()
+    asyncio.run(registry.reconcile())
+    assert go2rtc.calls == [put]
+
+
 def test_concurrent_creates_get_distinct_ids(client: TestClient) -> None:
     """并发新增串行化：不会分到同一编号而被误报为 IP 重复。"""
     from concurrent.futures import ThreadPoolExecutor
