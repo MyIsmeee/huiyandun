@@ -230,6 +230,7 @@ def _local(host: str) -> bool:
 
 
 SOURCE_FIELDS = ("protocol", "host", "port", "path")
+PLACEMENT = ("x", "y", "yaw_deg")  # 场景页也会写的位姿字段（FR-908）
 RELAY_PROTOCOLS = {"rtsp", "rtmp"}  # MediaMTX 能作为来源拉取的协议（D-117）
 
 
@@ -512,6 +513,7 @@ async def update_camera(
     changes = body.model_dump(exclude_unset=True)
     try:
         async with request.app.state.engine.begin() as conn:
+            await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
             row = await _locked(conn, camera_id)
             before = view(row)
             values: dict[str, Any] = dict(row)
@@ -538,6 +540,8 @@ async def update_camera(
                 )
             _check(values)
             values["updated_at"] = datetime.now(UTC)
+            if row["area_id"] and any(values["pose"][k] != row["pose"][k] for k in PLACEMENT):
+                await scene.touch(conn, row["area_id"], values["updated_at"])
             await conn.execute(
                 update(cameras)
                 .where(cameras.c.id == camera_id)
@@ -562,7 +566,10 @@ async def update_camera(
 @router.delete("/cameras/{camera_id}", status_code=204)
 async def delete_camera(camera_id: str, request: Request, principal: Admin) -> Response:
     async with request.app.state.engine.begin() as conn:
+        await scene.lock(conn)
         row = await _locked(conn, camera_id)
+        if row["area_id"]:
+            await scene.touch(conn, row["area_id"], datetime.now(UTC))
         await conn.execute(delete(cameras).where(cameras.c.id == camera_id))
         await record(
             conn,

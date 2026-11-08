@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, update
 from starlette.testclient import WebSocketTestSession
 
 from api_server import cameras, scene
@@ -31,12 +31,13 @@ def headers() -> dict[str, str]:
 
 
 def reset(db: tuple[ApiConfig, ApiConfig]) -> None:
-    """回到首次启动前：无摄像头、无区域、两个编号序列都未分配过。"""
+    """回到首次启动前：无摄像头、无区域、默认区域未建过、两个编号序列都未分配过。"""
 
     async def main() -> None:
         async with transaction(db[1]) as conn:
             await conn.execute(delete(cameras.cameras))
             await conn.execute(delete(scene.scene_areas))
+            await conn.execute(update(scene.scene_bootstrap).values(default_area_done=False))
         async with transaction(db[0]) as conn:  # 序列重置须属主权限
             await conn.execute(text("ALTER SEQUENCE camera_id_seq RESTART"))
             await conn.execute(text("ALTER SEQUENCE scene_area_id_seq RESTART"))
@@ -97,7 +98,9 @@ def audits(config: ApiConfig, action: str, r: Any) -> list[dict[str, Any]]:
     return asyncio.run(query_rows())
 
 
-def test_first_boot_creates_default_area_with_cameras(client: TestClient) -> None:
+def test_first_boot_creates_default_area_with_cameras(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig]
+) -> None:
     [area] = areas(client)
     assert {k: area[k] for k in ("id", "name", "width_m", "depth_m", "items")} == {
         "id": "area-01",
@@ -115,6 +118,97 @@ def test_first_boot_creates_default_area_with_cameras(client: TestClient) -> Non
     site = client.get("/api/site").json()
     assert site["areas"] == [area]
     assert {d["camera"]["area_id"] for d in site["devices"]} == {"area-01"}
+    [audit] = latest_system_audit(db[1])
+    assert (audit["target"], [c["id"] for c in audit["after"]["cameras"]]) == (
+        "area-01",
+        ["cam-01", "cam-02"],
+    )
+
+
+def latest_system_audit(config: ApiConfig) -> list[dict[str, Any]]:
+    query = (
+        select(audit_log)
+        .where(audit_log.c.actor == "system", audit_log.c.action == "scene_area.created")
+        .order_by(audit_log.c.id.desc())
+        .limit(1)
+    )
+
+    async def main() -> list[dict[str, Any]]:
+        async with transaction(config) as conn:
+            return [dict(r) for r in (await conn.execute(query)).mappings()]
+
+    return asyncio.run(main())
+
+
+def test_default_area_is_retried_after_failed_attempt(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig]
+) -> None:
+    """建到一半失败（已取号）回滚后，下次启动仍会建：判断依据随事务回滚，不看序列。"""
+
+    async def main() -> list[Any]:
+        async with transaction(db[1]) as conn:
+            await conn.execute(update(cameras.cameras).values(area_id=None))
+            await conn.execute(delete(scene.scene_areas))
+            await conn.execute(update(scene.scene_bootstrap).values(default_area_done=False))
+        with pytest.raises(RuntimeError):
+            async with transaction(db[1]) as conn:
+                await scene.ensure_default_area(conn, 40, 24)
+                raise RuntimeError("启动中断")
+        async with transaction(db[1]) as conn:
+            await scene.ensure_default_area(conn, 40, 24)
+            return list(await conn.execute(select(cameras.cameras.c.area_id)))
+
+    assert {r.area_id for r in asyncio.run(main())} == {"area-03"}  # area-02 随失败的尝试作废
+    assert [a["name"] for a in areas(client)] == ["默认区域"]
+
+
+def test_camera_page_edit_makes_scene_save_stale(client: TestClient) -> None:
+    [area] = areas(client)
+    rename = client.patch("/api/cameras/cam-01", json={"name": "东门"}, headers=headers())
+    assert rename.status_code == 200
+    assert areas(client) == [area]  # 不涉及位置的修改不影响场景编辑
+
+    pose = placements(client)["cam-01"][1] | {"yaw_deg": 180}
+    r = client.patch("/api/cameras/cam-01", json={"pose": pose}, headers=headers())
+    assert r.status_code == 200, r.text
+
+    cam = {"id": "cam-01", "x": 2, "y": 2, "yaw_deg": 90}
+    assert save(client, area, cameras=[cam]).status_code == 409
+    assert placements(client)["cam-01"][1]["yaw_deg"] == 180
+
+
+def test_deleting_camera_makes_scene_save_stale(client: TestClient) -> None:
+    [area] = areas(client)
+
+    assert client.delete("/api/cameras/cam-02", headers=headers()).status_code == 204
+
+    assert areas(client)[0]["updated_at"] != area["updated_at"]
+    assert save(client, area).status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        (
+            {"items": [ITEMS[0] | {"x": 41}]},
+            "items.0: 位置 (41, 6) 超出区域 40×24 m",
+        ),
+        (
+            {"depth_m": 20, "cameras": [{"id": "cam-02", "x": 38, "y": 22, "yaw_deg": 225}]},
+            "cameras.0: 位置 (38, 22) 超出区域 40×20 m",
+        ),
+    ],
+    ids=["item", "camera-after-shrink"],
+)
+def test_save_rejects_points_outside_area(
+    client: TestClient, changes: dict[str, Any], message: str
+) -> None:
+    [area] = areas(client)
+
+    r = save(client, area, **changes)
+
+    assert (r.status_code, r.json()["message"]) == (400, message)
+    assert areas(client) == [area]
 
 
 def test_default_area_is_not_recreated(
