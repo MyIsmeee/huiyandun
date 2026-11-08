@@ -41,14 +41,13 @@ def test_demo_site_is_valid() -> None:
     [
         (lambda d: d["site"].pop("width_m"), "site.width_m"),
         (lambda d: d["cameras"][0]["pose"].update(yaw_deg="东北"), "cameras.0.pose.yaw_deg"),
-        (lambda d: d["zones"][0].update(no_clim=True), "zones.0.no_clim"),
+        (lambda d: d["cameras"][0].update(no_clim=True), "cameras.0.no_clim"),
+        # 平面图墙体已由场景区域取代（D-124），旧字段明确拒绝而不是静默忽略
+        (lambda d: d.update(walls=[[0, 0, 40, 0]]), "walls"),
         (lambda d: d["cameras"][1].update(id="cam-01"), "cameras.1.id"),
-        (lambda d: d["zones"].append(d["zones"][0]), "zones.1.id"),
         (lambda d: d["cameras"][1].update(ip=d["cameras"][0]["ip"]), "cameras.1.ip"),
         (lambda d: d.update(whitelist=["172.30.0.1/28"]), "whitelist.0"),
         (lambda d: d["site"].update(mode="inline"), "site.mode"),
-        (lambda d: d.update(doors=[[0, 0, 1, 1]]), "doors.0"),  # 斜穿墙角，不在墙体上
-        (lambda d: d.update(doors=[[38, 0, 42, 0]]), "doors.0"),  # 超出墙体端点
         # 竖直的警戒线无法区分线上与线下（FR-104）
         (
             lambda d: d["cameras"][1].update(climb_lines=[[600, 300, 600, 200]]),
@@ -63,13 +62,11 @@ def test_demo_site_is_valid() -> None:
         "missing",
         "wrong-type",
         "unknown-field",
+        "removed-walls",
         "dup-camera",
-        "dup-zone",
         "dup-ip",
         "bad-cidr",
         "mode",
-        "door-off-wall",
-        "door-past-wall-end",
         "vertical-climb-line",
         "zero-length-climb-line",
     ],
@@ -83,7 +80,7 @@ def test_invalid_site_is_rejected_with_field_path(tmp_path: Path, edit: Any, pat
 
 def test_yaml_syntax_error_reports_line(tmp_path: Path) -> None:
     path = tmp_path / "site.yaml"
-    path.write_text("site: {id: x\nwalls: []\n", encoding="utf-8")
+    path.write_text("site: {id: x\ncameras: []\n", encoding="utf-8")
 
     with pytest.raises(site.SiteError) as exc:
         site.load(path)
@@ -151,44 +148,3 @@ def test_viewer_gets_site(client: TestClient, password: str) -> None:
     assert r.status_code == 200
     result = Site.model_validate(r.json())
     assert result.id == "demo-office"
-    assert [w.root for w in result.walls] == VALID["walls"]
-    assert [d.root for d in result.doors] == VALID["doors"]
-
-
-def test_doors_are_optional(tmp_path: Path) -> None:
-    result = site.load(write(tmp_path, edited(lambda d: d.pop("doors"))))
-
-    assert result.doors == []
-
-
-def test_door_on_any_wall_is_accepted(tmp_path: Path) -> None:
-    # 墙体方向与门洞方向相反、门洞贴着墙体端点，都算在墙体上
-    result = site.load(write(tmp_path, edited(lambda d: d.update(doors=[[0, 24, 0, 22]]))))
-
-    assert [d.root for d in result.doors] == [[0, 24, 0, 22]]
-
-
-def test_doors_without_value_mean_no_doors(tmp_path: Path) -> None:
-    # YAML 中写成 `doors:` 而未填值时为 null
-    result = site.load(write(tmp_path, edited(lambda d: d.update(doors=None))))
-
-    assert result.doors == []
-
-
-@pytest.mark.parametrize(
-    ("walls", "door", "reason"),
-    [
-        ([], [18, 0, 18, 0], "门洞长度为 0"),
-        ([[5, 5, 5, 5]], [5, 5, 6, 5], "门洞不在任何墙体上"),  # 长度为 0 的墙体不承载门洞
-    ],
-    ids=["zero-length-door", "zero-length-wall"],
-)
-def test_degenerate_door_or_wall_is_rejected(
-    tmp_path: Path, walls: list[list[float]], door: list[float], reason: str
-) -> None:
-    data = edited(lambda d: d.update(walls=d["walls"] + walls, doors=[door]))
-
-    with pytest.raises(site.SiteError) as exc:
-        site.load(write(tmp_path, data))
-
-    assert exc.value.errors == [f"doors.0: {reason}"]

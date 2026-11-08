@@ -11,16 +11,6 @@ from pydantic import ConfigDict, Field, RootModel
 from py_contracts.base import ContractModel
 
 
-class Wall(RootModel[list[float]]):
-    model_config = {"allow_inf_nan": False}
-    root: list[float] = Field(..., max_length=4, min_length=4)
-
-
-class Door(RootModel[list[float]]):
-    model_config = {"allow_inf_nan": False}
-    root: list[float] = Field(..., max_length=4, min_length=4)
-
-
 class SiteInfo(ContractModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -33,24 +23,6 @@ class SiteInfo(ContractModel):
     """
     部署模式，整个站点统一（architecture.md §6）；设备的 mode 取此值
     """
-
-
-class PolygonItem(RootModel[list[float]]):
-    model_config = {"allow_inf_nan": False}
-    root: list[float] = Field(..., max_length=2, min_length=2)
-
-
-class ZoneConfig(ContractModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
-    id: str
-    name: str
-    polygon: list[PolygonItem] = Field(..., min_length=3)
-    """
-    平面坐标 [x, y]，单位米
-    """
-    no_climb: bool
 
 
 class CalibrationItem(RootModel[list[float]]):
@@ -113,22 +85,13 @@ class CameraConfig(ContractModel):
 
 class SiteConfig(ContractModel):
     """
-    站点配置 site.yaml：平面图、门洞、区域、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（spec.md FR-901）
+    站点配置 site.yaml：站点尺寸（首次启动时建默认场景区域，D-124）、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（spec.md FR-901）
     """
 
     model_config = ConfigDict(
         extra="forbid",
     )
     site: SiteInfo
-    walls: list[Wall]
-    """
-    线段 [x1, y1, x2, y2]，单位米
-    """
-    doors: list[Door] | None = Field([], validate_default=True)
-    """
-    门洞线段 [x1, y1, x2, y2]，单位米；须位于某段墙体上（FR-904）
-    """
-    zones: list[ZoneConfig]
     cameras: list[CameraConfig]
     whitelist: list[IPv4Network | IPv6Network]
     """

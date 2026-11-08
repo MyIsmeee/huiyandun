@@ -32,4 +32,5 @@ def test_upgrade_downgrade_upgrade(scratch_db: tuple[ApiConfig, ApiConfig]) -> N
         "report",
         "llm_providers",
         "llm_settings",
+        "scene_areas",
     } <= asyncio.run(tables())

@@ -69,6 +69,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scene/areas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listSceneAreas"];
+        put?: never;
+        /** @description 新建空区域；写审计（G-13），经 WS site 频道推送 */
+        post: operations["createSceneArea"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scene/areas/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * @description 整体保存区域：名称、尺寸、物体与本区域摄像头的位置和朝向（FR-908）。cameras 即保存后位于本区域的全部摄像头：
+         *     未列出的原有摄像头移出区域，列出的其他区域摄像头移入（其原区域的 updated_at 随之更新）。
+         *     摄像头的位置与朝向写回登记表，各服务按 FR-906 热更新。物体与摄像头的放置点须在区域内，否则返回 400（D-125）。
+         *     在摄像头页改位置、朝向或删除摄像头同样更新所在区域的 updated_at。写审计（G-13），经 WS site 频道推送
+         */
+        put: operations["saveSceneArea"];
+        post?: never;
+        /** @description 写审计（G-13），经 WS site 频道推送 */
+        delete: operations["deleteSceneArea"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cameras": {
         parameters: {
             query?: never;
@@ -544,18 +584,64 @@ export interface components {
             name: string;
             width_m: number;
             height_m: number;
-            /** @description 线段 [x1, y1, x2, y2]，单位米 */
-            walls: number[][];
-            /** @description 门洞线段 [x1, y1, x2, y2]，单位米，位于某段墙体上 */
-            doors: number[][];
-            zones: components["schemas"]["Zone"][];
+            areas: components["schemas"]["SceneArea"][];
             devices: components["schemas"]["Device"][];
         };
-        Zone: {
+        /** @description 区域内放置的一个成品模型（FR-908） */
+        SceneItem: {
+            /** @description 资产目录中的编号 */
+            asset: string;
+            /** @description 米，区域左下为原点，按网格吸附 */
+            x: number;
+            y: number;
+            /**
+             * @description 旋转角（度）
+             * @enum {unknown}
+             */
+            rot: 0 | 90 | 180 | 270;
+            /** @description 线状资产（墙、围栏、道路）的长度，单位格；其余为 null */
+            len: number | null;
+        };
+        /** @description 场景区域（D-124）：一张独立的搭建式场景，摄像头的 pose.x、pose.y 为区域内坐标 */
+        SceneArea: {
+            /** @description area-NN，只增不复用 */
             id: string;
             name: string;
-            polygon: number[][];
-            no_climb: boolean;
+            width_m: number;
+            depth_m: number;
+            items: components["schemas"]["SceneItem"][];
+            /**
+             * Format: date-time
+             * @description 保存时原样带回，用于防并发覆盖
+             */
+            updated_at: string;
+        };
+        SceneAreaList: {
+            items: components["schemas"]["SceneArea"][];
+        };
+        SceneAreaCreate: {
+            name: string;
+            width_m: number;
+            depth_m: number;
+        };
+        /** @description 摄像头在区域内的位置与朝向；安装高度、俯角、视场角在摄像头页编辑 */
+        CameraPlacement: {
+            id: string;
+            x: number;
+            y: number;
+            yaw_deg: number;
+        };
+        SceneAreaUpdate: {
+            name: string;
+            width_m: number;
+            depth_m: number;
+            items: components["schemas"]["SceneItem"][];
+            cameras: components["schemas"]["CameraPlacement"][];
+            /**
+             * Format: date-time
+             * @description 读取时的 updated_at
+             */
+            updated_at: string;
         };
         Device: {
             id: string;
@@ -596,6 +682,8 @@ export interface components {
         Camera: {
             /** @description cam-NN，也是 go2rtc 与录像中的流名 */
             id: string;
+            /** @description 所在场景区域；null 表示未放入任何区域，3D 中不出现（D-124） */
+            area_id: string | null;
             name: string;
             ip: string;
             /**
@@ -654,6 +742,8 @@ export interface components {
         CameraInfo: {
             /** @description go2rtc 流名 */
             stream: string;
+            /** @description 所在场景区域，null 表示未放置 */
+            area_id: string | null;
             /**
              * @description 地面映射：calibrated 按 ≥ 4 组标定点；estimated 按安装参数估算（D-102）；none 时 state 为 uncalibrated
              * @enum {unknown}
@@ -905,7 +995,8 @@ export interface components {
          *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
          *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
          *     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；scene 为 VisionScene
-         *     （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；system 为系统消息（如心跳）。
+         *     （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；site 为 Site（摄像头登记表或场景区域
+         *     变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
          *     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
          *     各自的最新状态），按发生先后排列（D-077）
          */
@@ -1449,7 +1540,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 平面图、区域、设备、标定状态（FR-901） */
+            /** @description 站点、场景区域、设备、标定状态（FR-901、FR-908） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1459,6 +1550,135 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listSceneAreas: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部场景区域及其物体，按编号排列 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneAreaList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createSceneArea: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneAreaCreate"];
+            };
+        };
+        responses: {
+            /** @description 已新建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneArea"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    saveSceneArea: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneAreaUpdate"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneArea"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description updated_at 与库中不一致：场景已被其他人修改 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteSceneArea: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 区域内仍有摄像头 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listCameras: {

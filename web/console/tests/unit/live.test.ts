@@ -122,7 +122,7 @@ describe("站点推送（D-101）", () => {
   it("删除的摄像头移除推送状态；保留的沿用当前状态、登记信息取新站点", () => {
     receive({ channel: "devices", data: { ...device("cam-01"), state: "cyber_alert", alert_severity: "high" } } as never, 0);
     receive({ channel: "devices", data: device("cam-02") } as never, 0);
-    receive({ channel: "site", data: { id: "s", name: "s", width_m: 1, height_m: 1, walls: [], doors: [], zones: [], devices: [device("cam-01", "大门口"), device("cam-03")] } } as never, 0);
+    receive({ channel: "site", data: { id: "s", name: "s", width_m: 1, height_m: 1, areas: [], devices: [device("cam-01", "大门口"), device("cam-03")] } } as never, 0);
 
     const { site, devices } = useLive.getState();
     expect(site?.devices.map((d) => d.id)).toEqual(["cam-01", "cam-03"]);
@@ -135,7 +135,7 @@ describe("站点推送移除已删除摄像头的目标", () => {
   it("目标随摄像头删除立即移除", () => {
     useLive.setState({ targets: { "cam-02/1": { camera_id: "cam-02" } as never, "cam-01/1": { camera_id: "cam-01" } as never } });
     const device = { id: "cam-01", name: "cam-01", type: "camera", ip: "10.0.0.1", mode: "host_probe", state: "normal", alert_severity: null, camera: null };
-    receive({ channel: "site", data: { id: "s", name: "s", width_m: 1, height_m: 1, walls: [], doors: [], zones: [], devices: [device] } } as never, 0);
+    receive({ channel: "site", data: { id: "s", name: "s", width_m: 1, height_m: 1, areas: [], devices: [device] } } as never, 0);
     expect(Object.keys(useLive.getState().targets)).toEqual(["cam-01/1"]);
   });
 });

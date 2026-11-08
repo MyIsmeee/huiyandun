@@ -39,6 +39,7 @@ from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from api_server import scene
 from api_server.audit import record
 from api_server.auth import Principal, require
 from api_server.llm import seal, unseal
@@ -88,6 +89,7 @@ cameras = Table(
     Column("username", Text),
     Column("password_enc", LargeBinary),
     Column("relay", Boolean),
+    Column("area_id", Text),
     Column("pose", JSONB),
     Column("calibration", JSONB),
     Column("climb_lines", JSONB),
@@ -139,6 +141,7 @@ def view(row: Any) -> Camera:
             ),
             "username": row["username"],
             "password_set": row["password_enc"] is not None,
+            "area_id": row["area_id"],
             "pose": row["pose"],
             "calibration": row["calibration"],
             "climb_lines": row["climb_lines"],
@@ -174,6 +177,7 @@ def device(row: Any, mode: str) -> Device:
             "alert_severity": None,
             "camera": {
                 "stream": row["id"],
+                "area_id": row["area_id"],
                 "pose": row["pose"],
                 "calibration": row["calibration"],
                 "mapping": "calibrated" if calibrated else "estimated",
@@ -226,6 +230,7 @@ def _local(host: str) -> bool:
 
 
 SOURCE_FIELDS = ("protocol", "host", "port", "path")
+PLACEMENT = ("x", "y", "yaw_deg")  # 场景页也会写的位姿字段（FR-908）
 RELAY_PROTOCOLS = {"rtsp", "rtmp"}  # MediaMTX 能作为来源拉取的协议（D-117）
 
 
@@ -287,7 +292,9 @@ class Registry:
         self._lock = asyncio.Lock()  # 下发串行，各服务按先后收到登记表
         # 部署模式全站统一，设备的 mode 取此值
         site = yaml.safe_load(state.config.site_file.read_text(encoding="utf-8"))
-        self._mode = SiteConfig.model_validate(site).site.mode
+        info = SiteConfig.model_validate(site).site
+        self._mode = info.mode
+        self._size = (info.width_m, info.height_m)  # 首次启动时默认区域的尺寸
         self._pending = False  # 最近一次下发未完成（如总线不可达），尽快重试
 
     async def run(self) -> None:
@@ -303,6 +310,7 @@ class Registry:
                         if _seeded_max(rows):
                             await conn.execute(select(func.setval(ID_SEQUENCE, _seeded_max(rows))))
                         log.info("cameras.seeded")
+                    await scene.ensure_default_area(conn, *self._size)
                 break
             except Exception:
                 log.exception("cameras.bootstrap_failed")
@@ -345,13 +353,18 @@ class Registry:
                 log.exception("cameras.apply_failed")
                 self._pending = True
 
+    async def _areas(self) -> list[Any]:
+        async with self._state.engine.connect() as conn:
+            return await scene.list_areas(conn)
+
     async def _apply(self) -> None:
         rows = await self._load()
+        areas = await self._areas()
         site: Site = self._state.site
         devices = [device(r, self._mode) for r in rows]
-        # 只在登记表实际变化时推送：启动时从 site.yaml 初始导入的结果与启动时的站点相同
-        if devices != site.devices:
-            self._state.site = site.model_copy(update={"devices": devices})
+        # 只在登记表或场景区域实际变化时推送
+        if (devices, areas) != (site.devices, site.areas):
+            self._state.site = site.model_copy(update={"devices": devices, "areas": areas})
             self._state.devices.sync(devices, time.monotonic())
             self._state.hub.broadcast(
                 WsFrame(channel="site", data=self._state.site.model_dump(mode="json"))
@@ -464,6 +477,7 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         "pose": body.pose.model_dump(mode="json"),
         "calibration": [],
         "climb_lines": [line.root for line in body.climb_lines or []],
+        "area_id": None,  # 在场景页放入区域（FR-908）
         "created_at": now,
         "updated_at": now,
     } | _source_columns(body.source.model_dump() if body.source else None, body.ingest)
@@ -499,6 +513,7 @@ async def update_camera(
     changes = body.model_dump(exclude_unset=True)
     try:
         async with request.app.state.engine.begin() as conn:
+            await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
             row = await _locked(conn, camera_id)
             before = view(row)
             values: dict[str, Any] = dict(row)
@@ -525,6 +540,8 @@ async def update_camera(
                 )
             _check(values)
             values["updated_at"] = datetime.now(UTC)
+            if row["area_id"] and any(values["pose"][k] != row["pose"][k] for k in PLACEMENT):
+                await scene.touch(conn, row["area_id"], values["updated_at"])
             await conn.execute(
                 update(cameras)
                 .where(cameras.c.id == camera_id)
@@ -549,7 +566,10 @@ async def update_camera(
 @router.delete("/cameras/{camera_id}", status_code=204)
 async def delete_camera(camera_id: str, request: Request, principal: Admin) -> Response:
     async with request.app.state.engine.begin() as conn:
+        await scene.lock(conn)
         row = await _locked(conn, camera_id)
+        if row["area_id"]:
+            await scene.touch(conn, row["area_id"], datetime.now(UTC))
         await conn.execute(delete(cameras).where(cameras.c.id == camera_id))
         await record(
             conn,

@@ -32,6 +32,7 @@ from api_server import (
     llm_probe,
     relay,
     reports,
+    scene,
     site,
     video,
     ws,
@@ -198,6 +199,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(llm_chain.router)
     app.include_router(llm_probe.router)
     app.include_router(reports.router)
+    app.include_router(scene.router)
     app.include_router(site.router)
     app.include_router(ws.router)
     app.include_router(video.router)

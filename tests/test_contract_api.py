@@ -23,7 +23,7 @@ from py_contracts.api import (
 )
 
 SPEC = yaml.safe_load(
-    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v4.yaml").read_text()
+    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v5.yaml").read_text()
 )
 WRITE_METHODS = {"post", "put", "patch", "delete"}
 
@@ -38,6 +38,10 @@ ENDPOINTS = [
     ("patch", "/api/cameras/{id}", "admin"),
     ("delete", "/api/cameras/{id}", "admin"),
     ("get", "/api/cameras/{id}/snapshot", "viewer"),  # D-115：摄像头栏缩略图
+    ("get", "/api/scene/areas", "viewer"),
+    ("post", "/api/scene/areas", "admin"),
+    ("put", "/api/scene/areas/{id}", "admin"),
+    ("delete", "/api/scene/areas/{id}", "admin"),
     ("get", "/api/devices/{id}", "viewer"),
     ("post", "/api/devices/{id}/webrtc", "viewer"),
     ("get", "/api/incidents", "viewer"),
@@ -112,6 +116,7 @@ def site_sample() -> dict:
     pose = {"x": 2, "y": 2, "height_m": 3, "yaw_deg": 45, "pitch_deg": -30, "hfov_deg": 90}
     camera = {
         "stream": "cam-01",
+        "area_id": "area-01",
         "pose": pose | {"range_m": 15},
         "calibration": [[312, 540, 4.0, 6.0], [980, 552, 9.5, 6.2]],
         "mapping": "estimated",
@@ -126,15 +131,14 @@ def site_sample() -> dict:
         "mode": "bypass",
         "alert_severity": None,
     }
-    zone = {"id": "z-01", "name": "设备间外墙", "polygon": [[30, 0], [40, 0], [40, 6]]}
+    item = {"asset": "wall", "x": 0, "y": 0, "rot": 90, "len": 6}
+    area = {"id": "area-01", "name": "大厅", "width_m": 40, "depth_m": 24, "items": [item]}
     return {
         "id": "demo-office",
         "name": "演示办公区",
         "width_m": 40,
         "height_m": 24,
-        "walls": [[0, 0, 40, 0]],
-        "doors": [[18, 0, 20, 0]],
-        "zones": [zone | {"no_climb": True}],
+        "areas": [area | {"updated_at": "2026-11-08T00:00:00Z"}],
         "devices": [device | {"state": "uncalibrated", "camera": camera}],
     }
 
@@ -146,17 +150,11 @@ def test_site_accepts_site_yaml_shape() -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda s: s["walls"].append([0, 0, 40]),
-        lambda s: s["doors"].append([18, 0, 20]),
-        lambda s: s["zones"][0]["polygon"].append([1, 2, 3]),
         lambda s: s["devices"][0]["camera"]["calibration"].append([1, 2, 3]),
         lambda s: s["devices"][0]["camera"].update(homography=[[1, 0, 0], [0, 1, 0]]),
         lambda s: s["devices"][0]["camera"].update(homography=[[1, 0], [0, 1], [0, 0]]),
     ],
     ids=[
-        "wall",
-        "door",
-        "polygon-point",
         "calibration-point",
         "homography-rows",
         "homography-cols",
@@ -174,12 +172,11 @@ def test_site_rejects_wrong_array_length(mutate) -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda s, v: s["walls"].append([0, 0, v, 0]),
-        lambda s, v: s["zones"][0]["polygon"].append([v, 1]),
+        lambda s, v: s["areas"][0]["items"][0].update(x=v),
         lambda s, v: s["devices"][0]["camera"]["calibration"].append([1, 2, v, 4]),
         lambda s, v: s["devices"][0]["camera"].update(reproj_error_m=v),
     ],
-    ids=["wall", "polygon", "calibration", "reproj-error"],
+    ids=["item", "calibration", "reproj-error"],
 )
 def test_site_rejects_non_finite_number_in_nested_array(mutate, value: float) -> None:
     site = site_sample()
