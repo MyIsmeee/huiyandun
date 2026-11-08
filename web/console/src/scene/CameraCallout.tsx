@@ -32,6 +32,8 @@ export function CameraCallout({ cameras, view }: { cameras: Camera[]; view: View
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
+    // 卡片宽度固定、贴场景右上：场景变宽变窄（收起摄像头栏、全屏、调整窗口）时卡片移动而尺寸不变，须同时观察场景
+    if (el.parentElement) observer.observe(el.parentElement);
     return () => observer.disconnect();
   }, [camera?.id, focused]);
 

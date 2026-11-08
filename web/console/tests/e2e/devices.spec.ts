@@ -125,6 +125,17 @@ test("空间态势中选中摄像头：引线连到画面小卡，可跳到监�
   await expect(scene(page).locator("polyline")).toHaveCount(1);
   await expect(scene(page)).toHaveScreenshot("device-callout.png");
 
+  // 场景变窄时卡片随之左移，引线终点跟着卡片走
+  const end = async () => Number((await scene(page).locator("polyline").getAttribute("points"))?.split(/[ ,]/).at(-2));
+  const left = async () => {
+    const [box, region] = await Promise.all([callout.boundingBox(), scene(page).boundingBox()]);
+    return (box?.x ?? 0) - (region?.x ?? 0);
+  };
+  const before = await left();
+  await page.getByRole("button", { name: "展开摄像头栏" }).click();
+  await expect.poll(left).toBeLessThan(before);
+  await expect.poll(end).toBeCloseTo(await left(), 0);
+
   await callout.getByRole("button", { name: "在监控墙中查看" }).click();
   await expect(page.getByRole("list", { name: "监控墙" }).getByRole("listitem")).toHaveCount(1);
 });
