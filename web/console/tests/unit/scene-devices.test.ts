@@ -59,7 +59,7 @@ describe("deviceLook（§5.2）", () => {
   });
 });
 
-describe("三维视场（04 §5.1 L3）", () => {
+describe("三维视场（ui.md §5.2）", () => {
   it("顶点在镜头，弧在可视距离处的地面", async () => {
     const { coneGeometry } = await import("../../src/scene/DeviceMarkers");
     const pose = { x: 2, y: 3, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 10 };

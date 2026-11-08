@@ -31,7 +31,7 @@ class SiteInfo(ContractModel):
     height_m: float = Field(..., gt=0.0)
     mode: Literal["bypass", "host_probe"]
     """
-    部署模式，整个站点统一（HYD-ARCH-001 §6.2）；设备的 mode 取此值
+    部署模式，整个站点统一（architecture.md §6）；设备的 mode 取此值
     """
 
 
@@ -113,7 +113,7 @@ class CameraConfig(ContractModel):
 
 class SiteConfig(ContractModel):
     """
-    站点配置 site.yaml：平面图、门洞、区域、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）
+    站点配置 site.yaml：平面图、门洞、区域、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（spec.md FR-901）
     """
 
     model_config = ConfigDict(

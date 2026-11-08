@@ -56,7 +56,7 @@ class InvestigationProvider(ContractModel):
 
 class InvestigationFrame(ContractModel):
     """
-    AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（HYD-REQ-006 US-11）
+    AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（spec.md US-11）
     """
 
     incident_id: str

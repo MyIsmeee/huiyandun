@@ -7,22 +7,22 @@ import type { Camera } from "./devices";
 import type { Area, SceneView } from "./layout";
 import { PerceivedScene } from "./PerceivedScene";
 
-/** 页面底色（04 §3.1），场景背景与远处渐隐取同色 */
+/** 页面底色（ui.md §3），场景背景与远处渐隐取同色 */
 const BACKGROUND = "#0A0A0B";
-/** 主光方向（04 §5.1 光照）：方位 135°、仰角 55° */
+/** 主光方向（ui.md §5.2）：方位 135°、仰角 55° */
 const SUN_AZIMUTH = (135 * Math.PI) / 180;
 const SUN_ELEVATION = (55 * Math.PI) / 180;
 /** 阴影贴图边长：截图测试以软件渲染运行，减半（V-P2） */
 const SHADOW_MAP = import.meta.env.MODE === "e2e" ? 1024 : 2048;
 /** 渐隐的过渡距离，单位米 */
 const FOG_M = 50;
-/** 阴影承接面的不透明度（04 §5.1 L0）：只显示阴影，其余完全透明 */
+/** 阴影承接面的不透明度（ui.md §5.2）：只显示阴影，其余完全透明 */
 const SHADOW_OPACITY = 0.35;
 /** 阴影承接面与阴影相机在覆盖范围外多留的边距，单位米 */
 const SHADOW_MARGIN_M = 4;
 
 /**
- * 空间态势（04 §5.1、D-111、D-116）：不画站点底板与墙体，只有摄像头真实看到的——L1 感知场景、L2 设备、L3 视场、
+ * 空间态势（ui.md §5.2、D-111、D-116）：不画站点底板与墙体，只有摄像头真实看到的——L1 感知场景、L2 设备、L3 视场、
  * L4 检出目标；L0 为只显示阴影的承接面，让物体落地而不出现"地板"。
  * 固定的半球光 + 平行主光，投射软阴影，不随时间变化。按需渲染（frameloop="demand"）：无常驻动效（V-A3），
  * 只有对应真实告警的动效持续请求重绘。flat 关闭色调映射，色值与规范一致。

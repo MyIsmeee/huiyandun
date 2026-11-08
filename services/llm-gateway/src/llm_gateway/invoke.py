@@ -1,4 +1,4 @@
-"""调用链（HYD-ARCH-001 §5.1、TK-062）：按供应商顺序逐个尝试，全部失败时由调用方执行任务的 terminal。
+"""调用链（architecture.md §5、TK-062）：按供应商顺序逐个尝试，全部失败时由调用方执行任务的 terminal。
 
 每家：熔断检查 → 公网脱敏（C-LLM-03）→ 调用 → 剥离推理内容（C-LLM-12）→ 本地 Schema 校验，失败重试 1 次
 （C-LLM-05）→ 还原假名；成功后做事实回溯，未溯源实体随输出返回（C-LLM-06、D-086）。
@@ -42,7 +42,7 @@ NOT_COMPATIBLE = "返回的不是 OpenAI 兼容格式"
 
 
 class InvestigationTurn(IncidentInvestigationTurn):
-    """契约中 tool、args、verdict 可为 null：按 action 要求对应字段非空，否则按不符合格式重试（07 §6）。"""
+    """契约中 tool、args、verdict 可为 null：按 action 要求对应字段非空，否则按不符合格式重试（architecture.md §12）。"""
 
     @model_validator(mode="after")
     def _required(self) -> Self:
@@ -60,7 +60,7 @@ SCHEMAS: dict[str, type[BaseModel]] = {
 
 
 class Task(BaseModel):
-    """deploy/configs/llm-tasks.yaml 中的一项（HYD-ARCH-001 §5.3）。"""
+    """deploy/configs/llm-tasks.yaml 中的一项（architecture.md §5）。"""
 
     model_config = ConfigDict(extra="forbid")
     schema_: str = Field(alias="schema")

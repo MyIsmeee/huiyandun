@@ -13,7 +13,7 @@ import numpy as np
 
 MIN_DURATION_S = 2.0  # 持续时长门限（C-CV-04 默认 min_duration）
 MIN_CONFIDENCE = 0.5  # 判定所用关键点置信度的均值门限（C-CV-04）
-REPEAT_S = 30.0  # 持续满足时的重发间隔：使设备保持物理告警（解除时长 60 s，HYD-UIX-004 §5.2）
+REPEAT_S = 30.0  # 持续满足时的重发间隔：使设备保持物理告警（解除时长 60 s，ui.md §5.1）
 GAP_S = 1.0  # 漏检或无法判断不超过此时长时不中断计时
 FORGET_S = 10.0  # 轨迹消失超过此时长即丢弃其判定状态
 KEYPOINT_MIN = 0.3  # 关键点置信度低于此值视为不可见

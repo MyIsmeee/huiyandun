@@ -1,6 +1,6 @@
 {
   "title": "SiteConfig",
-  "description": "站点配置 site.yaml：平面图、门洞、区域、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（HYD-PLAN-007 §7、FR-901）",
+  "description": "站点配置 site.yaml：平面图、门洞、区域、摄像头（只在摄像头登记表为空时初始导入，D-101）、部署模式与核心业务白名单（spec.md FR-901）",
   "type": "object",
   "additionalProperties": false,
   "required": ["site", "walls", "zones", "cameras", "whitelist"],
@@ -42,7 +42,7 @@
         "height_m": { "type": "number", "exclusiveMinimum": 0 },
         "mode": {
           "enum": ["bypass", "host_probe"],
-          "description": "部署模式，整个站点统一（HYD-ARCH-001 §6.2）；设备的 mode 取此值"
+          "description": "部署模式，整个站点统一（architecture.md §6）；设备的 mode 取此值"
         }
       }
     },

@@ -12,7 +12,7 @@ const LAYOUTS: [WallLayout, string][] = [
   ["1+5", "1+5"],
 ];
 
-/** 主画布工具条左侧（04 §4.1 C 区）：视图切换；监控墙下另有宫格布局与分页（V-W1） */
+/** 主画布工具条左侧（ui.md §4）：视图切换；监控墙下另有宫格布局与分页（V-W1） */
 export function WallControls({ cameras }: { cameras: number }) {
   const { view, layout, page, zoomed } = useWall();
   const pages = pageCount(cameras, wallGrid(cameras, layout));

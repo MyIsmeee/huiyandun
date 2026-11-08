@@ -9,7 +9,7 @@ export const STATUS = {
   cyber: "#D03B3B",
   contained: "#0CA30C",
 } as const;
-/** 实体数字孪生（04 §5.1 L2、L3，D-111）：常态机身白灰、立杆浅灰，常态视场为白色光束；都不表达状态 */
+/** 实体数字孪生（ui.md §5.2，D-111）：常态机身白灰、立杆浅灰，常态视场为白色光束；都不表达状态 */
 export const BODY = "#E4E4E7";
 export const POLE_COLOR = "#D4D4D8";
 export const BEAM = "#FFFFFF";
@@ -65,7 +65,7 @@ const base = { opacity: 1, outline: null, ring: null, cone: CONE, tags: [] };
 
 /**
  * §5.2 设备状态机：设备外观的唯一来源。
- * 处置只由 Playbook 触发，M0 中触发处置的规则均含网络攻击（HYD-PLAN-007 §5），
+ * 处置只由 Playbook 触发，M0 中触发处置的规则均含网络攻击（architecture.md §12），
  * 因此"处置中""已通知 · 待联动"保持的告警色为网络攻击色。
  */
 export function deviceLook(state: DeviceState): Look {

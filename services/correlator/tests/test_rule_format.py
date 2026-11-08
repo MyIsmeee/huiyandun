@@ -1,4 +1,4 @@
-"""关联规则格式（HYD-PLAN-007 §4）：仓库内规则全部合法；非法规则拒绝加载并指出文件与字段。"""
+"""关联规则格式（architecture.md §12）：仓库内规则全部合法；非法规则拒绝加载并指出文件与字段。"""
 
 import json
 from pathlib import Path

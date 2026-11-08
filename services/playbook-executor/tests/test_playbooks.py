@@ -1,4 +1,4 @@
-"""Playbook 格式（HYD-PLAN-007 §5）：仓库内 Playbook 合法；非法的拒绝加载并指出文件与字段。"""
+"""Playbook 格式（architecture.md §12）：仓库内 Playbook 合法；非法的拒绝加载并指出文件与字段。"""
 
 import json
 from pathlib import Path

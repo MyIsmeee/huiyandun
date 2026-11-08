@@ -1,6 +1,6 @@
 # audit-service
 
-审计日志每日哈希链封存与校验（HYD-ARCH-001 §10.1、G-13）。审计记录由各服务与业务变更在同一事务内写入 `audit_log`（见 `services/api-server`），本服务只读审计日志、只追加封存记录。
+审计日志每日哈希链封存与校验（architecture.md §10、G-13）。审计记录由各服务与业务变更在同一事务内写入 `audit_log`（见 `services/api-server`），本服务只读审计日志、只追加封存记录。
 
 ## 职责
 

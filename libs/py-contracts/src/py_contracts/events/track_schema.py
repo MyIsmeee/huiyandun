@@ -51,7 +51,7 @@ class Keypoints(RootModel[list[Keypoint]]):
 
 class Track(ContractModel):
     """
-    检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）
+    检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（architecture.md §12）
     """
 
     camera_id: str

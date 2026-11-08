@@ -23,7 +23,7 @@ const STYLE: Record<Freshness, string> = {
   offline: "border-foreground bg-foreground text-background",
 };
 
-/** 连接与数据新鲜度（HYD-UIX-004 §8），常驻顶栏不可隐藏（§4.1 A 区）；以图标与文字区分状态（V-S3） */
+/** 连接与数据新鲜度（ui.md），常驻顶栏不可隐藏（§4.1 A 区）；以图标与文字区分状态（V-S3） */
 export function ConnectionStatus() {
   const connection = useConnection();
   const state = freshness(connection, useNow(1000));

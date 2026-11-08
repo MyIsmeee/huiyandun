@@ -33,7 +33,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("摄像头列表（04 §7.4）", () => {
+describe("摄像头列表（ui.md §7.2）", () => {
   const view = (cameras: Camera[], deleting: Camera | null = null) => {
     const handlers = { onEdit: vi.fn(), onDelete: vi.fn(), onConfirmDelete: vi.fn() };
     render(
@@ -73,7 +73,7 @@ describe("摄像头列表（04 §7.4）", () => {
   });
 });
 
-describe("添加与编辑（04 §7.4）", () => {
+describe("添加与编辑（ui.md §7.2）", () => {
   it("请求体：主机留空取设备 IP；口令为空不发送（只写不读）", () => {
     const form = { name: " 后门 ", ip: "10.0.0.5", ingest: "pull" as const, protocol: "http" as const, host: "", port: 80, path: "video.mjpg", relay: true, username: "", password: "", pose: POSE, climb_lines: [] };
     expect(body(form)).toEqual({

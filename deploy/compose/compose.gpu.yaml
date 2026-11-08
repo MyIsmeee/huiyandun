@@ -1,4 +1,4 @@
-# GPU 覆盖文件（HYD-DEP-005 §3.1）：make demo-up 默认加载，GPU=0 时不加载（DP-06）
+# GPU 覆盖文件（ops.md §2）：make demo-up 默认加载，GPU=0 时不加载（DP-06）
 # 经 NVIDIA Container Toolkit 透传 GPU（C-HW-10）；CUDAExecutionProvider 未生效时 vision-engine 退出（C-CV-11）
 services:
   vision-engine:

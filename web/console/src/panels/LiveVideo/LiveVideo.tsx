@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { ApiError, api } from "../../lib/api";
 import { DetectionOverlay } from "../DetectionOverlay/DetectionOverlay";
 
-/** 连接中 / 播放 / 媒体中断（保留最后画面，等待恢复）/ 不可用 / 设备没有视频流（HYD-UIX-004 §8） */
+/** 连接中 / 播放 / 媒体中断（保留最后画面，等待恢复）/ 不可用 / 设备没有视频流（ui.md） */
 export type VideoStatus =
   | { kind: "connecting" }
   | { kind: "playing"; stream: MediaStream }

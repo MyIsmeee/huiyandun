@@ -33,7 +33,7 @@ INTEGRITY = {
     "stream_lost": "视频流中断",
 }
 DEVICE = {"camera": "摄像头", "nvr": "录像机", "switch": "交换机"}
-# 与大屏处置栏一致（04 §5.2、V-T1）
+# 与大屏处置栏一致（ui.md §5.1、V-T1）
 EXECUTION = {
     "pending": "待确认",
     "executing": "处置中",

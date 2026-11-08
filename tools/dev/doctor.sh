@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 环境自检（HYD-DEP-005 §2）：任一失败即终止并打印修复提示
+# 环境自检（ops.md §1）：任一失败即终止并打印修复提示
 set -uo pipefail
 
 COMPOSE_DIR="$(dirname "$0")/../../deploy/compose"

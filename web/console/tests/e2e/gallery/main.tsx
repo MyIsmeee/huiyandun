@@ -152,7 +152,7 @@ const EXECUTIONS = {
   },
 } as Record<string, Execution>; // prettier-ignore
 const LAST_FRAME = Date.parse("2026-10-27T06:29:45Z");
-// 与告警栏同宽（04 §3.5）
+// 与告警栏同宽（ui.md §3）
 const alertList = (node: ReactNode) => <div className="flex h-96 w-[360px] flex-col bg-card">{node}</div>;
 // 详情抽屉相对场景定位（D-112）：放进一块场景大小的容器
 const drawer = (node: ReactNode) => <div className="relative h-[640px] w-[480px]">{node}</div>;

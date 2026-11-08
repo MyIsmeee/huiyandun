@@ -34,11 +34,11 @@ from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorInci
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
 SUBJECT = "hyd.security.alert.v1"
-# 告警保留 365 天（HYD-ARCH-001 §10.2）
+# 告警保留 365 天（architecture.md §10）
 STREAM = "HYD_SECURITY"
 STREAM_MAX_AGE_S = 365 * 86400
 INCIDENT_SUBJECT = "hyd.correlator.incident.v1"
-# 关联事件与处置记录同为 365 天（HYD-ARCH-001 §10.2）
+# 关联事件与处置记录同为 365 天（architecture.md §10）
 INCIDENT_STREAM = "HYD_INCIDENT"
 INCIDENT_MAX_AGE_S = 365 * 86400
 RESUBSCRIBE_S = 5.0  # 视觉事件的流由 vision-engine 创建：尚未创建时按此间隔重试订阅
@@ -61,7 +61,7 @@ class CorrelatorConfig(ServiceConfig):
         Path("/tmp/hyd-correlator-alive"), description="每个周期更新其修改时间，供健康检查判断"
     )
     rules_dir: Path = Field(
-        Path("/etc/hyd/rules"), description="关联规则目录 rules/correlator（HYD-PLAN-007 §4）"
+        Path("/etc/hyd/rules"), description="关联规则目录 rules/correlator（architecture.md §12）"
     )
     attack_file: Path = Field(
         Path("/etc/hyd/attack.json"), description="ATT&CK 精简查表 rules/attack/techniques.json"

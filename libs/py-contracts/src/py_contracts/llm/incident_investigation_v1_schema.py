@@ -28,7 +28,7 @@ class TurnVerdict(ContractModel):
 
 class IncidentInvestigationTurn(ContractModel):
     """
-    AI 安全值班员每轮输出（HYD-PLAN-007 §6、G-12）：调用一个只读工具，或给出最终判定
+    AI 安全值班员每轮输出（architecture.md §12、G-12）：调用一个只读工具，或给出最终判定
     """
 
     action: Literal["tool", "verdict"]

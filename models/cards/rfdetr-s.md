@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 版本 | `rfdetr-s@1.4.2+hyd.1`（未修改上游权重） |
-| 用途 | 车辆检测：自行车、轿车、摩托车、公交、货车，供实时感知大屏（HYD-REQ-006 FR-101、FR-102）。模型可检出 COCO 80 类，vision-engine 只取上述 5 类；人员由 rtmo-s 检出（含骨骼） |
+| 用途 | 车辆检测：自行车、轿车、摩托车、公交、货车，供实时感知大屏（spec.md FR-101、FR-102）。模型可检出 COCO 80 类，vision-engine 只取上述 5 类；人员由 rtmo-s 检出（含骨骼） |
 | 上游 | Roboflow RF-DETR 1.4.2 Small；ONNX 为 rtmlib 内置 `RFDETR` 引用的导出（Hugging Face `saifkhichi96/opendetect`，提交 `e9a01bb`） |
 | 许可证 | Apache-2.0（RF-DETR Nano / Small / Medium / Large 权重；XL 及以上许可证不同，不得使用） |
 | 训练数据 | COCO（上游公开数据集，使用条款见其官网） |

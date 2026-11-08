@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 版本 | `rtmo-s@dac2bf74_20231211+hyd.1`（未修改上游权重） |
-| 用途 | 单阶段多人姿态估计：每人输出人体框与 COCO 17 关键点；耗时与画面人数无关（HYD-ARCH-001 §8.1） |
+| 用途 | 单阶段多人姿态估计：每人输出人体框与 COCO 17 关键点；耗时与画面人数无关（architecture.md §8） |
 | 上游 | MMPose `projects/rtmo`，配置 `rtmo-s_8xb32-600e_body7-640x640`；ONNX 由 MMDeploy 1.3.0 导出 |
 | 许可证 | Apache-2.0（MMPose 代码与权重） |
 | 训练数据 | body7：AI Challenger、COCO、CrowdPose、Halpe、MPII、PoseTrack18、sub-JHMDB（上游公开数据集，各自的使用条款见其官网） |
@@ -19,7 +19,7 @@
 | 单帧耗时（CPU，6 核，1280×720 输入） | 约 80 ms | 本地实测，演示素材 14 帧 |
 | 横躺者置信度（fall-2 路口倒地，原画面 / 旋转 90°） | 0.16～0.35 / 0.68～0.76 | 本地实测 4 帧；据此检测时另加左右旋转推理，每帧耗时约为单次的 3 倍（TK-022） |
 | 行为判定素材测试 | fall-2 跌倒、climb-1 攀爬检出；crowd-1（5 分钟）、actions-1 零告警 | `services/vision-engine/tests/test_clips.py` |
-| 召回 / 精确率 / 每路每小时误报 | 未评测 | 尚无标注评测集；M0 按 HYD-PROC-002 §3.6"CV 效果"的简化评测补齐 |
+| 召回 / 精确率 / 每路每小时误报 | 未评测 | 尚无标注评测集；M0 按 engineering.md"CV 效果"的简化评测补齐 |
 
 ## 限制
 

@@ -151,7 +151,7 @@ class Technique(RootModel[str]):
 
 class Incident(ContractModel):
     """
-    关联事件实体（HYD-PLAN-007 §1），事件与 API 共用
+    关联事件实体（architecture.md §12），事件与 API 共用
     """
 
     id: str
@@ -257,7 +257,7 @@ class VerifyResult(ContractModel):
 
 class PlaybookExecution(ContractModel):
     """
-    处置执行实体（HYD-PLAN-007 §1），事件与 API 共用
+    处置执行实体（architecture.md §12），事件与 API 共用
     """
 
     id: str
@@ -266,7 +266,7 @@ class PlaybookExecution(ContractModel):
     incident_id: str
     device_ids: list[str]
     """
-    来自关联事件，供设备状态计算（HYD-UIX-004 §5.2）
+    来自关联事件，供设备状态计算（ui.md §5.1）
     """
     target: str
     state: Literal[
@@ -337,7 +337,7 @@ class Preset(
         "custom",
     ]
     """
-    选择后由前端填入地址模板与默认端口（HYD-ARCH-001 §5.3）
+    选择后由前端填入地址模板与默认端口（architecture.md §5）
     """
 
 
@@ -508,7 +508,7 @@ class WsFrame(ContractModel):
 
 class EventBase(ContractModel):
     """
-    所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）
+    所有事件的公共字段（architecture.md §12、C-BE-02）
     """
 
     schema_version: str = Field(..., pattern="^1[.][0-9]+[.][0-9]+$")
@@ -540,7 +540,7 @@ class InvestigationStep(ContractModel):
 
 class Investigation(ContractModel):
     """
-    AI 安全值班员调查记录（HYD-PLAN-007 §1 AiInvestigation）；verdict 为 null 表示进行中或失败
+    AI 安全值班员调查记录（architecture.md §12 AiInvestigation）；verdict 为 null 表示进行中或失败
     """
 
     incident_id: str
@@ -596,7 +596,7 @@ class Keypoints(RootModel[list[Keypoint]]):
 
 class Track(ContractModel):
     """
-    检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（HYD-PLAN-007 §1）
+    检出目标（人员或车辆）：平面坐标与画面位置，会话内有效，不跨摄像头关联（architecture.md §12）
     """
 
     camera_id: str
@@ -818,7 +818,7 @@ class IncidentList(ContractModel):
 
 class IncidentReport(ContractModel):
     """
-    溯源报告 AI 区（HYD-PLAN-007 §6、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
+    溯源报告 AI 区（architecture.md §12、G-12）；事实区由报告服务从结构化数据组装，不经过 LLM
     """
 
     summary: str = Field(..., max_length=300)
@@ -866,7 +866,7 @@ class EgressStats(ContractModel):
 
 class InvestigationFrame(ContractModel):
     """
-    AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（HYD-REQ-006 US-11）
+    AI 安全值班员调查流中的一帧：调查步骤、最终判定或失败（spec.md US-11）
     """
 
     incident_id: str
@@ -945,11 +945,11 @@ class Device(ContractModel):
         "notify_only",
     ]
     """
-    HYD-UIX-004 §5.2，由 api-server 计算
+    ui.md §5.1，由 api-server 计算
     """
     alert_severity: Literal["critical", "high", "medium", "low"] | None
     """
-    state 为 cyber_alert 或 both 期间收到的最高告警等级，其余状态为 null（HYD-UIX-004 §5.2、V-A1）
+    state 为 cyber_alert 或 both 期间收到的最高告警等级，其余状态为 null（ui.md §5.1、V-A1）
     """
     camera: CameraInfo | None
     """
@@ -1059,7 +1059,7 @@ class Marking(ContractModel):
 
 class SceneFrame(ContractModel):
     """
-    摄像头实时识别的环境，已投影到平面（HYD-REQ-006 FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（HYD-PLAN-007 §1）。地面、物体与标线的多边形合计不超过 64 个
+    摄像头实时识别的环境，已投影到平面（spec.md FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
     """
 
     camera_id: str

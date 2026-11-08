@@ -119,7 +119,7 @@ todo = @echo "$@：由 $(1) 实现" >&2; exit 1
 
 llm-check: ; $(call todo,TK-060)
 
-# 红方手动命令（D-105、HYD-PLAN-007 §7）：演示与走查时由队员执行，不发布任何事件。
+# 红方手动命令（D-105、ops.md §4.1）：演示与走查时由队员执行，不发布任何事件。
 # M0 只能攻击自建靶机 rtsp-target，它的地址即 cam-02 的设备 IP；攻击现场摄像头待 D-064 实现
 TARGET ?= cam-02
 CAMERA ?= cam-02

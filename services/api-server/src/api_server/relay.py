@@ -1,4 +1,4 @@
-"""NATS 事件按契约 WsFrame 的频道说明转发到 WS /ws，并据此更新设备状态（HYD-PLAN-007 §2、§3）。"""
+"""NATS 事件按契约 WsFrame 的频道说明转发到 WS /ws，并据此更新设备状态（architecture.md §12）。"""
 
 import asyncio
 import logging
@@ -81,7 +81,7 @@ async def follow(
 ) -> None:
     """从 JetStream 重放近 24 小时并持续接收（D-077）：告警与行为事件只记入历史（推送沿用 start 的转发）；
     画面完整性事件只记入历史，供报告查找（TK-070）；关联事件与处置执行记入历史并推送，执行同时更新设备的
-    处置状态（04 §5.2）；关联事件另提交值班员调查（TK-116）。"""
+    处置状态（ui.md §5.1）；关联事件另提交值班员调查（TK-116）。"""
 
     async def on_alert(event: EventBase) -> None:
         history.add_alert(event)

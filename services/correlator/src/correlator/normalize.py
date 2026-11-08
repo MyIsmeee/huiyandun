@@ -16,7 +16,7 @@ from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 SCHEMA_VERSION = "1.2.0"  # 1.1：来源、可信度、说明（C-SEC-09）；1.2：mode（D-068）
 # event_id 由 EVE 原文派生：重启后重读未确认的一行时 ID 不变，由 JetStream 去重
 EVENT_NAMESPACE = uuid.UUID("5d0f6a52-4b0e-4f0c-9a51-3c7f3e0c7a10")
-# Suricata 优先级 1 最高；critical 留给跨域关联事件（HYD-PLAN-007 §4）
+# Suricata 优先级 1 最高；critical 留给跨域关联事件（architecture.md §12）
 SEVERITY = {1: "high", 2: "medium"}
 
 type Ip = IPv4Address | IPv6Address

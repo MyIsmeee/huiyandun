@@ -25,7 +25,7 @@ function dayStart(): string {
 }
 
 /**
- * 关键指标（HYD-UIX-004 §4.1 C 区工具条）：每 5 s 拉取一次，上一次返回后再计时，请求不会叠加。
+ * 关键指标（ui.md §4工具条）：每 5 s 拉取一次，上一次返回后再计时，请求不会叠加。
  * 拉取失败或断线时保留上次数值并标为陈旧，无上次数值显示 —（§8 KpiTile）。
  */
 export function KpiRow({ stale }: { stale: boolean }) {

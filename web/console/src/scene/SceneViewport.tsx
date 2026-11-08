@@ -68,7 +68,7 @@ class Boundary extends Component<{ onError: () => void; children: ReactNode }, {
 }
 
 /**
- * 场景视口（HYD-UIX-004 §8）：加载 / 空场景 / 加载失败 / 无 WebGL2 降级 2D。
+ * 场景视口（ui.md）：加载 / 空场景 / 加载失败 / 无 WebGL2 降级 2D。
  * data-scene 标示当前状态，3D 场景首帧绘制后为 ready。
  */
 export function SceneViewport({ site }: { site: Site }) {

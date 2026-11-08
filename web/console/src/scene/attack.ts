@@ -22,5 +22,5 @@ export function attackerAnchor([x, y]: Point, area: Area): Point {
   return edges[0]?.[1] ?? [left - OUTSIDE_M, y];
 }
 
-/** 设备处于这些状态时画攻击连线：网络攻击、处置中、只通知（04 §5.2） */
+/** 设备处于这些状态时画攻击连线：网络攻击、处置中、只通知（ui.md §5.1） */
 export const ATTACKED = new Set(["cyber_alert", "both", "pending_action", "notify_only"]);

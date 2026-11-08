@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 COOKIE = "hyd_session"
 ROLES = ("viewer", "operator", "admin", "auditor")
-# 角色包含关系（HYD-PLAN-007 §3）：viewer ⊂ operator ⊂ admin，viewer ⊂ auditor
+# 角色包含关系（architecture.md §12）：viewer ⊂ operator ⊂ admin，viewer ⊂ auditor
 GRANTED = {
     "viewer": frozenset(ROLES),
     "operator": frozenset({"operator", "admin"}),

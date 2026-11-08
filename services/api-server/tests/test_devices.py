@@ -1,4 +1,4 @@
-"""设备状态的进入、续期、叠加、解除与连接补推（HYD-UIX-004 §5.2，#54）。"""
+"""设备状态的进入、续期、叠加、解除与连接补推（ui.md §5.1，#54）。"""
 
 import uuid
 from datetime import UTC, datetime
@@ -171,7 +171,7 @@ def execution(state: str, device_id: str = "cam-01", id: str = "exe-1") -> Playb
 
 
 def test_execution_overrides_alert_state_until_rolled_back(devices: Devices) -> None:
-    """04 §5.2：执行中为处置中，生效为已处置（网络告警解除后仍保持），回滚后回到按告警计算的状态。"""
+    """ui.md §5.1：执行中为处置中，生效为已处置（网络告警解除后仍保持），回滚后回到按告警计算的状态。"""
     devices.on_alert(alert(), 0)
     assert [d.state for d in devices.on_execution(execution("executing"), 1)] == ["pending_action"]
     assert devices.on_execution(execution("verifying"), 2) == []  # 状态未变

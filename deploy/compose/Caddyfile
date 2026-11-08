@@ -1,5 +1,5 @@
 # 唯一对外入口（C-OPS-05、D-02）：提供前端页面，同源反向代理 /api、/ws 到 api-server
-# 证书由 Caddy 内置本地 CA 签发，根证书由 make console-ca 导出后导入浏览器信任库（HYD-DEP-005 §5）
+# 证书由 Caddy 内置本地 CA 签发，根证书由 make console-ca 导出后导入浏览器信任库（ops.md §5）
 {
 	admin off
 	persist_config off
@@ -11,7 +11,7 @@
 	default_sni 127.0.0.1
 }
 
-# 演示在本机浏览器访问（HYD-DEP-005 §5）；只为列出的地址签发，内置 CA 不访问任何外部地址
+# 演示在本机浏览器访问（ops.md §5）；只为列出的地址签发，内置 CA 不访问任何外部地址
 localhost, 127.0.0.1 {
 	tls internal
 

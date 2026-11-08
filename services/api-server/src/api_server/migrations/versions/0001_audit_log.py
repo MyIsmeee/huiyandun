@@ -1,4 +1,4 @@
-"""审计日志：只追加（G-13、HYD-ARCH-001 §10.1）。
+"""审计日志：只追加（G-13、architecture.md §10）。
 
 两道防线：应用账号 hyd_app 只有 SELECT 与 INSERT 权限，且不能写入 id、ts；触发器拒绝任何账号的
 UPDATE / DELETE / TRUNCATE。触发器只有属主能停用，因此应用不以属主账号连接。

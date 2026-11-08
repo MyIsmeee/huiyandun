@@ -131,7 +131,7 @@ export function useMotion(): boolean {
 const ARC_SEGMENTS = 32;
 
 /**
- * 三维视场（04 §5.1 L3、D-111）：从镜头到可视距离处地面的扇形光束。几何在世界坐标中生成：
+ * 三维视场（ui.md §5.2、D-111）：从镜头到可视距离处地面的扇形光束。几何在世界坐标中生成：
  * faces 为两侧面与顶到弧的曲面，顶点透明度随距镜头的水平距离线性渐隐（镜头处 1、可视距离处 0）；
  * ground 为地面扇形，edges 为地面投影的轮廓（扇形两边与弧线）。
  */
@@ -170,7 +170,7 @@ export function coneGeometry(pose: Camera["pose"]): { faces: BufferGeometry; gro
   return { faces: beam, ground: geometry(ground), edges: geometry(edges) };
 }
 
-/** 侧面（镜头处）、地面填充、地面轮廓相对视场不透明度的倍数：常态为 14%、6%、35%（04 §5.1 L3） */
+/** 侧面（镜头处）、地面填充、地面轮廓相对视场不透明度的倍数：常态为 14%、6%、35%（ui.md §5.2） */
 const LAYERS = { faces: 1, ground: 0.43, edges: 2.5 } as const;
 
 /** 视场：常态在该摄像头有检出目标时提亮（§5.1 L3）；critical / high 网络攻击时 1 Hz 呼吸（V-A1） */

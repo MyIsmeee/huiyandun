@@ -75,7 +75,7 @@ describe("处置时间线（FR-304、D-106）", () => {
   });
 });
 
-describe("formatOffset（04 §4.1 时长格式）", () => {
+describe("formatOffset（ui.md §4 时长格式）", () => {
   it("小于 1 分钟按秒，小于 1 小时按分秒，否则按时分", () => {
     expect(formatOffset(0)).toBe("+0 秒");
     expect(formatOffset(38_800)).toBe("+39 秒");

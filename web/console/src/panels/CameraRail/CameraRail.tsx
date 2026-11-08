@@ -16,7 +16,7 @@ const REFRESH_MS = 10_000;
 const BACKOFF_MS = 60_000;
 
 /**
- * B 摄像头栏（HYD-UIX-004 §4.1、D-115）：每台摄像头一张卡片（缩略图、编号与名称、状态、人员与车辆数），
+ * B 摄像头栏（ui.md §4、D-115）：每台摄像头一张卡片（缩略图、编号与名称、状态、人员与车辆数），
  * 单击选中（监控墙随之翻页、检查栏显示详情）。可收起为图标栏。admin 底部可直接添加摄像头。
  */
 export function CameraRail(props: { devices: Device[]; admin: boolean }) {

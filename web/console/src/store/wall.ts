@@ -11,7 +11,7 @@ interface WallState {
   page: number;
   /** 双击临时放大为 1×1 的摄像头（V-W4），不持久化 */
   zoomed: string | null;
-  /** 摄像头栏收起为图标栏（04 §4.1 B 区） */
+  /** 摄像头栏收起为图标栏（ui.md §4） */
   railCollapsed: boolean;
 }
 

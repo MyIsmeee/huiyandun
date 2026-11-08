@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { camera, expectNoOverflow, freezeClock, open } from "./helpers";
 
-// HYD-UIX-004 §5.2：DeviceMarker 全部 9 种状态的截图基线（V-P2）
+// ui.md §5.1：DeviceMarker 全部 9 种状态的截图基线（V-P2）
 const STATES = [
   ["normal", null],
   ["offline", "离线"],

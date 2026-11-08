@@ -1,4 +1,4 @@
-"""事件契约：公共字段、取值约束与向后兼容（HYD-PLAN-007 §2、C-BE-02）。"""
+"""事件契约：公共字段、取值约束与向后兼容（architecture.md §12、C-BE-02）。"""
 
 from pathlib import Path
 from typing import Any

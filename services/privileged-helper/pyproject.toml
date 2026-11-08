@@ -1,7 +1,7 @@
 [project]
 name = "privileged-helper"
 version = "0.0.0"
-description = "特权动作：只接受签名指令，以固定模板操作 nftables（HYD-ARCH-001 C-SEC-06）"
+description = "特权动作：只接受签名指令，以固定模板操作 nftables（architecture.md C-SEC-06）"
 requires-python = "==3.12.*"
 dependencies = [
     "cryptography>=50,<51",  # 与 api-server 一致；Ed25519 签名校验

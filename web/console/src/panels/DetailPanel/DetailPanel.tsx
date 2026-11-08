@@ -13,7 +13,7 @@ import { ReportBar } from "../ReportBar/ReportBar";
 const TYPE: Record<Device["type"], string> = { camera: "摄像头", nvr: "录像机", switch: "交换机" };
 
 /**
- * 检查栏详情（HYD-UIX-004 §4.1 D 区、§8，D-115）：选中设备时取代告警栏，Esc 或"返回告警"回到告警栏（V-I2）。
+ * 检查栏详情（ui.md §4、§8，D-115）：选中设备时取代告警栏，Esc 或"返回告警"回到告警栏（V-I2）。
  * 自上而下为概要、处置时间线（FR-304）、规则结论与 AI 研判（AiInvestigation，TK-117）、报告（ReportBar，TK-070）、
  * 实时画面；处置操作（ActionBar，TK-052）固定在底部。
  * stale 为推送连接已断开：状态是断开前的最后值，弱化显示并标注（UP-3、V-U3）。

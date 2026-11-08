@@ -1,4 +1,4 @@
-"""Playbook（HYD-PLAN-007 §5）：playbooks/<Playbook ID>.yaml，启动时全部加载并校验。"""
+"""Playbook（architecture.md §12）：playbooks/<Playbook ID>.yaml，启动时全部加载并校验。"""
 
 from pathlib import Path
 from typing import Annotated, Any, Literal

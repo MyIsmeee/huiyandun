@@ -86,7 +86,7 @@ export function timelineOf(
   ];
 }
 
-/** 距首次告警的时长（04 §4.1）：小于 1 分钟按秒，小于 1 小时按分秒，否则按时分 */
+/** 距首次告警的时长（ui.md §4）：小于 1 分钟按秒，小于 1 小时按分秒，否则按时分 */
 export function formatOffset(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `+${s} 秒`;
@@ -158,7 +158,7 @@ export function useTimeline(incident: Incident | undefined): TimelineNode[] | nu
   }, [incident, alerts, executions, executionTimes, investigation]);
 }
 
-/** 详情抽屉中的竖向处置时间线（04 §4.1 D 区、§8 IncidentTimeline）：选中设备最近一个关联事件 */
+/** 详情抽屉中的竖向处置时间线（ui.md §4、§8 IncidentTimeline）：选中设备最近一个关联事件 */
 export function IncidentTimeline() {
   const deviceId = useSelection((s) => s.deviceId);
   const incident = useLive((s) => pick(s.incidents, deviceId));

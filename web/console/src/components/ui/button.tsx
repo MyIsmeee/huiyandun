@@ -10,7 +10,7 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
         destructive:
-          // 危险操作为白色描边，不用红色：红色是网络攻击（04 §3.1、V-S2）
+          // 危险操作为白色描边，不用红色：红色是网络攻击（ui.md §3、V-S2）
           "border border-destructive/60 bg-transparent text-destructive hover:bg-accent",
         outline:
           "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",

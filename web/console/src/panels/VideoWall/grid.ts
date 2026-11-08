@@ -1,4 +1,4 @@
-/** 监控墙宫格布局（HYD-UIX-004 V-W1）：自动、1、4、9、1+5 */
+/** 监控墙宫格布局（ui.md V-W1）：自动、1、4、9、1+5 */
 export type WallLayout = "auto" | "1" | "4" | "9" | "1+5";
 
 export interface Grid {

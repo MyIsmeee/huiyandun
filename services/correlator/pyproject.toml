@@ -1,7 +1,7 @@
 [project]
 name = "correlator"
 version = "0.0.0"
-description = "关联引擎：归一化 Suricata 告警，跨域关联生成 Incident（HYD-ARCH-001 §6）"
+description = "关联引擎：归一化 Suricata 告警，跨域关联生成 Incident（architecture.md §6）"
 requires-python = "==3.12.*"
 dependencies = [
     "nats-py>=2.16.0,<2.17",  # 与 py-common 一致；捕获发布失败的异常类型

@@ -21,7 +21,7 @@ LEGACY_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$optaESX4KEG8UhucRQ1oEw"
     "$G0IdQX27ZzmJx1ZDiUvF+ZrVDvkvENxU343bXFzyQ0I"
 )
-# HYD-PLAN-007 §3：viewer ⊂ operator ⊂ admin，viewer ⊂ auditor
+# architecture.md §12：viewer ⊂ operator ⊂ admin，viewer ⊂ auditor
 ALLOWED = {
     ("viewer", "viewer"), ("viewer", "operator"), ("viewer", "admin"), ("viewer", "auditor"),
     ("operator", "operator"), ("operator", "admin"),

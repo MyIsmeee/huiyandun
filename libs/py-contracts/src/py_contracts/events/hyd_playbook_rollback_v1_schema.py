@@ -8,7 +8,7 @@ from .event_base_schema import EventBase
 
 class PlaybookRollbackV1(EventBase):
     """
-    操作员手动回滚处置（生产者 api-server，消费者 playbook-executor，HYD-REQ-006 FR-405）
+    操作员手动回滚处置（生产者 api-server，消费者 playbook-executor，spec.md FR-405）
     """
 
     execution_id: str

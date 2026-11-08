@@ -1,4 +1,4 @@
-"""设备状态（HYD-UIX-004 §5.2）：由行为事件与网络告警计算，只保存在内存中，重启后回到初始状态。
+"""设备状态（ui.md §5.1）：由行为事件与网络告警计算，只保存在内存中，重启后回到初始状态。
 
 本模块实现告警态的进入与按时解除，处置执行对告警态的覆盖（TK-052），以及断流时的离线（FR-105）。
 时刻 now 为单调时钟秒数，只用于计时。
@@ -20,7 +20,7 @@ OFFLINE_HOLD_S = 35
 
 type Severity = Literal["critical", "high", "medium", "low"]
 type Override = Literal["pending_action", "contained", "notify_only"]
-# 处置执行对告警态的覆盖（04 §5.2）；回滚、失败、过期、跳过与等待确认不覆盖，回到按告警计算的状态。
+# 处置执行对告警态的覆盖（ui.md §5.1）；回滚、失败、过期、跳过与等待确认不覆盖，回到按告警计算的状态。
 # 同一设备有多个执行时按先后排列的优先级取最高的：仍被封禁的攻击源不因后来的执行显示为未处置
 OVERRIDE: dict[str, Override] = {
     "executing": "pending_action",

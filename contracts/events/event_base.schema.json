@@ -1,6 +1,6 @@
 {
   "title": "EventBase",
-  "description": "所有事件的公共字段（HYD-PLAN-007 §2、C-BE-02）",
+  "description": "所有事件的公共字段（architecture.md §12、C-BE-02）",
   "type": "object",
   "required": ["schema_version", "event_id", "ts"],
   "properties": {

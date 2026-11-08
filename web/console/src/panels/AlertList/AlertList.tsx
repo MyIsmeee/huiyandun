@@ -10,7 +10,7 @@ import { TimelineDots } from "../IncidentTimeline/IncidentTimeline";
 const BEHAVIOR: Record<string, string> = { fall: "跌倒", climb: "攀爬越界" };
 // 告警等级以图标形状 + 文字区分，不以颜色深浅区分（V-S4）
 export const SEVERITY: Record<Incident["severity"], string> = { critical: "严重", high: "高", medium: "中", low: "低" };
-/** 关联事件的处置状态（04 §5.2）；无执行记录时为"未处置" */
+/** 关联事件的处置状态（ui.md §5.1）；无执行记录时为"未处置" */
 const EXECUTION: Record<Execution["state"], string> = {
   pending: "待确认",
   executing: "处置中",

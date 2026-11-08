@@ -213,7 +213,7 @@ def test_expired_alert_pushes_restored_device(
 def test_new_connection_receives_latest_scene_of_each_camera(
     client: TestClient, ws_connect: Connect, nats_url: str
 ) -> None:
-    """连接建立时先补推设备，再补推各摄像头最新一帧场景（HYD-PLAN-007 §3）。"""
+    """连接建立时先补推设备，再补推各摄像头最新一帧场景（architecture.md §12）。"""
     latest = scene("cam-01", "grass")
     with ws_connect() as ws:
         for event in (scene("cam-01", "road"), scene("cam-02", "floor"), latest):

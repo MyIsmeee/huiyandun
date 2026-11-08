@@ -21,7 +21,7 @@ class VerifyResult(ContractModel):
 
 class PlaybookExecution(ContractModel):
     """
-    处置执行实体（HYD-PLAN-007 §1），事件与 API 共用
+    处置执行实体（architecture.md §12），事件与 API 共用
     """
 
     id: str
@@ -30,7 +30,7 @@ class PlaybookExecution(ContractModel):
     incident_id: str
     device_ids: list[str]
     """
-    来自关联事件，供设备状态计算（HYD-UIX-004 §5.2）
+    来自关联事件，供设备状态计算（ui.md §5.1）
     """
     target: str
     state: Literal[

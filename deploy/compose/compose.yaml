@@ -1,4 +1,4 @@
-# 全部服务定义（HYD-DEP-005 §3.1）；镜像与 deploy/third-party.yaml 一致（C-RU-01）
+# 全部服务定义（ops.md §2）；镜像与 deploy/third-party.yaml 一致（C-RU-01）
 # 自研服务由仓库根目录构建，基础镜像同样登记；标签 hyd.oneshot 的服务执行完即退出，以退出码 0 视为就绪
 name: huiyandun
 
@@ -91,7 +91,7 @@ services:
       start_period: 30s
       start_interval: 2s
 
-  # LLM 接入网关（HYD-ARCH-001 §5）：唯一访问模型供应商的组件（C-LLM-01）。内部接口只经 llm-net 给
+  # LLM 接入网关（architecture.md §5）：唯一访问模型供应商的组件（C-LLM-01）。内部接口只经 llm-net 给
   # api-server；不接入 core-net，其他服务无法借它出网。经 llm-egress 访问使用方配置的供应商地址（DP-05 例外）
   llm-gateway:
     image: huiyandun/llm-gateway:local
@@ -111,7 +111,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # 关联引擎（HYD-ARCH-001 §6）：归一化 suricata 的 EVE 告警，发布 hyd.security.alert.v1（TK-032）；
+  # 关联引擎（architecture.md §6）：归一化 suricata 的 EVE 告警，发布 hyd.security.alert.v1（TK-032）；
   # 设备行为模型读 zeek 的 conn.log（TK-115）。探针日志来自解析不可信流量的进程，只读挂载、按模型校验；
   # 读取位置与行为模型状态存于持久卷，重启后续用
   correlator:
@@ -122,7 +122,7 @@ services:
       - suricata-logs:/var/log/suricata:ro
       - zeek-logs:/zeek/logs:ro
       - correlator-state:/var/lib/correlator
-      - ../../rules/correlator:/etc/hyd/rules:ro  # 关联规则（HYD-PLAN-007 §4）
+      - ../../rules/correlator:/etc/hyd/rules:ro  # 关联规则（architecture.md §12）
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro  # ATT&CK 精简查表（D-070）
       # 由 nvr-sim 正常流量学好的基线快照：没有存盘状态时加载
       - ../../demo/scenarios/behavior-baseline.json:/etc/hyd/behavior-baseline.json:ro
@@ -292,7 +292,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # 视觉引擎（HYD-ARCH-001 §8）：经 go2rtc 拉流检测，向 NATS 发布 track 与 scene 事件。启动时断言推理设备（C-CV-11）
+  # 视觉引擎（architecture.md §8）：经 go2rtc 拉流检测，向 NATS 发布 track 与 scene 事件。启动时断言推理设备（C-CV-11）
   # 模型权重由 make fetch-models 下载（R-03）。只接入内部网络：onnxruntime 遥测已关闭，网络再隔一层（G-05）
   vision-engine:
     image: huiyandun/vision-engine:local

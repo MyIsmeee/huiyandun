@@ -1,7 +1,7 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
 import { camera, expectNoOverflow, freezeClock, open, presetTheme, targetAt, zoomIn } from "./helpers";
 
-// HYD-UIX-004 §8 TargetModels：人员 / 各类车辆 / 告警 / 高误差；V-U4 事件卡
+// ui.md TargetModels：人员 / 各类车辆 / 告警 / 高误差；V-U4 事件卡
 const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", ts: "2026-10-27T06:30:00Z" };
 /** 1.7 m 人员站立时 COCO 17 点相对脚点的横向偏移与高度（米），画面右侧为正 */
 const STANDING: [number, number][] = [

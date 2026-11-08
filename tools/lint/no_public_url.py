@@ -46,7 +46,7 @@ INERT_TEXT = (
     "https://github.com/pmndrs/react-three-fiber/issues`",
     "https://opencollective.com/react-three-fiber`",
 )
-# 模型供应商页预设的公网供应商地址（01 §5.3、D-096）：只作为表单默认值填入，浏览器不访问；
+# 模型供应商页预设的公网供应商地址（architecture.md §5、D-096）：只作为表单默认值填入，浏览器不访问；
 # 只有管理员保存并确认启用后由 llm-gateway 调用（G-02）。按地址前缀放行，同一主机的其他路径照常报告
 PROVIDER_PRESETS = (
     "https://api.deepseek.com/v1",
