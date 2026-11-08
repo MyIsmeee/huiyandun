@@ -171,7 +171,8 @@ bundled:
       - { name: libxcb, version: 1.17.0, license: X11 }
       - { name: libXau, version: 1.0.9, license: X11 }
 
-# 场景资产（REUSE-13，D-053）：前端本地打包的 CC0 成品模型，原样分发，运行时不联网（G-05）
+# 场景资产（REUSE-13，D-053）：前端本地打包的 CC0 成品模型，运行时不联网（G-05）。Kenney 模型经 tools/dev/assets.py
+# 归中、重新上色并按类别合并，models 逐个列出来源；其余原样分发
 # source 记录下载出处（站点与页面编号），不写成网址：本文件不放行 CI-07
 assets:
   - name: Quaternius Cars · Car（NormalCar1）
@@ -244,6 +245,119 @@ assets:
     source: Poly Pizza 模型页 m/BuRay4fVFr
     purpose: 床
     owner: MyIsmeee
+  - name: Kenney 场景资产 · 建筑
+    file: web/console/public/models/scene-building.glb
+    sha256: 32b401c0e2fa2dab2b5f914d25055b956d1f624311b71340464eec556d20f16b
+    license: CC0-1.0
+    source: Kenney 官网 city-kit-commercial 2.1、city-kit-industrial 2.0、city-kit-suburban 2.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 建筑（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: office-small, source: city-kit-commercial/building-a }
+      - { id: shop-low, source: city-kit-commercial/building-c }
+      - { id: shop-row, source: city-kit-commercial/building-e }
+      - { id: office, source: city-kit-commercial/building-j }
+      - { id: office-tall, source: city-kit-commercial/building-l }
+      - { id: tower, source: city-kit-commercial/building-skyscraper-a }
+      - { id: factory, source: city-kit-industrial/building-a }
+      - { id: factory-large, source: city-kit-industrial/building-c }
+      - { id: warehouse, source: city-kit-industrial/building-q }
+      - { id: workshop, source: city-kit-industrial/building-k }
+      - { id: house, source: city-kit-suburban/building-type-a }
+      - { id: house-large, source: city-kit-suburban/building-type-d }
+  - name: Kenney 场景资产 · 道路
+    file: web/console/public/models/scene-road.glb
+    sha256: 4ffafcc9fba733ee61e94614af34b466a032a418922be906643bea5312307d2d
+    license: CC0-1.0
+    source: Kenney 官网 city-kit-roads 2.2（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 道路（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: road, source: city-kit-roads/road-straight }
+      - { id: road-bend, source: city-kit-roads/road-bend }
+      - { id: road-junction, source: city-kit-roads/road-intersection }
+      - { id: road-crossroad, source: city-kit-roads/road-crossroad }
+      - { id: road-crosswalk, source: city-kit-roads/road-crossing }
+      - { id: road-end, source: city-kit-roads/road-end }
+      - { id: road-entrance, source: city-kit-roads/road-driveway-single }
+      - { id: plaza, source: city-kit-roads/tile-low }
+  - name: Kenney 场景资产 · 墙与围栏
+    file: web/console/public/models/scene-wall.glb
+    sha256: d6ee6f83f699561f66e3aaeafbfd468874985ca4e3d84440a9d8b3f0856c4add
+    license: CC0-1.0
+    source: Kenney 官网 building-kit 1.0、city-kit-roads 2.2、city-kit-suburban 2.0、factory-kit 3.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 墙与围栏（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: wall, source: building-kit/wall }
+      - { id: wall-low, source: building-kit/wall-low }
+      - { id: fence, source: city-kit-suburban/fence }
+      - { id: barrier, source: city-kit-roads/construction-fence }
+      - { id: column, source: building-kit/column }
+      - { id: bollard, source: factory-kit/warning-traffic }
+  - name: Kenney 场景资产 · 门窗
+    file: web/console/public/models/scene-opening.glb
+    sha256: 94ea64442333de4d484c12161b5907d4818bc3029a459055e1ab0571e4b6b398
+    license: CC0-1.0
+    source: Kenney 官网 building-kit 1.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 门窗（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: wall-door, source: building-kit/wall-doorway-square }
+      - { id: wall-door-wide, source: building-kit/wall-doorway-wide-square }
+      - { id: wall-window, source: building-kit/wall-window-square }
+      - { id: wall-window-wide, source: building-kit/wall-window-wide-square }
+  - name: Kenney 场景资产 · 家具
+    file: web/console/public/models/scene-furniture.glb
+    sha256: 129a40770cd774627fc471c42e90fd4024f84fdd6cffed7060b8cd19cecd852a
+    license: CC0-1.0
+    source: Kenney 官网 furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 家具（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: desk, source: furniture-kit/desk }
+      - { id: desk-corner, source: furniture-kit/deskCorner }
+      - { id: office-chair, source: furniture-kit/chairDesk }
+      - { id: chair, source: furniture-kit/chair }
+      - { id: table, source: furniture-kit/table }
+      - { id: coffee-table, source: furniture-kit/tableCoffee }
+      - { id: sofa, source: furniture-kit/loungeSofa }
+      - { id: sofa-corner, source: furniture-kit/loungeSofaCorner }
+      - { id: armchair, source: furniture-kit/loungeChair }
+      - { id: cabinet, source: furniture-kit/bookcaseClosedDoors }
+      - { id: cabinet-wide, source: furniture-kit/bookcaseClosedWide }
+      - { id: bed, source: furniture-kit/bedSingle }
+      - { id: bed-double, source: furniture-kit/bedDouble }
+      - { id: trash-can, source: furniture-kit/trashcan }
+  - name: Kenney 场景资产 · 货架设备
+    file: web/console/public/models/scene-equipment.glb
+    sha256: 5f37d037eb68b6e2bd6ffb7d1b9731efb038330180f48c66aa15dd59cdf343ab
+    license: CC0-1.0
+    source: Kenney 官网 factory-kit 3.0、furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 货架设备（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: shelf, source: furniture-kit/bookcaseOpen }
+      - { id: rack, source: factory-kit/machine }
+      - { id: console, source: factory-kit/screen-panel-wide }
+      - { id: conveyor, source: factory-kit/conveyor }
+      - { id: crate, source: factory-kit/box-large }
+      - { id: robot-arm, source: factory-kit/robot-arm-a }
+      - { id: scanner, source: factory-kit/scanner-high }
+      - { id: machine, source: factory-kit/machine-bed }
+  - name: Kenney 场景资产 · 绿化
+    file: web/console/public/models/scene-greenery.glb
+    sha256: 8d94b143f0b93829f850c0bd069b8625d52d58ddfd739e7108ebdd0eb9eae7b0
+    license: CC0-1.0
+    source: Kenney 官网 city-kit-roads 2.2、city-kit-suburban 2.0、furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 绿化（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: tree, source: city-kit-suburban/tree-large }
+      - { id: tree-small, source: city-kit-suburban/tree-small }
+      - { id: planter, source: city-kit-suburban/planter }
+      - { id: potted-plant, source: furniture-kit/pottedPlant }
+      - { id: grass, source: city-kit-roads/tile-low }
 
 # 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
 # 依赖由 tools/dev/export_efficientvit_seg.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件

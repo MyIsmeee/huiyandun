@@ -9,6 +9,7 @@ dev = [
     "httpx2",
     "import-linter>=2.15,<3",  # CI-06 模块依赖边界（D-01～D-05、C-LLM-01）
     "packaging>=26.3,<27",  # tools/dev/third_party_licenses.py 解析环境标记
+    "pillow>=13,<14",  # tools/dev/assets.py 重新上色调色板贴图
     "pip-licenses",
     "pre-commit",
     "pre-commit-hooks",
