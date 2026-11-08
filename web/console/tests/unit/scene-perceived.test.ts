@@ -29,6 +29,7 @@ const frame = (camera_id: string, more: Partial<SceneFrame> = {}) =>
   }) as SceneFrame;
 const camera = (id: string, mapped: boolean): Camera => ({
   id,
+  name: id,
   state: mapped ? "normal" : "uncalibrated",
   mapped,
   severe: false,

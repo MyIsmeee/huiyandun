@@ -308,6 +308,25 @@ test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再�
   await expect(panel).toHaveCount(0);
 });
 
+// V-I6：跟随中从摄像头栏选中摄像头，引线卡暂不显示；回到总览后卡片与引线一起出现
+test("跟随中选中摄像头，回到总览后引线卡带引线", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  await walk(page, ws, 0.4);
+  const callout = scene(page).getByRole("group", { name: "cam-01 画面" });
+
+  await scene(page).dblclick({ position: await targetAt(page, "cam-01/7") });
+  await page.clock.runFor(100);
+  await page.getByRole("button", { name: /^cam-01 / }).click();
+  await expect(callout).toHaveCount(0); // 跟随视角下不显示
+
+  await page.keyboard.press("Escape");
+  await page.clock.runFor(100);
+  await expect(callout).toContainText("· cam-01"); // 编号 · 名称；夹具的名称与编号相同
+  await expect(scene(page).locator("polyline")).toHaveCount(1);
+});
+
 test("跟随的车辆离开画面：详情收起，镜头飞回总览", async ({ page }) => {
   await still(page);
   const [ws] = await open(page, [camera("normal")]);

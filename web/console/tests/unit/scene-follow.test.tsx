@@ -8,7 +8,7 @@ import { type Target, useLive } from "../../src/store/live";
 const SIZE = { width: 1000, height: 600 };
 const BASE: Shot = { eye: [20, 30, 30], look: [20, 0, 12], fov: 0.6, center: [500, 330] };
 const POSE = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
-const CAMERAS: Camera[] = [{ id: "cam-01", state: "normal", mapped: true, severe: false, pose: POSE }];
+const CAMERAS: Camera[] = [{ id: "cam-01", name: "东门", state: "normal", mapped: true, severe: false, pose: POSE }];
 const KEY = "cam-01/7";
 
 const target = (patch: Partial<Target>): Target => ({

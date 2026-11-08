@@ -33,7 +33,7 @@ export function CameraCallout({ cameras, view }: { cameras: Camera[]; view: View
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [camera?.id]);
+  }, [camera?.id, focused]);
 
   if (!camera || focused) return null;
   const head = view.project([camera.pose.x, camera.pose.height_m, camera.pose.y]);
@@ -56,18 +56,23 @@ export function CameraCallout({ cameras, view }: { cameras: Camera[]; view: View
       >
         <Thumbnail id={camera.id} offline={camera.state === "offline"} refreshMs={REFRESH_MS} />
         <div className="flex items-center gap-2 px-1">
-          <span className="font-mono text-xs">{camera.id}</span>
+          <span className="flex min-w-0 items-baseline gap-1 text-xs">
+            <span className="font-mono">{camera.id}</span>
+            <span className="truncate text-muted-foreground">· {camera.name}</span>
+          </span>
+          {/* 只放图标：给"编号 · 名称"留出宽度，说明见悬停提示 */}
           <Button
             variant="ghost"
-            size="sm"
-            className="ml-auto h-7 px-2 text-meta text-muted-foreground"
+            size="icon"
+            aria-label="在监控墙中查看"
+            title="在监控墙中查看"
+            className="ml-auto size-7 shrink-0 text-muted-foreground"
             onClick={() => {
               setView("wall");
               if (useWall.getState().zoomed !== camera.id) toggleZoom(camera.id);
             }}
           >
             <LayoutGrid aria-hidden />
-            在监控墙中查看
           </Button>
         </div>
       </div>

@@ -17,6 +17,7 @@ export const BEAM = "#FFFFFF";
 export type DeviceState = Device["state"];
 export type Camera = {
   id: string;
+  name: string;
   state: DeviceState;
   /** 有地面映射（标定或按安装参数估算，FR-902、D-102）：才投放目标与环境；与 state 无关 */
   mapped: boolean;
@@ -31,10 +32,10 @@ export function useCameras(devices: Device[]): Camera[] {
   return useMemo(
     () =>
       devices.flatMap((initial) => {
-        const { id, state, alert_severity, camera } = pushed[initial.id] ?? initial;
+        const { id, name, state, alert_severity, camera } = pushed[initial.id] ?? initial;
         if (!camera) return [];
         const severe = alert_severity === "critical" || alert_severity === "high";
-        return [{ id, state, mapped: camera.mapping !== "none", severe, pose: camera.pose }];
+        return [{ id, name, state, mapped: camera.mapping !== "none", severe, pose: camera.pose }];
       }),
     [devices, pushed],
   );
