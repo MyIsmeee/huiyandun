@@ -1,5 +1,5 @@
 import { Car, User, WifiOff } from "lucide-react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, SyntheticEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/lib/utils";
 import { BEHAVIOR, ICONS } from "../../scene/DeviceTags";
@@ -59,9 +59,9 @@ export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?
       aria-label={`${device.id} ${device.name}`}
       aria-pressed={selected}
       data-tile={device.id}
-      onClick={onSelect}
-      onDoubleClick={onZoom}
-      onKeyDown={(e) => e.key === "Enter" && onSelect()}
+      onClick={(e) => !fromControl(e) && onSelect()}
+      onDoubleClick={(e) => !fromControl(e) && onZoom()}
+      onKeyDown={(e) => e.key === "Enter" && !fromControl(e) && onSelect()}
       style={style}
       className="group relative cursor-pointer overflow-hidden rounded-lg bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
@@ -113,3 +113,6 @@ function StatePill({ icon, color, text }: { icon: keyof typeof ICONS; color: str
     </p>
   );
 }
+
+/** 事件来自瓦片内的按钮（如"重试"）：只执行按钮本身，不连带选中或放大该路 */
+const fromControl = (e: SyntheticEvent) => e.target instanceof Element && e.target.closest("button") !== null;
