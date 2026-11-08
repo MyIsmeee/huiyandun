@@ -1,5 +1,5 @@
 import { CircleAlert, Clock, LogOut, MapPin, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { api, type Site } from "../../lib/api";
@@ -10,9 +10,9 @@ import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AlertList } from "../AlertList/AlertList";
 import { CameraPage } from "../CameraList/CameraList";
+import { CanvasToolbar } from "../CanvasToolbar/CanvasToolbar";
 import { ConnectionStatus, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
-import { KpiRow } from "../KpiTile/KpiRow";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { ProviderPage } from "../ProviderList/ProviderList";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
@@ -23,8 +23,8 @@ const deselect = () => select(null);
 type Page = "overview" | "cameras" | "providers";
 
 /**
- * 主界面分区（HYD-UIX-004 §4.1、D-112）：位置固定、不可拖拽（V-L1）；场景通栏，面积占比 ≥ 50%（V-L2）。
- * D 详情抽屉在选中对象时从右侧盖在场景上，F 告警栏始终完整可见；处置时间线在设备详情中（FR-304）。
+ * 主界面分区（HYD-UIX-004 §4.1、D-115）：位置固定、不可拖拽（V-L1）；主画布面积最大（V-L2），其上不叠加面板（V-L3）。
+ * D 检查栏未选中时为告警栏，选中设备或目标时切换为详情；告警栏只隐藏不卸载，返回时筛选、展开与滚动位置不丢失。
  * onLogout 完成后若仍渲染本页，说明会话仍有效、退出未成功。
  * 进入即连接 WS；连接被拒时调用 onRejected 核对会话。
  */
@@ -47,11 +47,14 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   const pushed = useLive((s) => (selectedId ? s.devices[selectedId] : undefined));
   const selected = pushed ?? site.devices.find((d) => d.id === selectedId);
   const targetKey = useSelection((s) => s.targetKey);
+  const canvas = useRef<HTMLElement>(null);
   const target = useLive((s) => (targetKey ? s.targets[targetKey] : undefined));
   // 选中的目标离开画面（2 s 无更新被移除，V-U4）即取消选中、收起详情（D-054）
   useEffect(() => {
     if (targetKey && !target) deselect();
   }, [targetKey, target]);
+
+  const detail = selected !== undefined || target !== undefined;
 
   async function handleLogout() {
     setLogout("pending");
@@ -93,23 +96,27 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
         </div>
       </header>
 
-      {/* C 场景通栏；指标条、视角控件、详情抽屉与断线提示浮在其上（V-L3）。断线时场景饱和度降至 50%（V-U3） */}
-      <section aria-label="场景" className={cn("relative min-h-0 overflow-hidden", offline && "saturate-50")}>
-        <SceneViewport site={site} />
-        <KpiRow stale={offline} />
-        {offline && (
-          <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-uncertain backdrop-blur-sm">
-            <Clock aria-hidden className="size-4" />
-            数据非实时 · 最后更新 {formatTime(lastFrameAt)}
-          </p>
-        )}
-        {/* D 详情抽屉：盖在场景右侧，不挤压告警栏（D-112） */}
-        {selected && <DetailPanel device={selected} stale={offline} onClose={deselect} />}
-        {target && <TargetPanel target={target} stale={offline} onClose={deselect} />}
+      {/* C 主画布：工具条 + 当前视图；断线时饱和度降至 50%（V-U3） */}
+      <section ref={canvas} aria-label="主画布" className="flex min-h-0 flex-col bg-background">
+        <CanvasToolbar canvas={canvas} stale={offline} />
+        <div aria-label="场景" role="region" className={cn("relative min-h-0 flex-1 overflow-hidden", offline && "saturate-50")}>
+          <SceneViewport site={site} />
+          {offline && (
+            <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-uncertain backdrop-blur-sm">
+              <Clock aria-hidden className="size-4" />
+              数据非实时 · 最后更新 {formatTime(lastFrameAt)}
+            </p>
+          )}
+        </div>
       </section>
 
-      <aside aria-label="告警" className="flex min-h-0 flex-col border-l bg-card">
-        <AlertList stale={offline} lastFrameAt={lastFrameAt} />
+      {/* D 检查栏（D-115） */}
+      <aside aria-label="检查栏" className="flex min-h-0 flex-col border-l bg-card">
+        <div hidden={detail} className="flex min-h-0 flex-1 flex-col">
+          <AlertList stale={offline} lastFrameAt={lastFrameAt} />
+        </div>
+        {selected && <DetailPanel device={selected} stale={offline} onClose={deselect} />}
+        {target && <TargetPanel target={target} stale={offline} onClose={deselect} />}
       </aside>
 
       {/* 盖在主界面之上而不替换它：场景与推送保持运行，返回时无需重新加载 */}

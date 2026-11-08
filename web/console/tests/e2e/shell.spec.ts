@@ -19,7 +19,7 @@ test("主界面分区与空态", async ({ page }) => {
   await expect(page.getByText("演示办公区")).toBeVisible();
   await expect(page.getByRole("list", { name: "关键指标" }).getByText("—")).toHaveCount(4);
   await expect(page.getByText("暂无告警")).toBeVisible();
-  // 处置时间线在详情抽屉中（D-112），未选中时主界面没有该区域
+  // 处置时间线在检查栏详情中（D-115），未选中时主界面没有该区域
   await expect(page.getByRole("region", { name: "处置时间线" })).toHaveCount(0);
   await sceneSettled(page);
   await expectNoOverflow(page);
@@ -38,14 +38,12 @@ test("关键指标显示数值与变化（D-100）", async ({ page }) => {
   await page.goto("/");
 
   const kpis = page.getByRole("list", { name: "关键指标" });
-  await expect(kpis.getByText("较上一次 ↓ 2.6")).toBeVisible();
+  await expect(kpis.getByTitle("较上一次")).toHaveText("↓ 2.6");
   await sceneSettled(page);
-  // V-P3：指标条（左上）不与视角控件组（左下）重叠
-  const [row, toolbar] = await Promise.all([
-    kpis.boundingBox(),
-    page.getByRole("toolbar", { name: "视角" }).boundingBox(),
-  ]);
-  expect((row?.y ?? 0) + (row?.height ?? 0)).toBeLessThan(toolbar?.y ?? 0);
+  // V-P3：最窄的 1366 宽下，指标一行完整显示在工具条内，不被截断（D-115）
+  const [row, bar] = await Promise.all([kpis.boundingBox(), page.getByRole("region", { name: "主画布" }).boundingBox()]);
+  expect(row?.x ?? 0).toBeGreaterThanOrEqual(bar?.x ?? 0);
+  expect((row?.x ?? 0) + (row?.width ?? 0)).toBeLessThanOrEqual((bar?.x ?? 0) + (bar?.width ?? 0));
   await expectNoOverflow(page);
   await expect(kpis).toHaveScreenshot("kpis-dark.png");
 });

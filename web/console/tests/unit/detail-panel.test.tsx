@@ -23,7 +23,7 @@ const DEVICE: Device = {
 };
 
 describe("DetailPanel", () => {
-  it("显示设备基本信息；Esc 与关闭按钮收起（V-I2）", () => {
+  it("显示设备基本信息；Esc 与返回按钮回到告警栏（V-I2、D-115）", () => {
     const onClose = vi.fn();
     render(<DetailPanel device={DEVICE} stale={false} onClose={onClose} />);
 
@@ -33,7 +33,7 @@ describe("DetailPanel", () => {
     expect(screen.getByText("该设备没有视频流")).toBeTruthy();
     expect(screen.queryByText("数据非实时")).toBeNull();
     fireEvent.keyDown(window, { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: "关闭详情" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回告警" }));
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 

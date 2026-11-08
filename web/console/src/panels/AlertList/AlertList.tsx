@@ -124,7 +124,7 @@ export function AlertListView(props: {
   const empty = alerts.length === 0 && incidents.length === 0;
   return (
     <>
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
         <h2 className="text-base font-medium">告警</h2>
         <span className="text-meta text-subtle-foreground tabular-nums">{incidents.length + groups.length}</span>
         <ToggleGroup

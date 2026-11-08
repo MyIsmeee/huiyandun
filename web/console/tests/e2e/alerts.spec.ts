@@ -51,7 +51,7 @@ for (const theme of ["light", "dark"] as const) {
     sockets[0]?.send(JSON.stringify({ channel: "incidents", data: INCIDENT }));
     sockets[0]?.send(JSON.stringify({ channel: "executions", data: EXECUTION }));
 
-    const panel = page.getByRole("complementary", { name: "告警" });
+    const panel = page.getByRole("complementary", { name: "检查栏" });
     await expect(panel.getByText("已处置")).toBeVisible();
     await expectNoOverflow(page);
     await expect(panel).toHaveScreenshot(`alert-list-${theme}.png`);
