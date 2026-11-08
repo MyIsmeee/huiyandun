@@ -1,6 +1,6 @@
 # playbook-executor
 
-确定性处置执行器（architecture.md §4、设计 `docs/design/050-containment.md`）：关联事件满足 Playbook 条件时，经 privileged-helper 封禁攻击源，到 TTL 自动解除。不 import 任何 LLM 客户端，处置参数只取关联事件的结构化字段（G-03、D-01）。
+确定性处置执行器（architecture.md §4、设计 `docs/archive/design/050-containment.md`）：关联事件满足 Playbook 条件时，经 privileged-helper 封禁攻击源，到 TTL 自动解除。不 import 任何 LLM 客户端，处置参数只取关联事件的结构化字段（G-03、D-01）。
 
 ## 职责
 

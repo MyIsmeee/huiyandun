@@ -1,6 +1,6 @@
 # privileged-helper
 
-特权动作（architecture.md C-SEC-06，设计 `docs/design/050-containment.md`，D-074）：只接受 playbook-executor 签名的指令，以固定模板操作宿主的 nftables。
+特权动作（architecture.md C-SEC-06，设计 `docs/archive/design/050-containment.md`，D-074）：只接受 playbook-executor 签名的指令，以固定模板操作宿主的 nftables。
 
 ## 职责
 

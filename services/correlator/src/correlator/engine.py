@@ -1,4 +1,4 @@
-"""关联引擎（TK-041，设计 docs/design/041-correlation-engine.md）：按规则把同一设备窗口内先后出现的
+"""关联引擎（TK-041，设计 docs/archive/design/041-correlation-engine.md）：按规则把同一设备窗口内先后出现的
 事件合并为关联事件。判定只由规则完成，不依赖 LLM（FR-305、G-03）。
 
 时间一律取事件自带的 ts：探针与视觉事件到达先后可能与发生先后不一致，按发生先后判断序列。

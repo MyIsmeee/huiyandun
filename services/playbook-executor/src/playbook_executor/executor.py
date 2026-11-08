@@ -1,4 +1,4 @@
-"""处置编排（TK-050，设计 docs/design/050-containment.md）：关联事件 → Playbook → 四接口 → TTL 到期回滚。
+"""处置编排（TK-050，设计 docs/archive/design/050-containment.md）：关联事件 → Playbook → 四接口 → TTL 到期回滚。
 
 判定只依据关联事件的结构化字段与 Playbook，不 import 任何 LLM 客户端（G-03、D-01）。状态只在本进程内维护，
 每次变化发布一条 hyd.playbook.execution.v1；重启时由 restore 以流中各执行的最后状态恢复。
