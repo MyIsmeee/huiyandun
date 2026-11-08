@@ -1,5 +1,6 @@
 import { Clock, RotateCw, Video, VideoOff } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ApiError, api } from "../../lib/api";
 import { DetectionOverlay } from "../DetectionOverlay/DetectionOverlay";
@@ -133,17 +134,14 @@ export function LiveVideoView(props: { status: VideoStatus; onRetry?: () => void
             实时画面不可用
           </span>
           <span className="px-4 text-center text-xs">{status.reason}</span>
-          <button
-            onClick={onRetry}
-            className="mt-1 flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
-          >
-            <RotateCw aria-hidden className="size-3.5" />
+          <Button variant="outline" size="sm" onClick={onRetry} className="mt-1">
+            <RotateCw aria-hidden />
             重试
-          </button>
+          </Button>
         </Center>
       )}
       {status.kind === "interrupted" && (
-        <p className="absolute top-2 right-2 flex items-center gap-1.5 rounded-full border border-dashed border-uncertain bg-card/80 px-3 py-1 text-xs whitespace-nowrap text-uncertain backdrop-blur">
+        <p className="absolute top-2 right-2 flex items-center gap-1.5 rounded-full border border-dashed border-uncertain bg-card/80 px-3 py-1 text-xs whitespace-nowrap text-muted-foreground backdrop-blur">
           <Clock aria-hidden className="size-3.5" />
           画面中断 · 正在重连
         </p>

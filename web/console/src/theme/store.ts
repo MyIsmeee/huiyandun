@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-/** 只有石墨暗色一套主题（ui.md §3、D-110；将按 D-121 改为浅色） */
-export type Theme = "dark";
+/** 只有浅色一套主题（ui.md §3、D-121） */
+export type Theme = "light";
 
 interface ThemeState {
   theme: Theme;
@@ -14,7 +14,7 @@ interface ThemeState {
 export const useTheme = create<ThemeState>()(
   persist(
     (set) => ({
-      theme: "dark",
+      theme: "light",
       reducedMotion: false,
       setReducedMotion: (reducedMotion) => set({ reducedMotion }),
     }),
@@ -29,7 +29,7 @@ export function prefersReducedMotion(): boolean {
 
 function apply({ reducedMotion }: ThemeState): void {
   const root = document.documentElement;
-  root.dataset.theme = "dark";
+  root.dataset.theme = "light";
   root.dataset.motion = reducedMotion ? "reduced" : "full";
 }
 

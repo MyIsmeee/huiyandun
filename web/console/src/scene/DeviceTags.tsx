@@ -1,4 +1,5 @@
 import { BellRing, Crosshair, LoaderCircle, Lock, type LucideIcon, ShieldAlert, TriangleAlert, WifiOff } from "lucide-react";
+import { StatusIcon, StatusPill, statusTint } from "@/components/StatusPill";
 import { type Behavior, useLive } from "../store/live";
 import { useViewpointCamera } from "./camera";
 import { type Camera, deviceLook, type TagIcon } from "./devices";
@@ -49,19 +50,11 @@ export function DeviceTags({ cameras, view }: { cameras: Camera[]; view: View })
       >
         {tags
           .filter((t) => PLAIN.has(t.icon))
-          .map(({ icon, text, color }) => {
-            const Icon = ICONS[icon];
-            return (
-              <span
-                key={icon}
-                style={{ borderColor: color }}
-                className="mb-1 flex items-center gap-1 rounded-full border bg-card/90 px-2 py-0.5 text-xs whitespace-nowrap text-foreground"
-              >
-                <Icon aria-hidden className="size-3.5" style={{ color }} />
-                {text}
-              </span>
-            );
-          })}
+          .map(({ icon, text, color }) => (
+            <StatusPill key={icon} icon={ICONS[icon]} color={color} className="mb-1">
+              {text}
+            </StatusPill>
+          ))}
         {alerts.length > 0 && <Pin tags={alerts} detail={detail} />}
       </div>
     );
@@ -72,13 +65,12 @@ export function DeviceTags({ cameras, view }: { cameras: Camera[]; view: View })
 function Pin({ tags, detail }: { tags: ReturnType<typeof deviceLook>["tags"]; detail: string[] }) {
   const [first, second] = tags;
   if (!first) return null;
-  const Icon = ICONS[first.icon];
   return (
     <>
       <span
         role="status"
-        style={{ borderColor: first.color }}
-        className="mb-1 rounded-full border bg-card/90 px-2.5 py-0.5 text-xs whitespace-nowrap text-foreground tabular-nums"
+        style={{ borderColor: first.color, backgroundColor: statusTint(first.color) }}
+        className="mb-1 rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap text-foreground tabular-nums"
       >
         {[...tags.map((t) => t.text), ...detail].join(" · ")}
       </span>
@@ -86,7 +78,7 @@ function Pin({ tags, detail }: { tags: ReturnType<typeof deviceLook>["tags"]; de
         style={{ borderColor: first.color, boxShadow: second ? `0 0 0 2px ${second.color}` : undefined }}
         className="grid size-7 place-items-center rounded-full border-2 bg-card"
       >
-        <Icon aria-hidden className="size-4" style={{ color: first.color }} />
+        <StatusIcon icon={ICONS[first.icon]} color={first.color} />
       </span>
       <span aria-hidden className="h-3 w-0.5" style={{ backgroundColor: first.color }} />
     </>

@@ -174,7 +174,7 @@ export function AiInvestigationView(props: {
           <h3 className="font-medium">AI 研判</h3>
           <span className="text-xs text-subtle-foreground">AI 生成 · 需人工复核</span>
           {stale && (
-            <span className="ml-auto inline-flex items-center gap-1 text-xs text-uncertain">
+            <span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Clock aria-hidden className="size-3.5" />
               数据非实时
             </span>

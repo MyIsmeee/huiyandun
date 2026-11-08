@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./theme/store";
 import "./theme/theme.css";
 import { App } from "./App";
@@ -9,6 +10,8 @@ if (!root) throw new Error("index.html 缺少 #root");
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <TooltipProvider>
+      <App />
+    </TooltipProvider>
   </StrictMode>,
 );

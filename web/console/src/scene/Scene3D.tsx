@@ -8,7 +8,7 @@ import type { Area, SceneView } from "./layout";
 import { PerceivedScene } from "./PerceivedScene";
 
 /** 页面底色（ui.md §3），场景背景与远处渐隐取同色 */
-const BACKGROUND = "#0A0A0B";
+const BACKGROUND = "#F4F5F7";
 /** 主光方向（ui.md §5.2）：方位 135°、仰角 55° */
 const SUN_AZIMUTH = (135 * Math.PI) / 180;
 const SUN_ELEVATION = (55 * Math.PI) / 180;
@@ -58,7 +58,7 @@ function Lights({ area }: { area: Area }) {
   ];
   return (
     <>
-      <hemisphereLight args={["#FFFFFF", "#27272A", 0.9]} />
+      <hemisphereLight args={["#FFFFFF", "#E5E7EB", 0.9]} />
       <primitive object={target} position={[cx, 0, cz]} />
       <directionalLight
         position={sun}

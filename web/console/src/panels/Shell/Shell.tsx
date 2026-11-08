@@ -73,9 +73,9 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       data-live={!offline}
       className="grid h-full grid-cols-[auto_minmax(0,1fr)_360px] grid-rows-[48px_minmax(0,1fr)] bg-background 2xl:grid-cols-[auto_minmax(0,1fr)_400px]"
     >
-      <header className="col-span-3 flex items-center gap-4 border-b px-3">
+      <header className="col-span-3 flex items-center gap-4 border-b bg-card px-3">
         <span className="flex items-center gap-2 text-[15px] font-semibold">
-          <span className="grid size-7 place-items-center rounded-md bg-foreground text-background">
+          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
             <ShieldCheck aria-hidden className="size-4" />
           </span>
           慧眼盾
@@ -118,7 +118,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           {/* 只挂载当前视图：监控墙下不占用 3D 渲染，空间态势下不保持多路实时画面连接 */}
           {view === "wall" ? <VideoWall devices={site.devices} /> : <SceneViewport site={site} />}
           {offline && (
-            <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-uncertain backdrop-blur-sm">
+            <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
               <Clock aria-hidden className="size-4" />
               数据非实时 · 最后更新 {formatTime(lastFrameAt)}
             </p>
@@ -165,7 +165,7 @@ function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => v
           onClick={() => onChange(item.page)}
           className={cn(
             "h-7 rounded-sm px-3 text-sm transition-colors",
-            page === item.page ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+            page === item.page ? "bg-card font-medium text-primary shadow-xs" : "text-muted-foreground hover:text-foreground",
           )}
         >
           {item.label}

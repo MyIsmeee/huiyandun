@@ -6,6 +6,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Spinner } from "@/components/ui/spinner";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
 import { useLive } from "../../store/live";
@@ -108,7 +111,12 @@ export function CameraListView(props: {
           {notice}
         </p>
       )}
-      {load.status === "loading" && <p className="text-subtle-foreground">加载中…</p>}
+      {load.status === "loading" && (
+        <p className="flex items-center gap-2 text-subtle-foreground">
+          <Spinner aria-hidden />
+          加载中…
+        </p>
+      )}
       {load.status === "failed" && (
         <p className="flex items-center gap-2">
           {load.message}
@@ -117,36 +125,59 @@ export function CameraListView(props: {
           </button>
         </p>
       )}
-      {load.status === "ready" && load.cameras.length === 0 && <p className="text-subtle-foreground">还没有摄像头，点"添加"登记第一路。</p>}
+      {load.status === "ready" && load.cameras.length === 0 && (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyTitle className="text-base">还没有摄像头</EmptyTitle>
+            <EmptyDescription>点"添加"登记第一路。</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
       {load.status === "ready" && load.cameras.length > 0 && (
-        <ul aria-label="摄像头列表" className="flex flex-col gap-2">
-          {load.cameras.map((camera) => {
-            const offline = devices[camera.id]?.state === "offline";
-            return (
-              <li key={camera.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
-                <span className="w-14 font-mono text-muted-foreground">{camera.id}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{camera.name}</span>
-                  <span className="block truncate text-xs text-subtle-foreground">
-                    {address(camera)} · 口令 {camera.password_set ? "已设置" : "未设置"}
-                  </span>
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {camera.source ? `拉流 · ${PROTOCOL[camera.source.protocol]}` : "推流"} · {camera.ip}
-                </span>
-                {/* 在线状态以图标形状 + 文字表达，不使用状态色（V-CAM1） */}
-                <span className="w-16 text-xs">{offline ? "○ 离线" : "● 在线"}</span>
-                <span className="w-24 text-xs text-subtle-foreground">{camera.calibration.length >= 4 ? "已标定" : "按安装参数估算"}</span>
-                <button type="button" aria-label={`编辑 ${camera.name}`} onClick={() => props.onEdit(camera)} className={button}>
-                  <Pencil aria-hidden className="size-4" />
-                </button>
-                <button type="button" aria-label={`删除 ${camera.name}`} onClick={() => props.onDelete(camera)} className={button}>
-                  <Trash2 aria-hidden className="size-4" />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="rounded-lg border bg-card">
+          <Table aria-label="摄像头列表" className="table-fixed">
+            <TableHeader>
+              <TableRow className="text-meta">
+                <TableHead className="w-24 pl-4">编号</TableHead>
+                <TableHead>名称与地址</TableHead>
+                <TableHead className="w-44">接入</TableHead>
+                <TableHead className="w-16">状态</TableHead>
+                <TableHead className="w-28">地面映射</TableHead>
+                <TableHead className="w-24 pr-4 text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {load.cameras.map((camera) => {
+                const offline = devices[camera.id]?.state === "offline";
+                return (
+                  <TableRow key={camera.id}>
+                    <TableCell className="pl-4 font-mono text-muted-foreground">{camera.id}</TableCell>
+                    <TableCell>
+                      <span className="block font-medium">{camera.name}</span>
+                      <span className="block truncate text-xs text-subtle-foreground">
+                        {address(camera)} · 口令 {camera.password_set ? "已设置" : "未设置"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="truncate text-xs text-muted-foreground">
+                      {camera.source ? `拉流 · ${PROTOCOL[camera.source.protocol]}` : "推流"} · {camera.ip}
+                    </TableCell>
+                    {/* 在线状态以图标形状 + 文字表达，不使用状态色（V-CAM1） */}
+                    <TableCell className="text-xs">{offline ? "○ 离线" : "● 在线"}</TableCell>
+                    <TableCell className="text-xs text-subtle-foreground">{camera.calibration.length >= 4 ? "已标定" : "按安装参数估算"}</TableCell>
+                    <TableCell className="space-x-2 pr-4 text-right">
+                      <button type="button" aria-label={`编辑 ${camera.name}`} onClick={() => props.onEdit(camera)} className={button}>
+                        <Pencil aria-hidden className="size-4" />
+                      </button>
+                      <button type="button" aria-label={`删除 ${camera.name}`} onClick={() => props.onDelete(camera)} className={button}>
+                        <Trash2 aria-hidden className="size-4" />
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       )}
       {deleting && (
         <AlertDialog open onOpenChange={(open) => !open && props.onCancelDelete()}>

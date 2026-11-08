@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useRef } from "react";
 import { smoothed, smoothers } from "../../scene/smoothing";
-import { CLASS_LABEL } from "../../scene/targets";
+import { ACCENT, CLASS_LABEL } from "../../scene/targets";
 import { useConnection } from "../../store/connection";
 import { type Target, useLive } from "../../store/live";
 import { selectTarget, useSelection } from "../../store/selection";
@@ -8,9 +8,10 @@ import { contentRect, hitTarget, isFresh, type Rect, SKELETON, toPixel } from ".
 
 const BOX = "rgb(255 255 255 / 0.8)";
 const BONE = "rgb(255 255 255 / 0.6)";
-/** 选中的目标：线宽加倍，与 3D 选中括框同为白色 */
-const SELECTED = "#FFFFFF";
+/** 选中的目标：线宽加倍，与 3D 选中括框同为强调色 */
+const SELECTED = ACCENT;
 const LABEL_BG = "rgb(19 19 22 / 0.8)";
+const LABEL_TEXT = "#FFFFFF";
 
 /**
  * 实时画面上的检测框与骨骼（FR-107、04 V-W5）：取与 3D 人形同一份滤波后的检测框与关键点（V-A8），
@@ -123,7 +124,7 @@ export function paint(ctx: CanvasRenderingContext2D, target: Target, shape: { bb
   ctx.beginPath();
   ctx.roundRect(left, ty, tw, 18, 9);
   ctx.fill();
-  ctx.fillStyle = SELECTED;
+  ctx.fillStyle = LABEL_TEXT;
   ctx.fillText(text, left + 6, ty + 13);
 }
 

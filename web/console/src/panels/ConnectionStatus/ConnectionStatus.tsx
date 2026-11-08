@@ -19,7 +19,7 @@ function useNow(intervalMs: number): number {
 const STYLE: Record<Freshness, string> = {
   connecting: "border-border text-subtle-foreground",
   live: "border-border text-muted-foreground",
-  delayed: "border-dashed border-uncertain text-uncertain",
+  delayed: "border-dashed border-uncertain text-muted-foreground",
   offline: "border-foreground bg-foreground text-background",
 };
 

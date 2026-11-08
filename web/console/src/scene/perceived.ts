@@ -55,18 +55,18 @@ export interface Palette {
 }
 /** 地面类别低饱和；立面、物体与家具为中性灰实体，受光并投射阴影（ui.md §5.2、D-111） */
 export const PALETTE: Record<Theme, Palette> = {
-  dark: {
-    road: "#40454C",
-    sidewalk: "#2B2F34",
-    floor: "#3E3B36",
-    grass: "#283027",
-    earth: "#342E26",
-    facade: "#52525B",
-    cap: "#71717A",
-    furniture: "#A1A1AA",
-    canopy: "#3F4A3C",
-    board: "#27272A",
-    marking: "#A1A1AA",
+  light: {
+    road: "#DCDFE5",
+    sidewalk: "#E6E8EC",
+    floor: "#EEF0F3",
+    grass: "#DDE5DA",
+    earth: "#E4E1DB",
+    facade: "#E5E7EB",
+    cap: "#CBD5E1",
+    furniture: "#D4D4D8",
+    canopy: "#B7C4B0",
+    board: "#D1D5DB",
+    marking: "#FFFFFF",
   },
 };
 

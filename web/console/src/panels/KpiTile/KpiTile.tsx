@@ -47,7 +47,7 @@ export function KpiTile(props: {
         </span>
       )}
       {stale && (
-        <span className="flex items-center gap-1 self-center text-xs text-uncertain">
+        <span className="flex items-center gap-1 self-center text-xs text-muted-foreground">
           <Clock aria-hidden className="size-3.5" />
           非实时
         </span>
