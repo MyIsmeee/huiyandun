@@ -1,6 +1,7 @@
 import { Car, User, WifiOff } from "lucide-react";
 import { type CSSProperties, type ReactNode, type Ref, type SyntheticEvent, useCallback, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { StatusPill } from "@/components/StatusPill";
 import { cn } from "@/lib/utils";
 import { BEHAVIOR, ICONS } from "../../scene/DeviceTags";
 import { deviceLook } from "../../scene/devices";
@@ -58,7 +59,7 @@ export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?
   const offline = device.state === "offline";
   // 告警与处置状态：状态色内描边 + 药丸（V-W2）；离线、未标定不算告警，用文字表达
   const alert = look.tags.find((t) => t.icon !== "offline" && t.icon !== "uncalibrated");
-  const ring = selected ? "var(--foreground)" : alert?.color;
+  const ring = selected ? "var(--primary)" : alert?.color;
   return (
     <div
       ref={rootRef}
@@ -103,23 +104,17 @@ export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?
           离线
         </p>
       )}
-      {/* 描边不呼吸：画面本身在动（V-W2）；选中为白色，优先于告警色 */}
+      {/* 描边不呼吸：画面本身在动（V-W2）；选中为强调色，优先于告警色 */}
       {ring && <div className="pointer-events-none absolute inset-0 rounded-lg border-2" style={{ borderColor: ring }} />}
     </div>
   );
 }
 
 function StatePill({ icon, color, text }: { icon: keyof typeof ICONS; color: string; text: string }) {
-  const Icon = ICONS[icon];
   return (
-    <p
-      role="status"
-      style={{ borderColor: color }}
-      className="pointer-events-none absolute top-2 left-2 flex items-center gap-1.5 rounded-full border bg-black/75 px-2.5 py-1 text-xs whitespace-nowrap text-white"
-    >
-      <Icon aria-hidden className="size-3.5" style={{ color }} />
+    <StatusPill role="status" icon={ICONS[icon]} color={color} className="pointer-events-none absolute top-2 left-2 py-1">
       {text}
-    </p>
+    </StatusPill>
   );
 }
 

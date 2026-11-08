@@ -23,7 +23,7 @@ test("主界面分区与空态", async ({ page }) => {
   await expect(page.getByRole("region", { name: "处置时间线" })).toHaveCount(0);
   await sceneSettled(page);
   await expectNoOverflow(page);
-  await expect(page).toHaveScreenshot("shell-dark.png");
+  await expect(page).toHaveScreenshot("shell.png");
 });
 
 test("关键指标显示数值与变化（D-100）", async ({ page }) => {
@@ -45,7 +45,7 @@ test("关键指标显示数值与变化（D-100）", async ({ page }) => {
   expect(row?.x ?? 0).toBeGreaterThanOrEqual(bar?.x ?? 0);
   expect((row?.x ?? 0) + (row?.width ?? 0)).toBeLessThanOrEqual((bar?.x ?? 0) + (bar?.width ?? 0));
   await expectNoOverflow(page);
-  await expect(kpis).toHaveScreenshot("kpis-dark.png");
+  await expect(kpis).toHaveScreenshot("kpis.png");
 });
 
 // V-L2：场景视口是面积最大的单一元素，占比 ≥ 50%

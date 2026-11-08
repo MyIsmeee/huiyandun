@@ -1,7 +1,9 @@
 import { Car, CircleCheck, PanelLeftClose, PanelLeftOpen, Plus, User, VideoOff } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { StatusIcon } from "@/components/StatusPill";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/api";
 import { ICONS } from "../../scene/DeviceTags";
@@ -45,14 +47,16 @@ export function CameraRail(props: { devices: Device[]; admin: boolean }) {
           {collapsed ? <PanelLeftOpen aria-hidden /> : <PanelLeftClose aria-hidden />}
         </Button>
       </header>
-      <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-        {cameras.length === 0 && !collapsed && <li className="px-2 py-6 text-center text-meta text-subtle-foreground">尚未登记摄像头</li>}
-        {cameras.map((camera) => (
-          <li key={camera.id}>
-            <RailCard device={camera} collapsed={collapsed} selected={camera.id === selectedId} onSelect={() => select(camera.id)} />
-          </li>
-        ))}
-      </ul>
+      <ScrollArea className="min-h-0 flex-1">
+        <ul className="flex flex-col gap-2 p-2">
+          {cameras.length === 0 && !collapsed && <li className="px-2 py-6 text-center text-meta text-subtle-foreground">尚未登记摄像头</li>}
+          {cameras.map((camera) => (
+            <li key={camera.id}>
+              <RailCard device={camera} collapsed={collapsed} selected={camera.id === selectedId} onSelect={() => select(camera.id)} />
+            </li>
+          ))}
+        </ul>
+      </ScrollArea>
       {admin && (
         <div className="shrink-0 border-t p-2">
           <Button variant="ghost" size="sm" aria-label="添加摄像头" onClick={() => setAdding(true)} className="w-full text-muted-foreground">
@@ -88,12 +92,12 @@ function RailCard(props: { device: Device; collapsed: boolean; selected: boolean
       style={alert ? { borderColor: alert } : undefined}
       className={cn(
         "flex w-full flex-col gap-1.5 rounded-lg border-2 p-1.5 text-left transition-colors hover:bg-secondary",
-        selected ? "border-foreground bg-accent" : !alert && "border-transparent",
+        selected ? "border-primary bg-accent" : !alert && "border-transparent",
       )}
     >
       {!collapsed && <Thumbnail id={device.id} offline={device.state === "offline"} />}
       <span className={cn("flex items-center gap-1.5 px-1", collapsed && "flex-col")}>
-        <Icon aria-hidden className="size-3.5 shrink-0" style={{ color: tag?.color }} />
+        <StatusIcon icon={Icon} color={tag?.color} />
         <span className="font-mono text-xs whitespace-nowrap">{device.id}</span>
         {!collapsed && <span className="truncate text-meta">{device.name}</span>}
       </span>

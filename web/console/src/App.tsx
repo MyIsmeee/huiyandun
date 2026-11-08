@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { ApiError, api, type Site } from "./lib/api";
 import { useSession } from "./store/session";
 import { LoginPage } from "./panels/LoginPage/LoginPage";
@@ -57,12 +58,9 @@ function Notice({ text, onRetry }: { text: string; onRetry?: () => void }) {
     <main className="flex h-full flex-col items-center justify-center gap-4 bg-background">
       <p className="text-muted-foreground">{text}</p>
       {onRetry && (
-        <button
-          onClick={onRetry}
-          className="h-10 rounded-full border border-border px-5 transition-colors hover:bg-secondary"
-        >
+        <Button variant="outline" onClick={onRetry}>
           重试
-        </button>
+        </Button>
       )}
     </main>
   );

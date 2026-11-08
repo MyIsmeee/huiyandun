@@ -32,9 +32,9 @@ export async function expectNoOverflow(page: Page): Promise<void> {
   expect(overflowing).toEqual([]);
 }
 
-/** 主题档位；未调用时为 playwright.config.ts 预置的暗色 */
-export async function presetTheme(page: Page, mode: "auto" | "dark" | "light", reducedMotion = false): Promise<void> {
-  const state = JSON.stringify({ state: { mode, reducedMotion }, version: 0 });
+/** 降低动效开关（V-A4）；未调用时为 playwright.config.ts 预置的关闭 */
+export async function presetMotion(page: Page, reducedMotion = false): Promise<void> {
+  const state = JSON.stringify({ state: { reducedMotion }, version: 0 });
   await page.addInitScript((value) => localStorage.setItem("hyd-theme", value), state);
 }
 

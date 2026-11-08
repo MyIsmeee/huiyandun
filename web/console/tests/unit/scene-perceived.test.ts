@@ -98,12 +98,12 @@ describe("地面色块（设计 §3.3）", () => {
       { class: "grass" as const, polygon: square(4, 4, 2) },
       { class: "road" as const, polygon: square(0, 0, 10) },
     ];
-    const { flat, solid } = sceneGeometry(frame("cam-01", { surfaces }), PALETTE.dark, FURNISHING);
+    const { flat, solid } = sceneGeometry(frame("cam-01", { surfaces }), PALETTE.light, FURNISHING);
     const color = flat?.getAttribute("color") as BufferAttribute;
 
     expect(solid).toBeNull();
     expect(new Color(color.getX(0), color.getY(0), color.getZ(0)).getHexString()).toBe(
-      new Color(PALETTE.dark.road).getHexString(),
+      new Color(PALETTE.light.road).getHexString(),
     );
     const box = bounds(flat);
     expect(box.min.y).toBeCloseTo(box.max.y);
@@ -117,8 +117,8 @@ describe("立面、物体与树（§5.1 L1）", () => {
     const walls = [{ class: "building" as const, line: [[0, 5], [10, 5]], height_m: 6 }];
     const objects = [{ class: "furniture" as const, polygon: square(2, 2, 1), height_m: 0.8 }];
 
-    const wall = bounds(sceneGeometry(frame("cam-01", { walls }), PALETTE.dark, FURNISHING).solid);
-    const object = bounds(sceneGeometry(frame("cam-01", { objects }), PALETTE.dark, FURNISHING).solid);
+    const wall = bounds(sceneGeometry(frame("cam-01", { walls }), PALETTE.light, FURNISHING).solid);
+    const object = bounds(sceneGeometry(frame("cam-01", { objects }), PALETTE.light, FURNISHING).solid);
 
     const close = (actual: number[], expected: number[]) => actual.forEach((v, i) => expect(v).toBeCloseTo(expected[i] ?? NaN));
     close([wall.min.y, wall.max.y, wall.min.x, wall.max.x, wall.min.z, wall.max.z], [0, 6, 0, 10, 4.9, 5.1]);
@@ -127,7 +127,7 @@ describe("立面、物体与树（§5.1 L1）", () => {
 
   it("立面着立面色，顶面着顶盖色（ui.md §5.2）", () => {
     const walls = [{ class: "wall" as const, line: [[0, 5], [10, 5]], height_m: 2.8 }];
-    const solid = sceneGeometry(frame("cam-01", { walls }), PALETTE.dark, FURNISHING).solid;
+    const solid = sceneGeometry(frame("cam-01", { walls }), PALETTE.light, FURNISHING).solid;
     const position = solid?.getAttribute("position") as BufferAttribute;
     const color = solid?.getAttribute("color") as BufferAttribute;
     const hex = (i: number) => new Color(color.getX(i), color.getY(i), color.getZ(i)).getHexString();
@@ -136,13 +136,13 @@ describe("立面、物体与树（§5.1 L1）", () => {
       const set = colors.get(hex(i)) ?? new Set<number>();
       colors.set(hex(i), set.add(Math.round(position.getY(i) * 10) / 10));
     }
-    expect(colors.get(new Color(PALETTE.dark.cap).getHexString())).toEqual(new Set([2.8]));
-    expect(colors.get(new Color(PALETTE.dark.facade).getHexString())).toEqual(new Set([0, 2.8]));
+    expect(colors.get(new Color(PALETTE.light.cap).getHexString())).toEqual(new Set([2.8]));
+    expect(colors.get(new Color(PALETTE.light.facade).getHexString())).toEqual(new Set([0, 2.8]));
   });
 
   it("黑板贴在墙脚线上方：离地 0.9 m、高 height_m，取黑板色（D-059、D-111）", () => {
     const walls = [{ class: "board" as const, line: [[1, 5], [4, 5]], height_m: 1.2 }];
-    const board = sceneGeometry(frame("cam-01", { walls }), PALETTE.dark, FURNISHING).solid;
+    const board = sceneGeometry(frame("cam-01", { walls }), PALETTE.light, FURNISHING).solid;
     const box = bounds(board);
     const color = board?.getAttribute("color") as BufferAttribute;
 
@@ -150,13 +150,13 @@ describe("立面、物体与树（§5.1 L1）", () => {
       expect(v).toBeCloseTo([0.9, 2.1, 1, 4, 4.88, 5.12][i] ?? NaN),
     );
     expect(new Color(color.getX(0), color.getY(0), color.getZ(0)).getHexString()).toBe(
-      new Color(PALETTE.dark.board).getHexString(),
+      new Color(PALETTE.light.board).getHexString(),
     );
   });
 
   it("桌椅等以家具模型沿底面轮廓排开，按部件明度着家具色（D-059、D-111）", () => {
     const objects = [{ class: "table" as const, polygon: [[0, 0], [3.6, 0], [3.6, 0.6], [0, 0.6]], height_m: 0.75 }];
-    const table = sceneGeometry(frame("cam-01", { objects }), PALETTE.dark, FURNISHING).solid;
+    const table = sceneGeometry(frame("cam-01", { objects }), PALETTE.light, FURNISHING).solid;
     const box = bounds(table);
     const color = table?.getAttribute("color") as BufferAttribute;
 
@@ -164,12 +164,12 @@ describe("立面、物体与树（§5.1 L1）", () => {
     [box.min.y, box.max.y, box.min.x, box.max.x, box.min.z, box.max.z].forEach((v, i) =>
       expect(v).toBeCloseTo([0, 0.75, 0, 3.6, 0, 0.6][i] ?? NaN),
     );
-    const facade = new Color(PALETTE.dark.furniture);
+    const facade = new Color(PALETTE.light.furniture);
     expect([color.getX(0), color.getY(0), color.getZ(0)]).toEqual([facade.r, facade.g, facade.b].map((c) => expect.closeTo(c * 0.5)));
   });
 
   it("树立在底部中心，树冠顶即树高", () => {
-    const tree = bounds(sceneGeometry(frame("cam-01", { trees: [{ x: 3, y: 4, height_m: 5 }] }), PALETTE.dark, FURNISHING).solid);
+    const tree = bounds(sceneGeometry(frame("cam-01", { trees: [{ x: 3, y: 4, height_m: 5 }] }), PALETTE.light, FURNISHING).solid);
 
     expect(tree.min.y).toBeCloseTo(0);
     expect(tree.max.y).toBeCloseTo(5, 1);
@@ -180,7 +180,7 @@ describe("立面、物体与树（§5.1 L1）", () => {
   it("标线绘制在地面色块之上", () => {
     const surfaces = [{ class: "road" as const, polygon: square(0, 0, 10) }];
     const markings = [{ class: "lane" as const, polygon: square(4, 0, 0.2) }];
-    const { flat } = sceneGeometry(frame("cam-01", { surfaces, markings }), PALETTE.dark, FURNISHING);
+    const { flat } = sceneGeometry(frame("cam-01", { surfaces, markings }), PALETTE.light, FURNISHING);
     const position = flat?.getAttribute("position");
     const last = position ? position.getY(position.count - 1) : 0;
 
@@ -188,7 +188,7 @@ describe("立面、物体与树（§5.1 L1）", () => {
   });
 
   it("没有识别结果时不生成几何体", () => {
-    expect(sceneGeometry(frame("cam-01"), PALETTE.dark, FURNISHING)).toEqual({ flat: null, solid: null });
+    expect(sceneGeometry(frame("cam-01"), PALETTE.light, FURNISHING)).toEqual({ flat: null, solid: null });
   });
 });
 

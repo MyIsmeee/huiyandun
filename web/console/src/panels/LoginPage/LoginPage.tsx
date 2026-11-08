@@ -3,7 +3,6 @@ import {
   Eye,
   EyeOff,
   Link2,
-  LoaderCircle,
   LockKeyhole,
   type LucideIcon,
   ShieldCheck,
@@ -12,6 +11,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { type FormEvent, type InputHTMLAttributes, type ReactNode, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { ApiError, api } from "../../lib/api";
 
 // 只列 M0 实际交付的能力（UP-4）；登录前没有真实数据，不放示意数据
@@ -123,14 +124,10 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
                 {error}
               </p>
             )}
-            <button
-              type="submit"
-              disabled={pending || !username || !password}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground font-medium text-background transition hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
-            >
-              {pending && <LoaderCircle aria-hidden className="size-4 animate-spin" />}
+            <Button type="submit" size="lg" disabled={pending || !username || !password} className="h-12 w-full rounded-full text-base">
+              {pending && <Spinner aria-hidden />}
               {pending ? "登录中…" : "登录"}
-            </button>
+            </Button>
           </form>
           <p className="mt-8 text-center text-sm text-subtle-foreground">仅限授权人员使用</p>
         </section>
@@ -142,7 +139,7 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
 function Brand({ className = "" }: { className?: string }) {
   return (
     <div className={`flex items-center gap-3 ${className}`}>
-      <span className="grid size-10 place-items-center rounded-lg bg-foreground text-background">
+      <span className="grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground">
         <ShieldCheck aria-hidden className="size-5" />
       </span>
       <span>

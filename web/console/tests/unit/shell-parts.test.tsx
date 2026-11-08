@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { KpiTile } from "../../src/panels/KpiTile/KpiTile";
 import { ThemeToggle } from "../../src/panels/ThemeToggle/ThemeToggle";
 import { useTheme } from "../../src/theme/store";
@@ -48,13 +49,13 @@ describe("ThemeToggle", () => {
     useTheme.setState(useTheme.getInitialState());
   });
 
-  it("只有降低动效开关，没有主题切换（D-104）", () => {
-    render(<ThemeToggle />);
+  it("只有降低动效开关，没有主题切换（D-121）", () => {
+    render(<ThemeToggle />, { wrapper: TooltipProvider });
     expect(screen.queryByRole("button", { name: /主题/ })).toBeNull();
   });
 
   it("开关降低动效并标示当前状态", () => {
-    render(<ThemeToggle />);
+    render(<ThemeToggle />, { wrapper: TooltipProvider });
     const button = screen.getByRole("button", { name: "降低动效" });
 
     fireEvent.click(button);

@@ -1,5 +1,8 @@
 import { ChevronDown, Clock, Cpu, Shield, ShieldAlert, TriangleAlert } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Item } from "@/components/ui/item";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { type Alert, type Execution, type Incident, useLive } from "../../store/live";
@@ -143,18 +146,20 @@ export function AlertListView(props: {
         </ToggleGroup>
       </header>
       {stale && (
-        <p className="flex items-center gap-1 border-b border-dashed border-uncertain px-4 py-2 text-xs text-uncertain">
+        <p className="flex items-center gap-1 border-b border-dashed border-uncertain px-4 py-2 text-xs text-muted-foreground">
           <Clock aria-hidden className="size-3.5" />
           数据非实时 · 最后更新 {formatTime(lastFrameAt)}
         </p>
       )}
       {empty || (shownIncidents.length === 0 && shownGroups.length === 0) ? (
-        <div className="m-auto text-center text-meta text-subtle-foreground">
-          <p>{empty ? "暂无告警" : "该类暂无告警"}</p>
-          <p className="mt-1">最后更新 {formatTime(lastFrameAt)}</p>
-        </div>
+        <Empty className="p-6">
+          <EmptyHeader>
+            <EmptyTitle className="text-sm">{empty ? "暂无告警" : "该类暂无告警"}</EmptyTitle>
+            <EmptyDescription className="text-meta">最后更新 {formatTime(lastFrameAt)}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <div className={cn("min-h-0 flex-1 overflow-y-auto py-1", stale && "opacity-60")}>
+        <ScrollArea className={cn("min-h-0 flex-1 py-1", stale && "opacity-60")}>
           {shownIncidents.length > 0 && (
             <ul aria-label="关联事件" className="border-b pb-1">
               {shownIncidents.map((incident) => {
@@ -162,7 +167,7 @@ export function AlertListView(props: {
                 return (
                   <li key={incident.id}>
                     <Row device={device} selected={device !== null && device === selected}>
-                      <ShieldAlert aria-label="网络攻击" className="mt-0.5 size-4 shrink-0 text-cyber" />
+                      <ShieldAlert aria-label="网络攻击" className="mx-0.5 mt-0.5 size-4 shrink-0 text-cyber" />
                       <span className="min-w-0 flex-1">
                         <span className="block font-medium break-words">{incident.title}</span>
                         <span className="block text-meta text-subtle-foreground tabular-nums">
@@ -218,7 +223,7 @@ export function AlertListView(props: {
               );
             })}
           </ul>
-        </div>
+        </ScrollArea>
       )}
     </>
   );
@@ -232,9 +237,9 @@ function AlertRow(props: { alert: Alert; selected: string | null; count: number 
   return (
     <Row device={device} selected={device !== null && device === selected}>
       {"behavior" in alert ? (
-        <TriangleAlert aria-label="物理告警" className="mt-0.5 size-4 shrink-0 text-physical" />
+        <TriangleAlert aria-label="物理告警" className="size-5 shrink-0 fill-physical text-foreground" />
       ) : (
-        <ShieldAlert aria-label="网络攻击" className="mt-0.5 size-4 shrink-0 text-cyber" />
+        <ShieldAlert aria-label="网络攻击" className="mx-0.5 mt-0.5 size-4 shrink-0 text-cyber" />
       )}
       <span className="min-w-0 flex-1">
         <span className="block break-words">
@@ -260,17 +265,10 @@ function AlertRow(props: { alert: Alert; selected: string | null; count: number 
 function Row(props: { device: string | null; selected: boolean; children: ReactNode }) {
   const { device, selected, children } = props;
   return (
-    <button
-      type="button"
-      disabled={device === null}
-      onClick={() => device && select(device)}
-      aria-current={selected || undefined}
-      className={cn(
-        "mx-1 flex min-w-0 flex-1 items-start gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-secondary disabled:cursor-default",
-        selected && "bg-accent hover:bg-accent",
-      )}
-    >
-      {children}
-    </button>
+    <Item asChild size="sm" className={cn("mx-1 min-w-0 flex-1 flex-nowrap items-start px-3 py-2 text-left hover:bg-secondary disabled:cursor-default", selected && "bg-accent hover:bg-accent")}>
+      <button type="button" disabled={device === null} onClick={() => device && select(device)} aria-current={selected || undefined}>
+        {children}
+      </button>
+    </Item>
   );
 }

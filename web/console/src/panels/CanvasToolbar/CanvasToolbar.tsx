@@ -1,6 +1,7 @@
 import { Maximize, Minimize } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { KpiRow } from "../KpiTile/KpiRow";
 
 /**
@@ -15,16 +16,14 @@ export function CanvasToolbar(props: { canvas: RefObject<HTMLElement | null>; st
       {children}
       <div className="ml-auto flex items-center gap-1">
         <KpiRow stale={stale} />
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={full.on ? "退出全屏" : "全屏"}
-          title={full.on ? "退出全屏" : "全屏"}
-          onClick={full.toggle}
-          className="size-8 text-muted-foreground"
-        >
-          {full.on ? <Minimize aria-hidden /> : <Maximize aria-hidden />}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label={full.on ? "退出全屏" : "全屏"} onClick={full.toggle} className="size-8 text-muted-foreground">
+              {full.on ? <Minimize aria-hidden /> : <Maximize aria-hidden />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{full.on ? "退出全屏" : "全屏"}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

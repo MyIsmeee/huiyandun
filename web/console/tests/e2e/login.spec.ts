@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { expectNoOverflow, presetTheme, SITE, UNAUTHORIZED } from "./helpers";
+import { expectNoOverflow, presetMotion, SITE, UNAUTHORIZED } from "./helpers";
 
 
 async function signedOut(page: Page) {
@@ -11,17 +11,15 @@ async function fill(page: Page) {
   await page.getByLabel("密码", { exact: true }).fill("secret");
 }
 
-for (const theme of ["dark", "light"] as const) {
-  test(`未登录时显示登录页（${theme}）`, async ({ page }) => {
-    await presetTheme(page, theme);
-    await signedOut(page);
-    await page.goto("/");
+test(`未登录时显示登录页`, async ({ page }) => {
+  await presetMotion(page);
+  await signedOut(page);
+  await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
-    await expectNoOverflow(page);
-    await expect(page).toHaveScreenshot(`login-${theme}.png`);
-  });
-}
+  await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot(`login.png`);
+});
 
 test("窄屏只保留表单", async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });

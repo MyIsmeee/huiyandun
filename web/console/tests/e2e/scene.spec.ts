@@ -1,5 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetTheme, presetView, SITE, sceneSettled, signedIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetMotion, presetView, SITE, sceneSettled, signedIn } from "./helpers";
 import { SCENES } from "./scenes";
 
 test.beforeEach(({ page }) => freezeClock(page));
@@ -75,7 +75,7 @@ for (const [name, time] of [
 ] as const) {
   test(`场景光照随时间变化：${name}`, async ({ page }) => {
     await page.clock.pauseAt(new Date(time));
-    await presetTheme(page, "auto");
+    await presetMotion(page);
     await signedIn(page);
     await page.goto("/");
     await sceneSettled(page);
@@ -238,13 +238,12 @@ test.describe("感知场景", () => {
     await page.clock.runFor(100);
   };
 
-  for (const [name, frame, theme] of [
-    ["street", "street", "light"],
-    ["street-dark", "street", "dark"],
-    ["indoor", "indoor", "light"],
+  for (const [name, frame] of [
+    ["street", "street"],
+    ["indoor", "indoor"],
   ] as const) {
     test(`${name}`, async ({ page }) => {
-      await presetTheme(page, theme, true);
+      await presetMotion(page, true);
       const [ws] = await open(page, [cam01()]);
       await shown(page, ws, SCENES[frame]);
 
@@ -255,13 +254,12 @@ test.describe("感知场景", () => {
 
   // D-059：桌、椅、柜等以家具模型沿识别区域排开、正面朝向摄像头，黑板贴在墙上；总览中家具过小，在摄像头视角下核对。
   // 实验室的实验台另有部分被识别为床
-  for (const [name, frame, theme] of [
-    ["classroom", "classroom", "light"],
-    ["classroom-dark", "classroom", "dark"],
-    ["lab", "lab", "light"],
+  for (const [name, frame] of [
+    ["classroom", "classroom"],
+    ["lab", "lab"],
   ] as const) {
     test(`家具与黑板：${name}`, async ({ page }) => {
-      await presetTheme(page, theme, true);
+      await presetMotion(page, true);
       const [ws] = await open(page, [cam01()]);
       await shown(page, ws, SCENES[frame]);
 
@@ -272,7 +270,7 @@ test.describe("感知场景", () => {
   }
 
   test("地面色块、斑马线与车道线、栏杆、长椅与树", async ({ page }) => {
-    await presetTheme(page, "light", true);
+    await presetMotion(page, true);
     const [ws] = await open(page, [cam01()]);
     await shown(page, ws, ELEMENTS);
 
@@ -281,7 +279,7 @@ test.describe("感知场景", () => {
 
   // V-I1：双击摄像头，镜头站到摄像头位置沿其朝向看出去，所见即该摄像头的重建场景；"返回总览"回到默认机位
   test("双击摄像头：摄像头视角；返回总览", async ({ page }) => {
-    await presetTheme(page, "light", true);
+    await presetMotion(page, true);
     const [ws] = await open(page, [cam01()]);
     await shown(page, ws, SCENES.street);
     const picker = scene(page).getByRole("button", { name: "查看 cam-01 详情" });
@@ -319,7 +317,7 @@ test.describe("感知场景", () => {
   });
 
   test("未标定摄像头不重建环境，只显示设备与未标定提示（V-U2）", async ({ page }) => {
-    await presetTheme(page, "dark", true);
+    await presetMotion(page, true);
     const [ws] = await open(page, [cam01("uncalibrated", false)]);
     await expect(scene(page).getByText("未标定")).toBeVisible();
     await page.clock.runFor(100);
@@ -331,7 +329,7 @@ test.describe("感知场景", () => {
   });
 
   test("场景帧的 ts 早于 10 s 前即弱化显示：补推的旧帧立即弱化，新帧超过 10 s 未更新同样弱化", async ({ page }) => {
-    await presetTheme(page, "light", true);
+    await presetMotion(page, true);
     const [ws] = await open(page, [cam01()]);
     await shown(page, ws, ELEMENTS, "2026-10-27T06:29:40Z");
     await expect(scene(page)).toHaveScreenshot("scene-stale.png");
@@ -345,7 +343,7 @@ test.describe("感知场景", () => {
   });
 
   test("新识别帧渐变替换；开启降低动效后瞬时替换（§5.1 L1、V-A4）", async ({ page }) => {
-    await presetTheme(page, "light");
+    await presetMotion(page);
     const [ws] = await open(page, [cam01()]);
     await shown(page, ws, ELEMENTS);
     const before = await scene(page).screenshot();
@@ -362,7 +360,7 @@ test.describe("感知场景", () => {
   });
 
   test("断线：保留最后一帧场景并降饱和（V-U3）", async ({ page }) => {
-    await presetTheme(page, "light", true);
+    await presetMotion(page, true);
     const [ws] = await open(page, [cam01()]);
     await shown(page, ws, ELEMENTS);
 
@@ -376,7 +374,7 @@ test.describe("感知场景", () => {
 
   test("无 WebGL2 时 2D 俯视视图同样绘制感知场景（C-FE-08）", async ({ page }) => {
     await withoutWebGL2(page);
-    await presetTheme(page, "light", true);
+    await presetMotion(page, true);
     await presetView(page, "space");
     await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices: [cam01()] } }));
     await mockKpis(page);

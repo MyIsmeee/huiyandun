@@ -53,7 +53,7 @@ describe("摄像头列表（ui.md §7.2）", () => {
 
   it("显示不含凭据的地址、口令是否设置、地面映射方式（V-CAM1、V-CAM2）", () => {
     view([CAM, { ...CAM, id: "cam-01", name: "演示", password_set: false, calibration: [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]] }]);
-    const items = within(screen.getByRole("list", { name: "摄像头列表" })).getAllByRole("listitem");
+    const items = within(screen.getByRole("table", { name: "摄像头列表" })).getAllByRole("row").slice(1);
     expect(items[0]?.textContent).toContain("rtsp://192.168.8.31:554/Streaming/Channels/101 · 口令 已设置");
     expect(items[0]?.textContent).toContain("按安装参数估算");
     expect(items[0]?.textContent).not.toContain("admin");

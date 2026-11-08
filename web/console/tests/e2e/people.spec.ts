@@ -1,5 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, open, presetTheme, targetAt, zoomIn } from "./helpers";
+import { camera, expectNoOverflow, freezeClock, open, presetMotion, targetAt, zoomIn } from "./helpers";
 
 // ui.md TargetModels：人员 / 各类车辆 / 告警 / 高误差；V-U4 事件卡
 const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", ts: "2026-10-27T06:30:00Z" };
@@ -73,7 +73,7 @@ test.beforeEach(({ page }) => freezeClock(page));
  * 截图用例一律开启降低动效：目标直接停在最新实测位置（V-A4）。暂停的时钟下每次推进会连续绘制全部插值帧，
  * 软件渲染（SwiftShader）并行运行时来不及完成截图；两次实测之间的插值与转向由单元测试 scene-targets 覆盖
  */
-const still = (page: Page) => presetTheme(page, "dark", true);
+const still = (page: Page) => presetMotion(page, true);
 
 for (const [name, uncertainty_m] of [
   ["normal", 0.4],
@@ -227,7 +227,7 @@ test("人形补全：桌后只见上半身时腿半透明补全，完全不可�
 });
 
 test("单击人员：四角括框与胶囊标签，详情播放所属摄像头画面；离开画面即收起（D-054）", async ({ page }) => {
-  await presetTheme(page, "dark", true);
+  await presetMotion(page, true);
   await page.route("/api/devices/cam-01/webrtc", (route) =>
     route.fulfill({ status: 502, json: { code: "bad_gateway", message: "视频服务不可用", request_id: "r" } }),
   );

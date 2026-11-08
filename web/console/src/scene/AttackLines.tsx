@@ -1,5 +1,6 @@
 import { ShieldAlert } from "lucide-react";
 import { useMemo } from "react";
+import { StatusPill } from "@/components/StatusPill";
 import { useLive } from "../store/live";
 import { ATTACKED, attackerAnchor } from "./attack";
 import { type Camera, STATUS } from "./devices";
@@ -57,11 +58,12 @@ export function AttackLines({ area, cameras, view }: { area: Area; cameras: Came
         <span
           key={id}
           data-attacker={id}
-          style={{ left: from[0], top: from[1], borderColor: STATUS.cyber }}
-          className={`pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-card/90 px-2 py-0.5 text-xs whitespace-nowrap text-foreground ${contained ? "animate-fade-out" : ""}`}
+          style={{ left: from[0], top: from[1] }}
+          className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 ${contained ? "animate-fade-out" : ""}`}
         >
-          <ShieldAlert aria-hidden className="size-3.5" style={{ color: STATUS.cyber }} />
-          外部攻击源 <span className="tabular-nums">{ip}</span>
+          <StatusPill icon={ShieldAlert} color={STATUS.cyber}>
+            外部攻击源 {ip}
+          </StatusPill>
         </span>
       ))}
     </>

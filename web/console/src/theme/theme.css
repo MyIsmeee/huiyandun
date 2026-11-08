@@ -1,27 +1,28 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* 只有一套暗色主题：shadcn 组件的 dark: 变体始终生效（ui.md §3） */
-@custom-variant dark (&);
+/* 只有一套浅色主题（D-121）：shadcn 组件的 dark: 变体永不生效（不设 .dark 类） */
+@custom-variant dark (&:where(.dark, .dark *));
 
-/* ui.md §3：石墨中性灰（D-110），变量名沿用 shadcn/ui */
+/* ui.md §3：浅灰白底 + 白色卡片 + 单一纯蓝强调，不用渐变（D-121），变量名沿用 shadcn/ui */
 :root {
-  color-scheme: dark;
-  --background: #0a0a0b;
-  --foreground: #ededef;
-  --card: #131316;
-  --popover: #1c1c20;
-  --secondary: #1c1c20;
-  --accent: #26262b;
-  --border: rgb(255 255 255 / 0.08);
-  --input: rgb(255 255 255 / 0.14);
-  --ring: rgb(255 255 255 / 0.4);
-  --muted-foreground: #a1a1aa;
-  --subtle-foreground: #8b8b94;
-  --primary: #ededef;
-  --primary-foreground: #0a0a0b;
+  color-scheme: light;
+  --background: #f4f5f7;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --secondary: #f1f5f9;
+  --accent: #f1f5f9;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: rgb(37 99 235 / 0.4);
+  --muted-foreground: #475569;
+  /* 元数据文字：在页面底与悬停底上也 ≥ 4.5:1（配色校验见 tests/unit/palette.test.ts） */
+  --subtle-foreground: #5f6f86;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
   /* 危险操作不用红色：红色是网络攻击（V-S2） */
-  --destructive: #ededef;
+  --destructive: #0f172a;
   --radius: 0.5rem;
   /* §5.3.1 动效令牌 */
   --duration-fast: 120ms;
@@ -100,7 +101,7 @@
 
 /* 静态点阵底纹（登录页），不动 */
 @utility bg-dots {
-  background-image: radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-image: radial-gradient(rgb(15 23 42 / 0.06) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 

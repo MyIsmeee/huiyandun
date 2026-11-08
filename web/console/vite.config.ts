@@ -15,5 +15,7 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: "jsdom",
     include: ["tests/unit/**/*.test.{ts,tsx}"],
+    // 配色校验以 ?raw 读取主题令牌：Vitest 默认把 CSS 置空（V-G2）
+    css: { include: [/theme\.css/] },
   },
 }));

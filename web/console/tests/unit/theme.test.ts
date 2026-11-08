@@ -3,15 +3,15 @@ import { useTheme } from "../../src/theme/store";
 
 const root = document.documentElement;
 
-describe("主题（D-104：只有暗色）", () => {
+describe("主题（D-121：只有浅色）", () => {
   beforeEach(() => {
     localStorage.clear();
     useTheme.setState(useTheme.getInitialState());
   });
 
-  it("页面根元素为暗色；降低动效立即生效", () => {
+  it("页面根元素为浅色；降低动效立即生效", () => {
     useTheme.getState().setReducedMotion(true);
-    expect(root.dataset).toMatchObject({ theme: "dark", motion: "reduced" });
+    expect(root.dataset).toMatchObject({ theme: "light", motion: "reduced" });
   });
 
   it("刷新后恢复降低动效开关", async () => {

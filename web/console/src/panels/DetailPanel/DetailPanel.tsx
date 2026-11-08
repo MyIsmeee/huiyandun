@@ -1,6 +1,7 @@
 import { ArrowLeft, Clock } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { deviceLook } from "../../scene/devices";
 import { CLASS_LABEL, kmh } from "../../scene/targets";
 import type { Device, Target } from "../../store/live";
@@ -77,7 +78,7 @@ export function TargetPanel(props: { target: Target; stale: boolean; onClose: ()
 
 function Stale() {
   return (
-    <span className="ml-2 inline-flex items-center gap-1 text-xs text-uncertain">
+    <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
       <Clock aria-hidden className="size-3.5" />
       数据非实时
     </span>
@@ -112,7 +113,9 @@ function Drawer(props: { title: string; onClose: () => void; footer?: ReactNode;
         </Button>
         <h2 className="ml-auto truncate text-base font-medium">{title}</h2>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex flex-col gap-4 p-4">{children}</div>
+      </ScrollArea>
       {footer && <div className="shrink-0 border-t p-3 empty:hidden">{footer}</div>}
     </section>
   );

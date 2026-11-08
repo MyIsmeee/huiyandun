@@ -18,7 +18,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useLive } from "../store/live";
 import { useTheme } from "../theme/store";
 import { useViewpointCamera } from "./camera";
-import { BEAM, BODY, type Camera, deviceLook, type Look, POLE_COLOR } from "./devices";
+import { BEAM, BODY, type Camera, CONE_LAYERS as LAYERS, deviceLook, type Look, POLE_COLOR } from "./devices";
 import { type Instance, Instanced } from "./Instanced";
 import { coneOpacity, detectingByCamera } from "./targets";
 
@@ -169,9 +169,6 @@ export function coneGeometry(pose: Camera["pose"]): { faces: BufferGeometry; gro
   beam.setAttribute("color", new Float32BufferAttribute(alpha, 4));
   return { faces: beam, ground: geometry(ground), edges: geometry(edges) };
 }
-
-/** 侧面（镜头处）、地面填充、地面轮廓相对视场不透明度的倍数：常态为 14%、6%、35%（ui.md §5.2） */
-const LAYERS = { faces: 1, ground: 0.43, edges: 2.5 } as const;
 
 /** 视场：常态在该摄像头有检出目标时提亮（§5.1 L3）；critical / high 网络攻击时 1 Hz 呼吸（V-A1） */
 function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullable<Look["cone"]>; severe: boolean }) {
