@@ -19,6 +19,7 @@ import { select, selectTarget, useSelection } from "../store/selection";
 import { focusOn, moveCamera, panned, useCamera, useFocusShot } from "./camera";
 import { CameraControls, useAnimate } from "./CameraControls";
 import { AttackLines } from "./AttackLines";
+import { CameraCallout } from "./CameraCallout";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import { useCameras } from "./devices";
@@ -194,6 +195,7 @@ export function SceneViewport({ site }: { site: Site }) {
           />
           {view3d && <TargetMarker />}
           {view3d && <HoverMarker />}
+          {view3d && <CameraCallout cameras={cameras} view={view3d} />}
         </>
       )}
       {(state === "ready" || state === "2d") && (

@@ -89,7 +89,7 @@ for (const [name, uncertainty_m] of [
   });
 }
 
-test("跌倒：化身转物理告警，摄像头旁弹出事件卡（V-U4）", async ({ page }) => {
+test("跌倒：化身转物理告警，摄像头上方定位针写明跌倒与时刻（V-U4）", async ({ page }) => {
   await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await walk(page, ws, 0.4);
@@ -99,7 +99,7 @@ test("跌倒：化身转物理告警，摄像头旁弹出事件卡（V-U4）", a
   ws?.send(JSON.stringify({ channel: "devices", data: camera("physical_alert") }));
 
   const card = scene(page).getByRole("status");
-  await expect(card).toHaveText("物理告警 · 跌倒cam-01 · 14:29:58");
+  await expect(card).toHaveText("物理告警 · 跌倒 · 14:29:58");
   await expectNoOverflow(page);
   await zoomIn(page);
   await expect(scene(page)).toHaveScreenshot("person-alert.png");
@@ -197,7 +197,7 @@ test("姿态人形：站立、抬手、跌倒与画面姿态一致（FR-109）",
   for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
   await page.clock.runFor(500);
   // 人形朝向摄像头：转到摄像头一侧观看，三种姿态都能看清
-  await page.getByRole("button", { name: "向右旋转 90°" }).click();
+  await page.getByRole("button", { name: "轴测（西南）" }).click();
   await page.clock.runFor(600);
 
   await expect(scene(page)).toHaveScreenshot("person-poses.png");
@@ -214,7 +214,7 @@ test("人形补全：桌后只见上半身时腿半透明补全，完全不可�
   ];
   for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
   await page.clock.runFor(500);
-  await page.getByRole("button", { name: "向右旋转 90°" }).click();
+  await page.getByRole("button", { name: "轴测（西南）" }).click();
   await page.clock.runFor(600);
 
   await expect(scene(page)).toHaveScreenshot("person-completion.png");
@@ -295,7 +295,7 @@ test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再�
   await scene(page).dblclick({ position: await targetAt(page, "cam-01/7") });
   await page.clock.runFor(100);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("人员 #7");
-  for (const name of ["缩小", "放大", "向左旋转 90°", "向右旋转 90°"]) await expect(toolbar.getByRole("button", { name })).toBeDisabled();
+  for (const name of ["缩小", "放大", "轴测（东南）", "轴测（西南）", "俯视"]) await expect(toolbar.getByRole("button", { name })).toBeDisabled();
   await expect(toolbar.getByRole("button", { name: "返回总览" })).toBeEnabled();
   await expect(scene(page)).toHaveScreenshot("follow-person.png");
 
@@ -306,6 +306,25 @@ test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再�
   await expect(scene(page)).toHaveScreenshot("follow-person-back.png");
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
+});
+
+// V-I6：跟随中从摄像头栏选中摄像头，引线卡暂不显示；回到总览后卡片与引线一起出现
+test("跟随中选中摄像头，回到总览后引线卡带引线", async ({ page }) => {
+  await still(page);
+  const [ws] = await open(page, [camera("normal")]);
+  await zoomIn(page);
+  await walk(page, ws, 0.4);
+  const callout = scene(page).getByRole("group", { name: "cam-01 画面" });
+
+  await scene(page).dblclick({ position: await targetAt(page, "cam-01/7") });
+  await page.clock.runFor(100);
+  await page.getByRole("button", { name: /^cam-01 / }).click();
+  await expect(callout).toHaveCount(0); // 跟随视角下不显示
+
+  await page.keyboard.press("Escape");
+  await page.clock.runFor(100);
+  await expect(callout).toContainText("· cam-01"); // 编号 · 名称；夹具的名称与编号相同
+  await expect(scene(page).locator("polyline")).toHaveCount(1);
 });
 
 test("跟随的车辆离开画面：详情收起，镜头飞回总览", async ({ page }) => {

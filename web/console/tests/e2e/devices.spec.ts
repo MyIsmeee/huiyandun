@@ -59,10 +59,10 @@ test("设备状态以推送为准", async ({ page }) => {
   await expect(scene(page).locator('[data-device="cam-01"]')).toContainText("网络攻击");
 });
 
-test("同时命中显示网络攻击与物理告警两个标签", async ({ page }) => {
+test("同时命中：定位针写明网络攻击与物理告警两种状态（V-U4）", async ({ page }) => {
   await open(page, [camera("both")]);
 
-  await expect(scene(page).locator('[data-device="cam-01"] span')).toHaveText(["网络攻击", "物理告警"]);
+  await expect(scene(page).locator('[data-device="cam-01"]').getByRole("status")).toHaveText("网络攻击 · 物理告警");
 });
 
 test("总览：演示站点的两台摄像头（V-P3）", async ({ page }) => {
@@ -110,4 +110,32 @@ test("网络攻击视场呼吸；断线或降低动效时停止（V-A1、V-U3、
   await expect.poll(changes(page)).toBe(true);
   await sockets[0]?.close();
   await expect.poll(changes(page)).toBe(false);
+});
+
+test("空间态势中选中摄像头：引线连到画面小卡，可跳到监控墙放大该路（V-I6）", async ({ page }) => {
+  await page.route(/\/api\/cameras\/.+\/snapshot/, (route) =>
+    route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="9"><rect width="16" height="9" fill="#666"/></svg>' }),
+  );
+  await open(page, [camera("normal")]);
+  const callout = scene(page).getByRole("group", { name: "cam-01 画面" });
+  await expect(callout).toHaveCount(0);
+
+  await scene(page).getByRole("button", { name: "查看 cam-01 详情" }).click();
+  await expect(callout.locator("img")).toBeVisible();
+  await expect(scene(page).locator("polyline")).toHaveCount(1);
+  await expect(scene(page)).toHaveScreenshot("device-callout.png");
+
+  // 场景变窄时卡片随之左移，引线终点跟着卡片走
+  const end = async () => Number((await scene(page).locator("polyline").getAttribute("points"))?.split(/[ ,]/).at(-2));
+  const left = async () => {
+    const [box, region] = await Promise.all([callout.boundingBox(), scene(page).boundingBox()]);
+    return (box?.x ?? 0) - (region?.x ?? 0);
+  };
+  const before = await left();
+  await page.getByRole("button", { name: "展开摄像头栏" }).click();
+  await expect.poll(left).toBeLessThan(before);
+  await expect.poll(end).toBeCloseTo(await left(), 0);
+
+  await callout.getByRole("button", { name: "在监控墙中查看" }).click();
+  await expect(page.getByRole("list", { name: "监控墙" }).getByRole("listitem")).toHaveCount(1);
 });

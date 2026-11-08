@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FLIGHT_MS, focusOn, moveCamera, rotated, useCamera, useFocusShot } from "../../src/scene/camera";
+import { FLIGHT_MS, focusOn, moveCamera, preset, useCamera, useFocusShot } from "../../src/scene/camera";
 import type { Camera } from "../../src/scene/devices";
 import { cameraShot, followShot, OVERVIEW, type Shot } from "../../src/scene/layout";
 import { type Target, useLive } from "../../src/store/live";
@@ -8,7 +8,7 @@ import { type Target, useLive } from "../../src/store/live";
 const SIZE = { width: 1000, height: 600 };
 const BASE: Shot = { eye: [20, 30, 30], look: [20, 0, 12], fov: 0.6, center: [500, 330] };
 const POSE = { x: 0, y: 0, height_m: 3, yaw_deg: 0, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
-const CAMERAS: Camera[] = [{ id: "cam-01", state: "normal", mapped: true, severe: false, pose: POSE }];
+const CAMERAS: Camera[] = [{ id: "cam-01", name: "东门", state: "normal", mapped: true, severe: false, pose: POSE }];
 const KEY = "cam-01/7";
 
 const target = (patch: Partial<Target>): Target => ({
@@ -114,7 +114,7 @@ describe("跟随视角（V-I1、D-058）", () => {
   });
 
   it("返回总览重置为默认机位", () => {
-    moveCamera(rotated(OVERVIEW, 1), false);
+    moveCamera(preset(OVERVIEW, "top"), false);
     act(() => focusOn({ kind: "target", key: KEY }, false));
     act(() => focusOn(null, false));
     expect(useCamera.getState().pose).toEqual(OVERVIEW);

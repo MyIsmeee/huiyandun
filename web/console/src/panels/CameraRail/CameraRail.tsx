@@ -119,10 +119,10 @@ function RailCard(props: { device: Device; collapsed: boolean; selected: boolean
 }
 
 /**
- * 16:9 缩略图：只在卡片可见且页面未隐藏时每 10 s 取一帧，失败退避到 60 s；离线时去饱和。
+ * 16:9 缩略图：只在可见且页面未隐藏时按间隔（默认 10 s）取一帧，失败退避到 60 s；离线时去饱和。空间态势的画面引线卡同样使用。
  * 同一时刻只有一次取帧在途：在途时可见性变化不另起请求，由在途的那次返回后排下一次，刷新循环始终只有一条
  */
-export function Thumbnail({ id, offline }: { id: string; offline: boolean }) {
+export function Thumbnail({ id, offline, refreshMs = REFRESH_MS }: { id: string; offline: boolean; refreshMs?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -145,7 +145,7 @@ export function Thumbnail({ id, offline }: { id: string; offline: boolean }) {
         if (current) URL.revokeObjectURL(current);
         current = next;
       }
-      timer = setTimeout(() => void load(), blob ? REFRESH_MS : BACKOFF_MS);
+      timer = setTimeout(() => void load(), blob ? refreshMs : BACKOFF_MS);
     }
     const observer = new IntersectionObserver(([entry]) => {
       visible = entry?.isIntersecting ?? false;
@@ -161,7 +161,7 @@ export function Thumbnail({ id, offline }: { id: string; offline: boolean }) {
       document.removeEventListener("visibilitychange", onVisibility);
       if (current) URL.revokeObjectURL(current);
     };
-  }, [id]);
+  }, [id, refreshMs]);
   return (
     <div ref={ref} className="relative aspect-video overflow-hidden rounded-md bg-black">
       {url ? (
