@@ -35,7 +35,7 @@ const SITE: Site = {
 const PLAN_SIZE = { width: 640, height: 400 };
 const plan = (site: Site) => (
   <div className="relative" style={PLAN_SIZE}>
-    <Scene2D cameras={[]} view={planView({ x0: 0, y0: 0, width_m: site.width_m, height_m: site.height_m }, PLAN_SIZE)} />
+    <Scene2D items={[]} cameras={[]} view={planView({ x0: 0, y0: 0, width_m: site.width_m, height_m: site.height_m }, PLAN_SIZE)} />
   </div>
 );
 

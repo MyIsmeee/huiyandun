@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type Area,
   blendShot,
-  coverage,
+  bounds as framing,
   cameraShot,
   followShot,
   OVERVIEW,
@@ -245,35 +245,13 @@ describe("跟随与摄像头机位", () => {
   });
 });
 
-describe("coverage：取景按摄像头覆盖范围（D-116）", () => {
-  it("包含安装位置与视场扇形，四周留 1 m", () => {
-    // 位于 (10, 10)、朝 +x、视场 90°、可视 6 m：扇形最远到 x = 16，上下各约 ±4.24 m
-    const area = coverage([{ x: 10, y: 10, yaw_deg: 0, hfov_deg: 90, range_m: 6 }]);
-    expect(area.x0).toBeCloseTo(9);
-    expect(area.x0 + area.width_m).toBeCloseTo(17);
-    expect(area.y0).toBeCloseTo(10 - 6 * Math.SQRT1_2 - 1);
-    expect(area.y0 + area.height_m).toBeCloseTo(10 + 6 * Math.SQRT1_2 + 1);
-  });
-
-  it("两台摄像头取并集，与站点尺寸无关", () => {
-    const area = coverage([
-      { x: 0, y: 0, yaw_deg: 90, hfov_deg: 60, range_m: 5 },
-      { x: 30, y: 0, yaw_deg: 90, hfov_deg: 60, range_m: 5 },
-    ]);
-    expect(area.x0).toBeLessThan(0);
-    expect(area.x0 + area.width_m).toBeGreaterThan(30);
-    expect(area.y0).toBeCloseTo(-1);
-  });
-
-  it("没有摄像头时为原点附近 10 m 见方", () => {
-    expect(coverage([])).toEqual({ x0: -5, y0: -5, width_m: 10, height_m: 10 });
-  });
-
-  it("覆盖范围不在原点时，总览与 2D 视图都以其中心为取景中心", () => {
-    const area: Area = { x0: 100, y0: 50, width_m: 20, height_m: 10 };
-    const [cx, cy] = planView(area, SIZE).project([110, 0, 55]);
+describe("bounds：总览按场景区域尺寸取景（设计 150 §9）", () => {
+  it("区域以左下为原点，宽沿 x、深沿 y；总览与 2D 视图都以区域中心为取景中心", () => {
+    const area = framing({ width_m: 30, depth_m: 20 });
+    expect(area).toEqual({ x0: 0, y0: 0, width_m: 30, height_m: 20 });
+    const [cx, cy] = planView(area, SIZE).project([15, 0, 10]);
     expect(cx).toBeCloseTo(AREA.left + (AREA.right - AREA.left) / 2);
     expect(cy).toBeCloseTo(AREA.top + (AREA.bottom - AREA.top) / 2);
-    expect(overviewShot(area, SIZE).shot.look).toEqual([110, 0, 55]);
+    expect(overviewShot(area, SIZE).shot.look).toEqual([15, 0, 10]);
   });
 });

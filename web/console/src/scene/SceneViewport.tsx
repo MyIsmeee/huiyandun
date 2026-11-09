@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Empty, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import type { Site } from "../lib/api";
 import { useConnection } from "../store/connection";
 import { useLive } from "../store/live";
@@ -22,8 +23,9 @@ import { AttackLines } from "./AttackLines";
 import { CameraCallout } from "./CameraCallout";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
+import type { SceneItem } from "./assets";
 import { useCameras } from "./devices";
-import { coverage, OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
+import { bounds, OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
 import { Scene2D } from "./Scene2D";
 import { HoverMarker, TargetMarker } from "./TargetMarker";
 import { renderedPosition } from "./smoothing";
@@ -31,6 +33,10 @@ import { pickTarget, visibleTargets } from "./targets";
 
 // 降级说明须简短：1366 宽下与 KPI 底板同处顶部一行（V-P3）
 const DEGRADED = { text: "2D 视图 · 不支持 WebGL2", title: "浏览器不支持 WebGL2，已降级为 2D 俯视视图（C-FE-08）" };
+
+/** 还没有任何区域时的取景范围，单位米 */
+const NO_AREA = { width_m: 20, depth_m: 20 };
+const NO_ITEMS: SceneItem[] = [];
 
 // three 体积较大，单独分包按需加载，不拖慢登录页与首屏（C-FE-04）
 const Scene3D = lazy(() => import("./Scene3D"));
@@ -68,7 +74,7 @@ class Boundary extends Component<{ onError: () => void; children: ReactNode }, {
 }
 
 /**
- * 场景视口（ui.md）：加载 / 空场景 / 加载失败 / 无 WebGL2 降级 2D。
+ * 场景视口（ui.md）：加载 / 空区域 / 加载失败 / 无 WebGL2 降级 2D。
  * data-scene 标示当前状态，3D 场景首帧绘制后为 ready。
  */
 export function SceneViewport({ site }: { site: Site }) {
@@ -78,10 +84,12 @@ export function SceneViewport({ site }: { site: Site }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const pose = useCamera((s) => s.pose);
-  const cameras = useCameras(site.devices);
-  // 取景按摄像头覆盖范围，不再用站点尺寸（D-116）；只随摄像头登记表变化，目标与告警不影响取景
-  const poses = useMemo(() => site.devices.flatMap((d) => (d.camera ? [d.camera.pose] : [])), [site.devices]);
-  const area = useMemo(() => coverage(poses), [poses]);
+  // 当前区域（D-124）：先取第一个区域，区域切换随态势页布局（TK-156）加入
+  const scene = site.areas[0] ?? null;
+  const cameras = useCameras(site.devices, scene?.id ?? null);
+  // 总览按区域尺寸取景（设计 150 §9）；目标与告警不影响取景
+  const [width, depth] = [scene?.width_m ?? NO_AREA.width_m, scene?.depth_m ?? NO_AREA.depth_m];
+  const area = useMemo(() => bounds({ width_m: width, depth_m: depth }), [width, depth]);
   const animate = useAnimate();
   const overviewed = useMemo(() => (size && webgl2 ? overviewShot(area, size, pose) : null), [area, size, webgl2, pose]);
   const shot = useFocusShot(overviewed?.shot ?? null, size, cameras, animate());
@@ -133,7 +141,7 @@ export function SceneViewport({ site }: { site: Site }) {
     };
   }, [view3d]);
 
-  /** 指针下的人员或车辆：按渲染中的位置命中。2D 降级视图不绘制目标 */
+  /** 指针下的人员或车辆：按渲染中的位置命中。2D 降级视图只显示目标位置，不支持点选 */
   const hit = (e: MouseEvent<HTMLDivElement>) => {
     if (!view3d || (e.target as Element).closest("button")) return null;
     const { targets, behaviors } = useLive.getState();
@@ -179,11 +187,17 @@ export function SceneViewport({ site }: { site: Site }) {
       {view3d && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene3D area={area} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
+            <Scene3D area={area} items={scene?.items ?? NO_ITEMS} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
           </Suspense>
         </Boundary>
       )}
-      {plan && <Scene2D cameras={cameras} view={plan} />}
+      {plan && (
+        <Boundary onError={() => setFailed(true)}>
+          <Suspense fallback={null}>
+            <Scene2D items={scene?.items ?? NO_ITEMS} cameras={cameras} view={plan} />
+          </Suspense>
+        </Boundary>
+      )}
       {view && (state === "ready" || state === "2d") && (
         <>
           <AttackLines area={area} cameras={cameras} view={view} />
@@ -197,6 +211,14 @@ export function SceneViewport({ site }: { site: Site }) {
           {view3d && <HoverMarker />}
           {view3d && <CameraCallout cameras={cameras} view={view3d} />}
         </>
+      )}
+      {(state === "ready" || state === "2d") && !scene?.items.length && (
+        // 不自动补全场景（设计 150 §4）：只显示摄像头与视场，并说明尚未搭建
+        <Empty className="pointer-events-none absolute inset-x-0 top-6 mx-auto w-fit flex-none p-0 md:p-0">
+          <EmptyHeader>
+            <EmptyTitle className="text-base">{scene ? "该区域还没有搭建场景" : "还没有场景区域"}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       )}
       {(state === "ready" || state === "2d") && (
         <CameraControls notice={state === "2d" ? DEGRADED : undefined} />
@@ -262,5 +284,7 @@ declare global {
   interface Window {
     /** e2e 构建专用（见 SceneViewport） */
     __hydTargetAt?: (key: string) => readonly [number, number] | null;
+    /** e2e 构建专用（见 Scene3D） */
+    __hydDrawCalls?: () => number;
   }
 }

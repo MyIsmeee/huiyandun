@@ -1,6 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetMotion, presetView, SITE, sceneSettled, signedIn } from "./helpers";
-import { SCENES } from "./scenes";
+import { AREA, camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetMotion, presetView, SITE, sceneSettled, signedIn } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
@@ -15,12 +14,13 @@ const withoutWebGL2 = (page: Page) =>
     } as typeof getContext;
   });
 
-test("3D 场景只有无限延伸的地面与栅格，不显示平面图的墙体与区域（UP-1）", async ({ page }) => {
+// 设计 150 §4：空区域只有渐隐地面，不画区域边框、网格，也不自动补墙；提示尚未搭建
+test("空区域：只有渐隐地面，提示该区域还没有搭建场景", async ({ page }) => {
   await signedIn(page);
   await page.goto("/");
   await sceneSettled(page);
 
-  await expect(scene(page).getByText("设备间外墙")).toHaveCount(0);
+  await expect(scene(page).getByText("该区域还没有搭建场景")).toBeVisible();
   await expectNoOverflow(page);
   await expect(scene(page)).toHaveScreenshot("scene-ready.png");
 });
@@ -96,7 +96,7 @@ test.describe("相机控件", () => {
 
   let sockets: WebSocketRoute[] = [];
 
-  // 另一台摄像头装在远处：覆盖范围与原站点相当（取景按覆盖范围，D-116），视差量级与相机距离一致
+  // 另一台摄像头装在区域另一角，视差量级与相机距离一致
   const far = { ...camera("normal", "cam-02"), camera: { ...camera("normal").camera, pose: { x: 36, y: 4, height_m: 3, yaw_deg: 135, pitch_deg: -30, hfov_deg: 90, range_m: 6 } } };
 
   test.beforeEach(async ({ page }) => {
@@ -204,84 +204,78 @@ test.describe("相机控件", () => {
 });
 
 // §5.1 L1、§8 PerceivedScene：街道 / 室内 / 未标定 / 陈旧 / 断线。
-// SCENES 由演示帧分割快照（services/vision-engine/tests/scenes/street-1、indoor-1，TK-122 的 classroom-1、lab-1）
-// 投影得到：室内按演示站点 cam-01 的标定，教室与实验室按估计的标定；快照不含图像，因而没有路面标线，标线与树另以 ELEMENTS 构造
-test.describe("感知场景", () => {
-  const BASE = { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000000", camera_id: "cam-01" };
-  const EMPTY = { surfaces: [], walls: [], objects: [], trees: [], markings: [] };
-  const ELEMENTS = {
-    ...EMPTY,
-    surfaces: [
-      { class: "road", polygon: [[3, 3], [14, 3], [14, 9], [3, 9]] },
-      { class: "sidewalk", polygon: [[3, 9], [14, 9], [14, 11], [3, 11]] },
-      { class: "grass", polygon: [[3, 11], [14, 11], [14, 15], [3, 15]] },
-    ],
-    markings: [
-      ...[4, 5, 6, 7].map((y) => ({ class: "crosswalk", polygon: [[5, y], [7, y], [7, y + 0.5], [5, y + 0.5]] })),
-      { class: "lane", polygon: [[9, 5.9], [13, 5.9], [13, 6.1], [9, 6.1]] },
-    ],
-    walls: [{ class: "railing", line: [[3, 11], [14, 11]], height_m: 1 }],
-    objects: [{ class: "street_furniture", polygon: [[8, 9.5], [9.5, 9.5], [9.5, 9.9], [8, 9.9]], height_m: 0.8 }],
-    trees: [{ x: 5, y: 13, height_m: 5 }, { x: 10, y: 13.5, height_m: 5 }, { x: 12.5, y: 12.5, height_m: 1 }],
-  };
+// D-120、设计 150 §9：当前区域管理员搭建的场景，同一资产的全部实例合并绘制
+test.describe("搭建场景", () => {
+  /** 少量物体：路、墙、小办公楼、树、一组桌椅（设计 150 §4 要求的"只有少量物体的区域"） */
+  const FEW = [
+    { asset: "road", x: 0, y: 20, rot: 0, len: 40 },
+    { asset: "wall", x: 12, y: 2, rot: 90, len: 8 },
+    { asset: "office-small", x: 30, y: 7, rot: 0, len: null },
+    { asset: "tree", x: 22, y: 14, rot: 0, len: null },
+    { asset: "tree-small", x: 26, y: 15, rot: 0, len: null },
+    { asset: "desk", x: 7, y: 10, rot: 90, len: null },
+    { asset: "office-chair", x: 8, y: 10, rot: 270, len: null },
+  ];
   // 演示站点的 cam-01：位于西北角，朝东南
-  const cam01 = (state = "normal", calibrated = true) => {
+  const cam01 = (state = "normal") => {
     const device = camera(state);
     const pose = { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
-    return { ...device, camera: { ...device.camera, pose, calibration: calibrated ? device.camera.calibration : [], mapping: calibrated ? device.camera.mapping : "none" } };
+    return { ...device, camera: { ...device.camera, pose } };
   };
-  const push = (ws: WebSocketRoute | undefined, frame: object, ts = "2026-10-27T06:30:00Z") =>
-    ws?.send(JSON.stringify({ channel: "scene", data: { ...BASE, ts, ...frame } }));
-  /** 推送后推进一帧，使 3D 场景绘制新识别结果 */
-  const shown = async (page: Page, ws: WebSocketRoute | undefined, frame: object, ts?: string) => {
-    push(ws, frame, ts);
-    await page.clock.runFor(100);
+  /** 以给定设备与物体打开空间态势；默认降低动效，截图不受转场影响 */
+  const furnished = async (page: Page, devices: object[], { items = FEW, webgl2 = true, reduced = true } = {}) => {
+    if (!webgl2) await withoutWebGL2(page);
+    await presetMotion(page, reduced);
+    await presetView(page, "space");
+    await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }], devices } }));
+    await mockKpis(page);
+    const sockets = await mockSocket(page);
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await sceneSettled(page, webgl2 ? "ready" : "2d");
+    return sockets;
   };
 
-  for (const [name, frame] of [
-    ["street", "street"],
-    ["indoor", "indoor"],
-  ] as const) {
-    test(`${name}`, async ({ page }) => {
-      await presetMotion(page, true);
-      const [ws] = await open(page, [cam01()]);
-      await shown(page, ws, SCENES[frame]);
+  for (const state of ["normal", "cyber_alert"]) {
+    test(`少量物体的区域：${state}`, async ({ page }) => {
+      await furnished(page, [cam01(state)]);
 
+      await expect(scene(page).getByText("该区域还没有搭建场景")).toHaveCount(0);
       await expectNoOverflow(page);
-      await expect(scene(page)).toHaveScreenshot(`scene-${name}.png`);
+      await expect(scene(page)).toHaveScreenshot(`scene-area-${state}.png`);
     });
   }
 
-  // D-059：桌、椅、柜等以家具模型沿识别区域排开、正面朝向摄像头，黑板贴在墙上；总览中家具过小，在摄像头视角下核对。
-  // 实验室的实验台另有部分被识别为床
-  for (const [name, frame] of [
-    ["classroom", "classroom"],
-    ["lab", "lab"],
-  ] as const) {
-    test(`家具与黑板：${name}`, async ({ page }) => {
-      await presetMotion(page, true);
-      const [ws] = await open(page, [cam01()]);
-      await shown(page, ws, SCENES[frame]);
+  test("实例化渲染：同样几种资产放得再多，绘制调用数不变（V-P1、C-FE-04）", async ({ page }) => {
+    await furnished(page, [cam01()]);
+    const few = await page.evaluate(() => window.__hydDrawCalls?.());
 
-      await scene(page).getByRole("button", { name: "查看 cam-01 详情" }).dblclick();
-      await page.clock.runFor(100);
-      await expect(scene(page)).toHaveScreenshot(`scene-${name}.png`);
-    });
-  }
+    const many = [...FEW];
+    for (let x = 4; x < 36; x += 4) for (const y of [4, 12]) many.push({ asset: "desk", x, y, rot: 0, len: null }, { asset: "tree", x, y: y + 2, rot: 0, len: null });
+    await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items: many }], devices: [cam01()] } }));
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await sceneSettled(page);
 
-  test("地面色块、斑马线与车道线、栏杆、长椅与树", async ({ page }) => {
-    await presetMotion(page, true);
-    const [ws] = await open(page, [cam01()]);
-    await shown(page, ws, ELEMENTS);
-
-    await expect(scene(page)).toHaveScreenshot("scene-elements.png");
+    expect(few).toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.__hydDrawCalls?.())).toBe(few);
   });
 
-  // V-I1：双击摄像头，镜头站到摄像头位置沿其朝向看出去，所见即该摄像头的重建场景；"返回总览"回到默认机位
+  test("没有任何区域：提示还没有场景区域", async ({ page }) => {
+    await presetView(page, "space");
+    await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [], devices: [cam01()] } }));
+    await mockKpis(page);
+    await mockSocket(page);
+    await page.goto("/");
+    await sceneSettled(page);
+
+    await expect(scene(page).getByText("还没有场景区域")).toBeVisible();
+    await expect(scene(page).getByRole("button", { name: "查看 cam-01 详情" })).toHaveCount(0); // 摄像头不在任何区域，不出现
+  });
+
+  // V-I1：双击摄像头，镜头站到摄像头位置沿其朝向看出去；"返回总览"回到默认机位
   test("双击摄像头：摄像头视角；返回总览", async ({ page }) => {
-    await presetMotion(page, true);
-    const [ws] = await open(page, [cam01()]);
-    await shown(page, ws, SCENES.street);
+    await furnished(page, [cam01()]);
     const picker = scene(page).getByRole("button", { name: "查看 cam-01 详情" });
 
     await picker.dblclick();
@@ -297,8 +291,7 @@ test.describe("感知场景", () => {
   });
 
   test("飞入摄像头视角途中断线：立即到位，不再继续（V-U3）", async ({ page }) => {
-    const [ws] = await open(page, [cam01("cyber_alert")]);
-    await shown(page, ws, SCENES.street);
+    const [ws] = await furnished(page, [cam01("cyber_alert")], { reduced: false });
     // 只看设备上方的定位针：检查栏详情也写着状态
     const tag = scene(page).locator('[data-device="cam-01"]');
     await expect(tag.getByText("网络攻击")).toBeVisible();
@@ -316,53 +309,8 @@ test.describe("感知场景", () => {
     expect(await scene(page).screenshot()).toEqual(end); // 没有后续飞行
   });
 
-  test("未标定摄像头不重建环境，只显示设备与未标定提示（V-U2）", async ({ page }) => {
-    await presetMotion(page, true);
-    const [ws] = await open(page, [cam01("uncalibrated", false)]);
-    await expect(scene(page).getByText("未标定")).toBeVisible();
-    await page.clock.runFor(100);
-    const before = await scene(page).screenshot();
-    await shown(page, ws, ELEMENTS);
-
-    await expect(scene(page).getByText("未标定")).toBeVisible();
-    expect((await scene(page).screenshot()).equals(before)).toBe(true);
-  });
-
-  test("场景帧的 ts 早于 10 s 前即弱化显示：补推的旧帧立即弱化，新帧超过 10 s 未更新同样弱化", async ({ page }) => {
-    await presetMotion(page, true);
-    const [ws] = await open(page, [cam01()]);
-    await shown(page, ws, ELEMENTS, "2026-10-27T06:29:40Z");
-    await expect(scene(page)).toHaveScreenshot("scene-stale.png");
-
-    await shown(page, ws, ELEMENTS);
-    const fresh = await scene(page).screenshot();
-    await page.clock.runFor(9_000);
-    expect((await scene(page).screenshot()).equals(fresh)).toBe(true);
-    await page.clock.runFor(2_000);
-    await expect(scene(page)).toHaveScreenshot("scene-stale.png");
-  });
-
-  test("新识别帧渐变替换；开启降低动效后瞬时替换（§5.1 L1、V-A4）", async ({ page }) => {
-    await presetMotion(page);
-    const [ws] = await open(page, [cam01()]);
-    await shown(page, ws, ELEMENTS);
-    const before = await scene(page).screenshot();
-
-    await shown(page, ws, SCENES.street);
-    const midway = await scene(page).screenshot();
-    await page.clock.runFor(400);
-    const after = await scene(page).screenshot();
-
-    expect(midway.equals(before) || midway.equals(after)).toBe(false);
-    await page.getByRole("button", { name: "降低动效" }).click();
-    await shown(page, ws, ELEMENTS);
-    expect((await scene(page).screenshot()).equals(before)).toBe(true);
-  });
-
-  test("断线：保留最后一帧场景并降饱和（V-U3）", async ({ page }) => {
-    await presetMotion(page, true);
-    const [ws] = await open(page, [cam01()]);
-    await shown(page, ws, ELEMENTS);
+  test("断线：场景保留并降饱和（V-U3）", async ({ page }) => {
+    const [ws] = await furnished(page, [cam01()]);
 
     await page.routeWebSocket("/ws", (route) => route.close());
     await ws?.close();
@@ -372,20 +320,15 @@ test.describe("感知场景", () => {
     await expect(scene(page)).toHaveScreenshot("scene-disconnected.png");
   });
 
-  test("无 WebGL2 时 2D 俯视视图同样绘制感知场景（C-FE-08）", async ({ page }) => {
-    await withoutWebGL2(page);
-    await presetMotion(page, true);
-    await presetView(page, "space");
-    await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices: [cam01()] } }));
-    await mockKpis(page);
-    const sockets = await mockSocket(page); // 页面连上后才有服务端一侧
-    await page.goto("/");
-    await sceneSettled(page, "2d");
-    await shown(page, sockets[0], ELEMENTS);
+  test("无 WebGL2 时 2D 俯视视图绘制物体占地、摄像头视场与人员（C-FE-08、#60）", async ({ page }) => {
+    const sockets = await furnished(page, [cam01()], { webgl2: false });
+    const track = { camera_id: "cam-01", track_id: 1, object_class: "person", x: 8, y: 7, uncertainty_m: 0.3, heading_deg: null, speed_mps: null, bbox: [0.4, 0.3, 0.5, 0.8], keypoints: null };
+    sockets[0]?.send(JSON.stringify({ channel: "tracks", data: { schema_version: "1.0.0", event_id: "00000000-0000-4000-8000-000000000001", ts: "2026-10-27T06:30:00Z", ...track } }));
+    await page.clock.runFor(100);
 
     await expect(scene(page)).toHaveScreenshot("scene-2d-elements.png");
 
-    // 断线：保留最后一帧场景并降饱和（V-U3、V-G3）
+    // 断线：保留并降饱和（V-U3、V-G3）
     await page.routeWebSocket("/ws", (route) => route.close());
     await sockets[0]?.close();
     await expect(scene(page).getByText(/^数据非实时/)).toBeVisible();

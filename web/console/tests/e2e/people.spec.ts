@@ -331,7 +331,7 @@ test("跟随的车辆离开画面：详情收起，镜头飞回总览", async ({
   await still(page);
   const [ws] = await open(page, [camera("normal")]);
   const car = { ...BASE, ...TARGET, object_class: "car", keypoints: null, camera_id: "cam-01", track_id: 1000001, y: 9.5, uncertainty_m: 0.4, heading_deg: 0 };
-  // 轿车只会出现在摄像头视场内（取景按覆盖范围，D-116）：cam-01 位于 (16, 14)、朝 300°、可视 6 m
+  // 轿车只会出现在摄像头视场内：cam-01 位于 (16, 14)、朝 300°、可视 6 m
   for (let i = 0; i < 5; i += 1) {
     ws?.send(JSON.stringify({ channel: "tracks", data: { ...car, x: 16 + i } }));
     await page.clock.runFor(500);
@@ -370,7 +370,7 @@ test("悬停人员显示中性灰括框；单击空白处收起详情", async ({
   await expect(panel).toHaveCount(1);
   await scene(page).click({ position: { x: 200, y: 600 } });
   await expect(panel).toHaveCount(0);
-  // 放大后机头在视口外（取景按覆盖范围，D-116）：回到总览再点摄像头
+  // 放大后机头在视口外：回到总览再点摄像头
   await page.getByRole("button", { name: "返回总览" }).click();
   await page.clock.runFor(600);
   await page.getByRole("button", { name: "查看 cam-01 详情" }).click();

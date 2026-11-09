@@ -1,12 +1,15 @@
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 
+/** 首次启动按 site.yaml 尺寸建的默认区域（设计 150 §5），尚未搭建 */
+export const AREA = { id: "area-01", name: "默认区域", width_m: 40, depth_m: 24, items: [], updated_at: "2026-10-27T06:00:00Z" };
+
 // 与 demo/scenarios/site.yaml 一致
 export const SITE = {
   id: "demo-office",
   name: "演示办公区",
   width_m: 40,
   height_m: 24,
-  areas: [],
+  areas: [AREA],
   devices: [],
 };
 export const UNAUTHORIZED = { code: "unauthorized", message: "未登录或会话失效", request_id: "r" };
@@ -82,7 +85,7 @@ export async function sceneSettled(page: Page, state: "ready" | "2d" | "error" =
   }).toPass({ intervals: [50] });
 }
 
-/** 位于站点中部的摄像头，状态由参数给定（设备与目标模型截图共用） */
+/** 位于默认区域中部的摄像头，状态由参数给定（设备与目标模型截图共用） */
 export const camera = (state: string, id = "cam-01") => ({
   id,
   name: id,
@@ -93,6 +96,7 @@ export const camera = (state: string, id = "cam-01") => ({
   alert_severity: null,
   camera: {
     stream: id,
+    area_id: AREA.id,
     pose: { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90, range_m: 6 },
     // 4 组标定点即为已标定（FR-902），目标模型才会投放；外观状态由 state 给定
     calibration: [[312, 540, 14, 12], [980, 552, 18, 12], [450, 300, 14, 16], [870, 310, 18, 16]],
