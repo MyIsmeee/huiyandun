@@ -8,7 +8,7 @@ export const WALL_HEIGHT_M = 2.8;
 /** 相机远裁剪面距离，单位米：远超任何机位的可见范围 */
 export const GROUND_M = 1000;
 /**
- * 取景时让开浮动卡片（设计 150 §3）：上方的指标卡、右侧的告警与详情卡（宽 340～380）、左下视角控件与底部断线提示（V-U3），
+ * 取景时让开浮动卡片（设计 150 §3）：上方的指标卡、右侧的告警与详情卡（宽 340～380）、右下视角控件与底部断线提示（V-U3），
  * 另留四周边距，单位像素
  */
 const INSET = { top: 132, right: 412, bottom: 56, left: 24 };
@@ -26,9 +26,9 @@ export function bounds(area: { width_m: number; depth_m: number }): Area {
 }
 
 /**
- * 相机姿态（V-I1、V-I5）：投影方式固定，方位与俯角取命名视角预设，另可缩放与平移。
+ * 相机姿态（V-I1、V-I5）：投影方式固定，俯角为轴测 45°，方位按 90° 旋转，另可缩放与平移。
  * - azimuth：方位角（弧度），0 为默认的东南机位，增大时场景在画面上顺时针转动
- * - tilt：俯角（弧度），轴测 45°、俯视 85°
+ * - tilt：俯角（弧度），总览为轴测 45°
  * - zoom：相对总览的倍数，1～4
  * - pan：取景中心沿画面向右、向下的偏移，单位米
  */
@@ -41,13 +41,6 @@ export interface Pose {
 const AXO_TILT = Math.PI / 4;
 export const OVERVIEW: Pose = { azimuth: 0, tilt: AXO_TILT, zoom: 1, pan: [0, 0] };
 
-/** 命名视角预设（V-I5，借鉴 Dilum Sanjaya 的 AXO R / AXO L / TOP）：方位与俯角；取代按 90° 旋转 */
-export const VIEW_PRESETS = {
-  axoRight: { label: "轴测（东南）", azimuth: 0, tilt: AXO_TILT },
-  axoLeft: { label: "轴测（西南）", azimuth: Math.PI / 2, tilt: AXO_TILT },
-  top: { label: "俯视", azimuth: 0, tilt: (85 * Math.PI) / 180 },
-} as const;
-export type ViewPreset = keyof typeof VIEW_PRESETS;
 export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 4;
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { moveCamera, overview, panned, preset, presetOf, TRANSITION_MS, useCamera, zoomed } from "../../src/scene/camera";
-import { OVERVIEW, type Pose, VIEW_PRESETS } from "../../src/scene/layout";
+import { moveCamera, overview, panned, rotated, TRANSITION_MS, useCamera, zoomed } from "../../src/scene/camera";
+import { OVERVIEW, type Pose } from "../../src/scene/layout";
 
 const QUARTER = Math.PI / 2;
 const AXO = Math.PI / 4;
@@ -19,22 +19,14 @@ describe("相机操作（V-I1、V-I5）", () => {
     expect(zoomed(pose, -1)).toEqual({ azimuth: 0, tilt: AXO, zoom: 1, pan: [0, 0] });
   });
 
-  it("命名视角：方位与俯角取预设，保留缩放，平移归零（V-I5）", () => {
+  it("旋转 90°：方位加四分之一圈，保留缩放与俯角，平移归零（V-I5）", () => {
     const pose: Pose = { azimuth: 0, tilt: AXO, zoom: 2, pan: [3, 2] };
-    expect(preset(pose, "axoLeft")).toEqual({ azimuth: QUARTER, tilt: AXO, zoom: 2, pan: [0, 0] });
-    expect(preset(pose, "top")).toMatchObject({ azimuth: 0, tilt: VIEW_PRESETS.top.tilt, zoom: 2 });
-  });
-
-  it("命名视角取离当前最近的等价方位，不多转一圈；当前姿态能认出所属预设", () => {
-    const turned: Pose = { azimuth: 2 * Math.PI, tilt: AXO, zoom: 1, pan: [0, 0] };
-    expect(preset(turned, "axoLeft").azimuth).toBeCloseTo(2 * Math.PI + QUARTER);
-    expect(presetOf(turned)).toBe("axoRight");
-    expect(presetOf({ ...turned, azimuth: -2 * Math.PI + QUARTER })).toBe("axoLeft");
-    expect(presetOf({ ...turned, azimuth: 0.3 })).toBeNull();
+    expect(rotated(pose)).toEqual({ azimuth: QUARTER, tilt: AXO, zoom: 2, pan: [0, 0] });
+    expect(rotated(rotated(rotated(rotated(pose)))).azimuth).toBeCloseTo(2 * Math.PI);
   });
 
   it("返回总览：方位角回到最近的整圈", () => {
-    expect(overview({ azimuth: 3 * QUARTER, tilt: VIEW_PRESETS.top.tilt, zoom: 4, pan: [1, 1] })).toEqual({ ...OVERVIEW, azimuth: 2 * Math.PI });
+    expect(overview({ azimuth: 3 * QUARTER, tilt: AXO, zoom: 4, pan: [1, 1] })).toEqual({ ...OVERVIEW, azimuth: 2 * Math.PI });
     expect(overview({ azimuth: QUARTER, tilt: AXO, zoom: 2, pan: [0, 0] })).toEqual(OVERVIEW);
   });
 
@@ -56,13 +48,13 @@ describe("moveCamera", () => {
   });
 
   it("瞬时切换：姿态立即到位（降低动效、断线）", () => {
-    moveCamera(preset(OVERVIEW, "axoLeft"), false);
+    moveCamera(rotated(OVERVIEW), false);
 
     expect(useCamera.getState().pose.azimuth).toBe(QUARTER);
   });
 
   it(`转场在 ${TRANSITION_MS} ms 内完成（V-A2）`, () => {
-    moveCamera(preset(OVERVIEW, "axoLeft"), true);
+    moveCamera(rotated(OVERVIEW), true);
     expect(useCamera.getState().pose.azimuth).toBe(0);
     expect(useCamera.getState().goal.azimuth).toBe(QUARTER);
 
@@ -76,7 +68,7 @@ describe("moveCamera", () => {
   });
 
   it("转场中再次操作从当前位置出发，可被打断", () => {
-    moveCamera(preset(OVERVIEW, "axoLeft"), true);
+    moveCamera(rotated(OVERVIEW), true);
     vi.advanceTimersByTime(TRANSITION_MS / 2);
     const middle = useCamera.getState().pose.azimuth;
 
