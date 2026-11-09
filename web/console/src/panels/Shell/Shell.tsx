@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
+import { guardLeave } from "../../editor/History";
 import { ScenePage } from "../../editor/ScenePage";
 import { api, type Site } from "../../lib/api";
 import { SceneViewport } from "../../scene/SceneViewport";
@@ -64,6 +65,9 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
 
   const detail = selected !== undefined || target !== undefined;
 
+  // 场景页有未保存的修改时，顶栏切页与退出先确认（设计 150 E-6）
+  const leave = (action: () => void) => (page === "scene" ? guardLeave(action) : action());
+
   async function handleLogout() {
     setLogout("pending");
     await onLogout();
@@ -82,7 +86,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </span>
           慧眼盾
         </span>
-        <NavBar page={page} admin={admin} onChange={setPage} />
+        <NavBar page={page} admin={admin} onChange={(next) => leave(() => setPage(next))} />
         <span className="flex items-center gap-1.5 text-meta text-muted-foreground">
           <MapPin aria-hidden className="size-3.5" />
           {site.name}
@@ -97,7 +101,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
             </p>
           )}
           <ThemeToggle />
-          <Button variant="ghost" size="sm" onClick={handleLogout} disabled={logout === "pending"} aria-label="退出登录">
+          <Button variant="ghost" size="sm" onClick={() => leave(() => void handleLogout())} disabled={logout === "pending"} aria-label="退出登录">
             <LogOut aria-hidden />
             {logout === "pending" ? "退出中…" : "退出"}
           </Button>

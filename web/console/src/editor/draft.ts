@@ -52,9 +52,12 @@ export function loadDraft(area: SceneArea, cameras: CameraPlacement[]): void {
   useDraft.temporal.getState().clear();
 }
 
-/** 保存成功：以服务端返回为准；撤销历史保留，撤销后又成为未保存的修改 */
+/**
+ * 保存成功：已保存的基准与 updated_at 取服务端返回，草稿本身不动——保存请求进行中又做的修改仍是未保存的修改；
+ * 撤销历史保留，撤销后又成为未保存的修改
+ */
 export function savedDraft(area: SceneArea, cameras: CameraPlacement[]): void {
-  untracked({ updatedAt: area.updated_at, saved: area.items, items: area.items, savedCameras: cameras, cameras });
+  untracked({ updatedAt: area.updated_at, saved: area.items, savedCameras: cameras });
 }
 
 // 撤销、重做后下标可能已不指向原物体，取消选中

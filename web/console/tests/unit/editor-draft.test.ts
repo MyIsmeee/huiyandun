@@ -67,6 +67,15 @@ describe("区域草稿的撤销与重做（设计 150 E-6）", () => {
     expect(useDraft.getState().selected).toBeNull();
   });
 
+  it("保存进行中又做的修改在保存成功后仍是未保存的修改", () => {
+    placeItem(desk(1));
+    const sent = useDraft.getState().items;
+    placeItem(desk(3)); // 请求发出后、响应到达前
+    savedDraft({ ...AREA, items: sent, updated_at: "2026-11-09T01:00:00Z" }, []);
+    expect(count()).toBe(2);
+    expect(isDirty(useDraft.getState())).toBe(true);
+  });
+
   it("摄像头放入、移出各为一步；顺序不同不算修改；放下后退出放置", () => {
     const cam = { id: "cam-01", x: 2, y: 2, yaw_deg: 45 };
     loadDraft(AREA, [cam, { ...cam, id: "cam-02" }]);

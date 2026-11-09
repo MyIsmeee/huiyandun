@@ -23,7 +23,7 @@ import { applySite } from "../store/live";
 import { DeleteAreaDialog, NewAreaDialog } from "./AreaDialogs";
 import { areaPlacements, placedCameras, registryCameras } from "./cameras";
 import { cameraTool, selectTool, useDraft, useDraftSync } from "./draft";
-import { HistoryButtons, useDiscardGuard } from "./History";
+import { DiscardDialog, guardLeave, HistoryButtons } from "./History";
 import { Library } from "./Library";
 import { SaveButton } from "./SaveButton";
 import { SelectionBar } from "./SelectionBar";
@@ -44,17 +44,16 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
   const area = site.areas.find((a) => a.id === areaId) ?? site.areas[0] ?? null;
   const [dialog, setDialog] = useState<"new" | "delete" | null>(null);
   const create = () => setDialog("new");
-  const { guard, dialog: discard } = useDiscardGuard(area, site.devices);
 
   return (
     <section aria-label="场景编辑" className="flex h-full flex-col text-sm">
       <header className="flex items-center gap-3 border-b bg-card px-4 py-2">
-        <Button variant="outline" size="sm" onClick={() => guard(onClose)}>
+        <Button variant="outline" size="sm" onClick={() => guardLeave(onClose)}>
           <ArrowLeft aria-hidden />
           返回
         </Button>
         <h1 className="text-base font-semibold">场景</h1>
-        {area && <AreaMenu areas={site.areas} current={area} onSelect={(id) => guard(() => setAreaId(id))} onDelete={() => setDialog("delete")} />}
+        {area && <AreaMenu areas={site.areas} current={area} onSelect={(id) => guardLeave(() => setAreaId(id))} onDelete={() => setDialog("delete")} />}
         <Button variant="outline" size="sm" onClick={create}>
           <Plus aria-hidden />
           新区域
@@ -97,7 +96,7 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           onClose={() => setDialog(null)}
           onCreated={(created) => {
             setDialog(null);
-            guard(() => setAreaId(created.id));
+            guardLeave(() => setAreaId(created.id));
             void refresh();
           }}
         />
@@ -105,7 +104,7 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
       {dialog === "delete" && area && (
         <DeleteAreaDialog area={area} onClose={() => setDialog(null)} onDeleted={() => void refresh()} />
       )}
-      {discard}
+      <DiscardDialog area={area} devices={site.devices} />
     </section>
   );
 }

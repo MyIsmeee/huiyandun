@@ -67,6 +67,10 @@ describe("rotated：旋转 90°（设计 150 E-4）", () => {
     expect(rotated(item("desk", 10, 10.5), DESK, CATALOG, [40, 24])).toEqual({ ...item("desk", 10.5, 11), rot: 90 });
   });
 
+  it("靠边的物体转后会超出区域时不转，不悄悄挪回区域内", () => {
+    expect(rotated(item("desk", 10, 23.5), DESK, CATALOG, [40, 24])).toBeNull();
+  });
+
   it("线状资产绕起点转；转后超出区域时不转", () => {
     expect(rotated(item("wall", 4, 5.5, 4), WALL, CATALOG, [40, 24])).toEqual({ ...item("wall", 4, 5.5, 4), rot: 90 });
     expect(rotated(item("wall", 4, 22.5, 4), WALL, CATALOG, [40, 24])).toBeNull();

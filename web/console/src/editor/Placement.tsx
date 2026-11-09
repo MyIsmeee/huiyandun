@@ -32,7 +32,8 @@ export function Placement({ size, items, registry }: { size: [number, number]; i
   useEffect(() => {
     if (asset?.line) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key === "r" || e.key === "R") && !e.ctrlKey && !e.metaKey) setRot((r) => ((r + 90) % 360) as Rot);
+      if (e.ctrlKey || e.metaKey || (e.target as Element).closest("input, textarea")) return;
+      if (e.key === "r" || e.key === "R") setRot((r) => ((r + 90) % 360) as Rot);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
