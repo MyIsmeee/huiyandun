@@ -1,7 +1,9 @@
 import { create } from "zustand";
 
 /** 顶栏导航的页面（设计 150 §3）：态势为默认页，监控墙为独立视图（D-122）；其余为管理页 */
-export type Page = "overview" | "wall" | "cameras" | "scene" | "providers";
+export type Page = "overview" | "wall" | AdminPage;
+/** 管理页（admin）：顶栏的"管理"进入，左侧栏切换（设计 150 §9A） */
+export type AdminPage = "cameras" | "scene" | "providers";
 
 /**
  * 当前页面。main 为最近打开的态势或监控墙：管理页盖在它之上而不替换它，

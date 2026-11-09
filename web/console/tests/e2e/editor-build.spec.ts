@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { canvas, DESK, dragOnGround, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
-import { AREA, camera, expectToast, freezeClock, SITE, sceneSettled } from "./helpers";
+import { AREA, camera, expectToast, freezeClock, openAdmin, sceneSettled, SITE } from "./helpers";
 
 // 场景页搭建（设计 150 E-2、E-7，FR-908）：从模型库选模型吸附网格放到地面上，整体保存，态势页随推送更新
 test.beforeEach(({ page }) => freezeClock(page));
@@ -165,7 +165,7 @@ test("放弃修改后换区域；返回时同样先确认，没有修改时直�
   await page.getByRole("alertdialog", { name: "放弃未保存的修改？" }).getByRole("button", { name: "放弃修改" }).click();
   await expect(editor(page)).toHaveCount(0);
 
-  await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "场景" }).click();
+  await openAdmin(page, "场景");
   await editor(page).getByRole("button", { name: "返回", exact: true }).click();
   await expect(editor(page)).toHaveCount(0);
 });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { expectNoOverflow, signedIn } from "./helpers";
+import { expectNoOverflow, openAdmin, signedIn } from "./helpers";
 
 const PUBLIC = {
   id: "p-2", name: "DeepSeek 官方", preset: "deepseek", base_url: "https://api.deepseek.com/v1",
@@ -20,14 +20,14 @@ for (const role of ["viewer", "operator"]) {
     await page.goto("/");
     await session;
     await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "模型供应商" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "管理" })).toHaveCount(0);
   });
 }
 
 test("admin 打开供应商页，启用公网供应商前确认（V-M2）", async ({ page }) => {
   await page.route("/api/auth/session", (route) => route.fulfill({ json: { username: "admin", role: "admin", expires_at: "2026-11-08T00:00:00Z" } }));
   await page.goto("/");
-  await page.getByRole("button", { name: "模型供应商" }).click();
+  await openAdmin(page, "模型供应商");
   await page.getByRole("switch", { name: "启用 DeepSeek 官方" }).click();
 
   const dialog = page.getByRole("alertdialog", { name: "启用公网供应商" });
@@ -43,7 +43,7 @@ test("admin 打开供应商页，启用公网供应商前确认（V-M2）", asyn
 test("编辑框点对话框外不关闭，未保存的填写不丢；Esc 关闭", async ({ page }) => {
   await page.route("/api/auth/session", (route) => route.fulfill({ json: { username: "admin", role: "admin", expires_at: "2026-11-08T00:00:00Z" } }));
   await page.goto("/");
-  await page.getByRole("button", { name: "模型供应商" }).click();
+  await openAdmin(page, "模型供应商");
   await page.getByRole("button", { name: "添加", exact: true }).click();
 
   const dialog = page.getByRole("dialog", { name: "添加供应商" });

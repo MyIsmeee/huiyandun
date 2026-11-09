@@ -77,6 +77,15 @@
   /* §3.4：只用系统字体，不加载 Web 字体（C-FE-01） */
   --font-sans: system-ui, "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace;
+  /* 管理页侧栏（shadcn Sidebar）：取已有令牌，不另设颜色（V-G2） */
+  --color-sidebar: var(--card);
+  --color-sidebar-foreground: var(--foreground);
+  --color-sidebar-primary: var(--primary);
+  --color-sidebar-primary-foreground: var(--primary-foreground);
+  --color-sidebar-accent: var(--secondary);
+  --color-sidebar-accent-foreground: var(--foreground);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--ring);
 }
 
 @layer base {

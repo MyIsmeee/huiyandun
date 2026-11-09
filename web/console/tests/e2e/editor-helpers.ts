@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { AREA, camera, presetMotion, SITE, signedIn } from "./helpers";
+import { AREA, camera, openAdmin, presetMotion, signedIn, SITE } from "./helpers";
 
 // 场景页用例共用：以 admin 打开场景页，按区域地面坐标移动指针与单击
 
@@ -17,7 +17,7 @@ export async function openEditor(page: Page, items: object[] = [], others: objec
   await page.route("/api/auth/session", (route) => route.fulfill({ json: { username: "admin", role: "admin", expires_at: "2026-11-09T12:00:00Z" } }));
   await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }, ...others], devices } }));
   await page.goto("/");
-  await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "场景" }).click();
+  await openAdmin(page, "场景");
   await editorReady(page);
   return sockets;
 }

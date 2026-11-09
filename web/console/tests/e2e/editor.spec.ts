@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { AREA, camera, expectNoOverflow, expectToast, freezeClock, presetMotion, SITE, sceneSettled, signedIn, withoutWebGL2 } from "./helpers";
+import { AREA, camera, expectNoOverflow, expectToast, freezeClock, openAdmin, presetMotion, sceneSettled, signedIn, SITE, withoutWebGL2 } from "./helpers";
 
 // 场景页（设计 150 §6，FR-908）：区域的选择、新建、删除与 3D 编辑视图
 test.beforeEach(({ page }) => freezeClock(page));
@@ -34,7 +34,7 @@ async function editorSettled(page: Page, state: "ready" | "error" = "ready") {
 
 async function openEditor(page: Page) {
   await page.goto("/");
-  await nav(page).getByRole("button", { name: "场景" }).click();
+  await openAdmin(page, "场景");
 }
 
 test("非 admin 不渲染场景页入口与去搭建（C-FE-07）", async ({ page }) => {
@@ -43,7 +43,7 @@ test("非 admin 不渲染场景页入口与去搭建（C-FE-07）", async ({ pag
   await sceneSettled(page);
 
   await expect(page.getByText("该区域还没有搭建场景")).toBeVisible();
-  await expect(nav(page).getByRole("button", { name: "场景" })).toHaveCount(0);
+  await expect(nav(page).getByRole("button", { name: "管理" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "去搭建" })).toHaveCount(0);
 });
 

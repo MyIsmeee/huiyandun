@@ -8,9 +8,10 @@ import { ScenePage } from "../../editor/ScenePage";
 import { api, type Site } from "../../lib/api";
 import { connect, useConnection } from "../../store/connection";
 import { applySite, useLive } from "../../store/live";
-import { go, type Page, useNav } from "../../store/nav";
+import { type AdminPage, go, type Page, useNav } from "../../store/nav";
 import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
+import { AdminFrame } from "../Admin/AdminFrame";
 import { CameraPage } from "../CameraList/CameraList";
 import { ConnectionStatus } from "../ConnectionStatus/ConnectionStatus";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
@@ -98,20 +99,18 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       )}
 
       {/* 管理页盖在态势或监控墙之上而不替换它：场景与推送保持运行，返回时无需重新加载 */}
-      {admin && page === "cameras" && (
-        <div className="fixed inset-x-0 top-12 bottom-0 z-20 overflow-auto bg-background">
-          <CameraPage onClose={home} />
-        </div>
-      )}
-      {/* 场景页铺满、页面本身不滚动（V-L2） */}
-      {admin && page === "scene" && (
+      {admin && isAdminPage(page) && (
         <div className="fixed inset-x-0 top-12 bottom-0 z-20 bg-background">
-          <ScenePage site={site} onClose={home} />
-        </div>
-      )}
-      {admin && page === "providers" && (
-        <div className="fixed inset-x-0 top-12 bottom-0 z-20 overflow-auto bg-background">
-          <ProviderPage onClose={home} />
+          <AdminFrame page={page} onNavigate={(next) => leave(() => go(next))}>
+            {/* 场景页铺满、页面本身不滚动（V-L2）；其余管理页在内容区内滚动 */}
+            {page === "scene" ? (
+              <ScenePage site={site} onClose={home} />
+            ) : (
+              <div className="min-h-0 flex-1 overflow-auto">
+                {page === "cameras" ? <CameraPage onClose={home} /> : <ProviderPage onClose={home} />}
+              </div>
+            )}
+          </AdminFrame>
         </div>
       )}
       {/* 操作结果提示（设计 150 §9A）：保存、删除区域的成功与失败 */}
@@ -120,25 +119,30 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   );
 }
 
-/** 顶栏分段导航（D-106、设计 150 §3）：态势 · 监控墙 · 摄像头 · 场景 · 模型供应商，后三项只对 admin 渲染（C-FE-07） */
+const isAdminPage = (page: Page): page is AdminPage => page !== "overview" && page !== "wall";
+
+/**
+ * 顶栏分段导航（D-106、设计 150 §3）：态势 · 监控墙 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
+ * 摄像头、场景、模型供应商在管理页左侧栏切换（产品负责人 2026-11-09 选定，导航不重复）
+ */
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
   const { page, admin, onChange } = props;
-  const items: { page: Page; label: string }[] = [
-    { page: "overview", label: "态势" },
-    { page: "wall", label: "监控墙" },
+  const items: { page: Page; label: string; current: boolean }[] = [
+    { page: "overview", label: "态势", current: page === "overview" },
+    { page: "wall", label: "监控墙", current: page === "wall" },
   ];
-  if (admin) items.push({ page: "cameras", label: "摄像头" }, { page: "scene", label: "场景" }, { page: "providers", label: "模型供应商" });
+  if (admin) items.push({ page: "cameras", label: "管理", current: isAdminPage(page) });
   return (
     <nav aria-label="导航" className="flex h-8 items-center gap-0.5 rounded-md bg-secondary p-0.5">
       {items.map((item) => (
         <button
           key={item.page}
           type="button"
-          aria-current={page === item.page ? "page" : undefined}
-          onClick={() => onChange(item.page)}
+          aria-current={item.current ? "page" : undefined}
+          onClick={() => !item.current && onChange(item.page)}
           className={cn(
             "h-7 rounded-sm px-3 text-sm transition-colors",
-            page === item.page ? "bg-card font-medium text-primary shadow-xs" : "text-muted-foreground hover:text-foreground",
+            item.current ? "bg-card font-medium text-primary shadow-xs" : "text-muted-foreground hover:text-foreground",
           )}
         >
           {item.label}
