@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { temporal } from "zundo";
 import { create } from "zustand";
 import type { SceneArea } from "../lib/api";
 import type { SceneItem } from "../scene/assets";
@@ -15,17 +16,39 @@ interface Draft {
   tool: string | null;
 }
 
-export const useDraft = create<Draft>()(() => ({ areaId: null, updatedAt: "", saved: [], items: [], tool: null }));
+/** 撤销、重做的步数上限（设计 150 E-6） */
+export const UNDO_LIMIT = 50;
 
-/** 载入区域：丢弃未保存的修改，退出放置 */
+/** 撤销、重做只记录物体的变化（zundo，MIT），选模型、载入与保存不算一步 */
+export const useDraft = create<Draft>()(
+  temporal((): Draft => ({ areaId: null, updatedAt: "", saved: [], items: [], tool: null }), {
+    partialize: (s): Pick<Draft, "items"> => ({ items: s.items }),
+    equality: (a, b) => a.items === b.items,
+    limit: UNDO_LIMIT,
+  }),
+);
+
+/** 不记入撤销历史地改草稿 */
+function untracked(change: Partial<Draft>) {
+  const history = useDraft.temporal.getState();
+  history.pause();
+  useDraft.setState(change);
+  history.resume();
+}
+
+/** 载入区域：丢弃未保存的修改与撤销历史，退出放置 */
 export function loadDraft(area: SceneArea): void {
-  useDraft.setState({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, tool: null });
+  untracked({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, tool: null });
+  useDraft.temporal.getState().clear();
 }
 
-/** 保存成功：以服务端返回为准 */
+/** 保存成功：以服务端返回为准；撤销历史保留，撤销后又成为未保存的修改 */
 export function savedDraft(area: SceneArea): void {
-  useDraft.setState({ updatedAt: area.updated_at, saved: area.items, items: area.items });
+  untracked({ updatedAt: area.updated_at, saved: area.items, items: area.items });
 }
+
+export const undo = () => useDraft.temporal.getState().undo();
+export const redo = () => useDraft.temporal.getState().redo();
 
 export const placeItem = (item: SceneItem) => useDraft.setState((s) => ({ items: [...s.items, item] }));
 export const selectTool = (tool: string | null) => useDraft.setState({ tool });
