@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { AREA, camera, expectNoOverflow, freezeClock, presetMotion, SITE, sceneSettled, signedIn, withoutWebGL2 } from "./helpers";
+import { AREA, camera, expectNoOverflow, expectToast, freezeClock, presetMotion, SITE, sceneSettled, signedIn, withoutWebGL2 } from "./helpers";
 
 // 场景页（设计 150 §6，FR-908）：区域的选择、新建、删除与 3D 编辑视图
 test.beforeEach(({ page }) => freezeClock(page));
@@ -154,18 +154,17 @@ test("删除区域：区域内仍有摄像头时提示原因，区域保留；�
     await editor(page).getByRole("button", { name: /^区域：/ }).click();
     await page.getByRole("menuitem", { name: "删除当前区域" }).click();
     await page.getByRole("alertdialog", { name: "删除区域" }).getByRole("button", { name: "删除" }).click();
-    await page.clock.runFor(100); // 提示经定时器挂载
   };
 
   await remove();
-  await expect(page.getByText("区域内仍有摄像头，不能删除")).toBeVisible();
+  await expectToast(page, "区域内仍有摄像头，不能删除");
   await expect(editor(page).getByRole("button", { name: "区域：默认区域" })).toBeVisible();
 
   status = 204;
   await editor(page).getByRole("button", { name: /^区域：/ }).click();
   await page.getByRole("menuitemradio", { name: /一号楼大厅/ }).click();
   await remove();
-  await expect(page.getByText('已删除区域"一号楼大厅"')).toBeVisible();
+  await expectToast(page, '已删除区域"一号楼大厅"');
 });
 
 test("编辑视图加载中", async ({ page }) => {

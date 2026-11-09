@@ -85,6 +85,14 @@ export async function freezeClock(page: Page): Promise<void> {
   await page.clock.pauseAt(now);
 }
 
+/** 等待顶部操作提示出现：提示经定时器挂载，时钟暂停时逐步推进直到出现（请求的响应按真实时间到达） */
+export async function expectToast(page: Page, text: string): Promise<void> {
+  await expect(async () => {
+    await page.clock.runFor(100);
+    await expect(page.getByText(text)).toBeVisible({ timeout: 50 });
+  }).toPass({ intervals: [50] });
+}
+
 /** 等待场景到达指定状态；时钟已暂停时逐帧推进，使 3D 场景得以绘制首帧 */
 export async function sceneSettled(page: Page, state: "ready" | "2d" | "error" = "ready"): Promise<void> {
   const scene = page.locator("[data-scene]");

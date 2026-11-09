@@ -39,16 +39,29 @@ export const MATERIALS = {
   canopy: "#B7C4B0",
 } as const;
 
-let catalog: Promise<Map<string, Asset>> | null = null;
+export interface Category {
+  id: string;
+  name: string;
+}
+let catalog: Promise<{ assets: Map<string, Asset>; categories: Category[] }> | null = null;
+
+function loadCatalog() {
+  catalog ??= fetch(CATALOG_URL).then(async (res) => {
+    if (!res.ok) throw new Error(`资产目录加载失败：${res.status}`);
+    const { assets, categories } = (await res.json()) as { assets: Asset[]; categories: Category[] };
+    return { assets: new Map(assets.map((a) => [a.id, a])), categories };
+  });
+  return catalog;
+}
 
 /** 资产目录，按编号索引；首次调用时加载，加载期间挂起，失败由场景的错误边界显示"加载失败" */
 export function useCatalog(): Map<string, Asset> {
-  catalog ??= fetch(CATALOG_URL).then(async (res) => {
-    if (!res.ok) throw new Error(`资产目录加载失败：${res.status}`);
-    const { assets } = (await res.json()) as { assets: Asset[] };
-    return new Map(assets.map((a) => [a.id, a]));
-  });
-  return use(catalog);
+  return use(loadCatalog()).assets;
+}
+
+/** 资产类别（场景页模型库），与目录同一次加载 */
+export function useCategories(): Category[] {
+  return use(loadCatalog()).categories;
 }
 
 /** 一件物体在平面上的占地：中心、沿放置方向的长与宽（米）、放置方向（度） */
