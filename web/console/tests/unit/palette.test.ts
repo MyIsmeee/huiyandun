@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import css from "../../src/theme/theme.css?raw";
+import { MATERIALS as SCENE } from "../../src/scene/assets";
 import { BEAM, BODY, CONE, CONE_LAYERS, POLE_COLOR, STATUS } from "../../src/scene/devices";
-import { PALETTE } from "../../src/scene/perceived";
 import { ACCENT, coneOpacity, FILL, MARK_OPACITY } from "../../src/scene/targets";
 
 // 配色校验（V-S5、V-G2、设计 150 §4）：令牌直接取自 theme.css，场景材质取自代码
@@ -72,10 +72,10 @@ function deltaE2000(c1: string, c2: string): number {
 
 /** 三个语义状态色；"不确定"本身是中性灰，以虚线 + 半透明区分，不参与材质色差校验 */
 const STATES = { physical: STATUS.physical, cyber: STATUS.cyber, contained: STATUS.contained };
-const MATERIALS = { ...PALETTE.light, body: BODY, pole: POLE_COLOR, target: FILL, beam: BEAM, background: token("background") };
+const MATERIALS = { ...SCENE, body: BODY, pole: POLE_COLOR, target: FILL, beam: BEAM, background: token("background") };
 /** 场景中的地面类：叠加标注落在这些颜色上 */
-const { floor, road, sidewalk, grass, earth } = PALETTE.light;
-const GROUNDS = Object.entries({ floor, road, sidewalk, grass, earth, background: token("background") });
+const { ground, road, plaza, grass } = SCENE;
+const GROUNDS = Object.entries({ ground, road, plaza, grass, background: token("background") });
 const SURFACES = ["card", "background", "secondary"].map(token);
 
 describe("配色校验（V-S5）", () => {

@@ -1,63 +1,87 @@
-import type { SceneFrame } from "../store/live";
-import { useTheme } from "../theme/store";
-import type { Camera } from "./devices";
-import { isFurniture } from "./furniture";
+import { useEffect, useMemo } from "react";
+import { useLive } from "../store/live";
+import { footprints, MATERIALS, type SceneItem, useCatalog } from "./assets";
+import { BODY, type Camera, deviceLook } from "./devices";
 import type { PlanView } from "./layout";
-import { largestFirst, PALETTE, type Palette, STALE_OPACITY, useScenes } from "./perceived";
+import { forget, smoothed } from "./smoothing";
+import { FILL, visibleTargets } from "./targets";
 
-/** 立面俯视为线条：外圈取栅格色勾边，在浅色地面上可辨 */
-const WALL_WIDTH_M = 0.25;
-const EDGE_M = 0.1;
-/** 树冠俯视半径与树高之比，与 3D 树冠一致 */
-const CROWN_RATIO = 0.35;
+/** 物体俯视的填充色，取场景材质；描边统一取屋顶灰，在浅色底上可辨 */
+const FILLS: Record<string, string> = {
+  building: MATERIALS.wall,
+  road: MATERIALS.road,
+  wall: MATERIALS.wallShade,
+  opening: MATERIALS.wallShade,
+  furniture: MATERIALS.furniture,
+  equipment: MATERIALS.furniture,
+  greenery: MATERIALS.grass,
+};
+const EDGE = MATERIALS.roof;
+/** 摄像头与人员的俯视半径，单位米 */
+const CAMERA_R = 0.5;
+const TARGET_R = 0.4;
+/** 视场扇形的弧分段数 */
+const ARC_STEPS = 8;
 
-const points = (polygon: number[][]) => polygon.map(([x, y]) => `${x},${y}`).join(" ");
-
-/** 无 WebGL2 时的 2D 俯视视图（C-FE-08），图层与配色同 3D 场景（§5.1）；不画站点底板与栅格（D-116），随相机旋转与缩放 */
-export function Scene2D({ cameras, view }: { cameras: Camera[]; view: PlanView }) {
-  const palette = PALETTE[useTheme((s) => s.theme)];
-  const scenes = useScenes(cameras);
+/**
+ * 无 WebGL2 时的 2D 俯视视图（C-FE-08、设计 150 §9）：区域内物体的占地、摄像头与视场、检出目标，配色同 3D 场景；
+ * 不画区域边框与网格（设计 150 §4），随相机旋转与缩放
+ */
+export function Scene2D({ items, cameras, view }: { items: SceneItem[]; cameras: Camera[]; view: PlanView }) {
   return (
     <svg aria-hidden className="absolute inset-0 size-full">
       <g transform={view.transform}>
-        {scenes.map(({ frame, stale }) => (
-          <g key={frame.camera_id} opacity={stale ? STALE_OPACITY : 1}>
-            <TopDown frame={frame} palette={palette} />
-          </g>
+        {items.length > 0 && <Footprints items={items} />}
+        {cameras.map((camera) => (
+          <CameraTopDown key={camera.id} camera={camera} />
         ))}
+        <Targets cameras={cameras} />
       </g>
     </svg>
   );
 }
 
-/** 一帧场景的俯视图：地面色块（面积从大到小）、标线、立面、物体、树冠 */
-function TopDown({ frame, palette }: { frame: SceneFrame; palette: Palette }) {
+function Footprints({ items }: { items: SceneItem[] }) {
+  const catalog = useCatalog();
+  return footprints(items, catalog).map(({ asset, x, y, length, width, rot }, i) => (
+    <rect
+      key={i}
+      x={-length / 2}
+      y={-width / 2}
+      width={length}
+      height={width}
+      transform={`translate(${x} ${y}) rotate(${rot})`}
+      fill={FILLS[asset.category] ?? BODY}
+      stroke={EDGE}
+      strokeWidth={0.1}
+    />
+  ));
+}
+
+/** 摄像头：视场扇形（颜色与不透明度同 3D 视场）与机身圆点 */
+function CameraTopDown({ camera }: { camera: Camera }) {
+  const { x, y, yaw_deg, hfov_deg, range_m } = camera.pose;
+  const look = deviceLook(camera.state);
+  const fan = Array.from({ length: ARC_STEPS + 1 }, (_, k) => {
+    const a = ((yaw_deg - hfov_deg / 2 + (hfov_deg * k) / ARC_STEPS) * Math.PI) / 180;
+    return `${x + range_m * Math.cos(a)},${y + range_m * Math.sin(a)}`;
+  });
   return (
-    <>
-      {largestFirst(frame.surfaces).map((s, i) => (
-        <polygon key={`s${i}`} points={points(s.polygon)} fill={palette[s.class]} />
-      ))}
-      {frame.markings.map((m, i) => (
-        <polygon key={`m${i}`} points={points(m.polygon)} fill={palette.marking} />
-      ))}
-      {frame.walls.map((w, i) => (
-        <g key={`w${i}`} fill="none" strokeLinejoin="round">
-          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M + EDGE_M * 2} className="stroke-accent" />
-          <polyline points={points(w.line)} strokeWidth={WALL_WIDTH_M} stroke={w.class === "board" ? palette.board : palette.facade} />
-        </g>
-      ))}
-      {frame.objects.map((o, i) => (
-        <polygon
-          key={`o${i}`}
-          points={points(o.polygon)}
-          fill={isFurniture(o.class) ? palette.furniture : palette.facade}
-          strokeWidth={EDGE_M}
-          className="stroke-accent"
-        />
-      ))}
-      {frame.trees.map((t, i) => (
-        <circle key={`t${i}`} cx={t.x} cy={t.y} r={t.height_m * CROWN_RATIO} fill={palette.canopy} strokeWidth={EDGE_M} className="stroke-accent" />
-      ))}
-    </>
+    <g opacity={look.opacity}>
+      {look.cone && <polygon points={[`${x},${y}`, ...fan].join(" ")} fill={look.cone.color} fillOpacity={look.cone.opacity} />}
+      <circle cx={x} cy={y} r={CAMERA_R} fill={look.fill ?? "none"} stroke={look.outline?.color ?? EDGE} strokeWidth={0.1} />
+    </g>
   );
+}
+
+/** 检出目标：滤波后的最新位置（V-A7），随推送更新、不逐帧动画 */
+function Targets({ cameras }: { cameras: Camera[] }) {
+  const targets = useLive((s) => s.targets);
+  const behaviors = useLive((s) => s.behaviors);
+  const visible = useMemo(() => visibleTargets(targets, cameras, behaviors), [targets, cameras, behaviors]);
+  useEffect(() => forget(new Set(Object.keys(targets))), [targets]);
+  return visible.map((t) => {
+    const [x, y] = smoothed(t.key, t).position(Number.POSITIVE_INFINITY);
+    return <circle key={t.key} cx={x} cy={y} r={TARGET_R} fill={FILL} />;
+  });
 }

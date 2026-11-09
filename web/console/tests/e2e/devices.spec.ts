@@ -26,7 +26,6 @@ for (const [state, label] of STATES) {
     if (label) await expect(tags).toContainText(label);
     else await expect(tags).toHaveCount(0);
     await expectNoOverflow(page);
-    // 取景已按覆盖范围贴近摄像头（D-116），不再放大：放大后机头在视口外
     await expect(scene(page)).toHaveScreenshot(`device-${state}.png`);
   });
 }

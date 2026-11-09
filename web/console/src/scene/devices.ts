@@ -28,18 +28,21 @@ export type Camera = {
   pose: NonNullable<Device["camera"]>["pose"];
 };
 
-/** 场景中的摄像头：状态以推送为准，未推送过的取 GET /api/site 的初始值；M0 站点只导入摄像头 */
-export function useCameras(devices: Device[]): Camera[] {
+/**
+ * 当前区域中的摄像头（D-124）：状态以推送为准，未推送过的取 GET /api/site 的初始值；M0 站点只导入摄像头。
+ * 未放入该区域的不出现，其目标也随之不显示
+ */
+export function useCameras(devices: Device[], areaId: string | null): Camera[] {
   const pushed = useLive((s) => s.devices);
   return useMemo(
     () =>
       devices.flatMap((initial) => {
         const { id, name, state, alert_severity, camera } = pushed[initial.id] ?? initial;
-        if (!camera) return [];
+        if (!camera?.area_id || camera.area_id !== areaId) return [];
         const severe = alert_severity === "critical" || alert_severity === "high";
         return [{ id, name, state, mapped: camera.mapping !== "none", severe, pose: camera.pose }];
       }),
-    [devices, pushed],
+    [devices, pushed, areaId],
   );
 }
 export type TagIcon = "offline" | "uncalibrated" | "physical" | "cyber" | "pending" | "contained" | "notified";

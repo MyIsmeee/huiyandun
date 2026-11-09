@@ -5,7 +5,6 @@ type Schemas = components["schemas"];
 export type Device = Schemas["Device"];
 export type Behavior = Schemas["VisionBehavior"];
 type Track = Schemas["VisionTrack"];
-export type SceneFrame = Schemas["VisionScene"];
 export type SecurityAlert = Schemas["SecurityAlert"];
 export type Incident = Schemas["incident.schema"];
 export type Execution = Schemas["playbook_execution.schema"];
@@ -55,8 +54,6 @@ interface LiveState {
   targets: Record<string, Target>;
   /** 每台摄像头最近一次行为事件，供事件卡显示 */
   behaviors: Record<string, Behavior>;
-  /** 每台摄像头最新一帧识别的环境（FR-108） */
-  scenes: Record<string, SceneFrame>;
   /** 单条告警，新的在前，按 event_id 去重（连接补推与实时转发可能重复） */
   alerts: Alert[];
   /** 关联事件，新的在前，按 id 去重 */
@@ -77,7 +74,6 @@ export const useLive = create<LiveState>()(() => ({
   devices: {},
   targets: {},
   behaviors: {},
-  scenes: {},
   alerts: [],
   incidents: [],
   executions: {},
@@ -104,10 +100,6 @@ export function receive(frame: Frame, now: number): void {
     }));
   }
   if (frame.channel === "site") applySite(data as Site);
-  if (frame.channel === "scene") {
-    const scene = data as SceneFrame;
-    useLive.setState((s) => ({ scenes: { ...s.scenes, [scene.camera_id]: scene } }));
-  }
   // alerts 频道同时承载行为事件（含 behavior 字段）与网络告警；场景只用行为事件，告警等级随设备推送
   if (frame.channel === "alerts") {
     const alert = data as Alert;
@@ -167,7 +159,6 @@ export function applySite(site: Site): void {
       }),
     ),
     behaviors: keep(s.behaviors),
-    scenes: keep(s.scenes),
     // 删除的摄像头的目标立即移除，不等 2 s 过期
     targets: Object.fromEntries(Object.entries(s.targets).filter(([, t]) => ids.has(t.camera_id))),
   }));

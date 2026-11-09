@@ -8,9 +8,11 @@ import type { Area, View } from "./layout";
 
 /** 断开处的缺口占连线长度的比例 */
 const GAP = 0.2;
+/** 攻击源标签与视口边缘的最小距离，单位像素 */
+const EDGE_PX = 8;
 
 /**
- * 攻击连线（ui.md §5.1、D-076）：设备处于网络攻击、处置中或只通知时，从站点边缘外的"外部攻击源"（标出 IP，取该设备
+ * 攻击连线（ui.md §5.1、D-076）：设备处于网络攻击、处置中或只通知时，从区域边缘外的"外部攻击源"（标出 IP，取该设备
  * 最近一条网络告警的源地址）画红色虚线到设备；已处置时虚线断开并淡出（降低动效或断线时瞬时消失，V-A4、V-U3）。
  * 以视口像素绘制，3D 与 2D 降级视图共用；状态色同时配图标与文字（V-S3）。
  */
@@ -54,12 +56,16 @@ export function AttackLines({ area, cameras, view }: { area: Area; cameras: Came
           );
         })}
       </svg>
-      {lines.map(({ id, ip, from, contained }) => (
+      {lines.map(({ id, ip, from, to, contained }) => (
+        // 标签不出视口：锚点限制在视口内，标签向设备一侧展开（攻击源在左则向右、在右则向左）
         <span
           key={id}
           data-attacker={id}
-          style={{ left: from[0], top: from[1] }}
-          className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 ${contained ? "animate-fade-out" : ""}`}
+          style={{
+            left: `clamp(${EDGE_PX}px, ${from[0]}px, calc(100% - ${EDGE_PX}px))`,
+            top: `clamp(${EDGE_PX * 2}px, ${from[1]}px, calc(100% - ${EDGE_PX * 2}px))`,
+          }}
+          className={`pointer-events-none absolute -translate-y-1/2 ${from[0] < to[0] ? "" : from[0] > to[0] ? "-translate-x-full" : "-translate-x-1/2"} ${contained ? "animate-fade-out" : ""}`}
         >
           <StatusPill icon={ShieldAlert} color={STATUS.cyber}>
             外部攻击源 {ip}
