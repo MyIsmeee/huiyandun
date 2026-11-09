@@ -222,8 +222,12 @@ test.describe("搭建场景", () => {
     const pose = { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 };
     return { ...device, camera: { ...device.camera, pose } };
   };
-  /** 以给定设备与物体打开空间态势；默认降低动效，截图不受转场影响 */
-  const furnished = async (page: Page, devices: object[], { items = FEW, webgl2 = true, reduced = true } = {}) => {
+  /** 以给定设备与物体打开空间态势，等到场景到达 state；默认降低动效，截图不受转场影响 */
+  const furnished = async (
+    page: Page,
+    devices: object[],
+    { items = FEW, webgl2 = true, reduced = true, state = webgl2 ? "ready" : "2d" }: { items?: object[]; webgl2?: boolean; reduced?: boolean; state?: "ready" | "2d" | "error" } = {},
+  ) => {
     if (!webgl2) await withoutWebGL2(page);
     await presetMotion(page, reduced);
     await presetView(page, "space");
@@ -232,11 +236,11 @@ test.describe("搭建场景", () => {
     const sockets = await mockSocket(page);
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    await sceneSettled(page, webgl2 ? "ready" : "2d");
+    await sceneSettled(page, state);
     return sockets;
   };
 
-  for (const state of ["normal", "cyber_alert"]) {
+  for (const state of ["normal", "physical_alert", "cyber_alert"]) {
     test(`少量物体的区域：${state}`, async ({ page }) => {
       await furnished(page, [cam01(state)]);
 
@@ -259,6 +263,40 @@ test.describe("搭建场景", () => {
 
     expect(few).toBeGreaterThan(0);
     expect(await page.evaluate(() => window.__hydDrawCalls?.())).toBe(few);
+  });
+
+  test("打开时一次加载整个资产库：之后放入新类别的物体不再加载模型，场景不闪空", async ({ page }) => {
+    const models = new Set<string>();
+    page.on("request", (req) => {
+      const name = new URL(req.url()).pathname.match(/\/models\/(scene-[a-z]+\.glb)$/)?.[1];
+      if (name) models.add(name);
+    });
+    await furnished(page, [cam01()]);
+
+    const catalog = (await (await page.request.get("/models/catalog.json")).json()) as { assets: { file: string }[] };
+    expect([...models].sort()).toEqual([...new Set(catalog.assets.map((a) => a.file))].sort());
+  });
+
+  // 资产目录或模型文件取不到时（如部署缺文件），由场景的错误边界提示，可重新加载
+  for (const [name, url] of [
+    ["资产目录", "/models/catalog.json"],
+    ["模型文件", "**/models/scene-building.glb"],
+  ] as const) {
+    test(`${name}加载失败时提示并可重新加载`, async ({ page }) => {
+      await page.route(url, (route) => route.fulfill({ status: 500 }));
+      await furnished(page, [cam01()], { state: "error" });
+
+      await expect(scene(page).getByText("场景加载失败")).toBeVisible();
+      await expect(scene(page).getByRole("button", { name: "重新加载" })).toBeVisible();
+    });
+  }
+
+  test("2D 降级视图中资产目录加载失败时同样提示并可重新加载", async ({ page }) => {
+    await page.route("/models/catalog.json", (route) => route.fulfill({ status: 500 }));
+    await furnished(page, [cam01()], { webgl2: false, state: "error" });
+
+    await expect(scene(page).getByText("场景加载失败")).toBeVisible();
+    await expect(scene(page).getByRole("button", { name: "重新加载" })).toBeVisible();
   });
 
   test("没有任何区域：提示还没有场景区域", async ({ page }) => {

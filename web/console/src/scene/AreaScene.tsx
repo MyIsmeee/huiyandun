@@ -34,11 +34,12 @@ interface Part {
 export function AreaScene({ area, items }: { area: Area; items: SceneItem[] }) {
   const catalog = useCatalog();
   const groups = useMemo(() => instances(footprints(items, catalog)), [items, catalog]);
-  const files = useMemo(() => [...new Set([...groups.keys()].map((id) => `/models/${catalog.get(id)?.file}`))], [groups, catalog]);
+  // 一次加载整个资产库（约 2 MB，同源）：之后放入新类别的物体不再挂起，场景不会因加载新模型而整体闪空
+  const files = useMemo(() => [...new Set([...catalog.values()].map((a) => `/models/${a.file}`))].sort(), [catalog]);
   return (
     <>
       <Ground area={area} />
-      {files.length > 0 && <Models files={files} groups={groups} />}
+      <Models files={files} groups={groups} />
     </>
   );
 }
@@ -49,7 +50,7 @@ function Models({ files, groups }: { files: string[]; groups: Map<string, Matrix
   const ids = useMemo(() => [...groups.keys()].sort().join(" "), [groups]);
   const parts = useMemo(() => {
     const scenes = gltfs.flatMap((g) => g.scenes);
-    return new Map(ids.split(" ").map((id) => [id, bake(scenes.find((s) => s.name === id))]));
+    return new Map(ids.split(" ").filter(Boolean).map((id) => [id, bake(scenes.find((s) => s.name === id))]));
   }, [gltfs, ids]);
   useEffect(
     () => () => {
