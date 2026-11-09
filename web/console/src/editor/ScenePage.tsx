@@ -1,33 +1,42 @@
-import { ArrowLeft, ChevronDown, CircleAlert, Clock, House, Minus, Plus, RotateCw } from "lucide-react";
+import { ArrowLeft, ChevronDown, CircleAlert, Clock, House, Minus, Plus, RotateCw, Trash2 } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import type { SceneArea, Site } from "../lib/api";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { api, type SceneArea, type Site } from "../lib/api";
 import { formatTime } from "../panels/ConnectionStatus/ConnectionStatus";
 import { ControlButton, useAnimate } from "../scene/CameraControls";
 import { type Camera, useCameras } from "../scene/devices";
 import { Boundary, Note, supportsWebGL2 } from "../scene/SceneViewport";
 import { useConnection } from "../store/connection";
+import { applySite } from "../store/live";
+import { DeleteAreaDialog, NewAreaDialog } from "./AreaDialogs";
 import type { EditorView } from "./view";
 
 // three 体积较大，与态势页一样单独分包按需加载（C-FE-04）
 const EditorCanvas = lazy(() => import("./EditorCanvas"));
 
+/** 区域增删后立即重读站点：不必等 WS site 频道推送；读取失败时推送仍会到达 */
+const refresh = () => api.getSite().then(applySite, () => undefined);
+
 /**
- * 场景页（设计 150 §6，FR-908），只对 admin 渲染入口（C-FE-07）：选择区域，在 3D 编辑视图中查看区域。
+ * 场景页（设计 150 §6，FR-908），只对 admin 渲染入口（C-FE-07）：选择、新建、删除区域，在 3D 编辑视图中查看区域。
  * 区域数据取自站点（GET /api/site 与 WS site 频道），保存后各浏览器 5 s 内更新
  */
 export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }) {
   const [areaId, setAreaId] = useState<string | null>(null);
   const area = site.areas.find((a) => a.id === areaId) ?? site.areas[0] ?? null;
   const cameras = useCameras(site.devices, area?.id ?? null);
+  const [dialog, setDialog] = useState<"new" | "delete" | null>(null);
+  const create = () => setDialog("new");
 
   return (
     <section aria-label="场景编辑" className="flex h-full flex-col text-sm">
@@ -37,7 +46,11 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           返回
         </Button>
         <h1 className="text-base font-semibold">场景</h1>
-        {area && <AreaMenu areas={site.areas} current={area} onSelect={setAreaId} />}
+        {area && <AreaMenu areas={site.areas} current={area} onSelect={setAreaId} onDelete={() => setDialog("delete")} />}
+        <Button variant="outline" size="sm" onClick={create}>
+          <Plus aria-hidden />
+          新区域
+        </Button>
       </header>
       <div className="relative min-h-0 flex-1">
         {area ? (
@@ -48,15 +61,35 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
               <EmptyTitle className="text-base">还没有场景区域</EmptyTitle>
               <EmptyDescription>新建一个区域，再像搭地图一样摆放建筑、道路与家具。</EmptyDescription>
             </EmptyHeader>
+            <EmptyContent>
+              <Button size="sm" onClick={create}>
+                <Plus aria-hidden />
+                新建区域
+              </Button>
+            </EmptyContent>
           </Empty>
         )}
       </div>
+      {dialog === "new" && (
+        <NewAreaDialog
+          size={[site.width_m, site.height_m]}
+          onClose={() => setDialog(null)}
+          onCreated={(created) => {
+            setDialog(null);
+            setAreaId(created.id);
+            void refresh();
+          }}
+        />
+      )}
+      {dialog === "delete" && area && (
+        <DeleteAreaDialog area={area} onClose={() => setDialog(null)} onDeleted={() => void refresh()} />
+      )}
     </section>
   );
 }
 
-/** 区域切换（设计 150 §3）：列出全部区域及尺寸 */
-function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id: string) => void }) {
+/** 区域切换（设计 150 §3）：列出全部区域，末尾为删除当前区域 */
+function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id: string) => void; onDelete: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -76,6 +109,11 @@ function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={props.onDelete}>
+          <Trash2 aria-hidden />
+          删除当前区域
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

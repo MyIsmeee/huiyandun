@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { AREA, camera, expectNoOverflow, freezeClock, presetMotion, SITE, sceneSettled, signedIn, withoutWebGL2 } from "./helpers";
 
-// 场景页（设计 150 §6，FR-908）：区域的选择与 3D 编辑视图
+// 场景页（设计 150 §6，FR-908）：区域的选择、新建、删除与 3D 编辑视图
 test.beforeEach(({ page }) => freezeClock(page));
 
 const EDITOR_CHUNK = "**/assets/EditorCanvas-*.js";
@@ -96,13 +96,76 @@ test("区域切换：列出全部区域及尺寸，选中后编辑该区域", as
   await editorSettled(page);
 });
 
-test("没有区域：空态", async ({ page }) => {
+test("没有区域：空态，可新建区域", async ({ page }) => {
   await asAdmin(page, { ...SITE, areas: [] });
   await openEditor(page);
 
   await expect(editor(page).getByText("还没有场景区域")).toBeVisible();
   await expectNoOverflow(page);
   await expect(editor(page)).toHaveScreenshot("editor-empty.png");
+});
+
+test("新建区域：提交名称与尺寸，建好后切到新区域", async ({ page }) => {
+  await asAdmin(page);
+  await page.route("/api/scene/areas", async (route) => {
+    // 新区域随后经 GET /api/site 读到
+    await page.route("/api/site", (r) => r.fulfill({ json: { ...SITE, areas: [{ ...AREA, items: ITEMS }, LOBBY], devices: [camera("normal")] } }));
+    await route.fulfill({ status: 201, json: LOBBY });
+  });
+  await openEditor(page);
+  await editorSettled(page);
+
+  await editor(page).getByRole("button", { name: "新区域" }).click();
+  const dialog = page.getByRole("dialog", { name: "新建区域" });
+  await expect(dialog.getByLabel("宽（米）")).toHaveValue("40"); // 默认取站点尺寸
+  await dialog.getByLabel("名称").fill("一号楼大厅");
+  await dialog.getByLabel("宽（米）").fill("20");
+  await dialog.getByLabel("深（米）").fill("12");
+  const request = page.waitForRequest("/api/scene/areas");
+  await dialog.getByRole("button", { name: "新建" }).click();
+
+  expect((await request).postDataJSON()).toEqual({ name: "一号楼大厅", width_m: 20, depth_m: 12 });
+  await expect(dialog).toHaveCount(0);
+  await expect(editor(page).getByRole("button", { name: "区域：一号楼大厅" })).toBeVisible();
+});
+
+test("新建区域失败：对话框内说明原因，不关闭", async ({ page }) => {
+  await asAdmin(page);
+  await page.route("/api/scene/areas", (route) => route.fulfill({ status: 400, json: { code: "invalid", message: "区域名称已存在", request_id: "r" } }));
+  await openEditor(page);
+
+  await editor(page).getByRole("button", { name: "新区域" }).click();
+  const dialog = page.getByRole("dialog", { name: "新建区域" });
+  await dialog.getByLabel("名称").fill("默认区域");
+  await dialog.getByRole("button", { name: "新建" }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("区域名称已存在");
+});
+
+test("删除区域：区域内仍有摄像头时提示原因，区域保留；删除成功后提示", async ({ page }) => {
+  await asAdmin(page, { ...SITE, areas: [{ ...AREA, items: ITEMS }, LOBBY], devices: [camera("normal")] });
+  let status = 409;
+  await page.route("/api/scene/areas/*", (route) =>
+    status === 409
+      ? route.fulfill({ status: 409, json: { code: "conflict", message: "区域内仍有摄像头，不能删除", request_id: "r" } })
+      : route.fulfill({ status: 204 }),
+  );
+  await openEditor(page);
+  const remove = async () => {
+    await editor(page).getByRole("button", { name: /^区域：/ }).click();
+    await page.getByRole("menuitem", { name: "删除当前区域" }).click();
+    await page.getByRole("alertdialog", { name: "删除区域" }).getByRole("button", { name: "删除" }).click();
+    await page.clock.runFor(100); // 提示经定时器挂载
+  };
+
+  await remove();
+  await expect(page.getByText("区域内仍有摄像头，不能删除")).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "区域：默认区域" })).toBeVisible();
+
+  status = 204;
+  await editor(page).getByRole("button", { name: /^区域：/ }).click();
+  await page.getByRole("menuitemradio", { name: /一号楼大厅/ }).click();
+  await remove();
+  await expect(page.getByText('已删除区域"一号楼大厅"')).toBeVisible();
 });
 
 test("编辑视图加载中", async ({ page }) => {

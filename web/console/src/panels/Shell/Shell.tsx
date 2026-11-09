@@ -1,6 +1,7 @@
 import { CircleAlert, Clock, LogOut, MapPin, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import { ScenePage } from "../../editor/ScenePage";
 import { api, type Site } from "../../lib/api";
@@ -153,6 +154,8 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           <ProviderPage onClose={() => setPage("overview")} />
         </div>
       )}
+      {/* 操作结果提示（设计 150 §9A）：保存、删除区域的成功与失败 */}
+      <Toaster position="top-center" />
     </div>
   );
 }

@@ -207,6 +207,7 @@
 | scheduler | 0.28.0 | MIT |
 | shebang-command | 2.0.0 | MIT |
 | shebang-regex | 3.0.0 | MIT |
+| sonner | 2.0.8 | MIT |
 | stats-gl | 2.4.2 | MIT |
 | stats.js | 0.17.0 | MIT |
 | suspend-react | 0.1.3 | MIT |
