@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { overlaps, snap } from "../../src/editor/placement";
+import { inside, overlaps, rotated, snap } from "../../src/editor/placement";
 import type { Asset } from "../../src/scene/assets";
 
 const asset = (id: string, category: string, footprint: [number, number], line = false): Asset => ({
@@ -59,5 +59,21 @@ describe("overlaps：与同一层已有物体重叠时禁止放置（设计 150 
     const wall = [item("wall", 0, 5.5, 6)];
     expect(overlaps(item("desk", 5, 5.5), wall, CATALOG)).toBe(true);
     expect(overlaps(item("desk", 7, 5.5), wall, CATALOG)).toBe(false);
+  });
+});
+
+describe("rotated：旋转 90°（设计 150 E-4）", () => {
+  it("普通物体绕占地中心转，长宽奇偶不同时中心挪半格吸附网格", () => {
+    expect(rotated(item("desk", 10, 10.5), DESK, CATALOG, [40, 24])).toEqual({ ...item("desk", 10.5, 11), rot: 90 });
+  });
+
+  it("线状资产绕起点转；转后超出区域时不转", () => {
+    expect(rotated(item("wall", 4, 5.5, 4), WALL, CATALOG, [40, 24])).toEqual({ ...item("wall", 4, 5.5, 4), rot: 90 });
+    expect(rotated(item("wall", 4, 22.5, 4), WALL, CATALOG, [40, 24])).toBeNull();
+  });
+
+  it("inside：线状资产逐段判断是否在区域内", () => {
+    expect(inside(item("wall", 36, 5.5, 4), CATALOG, [40, 24])).toBe(true);
+    expect(inside(item("wall", 37, 5.5, 4), CATALOG, [40, 24])).toBe(false);
   });
 });

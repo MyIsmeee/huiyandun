@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { isDirty, loadDraft, placeItem, redo, savedDraft, selectTool, UNDO_LIMIT, undo, useDraft } from "../../src/editor/draft";
+import { isDirty, loadDraft, placeItem, redo, removeItem, replaceItem, savedDraft, selectItem, selectTool, UNDO_LIMIT, undo, useDraft } from "../../src/editor/draft";
 
 const AREA = { id: "area-01", name: "默认区域", width_m: 40, depth_m: 24, items: [], updated_at: "2026-11-09T00:00:00Z" };
 const desk = (x: number) => ({ asset: "desk", x, y: 1.5, rot: 0 as const, len: null });
@@ -46,5 +46,23 @@ describe("区域草稿的撤销与重做（设计 150 E-6）", () => {
     loadDraft(AREA);
     expect(history().pastStates).toHaveLength(0);
     expect(history().futureStates).toHaveLength(0);
+  });
+
+  it("移动、删除选中的物体各为一步；撤销后取消选中，选模型放置时也取消选中", () => {
+    placeItem(desk(1));
+    selectItem(0);
+    replaceItem(0, desk(5));
+    removeItem(0);
+    expect(count()).toBe(0);
+    expect(useDraft.getState().selected).toBeNull();
+    undo();
+    expect(useDraft.getState().items).toEqual([desk(5)]);
+    selectItem(0);
+    undo();
+    expect(useDraft.getState().items).toEqual([desk(1)]);
+    expect(useDraft.getState().selected).toBeNull();
+    selectItem(0);
+    selectTool("tree");
+    expect(useDraft.getState().selected).toBeNull();
   });
 });

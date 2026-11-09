@@ -1,4 +1,4 @@
-import { useLoader, useThree } from "@react-three/fiber";
+import { type ThreeEvent, useLoader, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import {
   type BufferGeometry,
@@ -33,25 +33,43 @@ interface Part {
  * 当前区域的搭建场景（D-120、设计 150 §9）：管理员放置的成品模型，同一资产的全部实例合并为一次绘制（V-P1）。
  * 只用实体材质与固定光照（D-111），模型自带的调色板贴图保留明暗层次
  */
-export function AreaScene({ area, items }: { area: Area; items: SceneItem[] }) {
+/** 场景页按下物体时：该物体在 items 中的下标与原始事件（设计 150 E-4） */
+export type OnPick = (index: number, event: ThreeEvent<PointerEvent>) => void;
+
+export function AreaScene({ area, items, onPick }: { area: Area; items: SceneItem[]; onPick?: OnPick }) {
   return (
     <>
       <Ground area={area} />
-      <AssetModels items={items} />
+      <AssetModels items={items} onPick={onPick} />
     </>
   );
 }
 
 /** 一组物体的模型，不含地面；ghost 为场景页放置时的半透明预览（设计 150 E-2），不投射阴影 */
-export function AssetModels({ items, ghost = false }: { items: SceneItem[]; ghost?: boolean }) {
+export function AssetModels({ items, ghost = false, onPick }: { items: SceneItem[]; ghost?: boolean; onPick?: OnPick }) {
   const catalog = useCatalog();
   const groups = useMemo(() => instances(footprints(items, catalog)), [items, catalog]);
+  // 每个资产的第 k 个实例属于哪件物体：与 instances 同样按物体、分段的顺序排列
+  const owners = useMemo(() => {
+    const map = new Map<string, number[]>();
+    items.forEach((item, i) => {
+      for (const f of footprints([item], catalog)) map.set(f.asset.id, [...(map.get(f.asset.id) ?? []), i]);
+    });
+    return map;
+  }, [items, catalog]);
   // 一次加载整个资产库（约 2 MB，同源）：之后放入新类别的物体不再挂起，场景不会因加载新模型而整体闪空
   const files = useMemo(() => [...new Set([...catalog.values()].map((a) => `/models/${a.file}`))].sort(), [catalog]);
-  return <Models files={files} groups={groups} ghost={ghost} />;
+  const pick = onPick && ((id: string, k: number, e: ThreeEvent<PointerEvent>) => onPick(owners.get(id)?.[k] ?? -1, e));
+  return <Models files={files} groups={groups} ghost={ghost} onPick={pick} />;
 }
 
-function Models({ files, groups, ghost }: { files: string[]; groups: Map<string, Matrix4[]>; ghost: boolean }) {
+function Models(props: {
+  files: string[];
+  groups: Map<string, Matrix4[]>;
+  ghost: boolean;
+  onPick?: (id: string, instance: number, event: ThreeEvent<PointerEvent>) => void;
+}) {
+  const { files, groups, ghost, onPick } = props;
   const gltfs = useLoader(GLTFLoader, files);
   // 只随用到的资产变化重新烘焙：移动、增删同类物体只更新实例矩阵
   const ids = useMemo(() => [...groups.keys()].sort().join(" "), [groups]);
@@ -69,7 +87,15 @@ function Models({ files, groups, ghost }: { files: string[]; groups: Map<string,
     [parts],
   );
   return [...groups].flatMap(([id, matrices]) =>
-    (parts.get(id) ?? []).map((part, i) => <Batch key={`${id}/${i}`} part={part} matrices={matrices} shadow={!ghost} />),
+    (parts.get(id) ?? []).map((part, i) => (
+      <Batch
+        key={`${id}/${i}`}
+        part={part}
+        matrices={matrices}
+        shadow={!ghost}
+        onPointerDown={onPick && ((e) => e.instanceId !== undefined && onPick(id, e.instanceId, e))}
+      />
+    )),
   );
 }
 
@@ -90,7 +116,8 @@ function bake(scene: Object3D | undefined, ghost: boolean): Part[] {
   return parts;
 }
 
-function Batch({ part, matrices, shadow }: { part: Part; matrices: Matrix4[]; shadow: boolean }) {
+function Batch(props: { part: Part; matrices: Matrix4[]; shadow: boolean; onPointerDown?: (e: ThreeEvent<PointerEvent>) => void }) {
+  const { part, matrices, shadow, onPointerDown } = props;
   const ref = useRef<InstancedMesh>(null);
   const invalidate = useThree((s) => s.invalidate);
   useLayoutEffect(() => {
@@ -102,9 +129,17 @@ function Batch({ part, matrices, shadow }: { part: Part; matrices: Matrix4[]; sh
     mesh.computeBoundingSphere();
     invalidate();
   }, [matrices, invalidate]);
+  // 实例数变化时重建：InstancedMesh 的容量在创建时确定
   return (
-    // 实例数变化时重建：InstancedMesh 的容量在创建时确定
-    <instancedMesh key={matrices.length} ref={ref} args={[part.geometry, part.material, matrices.length]} castShadow={shadow} receiveShadow={shadow} />
+    // 只有传入 onPointerDown（场景页可选中的物体）时才参与射线拾取
+    <instancedMesh
+      key={matrices.length}
+      ref={ref}
+      args={[part.geometry, part.material, matrices.length]}
+      castShadow={shadow}
+      receiveShadow={shadow}
+      {...(onPointerDown && { onPointerDown })}
+    />
   );
 }
 

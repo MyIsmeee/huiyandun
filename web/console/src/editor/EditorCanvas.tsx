@@ -3,15 +3,16 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box3, BufferGeometry, DoubleSide, Float32BufferAttribute, Sphere, Vector3 } from "three";
 import type { SceneArea } from "../lib/api";
-import { AreaScene, AssetModels } from "../scene/AreaScene";
+import { AssetModels } from "../scene/AreaScene";
 import { MATERIALS, type SceneItem, useCatalog } from "../scene/assets";
 import { DeviceMarkers } from "../scene/DeviceMarkers";
 import type { Camera } from "../scene/devices";
 import { bounds, GROUND_M } from "../scene/layout";
 import { BACKGROUND, FirstFrame, Lights, ShadowCatcher } from "../scene/Scene3D";
 import { ACCENT } from "../scene/targets";
-import { placeItem, useDraft } from "./draft";
-import { overlaps, snap, span } from "./placement";
+import { placeItem, selectItem, useDraft } from "./draft";
+import { BLOCKED, overlaps, snap, span } from "./placement";
+import { EditableScene } from "./Selection";
 import type { EditorView } from "./view";
 
 /** 俯视 45°（设计 150 E-1），方位与态势页默认的东南机位一致：相机在 (+x, +z) 方向 */
@@ -38,12 +39,19 @@ export default function EditorCanvas(props: {
   const { area, items, cameras, onView, onReady } = props;
   const box = useMemo(() => bounds(area), [area]);
   return (
-    <Canvas flat shadows="soft" frameloop="demand" camera={{ fov: 35, near: 0.5, far: GROUND_M }}>
+    <Canvas
+      flat
+      shadows="soft"
+      frameloop="demand"
+      camera={{ fov: 35, near: 0.5, far: GROUND_M }}
+      // 左键单击空白处取消选中；右键平移不影响选中
+      onPointerMissed={(e) => e.type === "click" && e.button === 0 && selectItem(null)}
+    >
       <color attach="background" args={[BACKGROUND]} />
       <FirstFrame onReady={onReady} />
       <Lights area={box} />
       <ShadowCatcher area={box} />
-      <AreaScene area={box} items={items} />
+      <EditableScene area={box} items={items} />
       <GridLines width={area.width_m} depth={area.depth_m} />
       <DeviceMarkers cameras={cameras} />
       <Placement size={[area.width_m, area.depth_m]} items={items} />
@@ -109,9 +117,6 @@ function GridLines({ width, depth }: { width: number; depth: number }) {
   );
 }
 
-/** 预览占地的颜色：可放置为强调色（设计 150 E-2），与已有物体重叠时转灰 */
-const BLOCKED = "#94A3B8";
-
 /**
  * 放置（设计 150 E-2）：选中模型后，指针所在处显示吸附网格的半透明预览与占地；单击放下，可连续放置。
  * 与同层已有物体重叠时占地转灰，单击不放置
@@ -157,12 +162,12 @@ function Placement({ size, items }: { size: [number, number]; items: SceneItem[]
   );
 }
 
-/** 只在 e2e 构建中提供：区域地面点 (x, y) 在画布上的像素位置，用例据此在指定位置点击 */
+/** 只在 e2e 构建中提供：区域内 (x, y) 处高 h 米的点在画布上的像素位置，用例据此在指定位置点击 */
 function GroundProbe() {
   const { camera, size } = useThree();
   useEffect(() => {
-    window.__hydEditorAt = (x, y) => {
-      const p = new Vector3(x, 0, y).project(camera);
+    window.__hydEditorAt = (x, y, h = 0) => {
+      const p = new Vector3(x, h, y).project(camera);
       return [((p.x + 1) / 2) * size.width, ((1 - p.y) / 2) * size.height];
     };
     return () => {
@@ -175,6 +180,6 @@ function GroundProbe() {
 declare global {
   interface Window {
     /** e2e 构建专用（见 EditorCanvas） */
-    __hydEditorAt?: (x: number, y: number) => [number, number];
+    __hydEditorAt?: (x: number, y: number, h?: number) => [number, number];
   }
 }

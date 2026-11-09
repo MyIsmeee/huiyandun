@@ -1,59 +1,11 @@
 import { expect, type Page, test } from "@playwright/test";
-import { AREA, camera, expectToast, freezeClock, presetMotion, SITE, sceneSettled, signedIn } from "./helpers";
+import { canvas, DESK, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, settle } from "./editor-helpers";
+import { AREA, camera, expectToast, freezeClock, SITE, sceneSettled } from "./helpers";
 
 // 场景页搭建（设计 150 E-2、E-7，FR-908）：从模型库选模型吸附网格放到地面上，整体保存，态势页随推送更新
 test.beforeEach(({ page }) => freezeClock(page));
 
 const SAVED_AT = "2026-11-09T06:00:00Z";
-const DESK = { asset: "desk", x: 10, y: 10.5, rot: 0, len: null };
-const editor = (page: Page) => page.getByRole("region", { name: "场景编辑" });
-const library = (page: Page) => page.getByRole("complementary", { name: "模型库" });
-const canvas = (page: Page) => editor(page).locator("canvas");
-
-const LOBBY = { ...AREA, id: "area-02", name: "一号楼大厅", width_m: 20, depth_m: 12 };
-
-/** 以 admin 打开场景页，编辑第一个区域（items 为其中的物体）；返回模拟的 WS 服务端一侧 */
-async function openEditor(page: Page, items: object[] = [], others: object[] = []) {
-  await presetMotion(page, true);
-  const sockets = await signedIn(page);
-  await page.route("/api/auth/session", (route) => route.fulfill({ json: { username: "admin", role: "admin", expires_at: "2026-11-09T12:00:00Z" } }));
-  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }, ...others], devices: [camera("normal")] } }));
-  await page.goto("/");
-  await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "场景" }).click();
-  await editorReady(page);
-  return sockets;
-}
-
-/** 等编辑视图绘制首帧（换区域后画布重新挂载）；时钟暂停时逐帧推进 */
-async function editorReady(page: Page) {
-  await expect(async () => {
-    await page.clock.runFor(100);
-    await expect(page.locator("[data-editor]")).toHaveAttribute("data-editor", "ready", { timeout: 50 });
-  }).toPass({ intervals: [50] });
-}
-
-/** 指针移到区域地面点 (x, y) 上方；click 时单击放下 */
-async function pointAt(page: Page, [x, y]: [number, number], click = false) {
-  const box = await canvas(page).boundingBox();
-  const at = await page.evaluate((p) => window.__hydEditorAt?.(p.x, p.y), { x, y });
-  if (!box || !at) throw new Error("编辑视图未就绪");
-  await page.mouse.move(box.x + at[0], box.y + at[1]);
-  if (click) await page.mouse.click(box.x + at[0], box.y + at[1]);
-  await page.clock.runFor(50);
-}
-
-async function pickDesk(page: Page) {
-  await library(page).getByRole("button", { name: /^家具/ }).click();
-  await library(page).getByRole("button", { name: /^办公桌/ }).click();
-  await page.clock.runFor(50); // 绘制一帧：新挂载的接收指针的地面要在绘制时才更新位置
-}
-
-/** 退出放置并移开指针，只剩已放下的物体 */
-async function settle(page: Page) {
-  await page.keyboard.press("Escape");
-  await page.mouse.move(0, 0);
-  await page.clock.runFor(50);
-}
 
 test("选模型后指针处显示吸附网格的半透明预览，单击放下；Esc 退出放置", async ({ page }) => {
   await openEditor(page);
