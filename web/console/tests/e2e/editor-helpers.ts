@@ -11,11 +11,11 @@ export const canvas = (page: Page) => editor(page).locator("canvas");
 export const LOBBY = { ...AREA, id: "area-02", name: "一号楼大厅", width_m: 20, depth_m: 12 };
 
 /** 以 admin 打开场景页，编辑第一个区域（items 为其中的物体）；返回模拟的 WS 服务端一侧 */
-export async function openEditor(page: Page, items: object[] = [], others: object[] = []) {
+export async function openEditor(page: Page, items: object[] = [], others: object[] = [], devices: object[] = [camera("normal")]) {
   await presetMotion(page, true);
   const sockets = await signedIn(page);
   await page.route("/api/auth/session", (route) => route.fulfill({ json: { username: "admin", role: "admin", expires_at: "2026-11-09T12:00:00Z" } }));
-  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }, ...others], devices: [camera("normal")] } }));
+  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }, ...others], devices } }));
   await page.goto("/");
   await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "场景" }).click();
   await editorReady(page);
@@ -59,6 +59,14 @@ export async function savedItems(page: Page): Promise<unknown[]> {
   const request = page.waitForRequest((r) => r.method() === "PUT");
   await editor(page).getByRole("button", { name: "保存" }).click();
   return (await request).postDataJSON().items as unknown[];
+}
+
+/** 保存，返回提交的摄像头位置与朝向 */
+export async function savedCameras(page: Page): Promise<unknown[]> {
+  await page.route(`/api/scene/areas/${AREA.id}`, (route) => route.fulfill({ json: { ...AREA, ...route.request().postDataJSON() } }));
+  const request = page.waitForRequest((r) => r.method() === "PUT");
+  await editor(page).getByRole("button", { name: "保存" }).click();
+  return (await request).postDataJSON().cameras as unknown[];
 }
 
 /** 在地面上从 from 按下拖到 to 再松开（画线状资产） */

@@ -1,10 +1,12 @@
-import { BrickWall, Building2, DoorOpen, type LucideIcon, Package, Route, Search, Sofa, Trees } from "lucide-react";
+import { BrickWall, Building2, Cctv, DoorOpen, type LucideIcon, Package, Route, Search, Sofa, Trees } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useCatalog, useCategories } from "../scene/assets";
-import { selectTool, useDraft } from "./draft";
+import type { Device } from "../store/live";
+import { cameraTool, placingCamera, removeCamera, selectTool, useDraft } from "./draft";
 
 const ICONS: Record<string, LucideIcon> = {
   building: Building2,
@@ -19,8 +21,8 @@ const ICONS: Record<string, LucideIcon> = {
 const OPTION =
   "flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-secondary aria-pressed:border-primary aria-pressed:bg-card";
 
-/** 模型库（设计 150 §6）：按类别或名称查找模型，选中后在地面上放置（E-2），再点一次取消 */
-export function Library() {
+/** 模型库（设计 150 §6）：按类别或名称查找模型，选中后在地面上放置（E-2），再点一次取消；底部为摄像头（E-5） */
+export function Library({ devices }: { devices: Device[] }) {
   const catalog = useCatalog();
   const categories = useCategories();
   const tool = useDraft((s) => s.tool);
@@ -68,6 +70,48 @@ export function Library() {
           {shown.length === 0 && <p className="px-2 py-1.5 text-subtle-foreground">没有匹配的模型</p>}
         </div>
       </ScrollArea>
+      <Cameras devices={devices} />
     </aside>
+  );
+}
+
+/**
+ * 摄像头（设计 150 E-5）：未放入任何区域的摄像头点选后在地面上按下即放置，拖动方向为朝向；
+ * 本区域的摄像头可重新放置或移出区域。安装高度、俯角、视场角在摄像头页编辑
+ */
+function Cameras({ devices }: { devices: Device[] }) {
+  const placed = useDraft((s) => s.cameras);
+  const areaId = useDraft((s) => s.areaId);
+  const placing = cameraTool(useDraft((s) => s.tool));
+  const ids = new Set(placed.map((c) => c.id));
+  const cameras = devices.filter((d) => d.camera);
+  // 未放入任何区域的，以及本页刚从本区域移出、尚未保存的
+  const free = cameras.filter((d) => !ids.has(d.id) && (!d.camera?.area_id || d.camera.area_id === areaId));
+  const here = cameras.filter((d) => ids.has(d.id));
+  if (free.length === 0 && here.length === 0) return null;
+  return (
+    <div role="group" aria-label="摄像头" className="grid gap-0.5 border-t pt-2">
+      <p className="flex items-center gap-2 px-2 text-xs text-subtle-foreground">
+        <Cctv aria-hidden className="size-4" />
+        摄像头 · 按下放置，拖动设朝向
+      </p>
+      {free.map((d) => (
+        <button key={d.id} type="button" aria-pressed={placing === d.id} onClick={() => (placing === d.id ? selectTool(null) : placingCamera(d.id))} className={cn(OPTION, "justify-between")}>
+          {d.name}
+          <span className="text-xs text-subtle-foreground">未放置</span>
+        </button>
+      ))}
+      {here.map((d) => (
+        <div key={d.id} className="flex items-center gap-1 pl-2">
+          <span className="min-w-0 flex-1 truncate">{d.name}</span>
+          <Button variant="ghost" size="sm" aria-pressed={placing === d.id} aria-label={`重新放置 ${d.name}`} onClick={() => placingCamera(d.id)}>
+            重新放置
+          </Button>
+          <Button variant="ghost" size="sm" aria-label={`移出区域 ${d.name}`} onClick={() => removeCamera(d.id)}>
+            移出
+          </Button>
+        </div>
+      ))}
+    </div>
   );
 }

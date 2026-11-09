@@ -4,6 +4,8 @@ import { useStore } from "zustand";
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import type { SceneArea } from "../lib/api";
+import type { Device } from "../store/live";
+import { areaPlacements } from "./cameras";
 import { isDirty, loadDraft, redo, undo, useDraft } from "./draft";
 
 /** 撤销、重做（设计 150 E-6）：Ctrl+Z / Ctrl+Shift+Z（macOS 为 ⌘）；焦点在输入框时保留浏览器自己的撤销 */
@@ -36,7 +38,10 @@ export function HistoryButtons() {
  * 有未保存的修改时，返回或换区域前先确认（设计 150 E-6）；关闭、刷新标签页由浏览器提示。
  * guard(action)：没有修改时直接执行；有修改时弹出确认，放弃修改后再执行
  */
-export function useDiscardGuard(area: SceneArea | null): { guard: (action: () => void) => void; dialog: ReactNode } {
+export function useDiscardGuard(
+  area: SceneArea | null,
+  devices: Device[],
+): { guard: (action: () => void) => void; dialog: ReactNode } {
   const dirty = useDraft(isDirty);
   const [pending, setPending] = useState<{ action: () => void } | null>(null);
   useEffect(() => {
@@ -48,7 +53,7 @@ export function useDiscardGuard(area: SceneArea | null): { guard: (action: () =>
 
   const guard = (action: () => void) => (dirty ? setPending({ action }) : action());
   const discard = () => {
-    if (area) loadDraft(area);
+    if (area) loadDraft(area, areaPlacements(devices, area.id));
     pending?.action();
     setPending(null);
   };

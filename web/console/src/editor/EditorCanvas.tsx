@@ -32,11 +32,13 @@ export default function EditorCanvas(props: {
   /** 草稿中的物体（未保存的修改也在内） */
   items: SceneItem[];
   cameras: Camera[];
+  /** 登记表中的全部摄像头，放置摄像头时取外观与安装参数 */
+  registry: Camera[];
   /** 画布就绪后提供相机操作，卸载时传 null */
   onView: (view: EditorView | null) => void;
   onReady: () => void;
 }) {
-  const { area, items, cameras, onView, onReady } = props;
+  const { area, items, cameras, registry, onView, onReady } = props;
   const box = useMemo(() => bounds(area), [area]);
   return (
     <Canvas
@@ -54,7 +56,7 @@ export default function EditorCanvas(props: {
       <EditableScene area={box} items={items} />
       <GridLines width={area.width_m} depth={area.depth_m} />
       <DeviceMarkers cameras={cameras} />
-      <Placement size={[area.width_m, area.depth_m]} items={items} />
+      <Placement size={[area.width_m, area.depth_m]} items={items} registry={registry} />
       <Controls width={area.width_m} depth={area.depth_m} onView={onView} />
       {import.meta.env.MODE === "e2e" && <GroundProbe />}
     </Canvas>

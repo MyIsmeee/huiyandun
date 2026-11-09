@@ -3,6 +3,7 @@ import { temporal } from "zundo";
 import { create } from "zustand";
 import type { SceneArea } from "../lib/api";
 import type { SceneItem } from "../scene/assets";
+import type { CameraPlacement } from "./cameras";
 
 /** 场景页正在编辑的区域草稿（设计 150 §6）：修改只在本页，保存为整体 PUT（E-7） */
 interface Draft {
@@ -12,7 +13,10 @@ interface Draft {
   /** 载入或上次保存时的物体，与 items 不同即有未保存的修改 */
   saved: SceneItem[];
   items: SceneItem[];
-  /** 放置中的资产编号（E-2），null 为未选模型 */
+  /** 区域内摄像头的位置与朝向（E-5）；savedCameras 为载入或上次保存时的 */
+  savedCameras: CameraPlacement[];
+  cameras: CameraPlacement[];
+  /** 放置中的资产编号（E-2），或 camera:<摄像头编号>（E-5）；null 为未选 */
   tool: string | null;
   /** 选中的物体在 items 中的下标（E-4） */
   selected: number | null;
@@ -21,11 +25,15 @@ interface Draft {
 /** 撤销、重做的步数上限（设计 150 E-6） */
 export const UNDO_LIMIT = 50;
 
-/** 撤销、重做只记录物体的变化（zundo，MIT），选模型、载入与保存不算一步 */
+const CAMERA_TOOL = "camera:";
+/** 放置中的摄像头编号；不是摄像头时为 null */
+export const cameraTool = (tool: string | null) => (tool?.startsWith(CAMERA_TOOL) ? tool.slice(CAMERA_TOOL.length) : null);
+
+/** 撤销、重做只记录物体与摄像头位置的变化（zundo，MIT），选模型、载入与保存不算一步 */
 export const useDraft = create<Draft>()(
-  temporal((): Draft => ({ areaId: null, updatedAt: "", saved: [], items: [], tool: null, selected: null }), {
-    partialize: (s): Pick<Draft, "items"> => ({ items: s.items }),
-    equality: (a, b) => a.items === b.items,
+  temporal((): Draft => ({ areaId: null, updatedAt: "", saved: [], items: [], savedCameras: [], cameras: [], tool: null, selected: null }), {
+    partialize: (s): Pick<Draft, "items" | "cameras"> => ({ items: s.items, cameras: s.cameras }),
+    equality: (a, b) => a.items === b.items && a.cameras === b.cameras,
     limit: UNDO_LIMIT,
   }),
 );
@@ -38,15 +46,15 @@ function untracked(change: Partial<Draft>) {
   history.resume();
 }
 
-/** 载入区域：丢弃未保存的修改与撤销历史，退出放置 */
-export function loadDraft(area: SceneArea): void {
-  untracked({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, tool: null, selected: null });
+/** 载入区域与其中摄像头的位置：丢弃未保存的修改与撤销历史，退出放置 */
+export function loadDraft(area: SceneArea, cameras: CameraPlacement[]): void {
+  untracked({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, savedCameras: cameras, cameras, tool: null, selected: null });
   useDraft.temporal.getState().clear();
 }
 
 /** 保存成功：以服务端返回为准；撤销历史保留，撤销后又成为未保存的修改 */
-export function savedDraft(area: SceneArea): void {
-  untracked({ updatedAt: area.updated_at, saved: area.items, items: area.items });
+export function savedDraft(area: SceneArea, cameras: CameraPlacement[]): void {
+  untracked({ updatedAt: area.updated_at, saved: area.items, items: area.items, savedCameras: cameras, cameras });
 }
 
 // 撤销、重做后下标可能已不指向原物体，取消选中
@@ -68,16 +76,25 @@ export const replaceItem = (index: number, item: SceneItem) =>
   useDraft.setState((s) => ({ items: s.items.map((it, i) => (i === index ? item : it)) }));
 export const removeItem = (index: number) =>
   useDraft.setState((s) => ({ items: s.items.filter((_, i) => i !== index), selected: null }));
+/** 放入或重新放置摄像头，退出放置 */
+export const placeCamera = (placement: CameraPlacement) =>
+  useDraft.setState((s) => ({ cameras: [...s.cameras.filter((c) => c.id !== placement.id), placement], tool: null }));
+/** 移出区域：保存后该摄像头不属于任何区域，3D 中不出现 */
+export const removeCamera = (id: string) => useDraft.setState((s) => ({ cameras: s.cameras.filter((c) => c.id !== id) }));
+export const placingCamera = (id: string) => selectTool(`${CAMERA_TOOL}${id}`);
 
-export const isDirty = (s: Draft) => JSON.stringify(s.items) !== JSON.stringify(s.saved);
+const sameCameras = (a: CameraPlacement[], b: CameraPlacement[]) =>
+  JSON.stringify([...a].sort((x, y) => x.id.localeCompare(y.id))) === JSON.stringify([...b].sort((x, y) => x.id.localeCompare(y.id)));
+export const isDirty = (s: Draft) => JSON.stringify(s.items) !== JSON.stringify(s.saved) || !sameCameras(s.cameras, s.savedCameras);
 
 /**
  * 草稿跟随区域（设计 150 E-7）：换区域时载入；他人保存了同一区域（updated_at 变化）而本页没有未保存的修改时，
  * 换成最新内容；有未保存的修改时保留，保存时由服务端以 409 拒绝
  */
-export function useDraftSync(area: SceneArea): void {
+export function useDraftSync(area: SceneArea, cameras: CameraPlacement[]): void {
+  const key = JSON.stringify(cameras);
   useEffect(() => {
     const draft = useDraft.getState();
-    if (draft.areaId !== area.id || (draft.updatedAt !== area.updated_at && !isDirty(draft))) loadDraft(area);
-  }, [area]);
+    if (draft.areaId !== area.id || (draft.updatedAt !== area.updated_at && !isDirty(draft))) loadDraft(area, JSON.parse(key));
+  }, [area, key]);
 }

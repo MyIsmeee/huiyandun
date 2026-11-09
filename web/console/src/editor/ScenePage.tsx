@@ -16,12 +16,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, type SceneArea, type Site } from "../lib/api";
 import { formatTime } from "../panels/ConnectionStatus/ConnectionStatus";
 import { ControlButton, useAnimate } from "../scene/CameraControls";
-import { type Camera, useCameras } from "../scene/devices";
 import { Boundary, Note, supportsWebGL2 } from "../scene/SceneViewport";
 import { useConnection } from "../store/connection";
+import type { Device } from "../store/live";
 import { applySite } from "../store/live";
 import { DeleteAreaDialog, NewAreaDialog } from "./AreaDialogs";
-import { selectTool, useDraft, useDraftSync } from "./draft";
+import { areaPlacements, placedCameras, registryCameras } from "./cameras";
+import { cameraTool, selectTool, useDraft, useDraftSync } from "./draft";
 import { HistoryButtons, useDiscardGuard } from "./History";
 import { Library } from "./Library";
 import { SaveButton } from "./SaveButton";
@@ -41,10 +42,9 @@ const refresh = () => api.getSite().then(applySite, () => undefined);
 export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }) {
   const [areaId, setAreaId] = useState<string | null>(null);
   const area = site.areas.find((a) => a.id === areaId) ?? site.areas[0] ?? null;
-  const cameras = useCameras(site.devices, area?.id ?? null);
   const [dialog, setDialog] = useState<"new" | "delete" | null>(null);
   const create = () => setDialog("new");
-  const { guard, dialog: discard } = useDiscardGuard(area);
+  const { guard, dialog: discard } = useDiscardGuard(area, site.devices);
 
   return (
     <section aria-label="场景编辑" className="flex h-full flex-col text-sm">
@@ -61,7 +61,7 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
         </Button>
         <span className="ml-auto" />
         {area && <HistoryButtons />}
-        {area && <SaveButton area={area} cameras={cameras} />}
+        {area && <SaveButton area={area} />}
       </header>
       <div className="relative flex min-h-0 flex-1">
         {area ? (
@@ -69,11 +69,11 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
             {/* 模型库与场景同一份资产目录：目录加载失败时同样提示 */}
             <Boundary onError={() => undefined}>
               <Suspense fallback={<Spinner aria-label="模型库加载中" className="m-4" />}>
-                <Library />
+                <Library devices={site.devices} />
               </Suspense>
             </Boundary>
             <div className="relative min-w-0 flex-1">
-              <AreaView key={area.id} area={area} cameras={cameras} />
+              <AreaView key={area.id} area={area} devices={site.devices} />
             </div>
           </>
         ) : (
@@ -145,8 +145,13 @@ function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id
  * 区域的 3D 编辑视图：加载中 / 就绪 / 加载失败 / 不支持 WebGL2；断线时提示数据非实时（V-G3、V-U3）。
  * data-editor 标示当前状态，首帧绘制后为 ready
  */
-function AreaView({ area, cameras }: { area: SceneArea; cameras: Camera[] }) {
-  useDraftSync(area);
+function AreaView({ area, devices }: { area: SceneArea; devices: Device[] }) {
+  const saved = areaPlacements(devices, area.id);
+  useDraftSync(area, saved);
+  const placements = useDraft((s) => (s.areaId === area.id ? s.cameras : null)) ?? saved;
+  // 重新放置中的摄像头只显示跟随指针的预览
+  const moving = cameraTool(useDraft((s) => s.tool));
+  const cameras = placedCameras(devices, placements.filter((p) => p.id !== moving));
   // 草稿载入前（换区域的第一帧）先显示区域已保存的内容
   const items = useDraft((s) => (s.areaId === area.id ? s.items : area.items));
   const placing = useDraft((s) => s.tool !== null);
@@ -167,7 +172,7 @@ function AreaView({ area, cameras }: { area: SceneArea; cameras: Camera[] }) {
     <div data-editor={state} className="absolute inset-0">
       <Boundary onError={() => setState("error")}>
         <Suspense fallback={null}>
-          <EditorCanvas area={area} items={items} cameras={cameras} onView={setView} onReady={() => setState("ready")} />
+          <EditorCanvas area={area} items={items} cameras={cameras} registry={registryCameras(devices)} onView={setView} onReady={() => setState("ready")} />
         </Suspense>
       </Boundary>
       {state === "ready" && view && <ViewTools view={view} />}
@@ -178,7 +183,9 @@ function AreaView({ area, cameras }: { area: SceneArea; cameras: Camera[] }) {
       )}
       {state === "ready" && placing && (
         <p className="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
-          单击地面放置，可连续放置；墙、围栏、道路按下拖动画线 · <Kbd>R</Kbd> 旋转 · <Kbd>Esc</Kbd> 退出
+          {moving ? "按下地面放置摄像头，按住拖动设朝向" : "单击地面放置，可连续放置；墙、围栏、道路按下拖动画线 · "}
+          {!moving && <Kbd>R</Kbd>}
+          {!moving && " 旋转"} · <Kbd>Esc</Kbd> 退出
         </p>
       )}
       {state === "loading" && <Note>场景加载中…</Note>}
