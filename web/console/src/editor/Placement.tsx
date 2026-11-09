@@ -3,8 +3,10 @@ import { useEffect, useState } from "react";
 import { DoubleSide } from "three";
 import { AssetModels } from "../scene/AreaScene";
 import { type SceneItem, useCatalog } from "../scene/assets";
+import type { Camera } from "../scene/devices";
 import { ACCENT } from "../scene/targets";
-import { placeItem, useDraft } from "./draft";
+import { CameraPlacing } from "./CameraPlacing";
+import { cameraTool, placeItem, useDraft } from "./draft";
 import { BLOCKED, extent, inside, overlaps, snap, stroke } from "./placement";
 
 type Rot = SceneItem["rot"];
@@ -15,9 +17,11 @@ const point = (e: ThreeEvent<PointerEvent | MouseEvent>): [number, number] => [e
  * 普通物体单击放下，可连续放置，R 旋转 90°；线状资产（墙、围栏、道路）按下拖动画一段直线，松开时按网格分段生成。
  * 超出区域或与同层已有物体重叠时占地转灰，不放置
  */
-export function Placement({ size, items }: { size: [number, number]; items: SceneItem[] }) {
+export function Placement({ size, items, registry }: { size: [number, number]; items: SceneItem[]; registry: Camera[] }) {
   const catalog = useCatalog();
-  const asset = catalog.get(useDraft((s) => s.tool) ?? "");
+  const tool = useDraft((s) => s.tool);
+  const asset = catalog.get(tool ?? "");
+  const camera = registry.find((c) => c.id === cameraTool(tool));
   const [hover, setHover] = useState<[number, number] | null>(null);
   const [rot, setRot] = useState<Rot>(0);
   /** 线状资产按下的位置；松开前为拖动中 */
@@ -28,7 +32,8 @@ export function Placement({ size, items }: { size: [number, number]; items: Scen
   useEffect(() => {
     if (asset?.line) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.key === "r" || e.key === "R") && !e.ctrlKey && !e.metaKey) setRot((r) => ((r + 90) % 360) as Rot);
+      if (e.ctrlKey || e.metaKey || (e.target as Element).closest("input, textarea")) return;
+      if (e.key === "r" || e.key === "R") setRot((r) => ((r + 90) % 360) as Rot);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -43,6 +48,7 @@ export function Placement({ size, items }: { size: [number, number]; items: Scen
     window.addEventListener("pointerup", end);
     return () => window.removeEventListener("pointerup", end);
   });
+  if (camera) return <CameraPlacing camera={camera} size={size} />;
   if (!asset) return null;
 
   const box = preview && extent(preview, catalog);

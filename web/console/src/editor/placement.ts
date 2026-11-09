@@ -74,11 +74,13 @@ export function inside(item: SceneItem, catalog: Map<string, Asset>, [width, dep
 
 /**
  * 旋转 90°（设计 150 E-4）：普通物体绕占地中心转，再吸附网格（长宽奇偶不同时中心挪半格）；线状资产绕起点转。
- * 转后超出区域时返回 null
+ * 不挪回区域内：转后超出区域时返回 null，由调用方提示
  */
 export function rotated(item: SceneItem, asset: Asset, catalog: Map<string, Asset>, size: [number, number]): SceneItem | null {
   const rot = ((item.rot + 90) % 360) as Rot;
-  const next = asset.line ? { ...item, rot } : snap(asset, rot, [item.x, item.y], size);
+  const [sx, sy] = span(asset, rot);
+  const grid = (p: number, s: number) => Math.round(p - s / 2) + s / 2;
+  const next = asset.line ? { ...item, rot } : { ...item, rot, x: grid(item.x, sx), y: grid(item.y, sy) };
   return inside(next, catalog, size) ? next : null;
 }
 

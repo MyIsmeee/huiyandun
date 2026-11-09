@@ -187,3 +187,23 @@ test("墙按下拖动画线，按网格分段；普通物体放置前按 R 旋�
     { ...DESK, x: 10.5, y: 10, rot: 90 },
   ]);
 });
+
+test("有未保存的修改时，顶栏切页与退出先确认；放弃后切页（设计 150 E-6）", async ({ page }) => {
+  await openEditor(page, [], [LOBBY]);
+  await switchTo(page, "一号楼大厅");
+  await editorReady(page);
+  await placeDesk(page);
+  const nav = page.getByRole("navigation", { name: "导航" });
+  const confirm = page.getByRole("alertdialog", { name: "放弃未保存的修改？" });
+
+  await nav.getByRole("button", { name: "态势" }).click();
+  await confirm.getByRole("button", { name: "继续编辑" }).click();
+  await page.getByRole("button", { name: "退出登录" }).click();
+  await confirm.getByRole("button", { name: "继续编辑" }).click();
+  await expect(editor(page).getByRole("button", { name: "区域：一号楼大厅" })).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "保存" })).toBeEnabled();
+
+  await nav.getByRole("button", { name: "态势" }).click();
+  await confirm.getByRole("button", { name: "放弃修改" }).click();
+  await expect(editor(page)).toHaveCount(0);
+});
