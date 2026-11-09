@@ -87,10 +87,13 @@
 |---|---|---|
 | 1eurofilter | 1.3.0 | BSD-3-Clause |
 | @babel/runtime | 7.29.10 | MIT |
+| @dimforge/rapier3d-compat | 0.12.0 | Apache-2.0 |
 | @floating-ui/core | 1.8.0 | MIT |
 | @floating-ui/dom | 1.8.0 | MIT |
 | @floating-ui/react-dom | 2.1.9 | MIT |
 | @floating-ui/utils | 0.2.12 | MIT |
+| @mediapipe/tasks-vision | 0.10.17 | Apache-2.0 |
+| @monogrid/gainmap-js | 3.7.3 | MIT |
 | @radix-ui/number | 1.1.3 | MIT |
 | @radix-ui/primitive | 1.2.0 | MIT |
 | @radix-ui/react-accessible-icon | 1.2.0 | MIT |
@@ -151,21 +154,48 @@
 | @radix-ui/react-use-size | 1.1.5 | MIT |
 | @radix-ui/react-visually-hidden | 1.2.13 | MIT |
 | @radix-ui/rect | 1.1.3 | MIT |
+| @react-three/drei | 10.7.9 | MIT |
 | @react-three/fiber | 9.8.2 | MIT |
+| @tweenjs/tween.js | 23.1.3 | MIT |
+| @types/draco3d | 1.4.10 | MIT |
+| @types/offscreencanvas | 2019.7.3 | MIT |
 | @types/react | 19.3.0 | MIT |
 | @types/react-reconciler | 0.28.9 | MIT |
+| @types/stats.js | 0.17.4 | MIT |
+| @types/three | 0.186.0 | MIT |
 | @types/webxr | 0.5.24 | MIT |
+| @use-gesture/core | 10.3.1 | MIT |
+| @use-gesture/react | 10.3.1 | MIT |
 | aria-hidden | 1.2.6 | MIT |
 | base64-js | 1.5.1 | MIT |
+| bidi-js | 1.1.0 | MIT |
 | buffer | 6.0.3 | MIT |
+| camera-controls | 3.1.2 | MIT |
 | class-variance-authority | 0.7.1 | Apache-2.0 |
 | clsx | 2.1.1 | MIT |
+| cross-env | 7.0.3 | MIT |
+| cross-spawn | 7.0.6 | MIT |
 | csstype | 3.2.3 | MIT |
+| detect-gpu | 5.0.70 | MIT |
 | detect-node-es | 1.1.0 | MIT |
+| draco3d | 1.5.9 | Apache-2.0 |
+| fflate | 0.6.11, 0.8.3 | MIT |
 | get-nonce | 1.0.1 | MIT |
+| glsl-noise | 0.0.0 | MIT |
+| hls.js | 1.7.4 | Apache-2.0 |
 | ieee754 | 1.2.1 | BSD-3-Clause |
+| immediate | 3.0.6 | MIT |
+| is-promise | 2.2.2 | MIT |
+| isexe | 2.0.0 | ISC |
 | its-fine | 2.1.1 | MIT |
+| lie | 3.3.0 | MIT |
 | lucide-react | 1.61.0 | ISC |
+| maath | 0.10.8 | MIT |
+| meshline | 3.3.1 | MIT |
+| meshoptimizer | 1.1.1 | MIT |
+| path-key | 3.1.1 | MIT |
+| potpack | 1.0.2 | ISC |
+| promise-worker-transferable | 1.0.4 | Apache-2.0 |
 | radix-ui | 1.8.1 | MIT |
 | react | 19.3.1 | MIT |
 | react-dom | 19.3.1 | MIT |
@@ -173,16 +203,31 @@
 | react-remove-scroll-bar | 2.3.8 | MIT |
 | react-style-singleton | 2.2.3 | MIT |
 | react-use-measure | 2.1.7 | MIT |
+| require-from-string | 2.0.2 | MIT |
 | scheduler | 0.28.0 | MIT |
+| shebang-command | 2.0.0 | MIT |
+| shebang-regex | 3.0.0 | MIT |
+| stats-gl | 2.4.2 | MIT |
+| stats.js | 0.17.0 | MIT |
 | suspend-react | 0.1.3 | MIT |
 | tailwind-merge | 3.7.0 | MIT |
 | three | 0.186.1 | MIT |
+| three-mesh-bvh | 0.8.3 | MIT |
+| three-stdlib | 2.36.1 | MIT |
+| troika-three-text | 0.52.5 | MIT |
+| troika-three-utils | 0.52.5 | MIT |
+| troika-worker-utils | 0.52.0 | MIT |
 | tslib | 2.9.1 | 0BSD |
+| tunnel-rat | 0.1.2 | MIT |
 | tw-animate-css | 1.4.0 | MIT |
 | use-callback-ref | 1.3.3 | MIT |
 | use-sidecar | 1.1.3 | MIT |
 | use-sync-external-store | 1.7.0 | MIT |
-| zustand | 5.0.16 | MIT |
+| utility-types | 3.11.0 | MIT |
+| webgl-constants | 1.1.1 | MIT |
+| webgl-sdf-generator | 1.1.1 | MIT |
+| which | 2.0.2 | ISC |
+| zustand | 4.5.7, 5.0.16 | MIT |
 
 ## 构建期依赖（不随产品分发）
 

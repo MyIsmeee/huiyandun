@@ -70,7 +70,7 @@ export function CameraControls({ notice }: { notice?: { text: string; title: str
   );
 }
 
-function ControlButton(props: { label: string; disabled: boolean; onClick: () => void; children: ReactNode }) {
+export function ControlButton(props: { label: string; disabled: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       aria-label={props.label}

@@ -69,6 +69,15 @@ export async function signedIn(page: Page): Promise<WebSocketRoute[]> {
   return mockSocket(page);
 }
 
+/** 模拟浏览器不支持 WebGL2：场景降级为 2D 俯视视图（C-FE-08），场景编辑不可用 */
+export const withoutWebGL2 = (page: Page) =>
+  page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, ...rest: unknown[]) {
+      return id === "webgl2" ? null : getContext.call(this, id, ...(rest as []));
+    } as typeof getContext;
+  });
+
 /** 时钟固定在 Asia/Shanghai 14:30:00 并暂停，页面中的"最后更新"时刻确定；由用例以 clock.runFor 推进 */
 export async function freezeClock(page: Page): Promise<void> {
   const now = new Date("2026-10-27T06:30:00Z");

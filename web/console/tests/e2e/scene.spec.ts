@@ -1,18 +1,10 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { AREA, camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetMotion, presetView, SITE, sceneSettled, signedIn } from "./helpers";
+import { AREA, camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetMotion, presetView, SITE, sceneSettled, signedIn, withoutWebGL2 } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
 const scene = (page: Page) => page.getByRole("region", { name: "场景" });
 const SCENE_CHUNK = "**/assets/Scene3D-*.js";
-/** 模拟浏览器不支持 WebGL2：场景降级为 2D 俯视视图（C-FE-08） */
-const withoutWebGL2 = (page: Page) =>
-  page.addInitScript(() => {
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, id: string, ...rest: unknown[]) {
-      return id === "webgl2" ? null : getContext.call(this, id, ...(rest as []));
-    } as typeof getContext;
-  });
 
 // 设计 150 §4：空区域只有渐隐地面，不画区域边框、网格，也不自动补墙；提示尚未搭建
 test("空区域：只有渐隐地面，提示该区域还没有搭建场景", async ({ page }) => {

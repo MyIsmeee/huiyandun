@@ -9,7 +9,7 @@ import type { SceneItem } from "./assets";
 import type { Area, SceneView } from "./layout";
 
 /** 页面底色（ui.md §3），场景背景与远处渐隐取同色 */
-const BACKGROUND = "#F4F5F7";
+export const BACKGROUND = "#F4F5F7";
 /** 主光方向（ui.md §5.2）：方位 135°、仰角 55° */
 const SUN_AZIMUTH = (135 * Math.PI) / 180;
 const SUN_ELEVATION = (55 * Math.PI) / 180;
@@ -52,7 +52,7 @@ const HEMI_INTENSITY = 1.5;
 const SUN_INTENSITY = 2;
 
 /** 半球光 + 平行主光；主光的阴影相机贴合区域，阴影清晰且不浪费贴图 */
-function Lights({ area }: { area: Area }) {
+export function Lights({ area }: { area: Area }) {
   const [cx, cz] = [area.x0 + area.width_m / 2, area.y0 + area.height_m / 2];
   const target = useMemo(() => new Object3D(), []);
   const radius = Math.hypot(area.width_m, area.height_m) / 2 + SHADOW_MARGIN_M;
@@ -85,7 +85,7 @@ function Lights({ area }: { area: Area }) {
 }
 
 /** 只显示阴影的承接面：区域加边距，略高于地面，不接收点选 */
-function ShadowCatcher({ area }: { area: Area }) {
+export function ShadowCatcher({ area }: { area: Area }) {
   const [w, h] = [area.width_m + SHADOW_MARGIN_M * 2, area.height_m + SHADOW_MARGIN_M * 2];
   return (
     <mesh
@@ -121,7 +121,7 @@ function ViewCamera({ view }: { view: SceneView }) {
   return null;
 }
 
-function FirstFrame({ onReady }: { onReady: () => void }) {
+export function FirstFrame({ onReady }: { onReady: () => void }) {
   const done = useRef(false);
   const gl = useThree((s) => s.gl);
   // 只在 e2e 构建中提供：最近一帧的绘制调用数，用于核对实例化渲染（C-FE-04、SC-10）

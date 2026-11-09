@@ -12,7 +12,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { Empty, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import { Button } from "../components/ui/button";
+import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import type { Site } from "../lib/api";
 import { useConnection } from "../store/connection";
 import { useLive } from "../store/live";
@@ -41,7 +42,7 @@ const NO_ITEMS: SceneItem[] = [];
 // three 体积较大，单独分包按需加载，不拖慢登录页与首屏（C-FE-04）
 const Scene3D = lazy(() => import("./Scene3D"));
 
-function supportsWebGL2(): boolean {
+export function supportsWebGL2(): boolean {
   const gl = document.createElement("canvas").getContext("webgl2");
   gl?.getExtension("WEBGL_lose_context")?.loseContext();
   return gl !== null;
@@ -60,7 +61,7 @@ function useSize(ref: RefObject<HTMLElement | null>): Size | null {
 }
 
 /** 场景代码加载或 WebGL 初始化失败时显示"加载失败" */
-class Boundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
+export class Boundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
@@ -74,10 +75,10 @@ class Boundary extends Component<{ onError: () => void; children: ReactNode }, {
 }
 
 /**
- * 场景视口（ui.md）：加载 / 空区域 / 加载失败 / 无 WebGL2 降级 2D。
+ * 场景视口（ui.md）：加载 / 空区域 / 加载失败 / 无 WebGL2 降级 2D。onBuild 只对 admin 传入：空区域提示旁的"去搭建"打开场景页。
  * data-scene 标示当前状态，3D 场景首帧绘制后为 ready。
  */
-export function SceneViewport({ site }: { site: Site }) {
+export function SceneViewport({ site, onBuild }: { site: Site; onBuild?: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useSize(ref);
   const [webgl2] = useState(supportsWebGL2);
@@ -218,6 +219,13 @@ export function SceneViewport({ site }: { site: Site }) {
           <EmptyHeader>
             <EmptyTitle className="text-base">{scene ? "该区域还没有搭建场景" : "还没有场景区域"}</EmptyTitle>
           </EmptyHeader>
+          {onBuild && (
+            <EmptyContent>
+              <Button size="sm" className="pointer-events-auto" onClick={onBuild}>
+                去搭建
+              </Button>
+            </EmptyContent>
+          )}
         </Empty>
       )}
       {(state === "ready" || state === "2d") && (
@@ -240,7 +248,7 @@ export function SceneViewport({ site }: { site: Site }) {
   );
 }
 
-function Note({ children }: { children: ReactNode }) {
+export function Note({ children }: { children: ReactNode }) {
   return (
     <p className="pointer-events-none absolute inset-0 m-auto flex h-fit items-center justify-center gap-2 text-sm text-subtle-foreground">
       {children}
