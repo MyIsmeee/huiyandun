@@ -50,7 +50,7 @@ test(`告警列表：关联事件置顶与处置状态，规则 / 模型来源�
   sockets[0]?.send(JSON.stringify({ channel: "incidents", data: INCIDENT }));
   sockets[0]?.send(JSON.stringify({ channel: "executions", data: EXECUTION }));
 
-  const panel = page.getByRole("complementary", { name: "检查栏" });
+  const panel = page.getByRole("complementary", { name: "告警与详情" });
   await expect(panel.getByText("已处置")).toBeVisible();
   await expectNoOverflow(page);
   await expect(panel).toHaveScreenshot(`alert-list.png`);

@@ -1,4 +1,4 @@
-import { Hourglass, LoaderCircle, type LucideIcon, Wifi, WifiOff } from "lucide-react";
+import { Clock, Hourglass, LoaderCircle, type LucideIcon, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { type Freshness, freshness, useConnection } from "../../store/connection";
 
@@ -42,6 +42,16 @@ export function ConnectionStatus() {
     >
       <Icon aria-hidden className="size-3.5" />
       {text}
+    </p>
+  );
+}
+
+/** 断线时主视图底部居中的提示（V-U3） */
+export function StaleNotice({ lastFrameAt }: { lastFrameAt: number | null }) {
+  return (
+    <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
+      <Clock aria-hidden className="size-4" />
+      数据非实时 · 最后更新 {formatTime(lastFrameAt)}
     </p>
   );
 }

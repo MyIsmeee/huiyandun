@@ -308,7 +308,7 @@ test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再�
   await expect(panel).toHaveCount(0);
 });
 
-// V-I6：跟随中从摄像头栏选中摄像头，引线卡暂不显示；回到总览后卡片与引线一起出现
+// V-I6：跟随中从告警卡选中摄像头，引线卡暂不显示；回到总览后卡片与引线一起出现
 test("跟随中选中摄像头，回到总览后引线卡带引线", async ({ page }) => {
   await still(page);
   const [ws] = await open(page, [camera("normal")]);
@@ -316,9 +316,13 @@ test("跟随中选中摄像头，回到总览后引线卡带引线", async ({ pa
   await walk(page, ws, 0.4);
   const callout = scene(page).getByRole("group", { name: "cam-01 画面" });
 
+  ws?.send(JSON.stringify({ channel: "alerts", data: fall }));
   await scene(page).dblclick({ position: await targetAt(page, "cam-01/7") });
   await page.clock.runFor(100);
-  await page.getByRole("button", { name: /^cam-01 / }).click();
+  // 双击同时选中人员：先回到告警列表，再从中选中摄像头，跟随视角不变
+  const side = page.getByRole("complementary", { name: "告警与详情" });
+  await side.getByRole("button", { name: "返回告警" }).click();
+  await side.getByRole("button", { name: /跌倒/ }).click();
   await expect(callout).toHaveCount(0); // 跟随视角下不显示
 
   await page.keyboard.press("Escape");

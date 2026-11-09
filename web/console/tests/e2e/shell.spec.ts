@@ -19,7 +19,7 @@ test("主界面分区与空态", async ({ page }) => {
   await expect(page.getByText("演示办公区")).toBeVisible();
   await expect(page.getByRole("list", { name: "关键指标" }).getByText("—")).toHaveCount(4);
   await expect(page.getByText("暂无告警")).toBeVisible();
-  // 处置时间线在检查栏详情中（D-115），未选中时主界面没有该区域
+  // 处置时间线在详情中，未选中时主界面没有该区域
   await expect(page.getByRole("region", { name: "处置时间线" })).toHaveCount(0);
   await sceneSettled(page);
   await expectNoOverflow(page);
@@ -40,27 +40,32 @@ test("关键指标显示数值与变化（D-100）", async ({ page }) => {
   const kpis = page.getByRole("list", { name: "关键指标" });
   await expect(kpis.getByTitle("较上一次")).toHaveText("↓ 2.6");
   await sceneSettled(page);
-  // V-P3：最窄的 1366 宽下，指标一行完整显示在工具条内，不被截断（D-115）
-  const [row, bar] = await Promise.all([kpis.boundingBox(), page.getByRole("region", { name: "主画布" }).boundingBox()]);
-  expect(row?.x ?? 0).toBeGreaterThanOrEqual(bar?.x ?? 0);
-  expect((row?.x ?? 0) + (row?.width ?? 0)).toBeLessThanOrEqual((bar?.x ?? 0) + (bar?.width ?? 0));
+  // V-P3：最窄的 1366 宽下，指标卡一排完整显示，不与右侧告警卡重叠（设计 150 §3）
+  const [row, side] = await Promise.all([kpis.boundingBox(), page.getByRole("complementary", { name: "告警与详情" }).boundingBox()]);
+  expect((row?.x ?? 0) + (row?.width ?? 0)).toBeLessThan(side?.x ?? 0);
   await expectNoOverflow(page);
   await expect(kpis).toHaveScreenshot("kpis.png");
 });
 
-// V-L2：场景视口是面积最大的单一元素，占比 ≥ 50%
+// 设计 150 §3、V-L2：场景铺满顶栏以下；指标卡下方、告警卡左侧不被卡片遮挡的部分占视口一半以上
 for (const [width, height] of [
   [1920, 1080],
   [1366, 768],
 ] as const) {
-  test(`场景视口占比 ≥ 50%（${width}×${height}）`, async ({ page }) => {
+  test(`场景铺满，卡片外的场景占比 ≥ 50%（${width}×${height}）`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await signedIn(page);
     await page.goto("/");
 
-    const box = await page.getByRole("region", { name: "场景" }).boundingBox();
-    expect(box).not.toBeNull();
-    expect(((box?.width ?? 0) * (box?.height ?? 0)) / (width * height)).toBeGreaterThanOrEqual(0.5);
+    const [scene, kpis, side] = await Promise.all([
+      page.getByRole("region", { name: "场景" }).boundingBox(),
+      page.getByRole("list", { name: "关键指标" }).boundingBox(),
+      page.getByRole("complementary", { name: "告警与详情" }).boundingBox(),
+    ]);
+    if (!scene || !kpis || !side) throw new Error("主界面未就绪");
+    expect(scene.width).toBe(width);
+    const free = (side.x - scene.x) * (scene.y + scene.height - (kpis.y + kpis.height));
+    expect(free / (width * height)).toBeGreaterThanOrEqual(0.5);
     await expectNoOverflow(page);
   });
 }

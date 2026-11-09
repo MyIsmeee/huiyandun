@@ -105,6 +105,14 @@
   background-size: 24px 24px;
 }
 
+/* 态势页浮动卡片（设计 150 §3）：白底、圆角 16、柔和阴影 + 1 px 边框 */
+@utility floating-card {
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 0.08);
+}
+
 /* 页面进入时一次性淡入上移，不循环（V-A3） */
 @keyframes enter {
   from {
