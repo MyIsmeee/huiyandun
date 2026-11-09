@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronDown, CircleAlert, Clock, House, Minus, Plus, RotateCw, Trash2 } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,6 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Kbd } from "@/components/ui/kbd";
+import { Spinner } from "@/components/ui/spinner";
 import { api, type SceneArea, type Site } from "../lib/api";
 import { formatTime } from "../panels/ConnectionStatus/ConnectionStatus";
 import { ControlButton, useAnimate } from "../scene/CameraControls";
@@ -19,6 +21,8 @@ import { Boundary, Note, supportsWebGL2 } from "../scene/SceneViewport";
 import { useConnection } from "../store/connection";
 import { applySite } from "../store/live";
 import { DeleteAreaDialog, NewAreaDialog } from "./AreaDialogs";
+import { selectTool, useDraft, useDraftSync } from "./draft";
+import { Library } from "./Library";
 import type { EditorView } from "./view";
 
 // three 体积较大，与态势页一样单独分包按需加载（C-FE-04）
@@ -28,7 +32,7 @@ const EditorCanvas = lazy(() => import("./EditorCanvas"));
 const refresh = () => api.getSite().then(applySite, () => undefined);
 
 /**
- * 场景页（设计 150 §6，FR-908），只对 admin 渲染入口（C-FE-07）：选择、新建、删除区域，在 3D 编辑视图中查看区域。
+ * 场景页（设计 150 §6，FR-908），只对 admin 渲染入口（C-FE-07）：选择、新建、删除区域，从模型库选模型放到地面上。
  * 区域数据取自站点（GET /api/site 与 WS site 频道），保存后各浏览器 5 s 内更新
  */
 export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }) {
@@ -52,9 +56,19 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           新区域
         </Button>
       </header>
-      <div className="relative min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {area ? (
-          <AreaView key={area.id} area={area} cameras={cameras} />
+          <>
+            {/* 模型库与场景同一份资产目录：目录加载失败时同样提示 */}
+            <Boundary onError={() => undefined}>
+              <Suspense fallback={<Spinner aria-label="模型库加载中" className="m-4" />}>
+                <Library />
+              </Suspense>
+            </Boundary>
+            <div className="relative min-w-0 flex-1">
+              <AreaView key={area.id} area={area} cameras={cameras} />
+            </div>
+          </>
         ) : (
           <Empty className="h-full">
             <EmptyHeader>
@@ -124,6 +138,16 @@ function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id
  * data-editor 标示当前状态，首帧绘制后为 ready
  */
 function AreaView({ area, cameras }: { area: SceneArea; cameras: Camera[] }) {
+  useDraftSync(area);
+  // 草稿载入前（换区域的第一帧）先显示区域已保存的内容
+  const items = useDraft((s) => (s.areaId === area.id ? s.items : area.items));
+  const placing = useDraft((s) => s.tool !== null);
+  // Esc 退出放置（E-2）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && selectTool(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [webgl2] = useState(supportsWebGL2);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [view, setView] = useState<EditorView | null>(null);
@@ -135,10 +159,15 @@ function AreaView({ area, cameras }: { area: SceneArea; cameras: Camera[] }) {
     <div data-editor={state} className="absolute inset-0">
       <Boundary onError={() => setState("error")}>
         <Suspense fallback={null}>
-          <EditorCanvas area={area} cameras={cameras} onView={setView} onReady={() => setState("ready")} />
+          <EditorCanvas area={area} items={items} cameras={cameras} onView={setView} onReady={() => setState("ready")} />
         </Suspense>
       </Boundary>
       {state === "ready" && view && <ViewTools view={view} />}
+      {state === "ready" && placing && (
+        <p className="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
+          单击地面放置，可连续放置 · <Kbd>Esc</Kbd> 退出
+        </p>
+      )}
       {state === "loading" && <Note>场景加载中…</Note>}
       {state === "error" && (
         <Note>

@@ -20,6 +20,8 @@ import type { Area } from "./layout";
 const FADE_M = 15;
 /** 渐隐贴图每米的像素数 */
 const FADE_PX_PER_M = 2;
+/** 放置预览的不透明度 */
+const GHOST_OPACITY = 0.5;
 
 /** 资产的一个网格：已烘焙到资产局部坐标，实例矩阵直接作用其上 */
 interface Part {
@@ -32,26 +34,31 @@ interface Part {
  * 只用实体材质与固定光照（D-111），模型自带的调色板贴图保留明暗层次
  */
 export function AreaScene({ area, items }: { area: Area; items: SceneItem[] }) {
-  const catalog = useCatalog();
-  const groups = useMemo(() => instances(footprints(items, catalog)), [items, catalog]);
-  // 一次加载整个资产库（约 2 MB，同源）：之后放入新类别的物体不再挂起，场景不会因加载新模型而整体闪空
-  const files = useMemo(() => [...new Set([...catalog.values()].map((a) => `/models/${a.file}`))].sort(), [catalog]);
   return (
     <>
       <Ground area={area} />
-      <Models files={files} groups={groups} />
+      <AssetModels items={items} />
     </>
   );
 }
 
-function Models({ files, groups }: { files: string[]; groups: Map<string, Matrix4[]> }) {
+/** 一组物体的模型，不含地面；ghost 为场景页放置时的半透明预览（设计 150 E-2），不投射阴影 */
+export function AssetModels({ items, ghost = false }: { items: SceneItem[]; ghost?: boolean }) {
+  const catalog = useCatalog();
+  const groups = useMemo(() => instances(footprints(items, catalog)), [items, catalog]);
+  // 一次加载整个资产库（约 2 MB，同源）：之后放入新类别的物体不再挂起，场景不会因加载新模型而整体闪空
+  const files = useMemo(() => [...new Set([...catalog.values()].map((a) => `/models/${a.file}`))].sort(), [catalog]);
+  return <Models files={files} groups={groups} ghost={ghost} />;
+}
+
+function Models({ files, groups, ghost }: { files: string[]; groups: Map<string, Matrix4[]>; ghost: boolean }) {
   const gltfs = useLoader(GLTFLoader, files);
   // 只随用到的资产变化重新烘焙：移动、增删同类物体只更新实例矩阵
   const ids = useMemo(() => [...groups.keys()].sort().join(" "), [groups]);
   const parts = useMemo(() => {
     const scenes = gltfs.flatMap((g) => g.scenes);
-    return new Map(ids.split(" ").filter(Boolean).map((id) => [id, bake(scenes.find((s) => s.name === id))]));
-  }, [gltfs, ids]);
+    return new Map(ids.split(" ").filter(Boolean).map((id) => [id, bake(scenes.find((s) => s.name === id), ghost)]));
+  }, [gltfs, ids, ghost]);
   useEffect(
     () => () => {
       for (const list of parts.values()) for (const { geometry, material } of list) {
@@ -62,12 +69,12 @@ function Models({ files, groups }: { files: string[]; groups: Map<string, Matrix
     [parts],
   );
   return [...groups].flatMap(([id, matrices]) =>
-    (parts.get(id) ?? []).map((part, i) => <Batch key={`${id}/${i}`} part={part} matrices={matrices} />),
+    (parts.get(id) ?? []).map((part, i) => <Batch key={`${id}/${i}`} part={part} matrices={matrices} shadow={!ghost} />),
   );
 }
 
-/** 把资产场景中的网格烘焙到资产局部坐标；材质改为受光的 Lambert，只保留底色与贴图 */
-function bake(scene: Object3D | undefined): Part[] {
+/** 把资产场景中的网格烘焙到资产局部坐标；材质改为受光的 Lambert，只保留底色与贴图；预览为半透明 */
+function bake(scene: Object3D | undefined, ghost: boolean): Part[] {
   if (!scene) return [];
   scene.updateMatrixWorld(true);
   const parts: Part[] = [];
@@ -77,13 +84,13 @@ function bake(scene: Object3D | undefined): Part[] {
     const source = mesh.material as MeshStandardMaterial;
     parts.push({
       geometry: mesh.geometry.clone().applyMatrix4(mesh.matrixWorld),
-      material: new MeshLambertMaterial({ color: source.color, map: source.map }),
+      material: new MeshLambertMaterial({ color: source.color, map: source.map, transparent: ghost, opacity: ghost ? GHOST_OPACITY : 1 }),
     });
   });
   return parts;
 }
 
-function Batch({ part, matrices }: { part: Part; matrices: Matrix4[] }) {
+function Batch({ part, matrices, shadow }: { part: Part; matrices: Matrix4[]; shadow: boolean }) {
   const ref = useRef<InstancedMesh>(null);
   const invalidate = useThree((s) => s.invalidate);
   useLayoutEffect(() => {
@@ -97,7 +104,7 @@ function Batch({ part, matrices }: { part: Part; matrices: Matrix4[] }) {
   }, [matrices, invalidate]);
   return (
     // 实例数变化时重建：InstancedMesh 的容量在创建时确定
-    <instancedMesh key={matrices.length} ref={ref} args={[part.geometry, part.material, matrices.length]} castShadow receiveShadow />
+    <instancedMesh key={matrices.length} ref={ref} args={[part.geometry, part.material, matrices.length]} castShadow={shadow} receiveShadow={shadow} />
   );
 }
 
