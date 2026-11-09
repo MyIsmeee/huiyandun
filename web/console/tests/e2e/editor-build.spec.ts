@@ -10,19 +10,26 @@ const editor = (page: Page) => page.getByRole("region", { name: "场景编辑" }
 const library = (page: Page) => page.getByRole("complementary", { name: "模型库" });
 const canvas = (page: Page) => editor(page).locator("canvas");
 
-/** 以 admin 打开场景页；返回模拟的 WS 服务端一侧 */
-async function openEditor(page: Page, items: object[] = []) {
+const LOBBY = { ...AREA, id: "area-02", name: "一号楼大厅", width_m: 20, depth_m: 12 };
+
+/** 以 admin 打开场景页，编辑第一个区域（items 为其中的物体）；返回模拟的 WS 服务端一侧 */
+async function openEditor(page: Page, items: object[] = [], others: object[] = []) {
   await presetMotion(page, true);
   const sockets = await signedIn(page);
   await page.route("/api/auth/session", (route) => route.fulfill({ json: { username: "admin", role: "admin", expires_at: "2026-11-09T12:00:00Z" } }));
-  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }], devices: [camera("normal")] } }));
+  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }, ...others], devices: [camera("normal")] } }));
   await page.goto("/");
   await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "场景" }).click();
+  await editorReady(page);
+  return sockets;
+}
+
+/** 等编辑视图绘制首帧（换区域后画布重新挂载）；时钟暂停时逐帧推进 */
+async function editorReady(page: Page) {
   await expect(async () => {
     await page.clock.runFor(100);
     await expect(page.locator("[data-editor]")).toHaveAttribute("data-editor", "ready", { timeout: 50 });
   }).toPass({ intervals: [50] });
-  return sockets;
 }
 
 /** 指针移到区域地面点 (x, y) 上方；click 时单击放下 */
@@ -143,4 +150,70 @@ test("放置点超出区域等错误（400）：显示服务端指出的原因",
   await editor(page).getByRole("button", { name: "保存" }).click();
   await expectToast(page, message);
   await expect(editor(page).getByRole("button", { name: "保存" })).toBeEnabled(); // 修改保留
+});
+
+test("撤销与重做：按钮与 Ctrl+Z / Ctrl+Shift+Z（设计 150 E-6）", async ({ page }) => {
+  await openEditor(page);
+  const button = (name: string) => editor(page).getByRole("button", { name, exact: true });
+  const [save, undoButton, redoButton] = [button("保存"), button("撤销"), button("重做")];
+  await expect(undoButton).toBeDisabled();
+  await placeDesk(page);
+
+  await undoButton.click();
+  await expect(save).toBeDisabled(); // 回到已保存的内容
+  await expect(redoButton).toBeEnabled();
+  await page.keyboard.press("Control+Shift+Z");
+  await expect(save).toBeEnabled();
+  await page.keyboard.press("Control+Z");
+  await expect(save).toBeDisabled();
+});
+
+/** 放下一张办公桌，成为未保存的修改 */
+async function placeDesk(page: Page) {
+  await pickDesk(page);
+  await pointAt(page, [10.3, 10.4], true);
+  await settle(page);
+}
+
+async function switchTo(page: Page, name: string) {
+  await editor(page).getByRole("button", { name: /^区域：/ }).click();
+  await page.getByRole("menuitemradio", { name: new RegExp(name) }).click();
+}
+
+test("有未保存的修改时换区域先确认，可继续编辑；关闭标签页由浏览器提示", async ({ page }) => {
+  await openEditor(page, [], [LOBBY]);
+  await placeDesk(page);
+
+  await switchTo(page, "一号楼大厅");
+  await page.getByRole("alertdialog", { name: "放弃未保存的修改？" }).getByRole("button", { name: "继续编辑" }).click();
+  await expect(editor(page).getByRole("button", { name: "区域：默认区域" })).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "保存" })).toBeEnabled();
+
+  let prompted = false;
+  page.on("dialog", (dialog) => {
+    prompted = dialog.type() === "beforeunload";
+    void dialog.dismiss();
+  });
+  await page.close({ runBeforeUnload: true });
+  await expect.poll(() => prompted).toBe(true);
+});
+
+test("放弃修改后换区域；返回时同样先确认，没有修改时直接返回", async ({ page }) => {
+  await openEditor(page, [], [LOBBY]);
+  await placeDesk(page);
+  await switchTo(page, "一号楼大厅");
+  await page.getByRole("alertdialog", { name: "放弃未保存的修改？" }).getByRole("button", { name: "放弃修改" }).click();
+  await expect(editor(page).getByRole("button", { name: "区域：一号楼大厅" })).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "保存" })).toBeDisabled();
+
+  await editorReady(page);
+  await placeDesk(page);
+  const back = editor(page).getByRole("button", { name: "返回", exact: true });
+  await back.click();
+  await page.getByRole("alertdialog", { name: "放弃未保存的修改？" }).getByRole("button", { name: "放弃修改" }).click();
+  await expect(editor(page)).toHaveCount(0);
+
+  await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "场景" }).click();
+  await editor(page).getByRole("button", { name: "返回", exact: true }).click();
+  await expect(editor(page)).toHaveCount(0);
 });

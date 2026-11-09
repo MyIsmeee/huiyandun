@@ -228,6 +228,7 @@
 | webgl-constants | 1.1.1 | MIT |
 | webgl-sdf-generator | 1.1.1 | MIT |
 | which | 2.0.2 | ISC |
+| zundo | 2.3.0 | MIT |
 | zustand | 4.5.7, 5.0.16 | MIT |
 
 ## 构建期依赖（不随产品分发）
