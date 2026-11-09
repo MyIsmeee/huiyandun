@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inside, overlaps, rotated, snap } from "../../src/editor/placement";
+import { extent, inside, overlaps, rotated, snap, stroke } from "../../src/editor/placement";
 import type { Asset } from "../../src/scene/assets";
 
 const asset = (id: string, category: string, footprint: [number, number], line = false): Asset => ({
@@ -75,5 +75,21 @@ describe("rotated：旋转 90°（设计 150 E-4）", () => {
   it("inside：线状资产逐段判断是否在区域内", () => {
     expect(inside(item("wall", 36, 5.5, 4), CATALOG, [40, 24])).toBe(true);
     expect(inside(item("wall", 37, 5.5, 4), CATALOG, [40, 24])).toBe(false);
+  });
+});
+
+describe("stroke：线状资产按下拖动画线（设计 150 E-3）", () => {
+  it("沿位移较大的坐标轴铺设，长度取资产长度的整数倍；起点为按下处的网格交点，奇数宽时中线让开半格", () => {
+    expect(stroke(WALL, [5.2, 4.9], [12.3, 5.4])).toEqual({ asset: "wall", x: 5, y: 5.5, rot: 0, len: 8 });
+    expect(stroke(WALL, [20, 3], [20.4, 9.6])).toEqual({ asset: "wall", x: 20.5, y: 3, rot: 90, len: 6 });
+    expect(stroke(WALL, [10, 10], [4.4, 10.3])).toMatchObject({ x: 10, rot: 180, len: 6 });
+  });
+
+  it("没怎么拖动时为一段", () => {
+    expect(stroke(WALL, [5, 5], [5.3, 5.1])).toMatchObject({ rot: 0, len: 2 });
+  });
+
+  it("extent：合并各段的外接矩形", () => {
+    expect(extent(stroke(WALL, [5, 5], [11, 5]), CATALOG)).toEqual([5, 5, 11, 6]);
   });
 });

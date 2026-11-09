@@ -52,3 +52,26 @@ export async function settle(page: Page) {
   await page.mouse.move(0, 0);
   await page.clock.runFor(50);
 }
+
+/** 保存，返回提交的物体：以保存的请求体核对编辑结果 */
+export async function savedItems(page: Page): Promise<unknown[]> {
+  await page.route(`/api/scene/areas/${AREA.id}`, (route) => route.fulfill({ json: { ...AREA, ...route.request().postDataJSON() } }));
+  const request = page.waitForRequest((r) => r.method() === "PUT");
+  await editor(page).getByRole("button", { name: "保存" }).click();
+  return (await request).postDataJSON().items as unknown[];
+}
+
+/** 在地面上从 from 按下拖到 to 再松开（画线状资产） */
+export async function dragOnGround(page: Page, from: [number, number], to: [number, number]) {
+  const box = await canvas(page).boundingBox();
+  const at = ([x, y]: [number, number]) => page.evaluate((q) => window.__hydEditorAt?.(q.x, q.y), { x, y });
+  const [a, b] = [await at(from), await at(to)];
+  if (!box || !a || !b) throw new Error("编辑视图未就绪");
+  await page.mouse.move(box.x + a[0], box.y + a[1]);
+  await page.mouse.down();
+  await page.mouse.move(box.x + (a[0] + b[0]) / 2, box.y + (a[1] + b[1]) / 2);
+  await page.mouse.move(box.x + b[0], box.y + b[1]);
+  await page.clock.runFor(50);
+  await page.mouse.up();
+  await page.clock.runFor(50);
+}
