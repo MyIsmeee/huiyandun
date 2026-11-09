@@ -1,9 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
-import { AREA, camera, freezeClock, presetMotion, SITE, signedIn } from "./helpers";
+import { AREA, camera, expectToast, freezeClock, presetMotion, SITE, sceneSettled, signedIn } from "./helpers";
 
-// 场景页搭建（设计 150 E-2，FR-908）：从模型库选模型，吸附网格放到地面上
+// 场景页搭建（设计 150 E-2、E-7，FR-908）：从模型库选模型吸附网格放到地面上，整体保存，态势页随推送更新
 test.beforeEach(({ page }) => freezeClock(page));
 
+const SAVED_AT = "2026-11-09T06:00:00Z";
 const DESK = { asset: "desk", x: 10, y: 10.5, rot: 0, len: null };
 const editor = (page: Page) => page.getByRole("region", { name: "场景编辑" });
 const library = (page: Page) => page.getByRole("complementary", { name: "模型库" });
@@ -85,4 +86,61 @@ test("模型库按名称搜索", async ({ page }) => {
   await expect(library(page).getByRole("group", { name: "模型" }).getByRole("button")).toHaveText([/^大树/, /^小树/]);
   await library(page).getByRole("textbox", { name: "搜索模型" }).fill("不存在");
   await expect(library(page).getByText("没有匹配的模型")).toBeVisible();
+});
+
+test("放置并保存：态势页随 site 推送出现新物体（FR-908）", async ({ page }) => {
+  const sockets = await openEditor(page);
+  const save = editor(page).getByRole("button", { name: "保存" });
+  await expect(save).toBeDisabled(); // 没有修改
+
+  await pickDesk(page);
+  await pointAt(page, [10.3, 10.4], true);
+
+  const saved = { ...AREA, items: [DESK], updated_at: SAVED_AT };
+  await page.route(`/api/scene/areas/${AREA.id}`, (route) => route.fulfill({ json: saved }));
+  const request = page.waitForRequest((r) => r.method() === "PUT");
+  await save.click();
+  expect((await request).postDataJSON()).toEqual({
+    name: AREA.name,
+    width_m: AREA.width_m,
+    depth_m: AREA.depth_m,
+    items: [DESK],
+    cameras: [{ id: "cam-01", x: 16, y: 14, yaw_deg: 300 }], // 本区域摄像头原样带上，否则会被移出区域
+    updated_at: AREA.updated_at,
+  });
+  await expectToast(page, "已保存，态势页随后更新");
+  await expect(save).toBeDisabled();
+
+  // 服务端经 site 频道推送新场景，回到态势页
+  sockets[0]?.send(JSON.stringify({ channel: "site", data: { ...SITE, areas: [saved], devices: [camera("normal")] } }));
+  await editor(page).getByRole("button", { name: "返回", exact: true }).click();
+  await sceneSettled(page);
+  await expect(page.getByText("该区域还没有搭建场景")).toHaveCount(0, { timeout: 5000 });
+});
+
+test("保存时场景已被他人修改（409）：提示并可重新载入，丢弃本页修改", async ({ page }) => {
+  await openEditor(page);
+  await pickDesk(page);
+  await pointAt(page, [10.3, 10.4], true);
+  await page.route(`/api/scene/areas/${AREA.id}`, (route) => route.fulfill({ status: 409, json: { code: "conflict", message: "场景已被修改", request_id: "r" } }));
+
+  await editor(page).getByRole("button", { name: "保存" }).click();
+  await expectToast(page, "场景已被其他人修改");
+
+  const latest = { ...AREA, items: [{ asset: "tree", x: 20, y: 12, rot: 0, len: null }], updated_at: SAVED_AT };
+  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [latest], devices: [camera("normal")] } }));
+  await page.getByRole("button", { name: "重新载入" }).click();
+  await expect(editor(page).getByRole("button", { name: "保存" })).toBeDisabled(); // 已换成最新内容，没有未保存的修改
+});
+
+test("放置点超出区域等错误（400）：显示服务端指出的原因", async ({ page }) => {
+  await openEditor(page);
+  await pickDesk(page);
+  await pointAt(page, [10.3, 10.4], true);
+  const message = "第 1 个物体（办公桌）超出区域";
+  await page.route(`/api/scene/areas/${AREA.id}`, (route) => route.fulfill({ status: 400, json: { code: "invalid", message, request_id: "r" } }));
+
+  await editor(page).getByRole("button", { name: "保存" }).click();
+  await expectToast(page, message);
+  await expect(editor(page).getByRole("button", { name: "保存" })).toBeEnabled(); // 修改保留
 });

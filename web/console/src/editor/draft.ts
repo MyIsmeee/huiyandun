@@ -22,6 +22,11 @@ export function loadDraft(area: SceneArea): void {
   useDraft.setState({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, tool: null });
 }
 
+/** 保存成功：以服务端返回为准 */
+export function savedDraft(area: SceneArea): void {
+  useDraft.setState({ updatedAt: area.updated_at, saved: area.items, items: area.items });
+}
+
 export const placeItem = (item: SceneItem) => useDraft.setState((s) => ({ items: [...s.items, item] }));
 export const selectTool = (tool: string | null) => useDraft.setState({ tool });
 

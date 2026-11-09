@@ -23,6 +23,7 @@ import { applySite } from "../store/live";
 import { DeleteAreaDialog, NewAreaDialog } from "./AreaDialogs";
 import { selectTool, useDraft, useDraftSync } from "./draft";
 import { Library } from "./Library";
+import { SaveButton } from "./SaveButton";
 import type { EditorView } from "./view";
 
 // three 体积较大，与态势页一样单独分包按需加载（C-FE-04）
@@ -32,7 +33,7 @@ const EditorCanvas = lazy(() => import("./EditorCanvas"));
 const refresh = () => api.getSite().then(applySite, () => undefined);
 
 /**
- * 场景页（设计 150 §6，FR-908），只对 admin 渲染入口（C-FE-07）：选择、新建、删除区域，从模型库选模型放到地面上。
+ * 场景页（设计 150 §6，FR-908），只对 admin 渲染入口（C-FE-07）：选择、新建、删除区域，从模型库选模型放到地面上，整体保存。
  * 区域数据取自站点（GET /api/site 与 WS site 频道），保存后各浏览器 5 s 内更新
  */
 export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }) {
@@ -55,6 +56,8 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           <Plus aria-hidden />
           新区域
         </Button>
+        <span className="ml-auto" />
+        {area && <SaveButton area={area} cameras={cameras} />}
       </header>
       <div className="relative flex min-h-0 flex-1">
         {area ? (

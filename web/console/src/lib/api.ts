@@ -107,6 +107,9 @@ export const api = {
   deleteCamera: (id: string) => request<undefined>("DELETE", `/api/cameras/${encodeURIComponent(id)}`),
   /** 场景区域（FR-908，D-124），增删改仅 admin；变更后经 WS site 频道推送 */
   createSceneArea: (body: Schemas["SceneAreaCreate"]) => request<SceneArea>("POST", "/api/scene/areas", body),
+  /** 整体保存；updated_at 与库中不一致时为 409，放置点超出区域时为 400（D-125） */
+  saveSceneArea: (id: string, body: Schemas["SceneAreaUpdate"]) =>
+    request<SceneArea>("PUT", `/api/scene/areas/${encodeURIComponent(id)}`, body),
   /** 区域内仍有摄像头时为 409 */
   deleteSceneArea: (id: string) => request<undefined>("DELETE", `/api/scene/areas/${encodeURIComponent(id)}`),
   /** 经 go2rtc 取一帧（V-CAM4）；首帧须等关键帧，api-server 等 8 s，这里再加余量 */
