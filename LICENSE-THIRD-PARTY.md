@@ -252,13 +252,16 @@
 | @bramus/specificity | 2.4.3 | MIT |
 | @cacheable/memory | 2.2.0 | MIT |
 | @cacheable/utils | 2.5.0 | MIT |
+| @colors/colors | 1.5.0, 1.6.0 | MIT |
 | @csstools/color-helpers | 6.1.2 | MIT-0 |
 | @csstools/css-calc | 3.4.3 | MIT |
 | @csstools/css-color-parser | 4.2.6 | MIT |
 | @csstools/css-parser-algorithms | 4.0.2 | MIT |
 | @csstools/css-syntax-patches-for-csstree | 1.1.15 | MIT-0 |
 | @csstools/css-tokenizer | 4.0.2 | MIT |
+| @dabh/diagnostics | 2.0.9 | MIT |
 | @dimforge/rapier3d-compat | 0.12.0 | Apache-2.0 |
+| @donmccurdy/caporal | 0.0.10 | MIT |
 | @eslint-community/eslint-utils | 4.10.1 | MIT |
 | @eslint-community/regexpp | 4.12.2 | MIT |
 | @eslint/config-array | 0.23.5 | Apache-2.0 |
@@ -268,11 +271,19 @@
 | @eslint/object-schema | 3.0.5 | Apache-2.0 |
 | @eslint/plugin-kit | 0.7.3 | Apache-2.0 |
 | @exodus/bytes | 1.16.0 | MIT |
+| @gltf-transform/cli | 4.5.1 | MIT |
+| @gltf-transform/core | 4.5.1 | MIT |
+| @gltf-transform/extensions | 4.5.1 | MIT |
+| @gltf-transform/functions | 4.5.1 | MIT |
 | @humanfs/core | 0.19.2 | Apache-2.0 |
 | @humanfs/node | 0.16.8 | Apache-2.0 |
 | @humanfs/types | 0.15.0 | Apache-2.0 |
 | @humanwhocodes/module-importer | 1.0.1 | Apache-2.0 |
 | @humanwhocodes/retry | 0.4.3 | Apache-2.0 |
+| @img/colour | 1.1.0 | MIT |
+| @img/sharp-libvips-linux-x64 | 1.3.4 | LGPL-3.0-or-later |
+| @img/sharp-linux-x64 | 0.35.5 | Apache-2.0 |
+| @isaacs/cliui | 8.0.2 | ISC |
 | @jridgewell/gen-mapping | 0.3.13 | MIT |
 | @jridgewell/remapping | 2.3.5 | MIT |
 | @jridgewell/resolve-uri | 3.1.2 | MIT |
@@ -281,12 +292,14 @@
 | @keyv/bigmap | 1.3.1 | MIT |
 | @keyv/serialize | 1.1.1 | MIT |
 | @oxc-project/types | 0.155.0 | MIT |
+| @pkgjs/parseargs | 0.11.0 | MIT |
 | @playwright/test | 1.64.1 | Apache-2.0 |
 | @redocly/ajv | 8.11.2 | MIT |
 | @redocly/config | 0.22.0 | MIT |
 | @redocly/openapi-core | 1.34.22 | MIT |
 | @rolldown/binding-linux-x64-gnu | 1.2.15 | MIT |
 | @rolldown/pluginutils | 1.0.1 | MIT |
+| @so-ric/colorspace | 1.1.6 | MIT |
 | @tailwindcss/node | 4.3.3 | MIT |
 | @tailwindcss/oxide | 4.3.3 | MIT |
 | @tailwindcss/oxide-linux-x64-gnu | 4.3.3 | MIT |
@@ -295,16 +308,28 @@
 | @testing-library/react | 16.3.3 | MIT |
 | @tweenjs/tween.js | 23.1.3 | MIT |
 | @types/aria-query | 5.0.4 | MIT |
+| @types/braces | 3.0.5 | MIT |
 | @types/chai | 5.2.3 | MIT |
 | @types/deep-eql | 4.0.2 | MIT |
 | @types/esrecurse | 4.3.1 | MIT |
 | @types/estree | 1.0.9 | MIT |
+| @types/glob | 8.1.0 | MIT |
 | @types/json-schema | 7.0.15 | MIT |
+| @types/lodash | 4.17.27 | MIT |
+| @types/micromatch | 4.0.10 | MIT |
+| @types/minimatch | 5.1.2 | MIT |
+| @types/ndarray | 1.1.0 | MIT |
+| @types/node | 20.5.6, 26.6.6 | MIT |
+| @types/prompts | 2.4.9 | MIT |
 | @types/react | 19.3.0 | MIT |
 | @types/react-dom | 19.3.0 | MIT |
 | @types/stats.js | 0.17.4 | MIT |
+| @types/table | 5.0.0 | MIT |
 | @types/three | 0.186.0 | MIT |
+| @types/tmp | 0.2.6 | MIT |
+| @types/triple-beam | 1.3.5 | MIT |
 | @types/webxr | 0.5.24 | MIT |
+| @types/wrap-ansi | 8.0.2 | MIT |
 | @typescript-eslint/eslint-plugin | 8.72.0 | MIT |
 | @typescript-eslint/parser | 8.72.0 | MIT |
 | @typescript-eslint/project-service | 8.72.0 | MIT |
@@ -323,25 +348,39 @@
 | agent-base | 7.1.4 | MIT |
 | ajv | 6.15.0 | MIT |
 | ansi-colors | 4.1.3 | MIT |
-| ansi-regex | 5.0.1 | MIT |
-| ansi-styles | 5.2.0 | MIT |
+| ansi-escapes | 7.3.0 | MIT |
+| ansi-regex | 4.1.1, 5.0.1, 6.4.0 | MIT |
+| ansi-styles | 3.2.1, 4.3.0, 5.2.0, 6.2.3 | MIT |
 | argparse | 2.0.1 | Python-2.0 |
 | aria-query | 5.3.0 | Apache-2.0 |
 | assertion-error | 2.0.1 | MIT |
+| astral-regex | 1.0.0 | MIT |
+| async | 3.2.6 | MIT |
 | balanced-match | 1.0.2, 4.0.4 | MIT |
 | baseline-browser-mapping | 2.11.33 | Apache-2.0 |
 | bidi-js | 1.1.0 | MIT |
 | brace-expansion | 2.1.7, 5.0.12 | MIT |
+| braces | 3.0.3 | MIT |
 | browserslist | 4.29.4 | MIT |
 | cacheable | 2.5.0 | MIT |
 | caniuse-lite | 1.0.30001819 | CC-BY-4.0 |
 | chai | 6.3.0 | MIT |
+| chalk | 3.0.0 | MIT |
 | change-case | 5.4.4 | MIT |
-| colorette | 1.4.0 | MIT |
+| cli-cursor | 5.0.0 | MIT |
+| cli-table3 | 0.6.5 | MIT |
+| cli-truncate | 4.0.0 | MIT |
+| color | 5.0.3 | MIT |
+| color-convert | 1.9.3, 2.0.1, 3.1.3 | MIT |
+| color-name | 1.1.3, 1.1.4, 2.1.1 | MIT |
+| color-string | 2.1.4 | MIT |
+| colorette | 1.4.0, 2.0.20 | MIT |
 | convert-source-map | 2.0.0 | MIT |
 | cross-spawn | 7.0.6 | MIT |
 | css-tree | 3.2.1 | MIT |
 | csstype | 3.2.3 | MIT |
+| csv-stringify | 6.8.3 | MIT |
+| cwise-compiler | 1.1.3 | MIT |
 | data-urls | 8.0.0 | MIT |
 | debug | 4.4.3 | MIT |
 | decimal.js | 10.6.0 | MIT |
@@ -349,9 +388,14 @@
 | dequal | 2.0.3 | MIT |
 | detect-libc | 2.1.2 | Apache-2.0 |
 | dom-accessibility-api | 0.5.16 | MIT |
+| draco3dgltf | 1.5.9 | Apache-2.0 |
+| eastasianwidth | 0.2.0 | MIT |
 | electron-to-chromium | 1.5.464 | ISC |
+| emoji-regex | 7.0.3, 8.0.0, 9.2.2, 10.6.0 | MIT |
+| enabled | 2.0.0 | MIT |
 | enhanced-resolve | 5.26.0 | MIT |
 | entities | 8.1.0 | BSD-2-Clause |
+| environment | 1.1.0 | MIT |
 | es-module-lexer | 2.3.2 | MIT |
 | escalade | 3.2.0 | MIT |
 | escape-string-regexp | 4.0.0 | MIT |
@@ -365,20 +409,29 @@
 | estraverse | 5.3.0 | BSD-2-Clause |
 | estree-walker | 3.0.3 | MIT |
 | esutils | 2.0.3 | BSD-2-Clause |
+| eventemitter3 | 5.0.4 | MIT |
 | expect-type | 1.4.0 | Apache-2.0 |
 | fast-deep-equal | 3.1.3 | MIT |
 | fast-json-stable-stringify | 2.1.0 | MIT |
 | fast-levenshtein | 2.0.6 | MIT |
 | fdir | 6.5.0 | MIT |
+| fecha | 4.2.3 | MIT |
 | fflate | 0.8.3 | MIT |
 | file-entry-cache | 11.1.5 | MIT |
+| fill-range | 7.1.1 | MIT |
 | find-up | 5.0.0 | MIT |
 | flat-cache | 6.1.23 | MIT |
 | flatted | 3.4.4 | ISC |
+| fn.name | 1.1.0 | MIT |
+| foreground-child | 3.3.1 | ISC |
 | gensync | 1.0.0-beta.2 | MIT |
+| get-east-asian-width | 1.7.0 | MIT |
+| glob | 10.5.0 | ISC |
 | glob-parent | 6.0.2 | ISC |
 | globals | 17.13.0 | MIT |
+| gltf-validator | 2.0.0-dev.3.10 | Apache-2.0 |
 | graceful-fs | 4.2.11 | ISC |
+| has-flag | 4.0.0 | MIT |
 | hashery | 1.5.1 | MIT |
 | hermes-estree | 0.25.1 | MIT |
 | hermes-parser | 0.25.1 | MIT |
@@ -388,10 +441,17 @@
 | ignore | 5.3.2, 7.0.14 | MIT |
 | imurmurhash | 0.1.4 | MIT |
 | index-to-position | 1.2.0 | MIT |
+| inherits | 2.0.4 | ISC |
+| iota-array | 1.0.0 | MIT |
+| is-buffer | 1.1.6 | MIT |
 | is-extglob | 2.1.1 | MIT |
+| is-fullwidth-code-point | 2.0.0, 3.0.0, 4.0.0, 5.1.0 | MIT |
 | is-glob | 4.0.3 | MIT |
+| is-number | 7.0.0 | MIT |
 | is-potential-custom-element-name | 1.0.1 | MIT |
+| is-stream | 2.0.1 | MIT |
 | isexe | 2.0.0 | ISC |
+| jackspeak | 3.4.3 | BlueOak-1.0.0 |
 | jiti | 2.7.0 | MIT |
 | js-levenshtein | 1.1.6 | MIT |
 | js-tokens | 4.0.0 | MIT |
@@ -401,82 +461,129 @@
 | json-schema-traverse | 0.4.1, 1.0.0 | MIT |
 | json-stable-stringify-without-jsonify | 1.0.1 | MIT |
 | json5 | 2.2.3 | MIT |
+| keyframe-resample | 0.1.0 | BlueOak-1.0.0 |
 | keyv | 5.6.0 | MIT |
+| kleur | 3.0.3 | MIT |
+| ktx-parse | 1.1.0 | MIT |
+| kuler | 2.0.0 | MIT |
 | levn | 0.4.1 | MIT |
 | lightningcss | 1.32.0, 1.33.0 | MPL-2.0 |
 | lightningcss-linux-x64-gnu | 1.32.0, 1.33.0 | MPL-2.0 |
+| listr2 | 8.3.3 | MIT |
 | locate-path | 6.0.0 | MIT |
-| lru-cache | 5.1.1 | ISC |
+| lodash | 4.18.1 | MIT |
+| log-update | 6.1.0 | MIT |
+| logform | 2.7.0 | MIT |
+| lru-cache | 5.1.1, 10.4.3 | ISC |
 | lru-cache | 11.5.3 | BlueOak-1.0.0 |
 | lz-string | 1.5.0 | MIT |
 | magic-string | 0.30.21, 1.4.4 | MIT |
 | mdn-data | 2.27.1 | CC0-1.0 |
-| meshoptimizer | 1.1.1 | MIT |
-| minimatch | 5.1.9 | ISC |
+| meshoptimizer | 1.1.1, 1.2.0 | MIT |
+| micromatch | 4.0.8 | MIT |
+| mikktspace | 1.1.1 | MIT |
+| mimic-function | 5.0.1 | MIT |
+| minimatch | 5.1.9, 9.0.9 | ISC |
 | minimatch | 10.2.6 | BlueOak-1.0.0 |
+| minipass | 7.1.3 | BlueOak-1.0.0 |
 | ms | 2.1.3 | MIT |
 | nanoid | 3.3.20 | MIT |
 | natural-compare | 1.4.0 | MIT |
+| ndarray | 1.1.1 | MIT |
+| ndarray-lanczos | 0.3.0 | MIT |
+| ndarray-ops | 1.2.2 | MIT |
+| ndarray-pixels | 5.2.0 | MIT |
 | node-releases | 2.0.60 | MIT |
 | obug | 3.0.0 | MIT |
+| one-time | 1.0.0 | MIT |
+| onetime | 7.0.0 | MIT |
 | openapi-typescript | 7.13.0 | MIT |
 | optionator | 0.9.4 | MIT |
 | p-limit | 3.1.0 | MIT |
 | p-locate | 5.0.0 | MIT |
+| package-json-from-dist | 1.0.1 | BlueOak-1.0.0 |
 | parse-json | 8.3.0 | MIT |
 | parse5 | 8.0.1 | MIT |
 | path-exists | 4.0.0 | MIT |
 | path-key | 3.1.1 | MIT |
+| path-scurry | 1.11.1 | BlueOak-1.0.0 |
 | picocolors | 1.1.1 | ISC |
-| picomatch | 4.0.7 | MIT |
+| picomatch | 2.3.2, 4.0.7 | MIT |
 | playwright | 1.64.1 | Apache-2.0 |
 | playwright-core | 1.64.1 | Apache-2.0 |
 | pluralize | 8.0.0 | MIT |
 | postcss | 8.5.31 | MIT |
 | prelude-ls | 1.2.1 | MIT |
 | pretty-format | 27.5.1 | MIT |
+| prompts | 2.4.2 | MIT |
+| property-graph | 4.1.0 | MIT |
 | punycode | 2.3.1 | MIT |
 | qified | 0.10.1 | MIT |
 | react | 19.3.1 | MIT |
 | react-dom | 19.3.1 | MIT |
 | react-is | 17.0.2 | MIT |
+| readable-stream | 3.6.2 | MIT |
 | require-from-string | 2.0.2 | MIT |
+| restore-cursor | 5.1.0 | MIT |
+| rfdc | 1.4.1 | MIT |
 | rolldown | 1.2.15 | MIT |
+| safe-buffer | 5.2.1 | MIT |
+| safe-stable-stringify | 2.5.0 | MIT |
 | saxes | 6.0.0 | ISC |
 | scheduler | 0.28.0 | MIT |
 | semver | 6.3.1, 7.8.5 | ISC |
+| sharp | 0.35.5 | Apache-2.0 |
 | shebang-command | 2.0.0 | MIT |
 | shebang-regex | 3.0.0 | MIT |
+| signal-exit | 4.1.0 | ISC |
+| sisteransi | 1.0.5 | MIT |
+| slice-ansi | 2.1.0, 5.0.0, 7.1.2 | MIT |
 | source-map-js | 1.2.2 | BSD-3-Clause |
+| stack-trace | 0.0.10 | MIT |
 | std-env | 4.3.0 | MIT |
-| supports-color | 10.2.2 | MIT |
+| string-width | 3.1.0, 4.2.3, 5.1.2, 7.2.0 | MIT |
+| string_decoder | 1.3.0 | MIT |
+| strip-ansi | 5.2.0, 6.0.1, 7.2.0 | MIT |
+| supports-color | 7.2.0, 10.2.2 | MIT |
+| table | 5.4.6 | BSD-3-Clause |
 | tailwindcss | 4.3.3 | MIT |
 | tapable | 2.3.3 | MIT |
+| text-hex | 1.0.0 | MIT |
 | tinybench | 6.2.2 | MIT |
 | tinyexec | 1.3.1 | MIT |
 | tinyglobby | 0.2.17 | MIT |
 | tldts | 7.4.19 | MIT |
 | tldts-core | 7.4.19 | MIT |
+| tmp | 0.2.7 | MIT |
+| to-regex-range | 5.0.1 | MIT |
 | tough-cookie | 6.0.2 | BSD-3-Clause |
 | tr46 | 7.0.0 | MIT |
+| triple-beam | 1.4.1 | MIT |
 | ts-api-utils | 2.5.0 | MIT |
 | type-check | 0.4.0 | MIT |
 | type-fest | 4.41.0 | (MIT OR CC0-1.0) |
 | typescript | 5.9.3 | Apache-2.0 |
 | typescript-eslint | 8.72.0 | MIT |
 | undici | 8.12.3 | MIT |
+| undici-types | 8.9.0 | MIT |
+| uniq | 1.0.1 | MIT |
 | update-browserslist-db | 1.3.4 | MIT |
 | uri-js | 4.4.1 | BSD-2-Clause |
 | uri-js-replace | 1.0.2 | MIT |
+| util-deprecate | 1.0.2 | MIT |
 | vite | 8.3.5 | MIT |
 | vitest | 5.0.5 | MIT |
 | w3c-xmlserializer | 6.0.0 | MIT |
+| watlas | 1.0.1 | MIT |
 | webidl-conversions | 8.0.1 | BSD-2-Clause |
 | whatwg-mimetype | 5.0.0 | MIT |
 | whatwg-url | 17.3.0 | MIT |
 | which | 2.0.2 | ISC |
 | why-is-node-running | 3.2.1 | MIT |
+| winston | 3.10.0 | MIT |
+| winston-transport | 4.9.0 | MIT |
 | word-wrap | 1.2.5 | MIT |
+| wrap-ansi | 7.0.0, 8.1.0, 9.0.2 | MIT |
 | xml-name-validator | 5.0.0 | Apache-2.0 |
 | xmlchars | 2.2.0 | MIT |
 | yallist | 3.1.1 | ISC |
