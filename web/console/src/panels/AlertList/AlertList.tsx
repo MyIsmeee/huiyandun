@@ -1,5 +1,6 @@
-import { ChevronDown, Clock, Cpu, Shield, ShieldAlert, TriangleAlert } from "lucide-react";
+import { ChevronDown, Clock, Cpu, PanelRightClose, Shield, ShieldAlert, TriangleAlert } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Item } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -74,7 +75,7 @@ export function groupAlerts(alerts: Alert[]): AlertGroup[] {
 }
 
 /** F 告警栏：数据取自推送 */
-export function AlertList(props: { stale: boolean; lastFrameAt: number | null }) {
+export function AlertList(props: { stale: boolean; lastFrameAt: number | null; onCollapse?: () => void }) {
   const alerts = useLive((s) => s.alerts);
   const incidents = useLive((s) => s.incidents);
   const executions = useLive((s) => s.executions);
@@ -101,8 +102,10 @@ export function AlertListView(props: {
   executions: Record<string, Execution>;
   stale: boolean;
   lastFrameAt: number | null;
+  /** 态势页可把告警卡收起为胶囊（设计 150 §3）；未传入时不显示收起按钮 */
+  onCollapse?: () => void;
 }) {
-  const { alerts, incidents, executions, stale, lastFrameAt } = props;
+  const { alerts, incidents, executions, stale, lastFrameAt, onCollapse } = props;
   const selected = useSelection((s) => s.deviceId);
   const [filter, setFilter] = useState<Filter>("all");
   const groups = useMemo(() => groupAlerts(alerts), [alerts]);
@@ -144,6 +147,11 @@ export function AlertListView(props: {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        {onCollapse && (
+          <Button variant="ghost" size="icon" aria-label="收起告警" title="收起告警" onClick={onCollapse} className="-mr-2 size-8 text-muted-foreground">
+            <PanelRightClose aria-hidden />
+          </Button>
+        )}
       </header>
       {stale && (
         <p className="flex items-center gap-1 border-b border-dashed border-uncertain px-4 py-2 text-xs text-muted-foreground">

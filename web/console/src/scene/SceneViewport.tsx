@@ -15,6 +15,7 @@ import {
 import { Button } from "../components/ui/button";
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import type { Site } from "../lib/api";
+import type { Area } from "./areas";
 import { useConnection } from "../store/connection";
 import { useLive } from "../store/live";
 import { select, selectTarget, useSelection } from "../store/selection";
@@ -78,15 +79,13 @@ export class Boundary extends Component<{ onError: () => void; children: ReactNo
  * 场景视口（ui.md）：加载 / 空区域 / 加载失败 / 无 WebGL2 降级 2D。onBuild 只对 admin 传入：空区域提示旁的"去搭建"打开场景页。
  * data-scene 标示当前状态，3D 场景首帧绘制后为 ready。
  */
-export function SceneViewport({ site, onBuild }: { site: Site; onBuild?: () => void }) {
+export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Area | null; onBuild?: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useSize(ref);
   const [webgl2] = useState(supportsWebGL2);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const pose = useCamera((s) => s.pose);
-  // 当前区域（D-124）：先取第一个区域，区域切换随态势页布局（TK-156）加入
-  const scene = site.areas[0] ?? null;
   const cameras = useCameras(site.devices, scene?.id ?? null);
   // 总览按区域尺寸取景（设计 150 §9）；目标与告警不影响取景
   const [width, depth] = [scene?.width_m ?? NO_AREA.width_m, scene?.depth_m ?? NO_AREA.depth_m];
@@ -102,11 +101,11 @@ export function SceneViewport({ site, onBuild }: { site: Site; onBuild?: () => v
   const view = view3d ?? plan;
   const state = failed ? "error" : !webgl2 ? "2d" : ready ? "ready" : "loading";
   const { dragged, ...drag } = useDragPan(view);
-  // 每次进入主界面从总览开始
+  // 每次进入主界面、切换区域都从总览开始
   useEffect(() => {
     focusOn(null, false);
     moveCamera(OVERVIEW, false);
-  }, []);
+  }, [scene?.id]);
   // 断线时所有动效立即停止（V-U3、C-FE-05）：进行中的转场直接到位
   const offline = useConnection((s) => !s.open && !s.connecting);
   useEffect(() => {
