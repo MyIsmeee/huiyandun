@@ -14,6 +14,8 @@ interface Draft {
   items: SceneItem[];
   /** 放置中的资产编号（E-2），null 为未选模型 */
   tool: string | null;
+  /** 选中的物体在 items 中的下标（E-4） */
+  selected: number | null;
 }
 
 /** 撤销、重做的步数上限（设计 150 E-6） */
@@ -21,7 +23,7 @@ export const UNDO_LIMIT = 50;
 
 /** 撤销、重做只记录物体的变化（zundo，MIT），选模型、载入与保存不算一步 */
 export const useDraft = create<Draft>()(
-  temporal((): Draft => ({ areaId: null, updatedAt: "", saved: [], items: [], tool: null }), {
+  temporal((): Draft => ({ areaId: null, updatedAt: "", saved: [], items: [], tool: null, selected: null }), {
     partialize: (s): Pick<Draft, "items"> => ({ items: s.items }),
     equality: (a, b) => a.items === b.items,
     limit: UNDO_LIMIT,
@@ -38,7 +40,7 @@ function untracked(change: Partial<Draft>) {
 
 /** 载入区域：丢弃未保存的修改与撤销历史，退出放置 */
 export function loadDraft(area: SceneArea): void {
-  untracked({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, tool: null });
+  untracked({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, tool: null, selected: null });
   useDraft.temporal.getState().clear();
 }
 
@@ -47,11 +49,25 @@ export function savedDraft(area: SceneArea): void {
   untracked({ updatedAt: area.updated_at, saved: area.items, items: area.items });
 }
 
-export const undo = () => useDraft.temporal.getState().undo();
-export const redo = () => useDraft.temporal.getState().redo();
+// 撤销、重做后下标可能已不指向原物体，取消选中
+export const undo = () => {
+  useDraft.temporal.getState().undo();
+  useDraft.setState({ selected: null });
+};
+export const redo = () => {
+  useDraft.temporal.getState().redo();
+  useDraft.setState({ selected: null });
+};
 
 export const placeItem = (item: SceneItem) => useDraft.setState((s) => ({ items: [...s.items, item] }));
-export const selectTool = (tool: string | null) => useDraft.setState({ tool });
+/** 选模型进入放置时取消选中，二者不同时进行 */
+export const selectTool = (tool: string | null) => useDraft.setState({ tool, selected: null });
+export const selectItem = (selected: number | null) => useDraft.setState({ selected });
+/** 移动或旋转选中的物体：替换为新的放置点，算一步 */
+export const replaceItem = (index: number, item: SceneItem) =>
+  useDraft.setState((s) => ({ items: s.items.map((it, i) => (i === index ? item : it)) }));
+export const removeItem = (index: number) =>
+  useDraft.setState((s) => ({ items: s.items.filter((_, i) => i !== index), selected: null }));
 
 export const isDirty = (s: Draft) => JSON.stringify(s.items) !== JSON.stringify(s.saved);
 

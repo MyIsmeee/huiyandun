@@ -25,6 +25,7 @@ import { selectTool, useDraft, useDraftSync } from "./draft";
 import { HistoryButtons, useDiscardGuard } from "./History";
 import { Library } from "./Library";
 import { SaveButton } from "./SaveButton";
+import { SelectionBar } from "./SelectionBar";
 import type { EditorView } from "./view";
 
 // three 体积较大，与态势页一样单独分包按需加载（C-FE-04）
@@ -170,6 +171,11 @@ function AreaView({ area, cameras }: { area: SceneArea; cameras: Camera[] }) {
         </Suspense>
       </Boundary>
       {state === "ready" && view && <ViewTools view={view} />}
+      {state === "ready" && (
+        <Suspense fallback={null}>
+          <SelectionBar width={area.width_m} depth={area.depth_m} />
+        </Suspense>
+      )}
       {state === "ready" && placing && (
         <p className="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
           单击地面放置，可连续放置 · <Kbd>Esc</Kbd> 退出
