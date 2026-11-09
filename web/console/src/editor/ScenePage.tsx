@@ -178,7 +178,7 @@ function AreaView({ area, cameras }: { area: SceneArea; cameras: Camera[] }) {
       )}
       {state === "ready" && placing && (
         <p className="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
-          单击地面放置，可连续放置 · <Kbd>Esc</Kbd> 退出
+          单击地面放置，可连续放置；墙、围栏、道路按下拖动画线 · <Kbd>R</Kbd> 旋转 · <Kbd>Esc</Kbd> 退出
         </p>
       )}
       {state === "loading" && <Note>场景加载中…</Note>}

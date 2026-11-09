@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { canvas, DESK, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, settle } from "./editor-helpers";
+import { canvas, DESK, dragOnGround, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
 import { AREA, camera, expectToast, freezeClock, SITE, sceneSettled } from "./helpers";
 
 // 场景页搭建（设计 150 E-2、E-7，FR-908）：从模型库选模型吸附网格放到地面上，整体保存，态势页随推送更新
@@ -168,4 +168,22 @@ test("放弃修改后换区域；返回时同样先确认，没有修改时直�
   await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "场景" }).click();
   await editor(page).getByRole("button", { name: "返回", exact: true }).click();
   await expect(editor(page)).toHaveCount(0);
+});
+
+test("墙按下拖动画线，按网格分段；普通物体放置前按 R 旋转（设计 150 E-3）", async ({ page }) => {
+  await openEditor(page);
+  await library(page).getByRole("button", { name: /^墙与围栏/ }).click();
+  await library(page).getByRole("group", { name: "模型" }).getByRole("button", { name: /^墙 / }).click();
+  await page.clock.runFor(50);
+  await dragOnGround(page, [5.2, 4.9], [12.3, 5.4]);
+  await dragOnGround(page, [20, 3], [20.4, 9.6]);
+
+  await pickDesk(page);
+  await page.keyboard.press("r");
+  await pointAt(page, [10.3, 10.4], true);
+  expect(await savedItems(page)).toEqual([
+    { asset: "wall", x: 5, y: 5.5, rot: 0, len: 8 },
+    { asset: "wall", x: 20.5, y: 3, rot: 90, len: 6 },
+    { ...DESK, x: 10.5, y: 10, rot: 90 },
+  ]);
 });

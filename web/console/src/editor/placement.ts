@@ -38,6 +38,32 @@ function box({ x, y, length, width, rot }: Footprint): [number, number, number, 
   return [x - sx / 2, y - sy / 2, x + sx / 2, y + sy / 2];
 }
 
+/**
+ * 线状资产按下 from、拖到 to（设计 150 E-3）：沿位移较大的坐标轴铺设，长度为资产长度的整数倍（至少一段）；
+ * 起点为按下处最近的网格交点，资产宽为奇数格时中线让开半格，使边缘落在网格上
+ */
+export function stroke(asset: Asset, from: [number, number], to: [number, number]): SceneItem {
+  const [length, width] = asset.footprint;
+  const [ax, ay] = [Math.round(from[0]), Math.round(from[1])];
+  const [dx, dy] = [to[0] - ax, to[1] - ay];
+  const alongX = Math.abs(dx) >= Math.abs(dy);
+  const rot: Rot = alongX ? (dx >= 0 ? 0 : 180) : dy >= 0 ? 90 : 270;
+  const count = Math.max(1, Math.round(Math.abs(alongX ? dx : dy) / length));
+  const half = width % 2 === 1 ? 0.5 : 0;
+  return { asset: asset.id, x: alongX ? ax : ax + half, y: alongX ? ay + half : ay, rot, len: count * length };
+}
+
+/** 物体全部占地的外接矩形 [x0, y0, x1, y1]（线状资产合并各段） */
+export function extent(item: SceneItem, catalog: Map<string, Asset>): [number, number, number, number] {
+  const boxes = footprints([item], catalog).map(box);
+  return [
+    Math.min(...boxes.map((b) => b[0])),
+    Math.min(...boxes.map((b) => b[1])),
+    Math.max(...boxes.map((b) => b[2])),
+    Math.max(...boxes.map((b) => b[3])),
+  ];
+}
+
 /** 占地是否整块在区域内（线状资产逐段判断） */
 export function inside(item: SceneItem, catalog: Map<string, Asset>, [width, depth]: [number, number]): boolean {
   return footprints([item], catalog).every((f) => {

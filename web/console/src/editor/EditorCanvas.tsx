@@ -1,17 +1,15 @@
 import { CameraControls, CameraControlsImpl } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Box3, BufferGeometry, DoubleSide, Float32BufferAttribute, Sphere, Vector3 } from "three";
+import { useEffect, useMemo, useRef } from "react";
+import { Box3, BufferGeometry, Float32BufferAttribute, Sphere, Vector3 } from "three";
 import type { SceneArea } from "../lib/api";
-import { AssetModels } from "../scene/AreaScene";
-import { MATERIALS, type SceneItem, useCatalog } from "../scene/assets";
+import { MATERIALS, type SceneItem } from "../scene/assets";
 import { DeviceMarkers } from "../scene/DeviceMarkers";
 import type { Camera } from "../scene/devices";
 import { bounds, GROUND_M } from "../scene/layout";
 import { BACKGROUND, FirstFrame, Lights, ShadowCatcher } from "../scene/Scene3D";
-import { ACCENT } from "../scene/targets";
-import { placeItem, selectItem, useDraft } from "./draft";
-import { BLOCKED, overlaps, snap, span } from "./placement";
+import { selectItem } from "./draft";
+import { Placement } from "./Placement";
 import { EditableScene } from "./Selection";
 import type { EditorView } from "./view";
 
@@ -21,6 +19,8 @@ const AZIMUTH = Math.PI / 4;
 /** 每次放大、缩小改变视距的倍数 */
 const ZOOM_STEP = 0.7;
 const MIN_DISTANCE_M = 4;
+/** 总览取景球的半径占区域半对角线的比例：俯视 45° 时整个区域仍在画面内，四周不留大片空白 */
+const FIT = 0.95;
 const { ACTION } = CameraControlsImpl;
 
 /**
@@ -68,7 +68,7 @@ function Controls(props: { width: number; depth: number; onView: (view: EditorVi
   useEffect(() => {
     const controls = ref.current;
     if (!controls) return;
-    const sphere = new Sphere(new Vector3(width / 2, 0, depth / 2), Math.hypot(width, depth) / 2);
+    const sphere = new Sphere(new Vector3(width / 2, 0, depth / 2), (Math.hypot(width, depth) / 2) * FIT);
     const home = (animate: boolean) => {
       void controls.rotateTo(AZIMUTH, TILT, animate);
       void controls.fitToSphere(sphere, animate);
@@ -114,51 +114,6 @@ function GridLines({ width, depth }: { width: number; depth: number }) {
     <lineSegments geometry={geometry} position-y={0.002} raycast={() => undefined}>
       <lineBasicMaterial color={MATERIALS.roof} />
     </lineSegments>
-  );
-}
-
-/**
- * 放置（设计 150 E-2）：选中模型后，指针所在处显示吸附网格的半透明预览与占地；单击放下，可连续放置。
- * 与同层已有物体重叠时占地转灰，单击不放置
- */
-function Placement({ size, items }: { size: [number, number]; items: SceneItem[] }) {
-  const catalog = useCatalog();
-  const asset = catalog.get(useDraft((s) => s.tool) ?? "");
-  const [point, setPoint] = useState<[number, number] | null>(null);
-  if (!asset) return null;
-  const item = point && snap(asset, 0, point, size);
-  const blocked = item ? overlaps(item, items, catalog) : false;
-  const [sx, sy] = span(asset, 0);
-  const center: [number, number] | null = item && (asset.line ? [item.x + sx / 2, item.y] : [item.x, item.y]);
-  return (
-    <>
-      {/* 接收指针的地面：完全透明，铺满区域 */}
-      <mesh
-        rotation-x={-Math.PI / 2}
-        position={[size[0] / 2, 0, size[1] / 2]}
-        onPointerMove={(e) => setPoint([e.point.x, e.point.z])}
-        onPointerOut={() => setPoint(null)}
-        onClick={(e) => {
-          // 按单击处计算，不依赖上一次指针移动的预览：直接单击同样放在指针下
-          const placed = snap(asset, 0, [e.point.x, e.point.z], size);
-          if (e.button !== 0 || overlaps(placed, items, catalog)) return;
-          e.stopPropagation();
-          placeItem(placed);
-        }}
-      >
-        <planeGeometry args={size} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} side={DoubleSide} />
-      </mesh>
-      {item && center && (
-        <>
-          <AssetModels items={[item]} ghost />
-          <mesh rotation-x={-Math.PI / 2} position={[center[0], 0.01, center[1]]} raycast={() => undefined}>
-            <planeGeometry args={[sx, sy]} />
-            <meshBasicMaterial color={blocked ? BLOCKED : ACCENT} transparent opacity={0.3} depthWrite={false} />
-          </mesh>
-        </>
-      )}
-    </>
   );
 }
 

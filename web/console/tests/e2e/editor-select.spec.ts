@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
-import { canvas, DESK, editor, openEditor, pointAt } from "./editor-helpers";
-import { AREA, expectToast, freezeClock } from "./helpers";
+import { canvas, DESK, editor, openEditor, pointAt, savedItems } from "./editor-helpers";
+import { expectToast, freezeClock } from "./helpers";
 
 // 场景页选中、移动、旋转、删除（设计 150 E-4）
 test.beforeEach(({ page }) => freezeClock(page));
@@ -8,14 +8,6 @@ test.beforeEach(({ page }) => freezeClock(page));
 /** 办公桌桌面的高度：按在桌面上才点中办公桌，地面点的射线会从桌下穿过 */
 const DESK_TOP = 0.7;
 const toolbar = (page: Page) => editor(page).getByRole("toolbar", { name: "选中的物体" });
-
-/** 保存，返回提交的物体：以保存的请求体核对编辑结果 */
-async function savedItems(page: Page): Promise<unknown[]> {
-  await page.route(`/api/scene/areas/${AREA.id}`, (route) => route.fulfill({ json: { ...AREA, ...route.request().postDataJSON() } }));
-  const request = page.waitForRequest((r) => r.method() === "PUT");
-  await editor(page).getByRole("button", { name: "保存" }).click();
-  return (await request).postDataJSON().items as unknown[];
-}
 
 /** 按住 from 处的办公桌（桌面）拖到地面点 to 上方，再松开 */
 async function drag(page: Page, from: [number, number], to: [number, number]) {

@@ -2,11 +2,11 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useState } from "react";
 import { BufferGeometry, Float32BufferAttribute, Plane, Vector3 } from "three";
 import { AreaScene, type OnPick } from "../scene/AreaScene";
-import { footprints, type SceneItem, useCatalog } from "../scene/assets";
+import { type SceneItem, useCatalog } from "../scene/assets";
 import type { Area } from "../scene/layout";
 import { ACCENT } from "../scene/targets";
 import { replaceItem, selectItem, useDraft } from "./draft";
-import { BLOCKED, inside, overlaps } from "./placement";
+import { BLOCKED, extent, inside, overlaps } from "./placement";
 
 const GROUND = new Plane(new Vector3(0, 1, 0), 0);
 /** 指针射线与地面的交点（平面坐标）：按在楼顶上也取其下方的地面点，拖动不跳 */
@@ -76,14 +76,7 @@ export function EditableScene({ area, items }: { area: Area; items: SceneItem[] 
 function Brackets({ item, color }: { item: SceneItem; color: string }) {
   const catalog = useCatalog();
   const geometry = useMemo(() => {
-    const parts = footprints([item], catalog).map(({ x, y, length, width, rot }) => {
-      const [sx, sy] = rot % 180 === 0 ? [length, width] : [width, length];
-      return { x0: x - sx / 2, y0: y - sy / 2, x1: x + sx / 2, y1: y + sy / 2 };
-    });
-    const x0 = Math.min(...parts.map((p) => p.x0));
-    const y0 = Math.min(...parts.map((p) => p.y0));
-    const x1 = Math.max(...parts.map((p) => p.x1));
-    const y1 = Math.max(...parts.map((p) => p.y1));
+    const [x0, y0, x1, y1] = extent(item, catalog);
     const arm = Math.min(1, (x1 - x0) / 4, (y1 - y0) / 4);
     const points: number[] = [];
     const corners: [number, number, number, number][] = [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]];
