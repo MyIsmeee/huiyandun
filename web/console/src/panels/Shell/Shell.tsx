@@ -2,6 +2,7 @@ import { CircleAlert, Clock, LogOut, MapPin, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ScenePage } from "../../editor/ScenePage";
 import { api, type Site } from "../../lib/api";
 import { SceneViewport } from "../../scene/SceneViewport";
 import { connect, useConnection } from "../../store/connection";
@@ -24,7 +25,7 @@ import { useWall } from "../../store/wall";
 const deselect = () => select(null);
 
 /** 顶栏导航的页面（D-106）：管理页盖在态势之上，场景与推送不中断 */
-type Page = "overview" | "cameras" | "providers";
+type Page = "overview" | "cameras" | "scene" | "providers";
 
 /**
  * 主界面分区（ui.md §4、D-115）：位置固定、不可拖拽（V-L1）；主画布面积最大（V-L2），其上不叠加面板（V-L3）。
@@ -116,7 +117,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           className={cn("relative min-h-0 flex-1 overflow-hidden", offline && "saturate-50")}
         >
           {/* 只挂载当前视图：监控墙下不占用 3D 渲染，空间态势下不保持多路实时画面连接 */}
-          {view === "wall" ? <VideoWall devices={site.devices} /> : <SceneViewport site={site} />}
+          {view === "wall" ? <VideoWall devices={site.devices} /> : <SceneViewport site={site} onBuild={admin ? () => setPage("scene") : undefined} />}
           {offline && (
             <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
               <Clock aria-hidden className="size-4" />
@@ -141,6 +142,12 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           <CameraPage onClose={() => setPage("overview")} />
         </div>
       )}
+      {/* 场景页铺满、页面本身不滚动（V-L2） */}
+      {admin && page === "scene" && (
+        <div className="fixed inset-x-0 top-12 bottom-0 z-20 bg-background">
+          <ScenePage site={site} onClose={() => setPage("overview")} />
+        </div>
+      )}
       {admin && page === "providers" && (
         <div className="fixed inset-x-0 top-12 bottom-0 z-20 overflow-auto bg-background">
           <ProviderPage onClose={() => setPage("overview")} />
@@ -150,11 +157,11 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   );
 }
 
-/** 顶栏分段导航（D-106）："摄像头""模型供应商"只对 admin 渲染（C-FE-07） */
+/** 顶栏分段导航（D-106、设计 150 §3）："摄像头""场景""模型供应商"只对 admin 渲染（C-FE-07） */
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
   const { page, admin, onChange } = props;
   const items: { page: Page; label: string }[] = [{ page: "overview", label: "态势" }];
-  if (admin) items.push({ page: "cameras", label: "摄像头" }, { page: "providers", label: "模型供应商" });
+  if (admin) items.push({ page: "cameras", label: "摄像头" }, { page: "scene", label: "场景" }, { page: "providers", label: "模型供应商" });
   return (
     <nav aria-label="导航" className="flex h-8 items-center gap-0.5 rounded-md bg-secondary p-0.5">
       {items.map((item) => (
