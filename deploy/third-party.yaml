@@ -297,7 +297,7 @@ assets:
       - { id: bollard, source: factory-kit/warning-traffic }
   - name: Kenney 场景资产 · 门窗
     file: web/console/public/models/scene-opening.glb
-    sha256: 94ea64442333de4d484c12161b5907d4818bc3029a459055e1ab0571e4b6b398
+    sha256: 7ca4da4e13a42061fbc9dd23dfd15ca2f7026984ad030281bf6f2cba8ba1f1aa
     license: CC0-1.0
     source: Kenney 官网 building-kit 1.0（tools/dev/assets.py 归中、重新上色、合并）
     purpose: 场景搭建模型库 · 门窗（设计 150 §8）

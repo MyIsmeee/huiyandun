@@ -151,7 +151,8 @@ def recolor(rgb: tuple[int, int, int], palette: str) -> tuple[int, int, int]:
     """按原色明度在色板两端之间线性取色。"""
     dark, light = (hex_rgb(c) for c in PALETTES[palette])
     t = min(max((lightness(rgb) - DARK) / (LIGHT - DARK), 0.0), 1.0)
-    return tuple(round(lo + (hi - lo) * t) for lo, hi in zip(dark, light, strict=True))  # type: ignore[return-value]
+    r, g, b = (round(lo + (hi - lo) * t) for lo, hi in zip(dark, light, strict=True))
+    return (r, g, b)
 
 
 def footprint(size: tuple[float, float], scale: float, yaw: int) -> list[int]:
@@ -174,8 +175,9 @@ def extract(archive: zipfile.ZipFile, member: str, target: Path) -> None:
 
 
 def recolor_gltf(path: Path, name: str, palette: str) -> None:
-    """改调色板贴图与材质底色；场景改名为资产编号（合并后按场景名取用），并去掉节点与网格名：
-    three.js 加载时节点、网格、场景共用一套名字，重名的会被加后缀，场景就按编号找不到了。"""
+    """改调色板贴图与材质底色，去掉自发光（场景只用实体材质与固定光照，D-111）；场景改名为资产编号
+    （合并后按场景名取用），并去掉节点与网格名：three.js 加载时节点、网格、场景共用一套名字，
+    重名的会被加后缀，场景就按编号找不到了。"""
     doc = json.loads(path.read_text(encoding="utf-8"))
     doc["scenes"][doc.get("scene", 0)]["name"] = name
     for item in doc["nodes"] + doc["meshes"]:
@@ -191,11 +193,13 @@ def recolor_gltf(path: Path, name: str, palette: str) -> None:
         rgba.putdata(pixels)
         rgba.save(file)
     for material in doc.get("materials", []):
+        material.pop("emissiveFactor", None)
+        material.pop("emissiveTexture", None)
         pbr = material.setdefault("pbrMetallicRoughness", {})
         if "baseColorFactor" in pbr:
             *rgb, alpha = pbr["baseColorFactor"]
-            srgb = tuple(round(linear_to_srgb(c) * 255) for c in rgb)
-            color = [srgb_to_linear(c / 255) for c in recolor(srgb, palette)]
+            r, g, b = (round(linear_to_srgb(c) * 255) for c in rgb)
+            color = [srgb_to_linear(c / 255) for c in recolor((r, g, b), palette)]
             pbr["baseColorFactor"] = [*color, alpha]
     path.write_text(json.dumps(doc), encoding="utf-8")
 

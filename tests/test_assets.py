@@ -51,6 +51,9 @@ def test_catalog_matches_model_files() -> None:
         scenes = [s.get("name") for s in doc["scenes"]]
         assert sorted(scenes) == sorted(a["id"] for a in CATALOG["assets"] if a["file"] == file)
         assert not [x for x in doc["nodes"] + doc["meshes"] if "name" in x]
+        # 只用实体材质与固定光照（D-111）：自发光会绕过 §4 场景材质色
+        assert not [m for m in doc.get("materials", []) if "emissiveFactor" in m]
+        assert not [m for m in doc.get("materials", []) if "emissiveTexture" in m]
 
 
 def test_catalog_fields() -> None:
