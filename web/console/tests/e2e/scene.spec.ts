@@ -339,7 +339,7 @@ test.describe("搭建场景", () => {
 
     await page.routeWebSocket("/ws", (route) => route.close());
     await ws?.close();
-    await expect(scene(page).getByText(/^数据非实时/)).toBeVisible();
+    await expect(page.getByRole("status", { name: "断线提示" })).toHaveText(/^数据非实时/);
     await page.clock.runFor(100);
     await expect(scene(page)).toHaveClass(/saturate-50/);
     await expect(scene(page)).toHaveScreenshot("scene-disconnected.png");
@@ -356,7 +356,7 @@ test.describe("搭建场景", () => {
     // 断线：保留并降饱和（V-U3、V-G3）
     await page.routeWebSocket("/ws", (route) => route.close());
     await sockets[0]?.close();
-    await expect(scene(page).getByText(/^数据非实时/)).toBeVisible();
+    await expect(page.getByRole("status", { name: "断线提示" })).toHaveText(/^数据非实时/);
     await expect(scene(page)).toHaveClass(/saturate-50/);
     await expect(scene(page)).toHaveScreenshot("scene-2d-disconnected.png");
   });

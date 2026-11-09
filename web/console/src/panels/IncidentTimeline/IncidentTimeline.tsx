@@ -95,7 +95,7 @@ export function formatOffset(ms: number): string {
 }
 
 /** 选中设备最近一个关联事件；未选中时为全站最近一个（incidents 新的在前） */
-function pick(incidents: Incident[], deviceId: string | null): Incident | undefined {
+export function pick(incidents: Incident[], deviceId: string | null): Incident | undefined {
   return deviceId ? incidents.find((i) => i.device_ids.includes(deviceId)) : incidents[0];
 }
 
@@ -201,10 +201,9 @@ export function TimelineDots({ incident }: { incident: Incident }) {
 
 const ICON = { first: ShieldAlert, incident: TriangleAlert, ai: Bot, contained: Lock, released: Unlock } as const;
 
-function Step(props: { node: TimelineNode; origin: number; last: boolean; next: boolean }) {
-  const { node, origin, last, next } = props;
+/** 节点的图标与色调：状态色只用于"首次告警"（网络攻击）与"处置生效"（已处置）的图标，并配文字（V-S3） */
+export function nodeLook(node: TimelineNode) {
   const Icon = node.key === "contained" && node.reached ? CircleCheck : ICON[node.key];
-  // 状态色只用于"首次告警"（网络攻击）与"处置生效"（已处置），并配图标与文字（V-S3）
   const tone = !node.reached
     ? "text-subtle-foreground"
     : node.key === "first"
@@ -212,6 +211,12 @@ function Step(props: { node: TimelineNode; origin: number; last: boolean; next: 
       : node.key === "contained"
         ? "text-contained"
         : "text-foreground";
+  return { Icon, tone };
+}
+
+function Step(props: { node: TimelineNode; origin: number; last: boolean; next: boolean }) {
+  const { node, origin, last, next } = props;
+  const { Icon, tone } = nodeLook(node);
   const offset = node.at !== null && node.key !== "first" ? formatOffset(node.at - origin) : null;
   return (
     <li className="flex gap-3">

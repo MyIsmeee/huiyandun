@@ -133,8 +133,8 @@ test("断线：化身与事件卡保留，场景降饱和并提示数据非实�
   // 服务端不可达：之后的重连一律被关闭，连接保持断开
   await page.routeWebSocket("/ws", (route) => route.close());
   await ws?.close();
-  const notice = scene(page).getByText(/^数据非实时 · 最后更新 \d{2}:\d{2}:\d{2}$/);
-  await expect(notice).toBeVisible();
+  const notice = page.getByRole("status", { name: "断线提示" });
+  await expect(notice).toHaveText(/^数据非实时 · 最后更新 \d{2}:\d{2}:\d{2}$/);
   await page.clock.runFor(100); // 时钟暂停：推进一帧，使 3D 场景绘制告警态
   const before = await scene(page).screenshot();
   await page.clock.runFor(2500); // 超过 2 s 无更新：在线时会移除化身
