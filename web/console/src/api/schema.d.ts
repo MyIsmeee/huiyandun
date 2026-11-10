@@ -109,6 +109,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scene/areas/{id}/frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description 区域内摄像头最近的识别帧，供场景页"从画面生成初稿"（FR-909）：只含平面坐标，不含图像（C-LLM-04）。
+         *     只读、不改动区域；草稿由场景页转换，经管理员确认后随整体保存提交
+         */
+        get: operations["getSceneAreaFrames"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cameras": {
         parameters: {
             query?: never;
@@ -643,6 +663,12 @@ export interface components {
              */
             updated_at: string;
         };
+        SceneAreaFrames: {
+            /** @description 区域内各摄像头 10 s 内的最新一帧，坐标为区域内坐标，按摄像头编号排列 */
+            frames: components["schemas"]["hyd.vision.scene.v1.schema"][];
+            /** @description 区域内 10 s 内没有识别帧的摄像头编号（未建立地面映射、断流或画面中无可识别的环境） */
+            stale: string[];
+        };
         Device: {
             id: string;
             /** @description 显示名称（摄像头登记表的 name） */
@@ -1024,6 +1050,75 @@ export interface components {
         SecurityAlert: components["schemas"]["hyd.security.alert.v1.schema"];
         VisionIntegrity: components["schemas"]["hyd.vision.integrity.v1.schema"];
         /**
+         * EventBase
+         * @description 所有事件的公共字段（architecture.md §12、C-BE-02）
+         */
+        "event_base.schema": {
+            /** @description 语义化版本，主版本与文件名中的 v1 一致 */
+            schema_version: string;
+            /** Format: uuid */
+            event_id: string;
+            /**
+             * Format: date-time
+             * @description UTC，RFC 3339，毫秒精度
+             */
+            ts: string;
+        };
+        /** @description 平面坐标 [x, y]，单位米 */
+        Point: number[];
+        Polygon: components["schemas"]["Point"][];
+        Line: components["schemas"]["Point"][];
+        /**
+         * SceneFrame
+         * @description 摄像头实时识别的环境，已投影到平面（spec.md FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
+         */
+        "scene_frame.schema": {
+            camera_id: string;
+            /** @description 地面色块 */
+            surfaces: {
+                /** @enum {unknown} */
+                class: "road" | "sidewalk" | "floor" | "grass" | "earth";
+                polygon: components["schemas"]["Polygon"];
+            }[];
+            /** @description 立面：沿墙脚线挤出，高度按类别取默认值。board 为黑板（含投影幕、公告板），line 为其下方的墙脚线，板面离地 0.9 m、高 height_m */
+            walls: {
+                /** @enum {unknown} */
+                class: "wall" | "building" | "fence" | "railing" | "board";
+                line: components["schemas"]["Line"];
+                height_m: number;
+            }[];
+            /** @description 物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块 */
+            objects: {
+                /** @enum {unknown} */
+                class: "table" | "chair" | "cabinet" | "sofa" | "bed" | "furniture" | "street_furniture";
+                polygon: components["schemas"]["Polygon"];
+                height_m: number;
+            }[];
+            /** @description 植被：树干底部中心 */
+            trees: {
+                x: number;
+                y: number;
+                height_m: number;
+            }[];
+            /** @description 路面区域内的白色标线 */
+            markings: {
+                /** @enum {unknown} */
+                class: "crosswalk" | "lane";
+                polygon: components["schemas"]["Polygon"];
+            }[];
+            $defs: {
+                /** @description 平面坐标 [x, y]，单位米 */
+                Point: number[];
+                Polygon: components["schemas"]["Point"][];
+                Line: components["schemas"]["Point"][];
+            };
+        };
+        /**
+         * VisionSceneV1
+         * @description 摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
+         */
+        "hyd.vision.scene.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["scene_frame.schema"];
+        /**
          * Incident
          * @description 关联事件实体（architecture.md §12），事件与 API 共用
          */
@@ -1083,21 +1178,6 @@ export interface components {
              * @enum {unknown}
              */
             location: "internal" | "public";
-        };
-        /**
-         * EventBase
-         * @description 所有事件的公共字段（architecture.md §12、C-BE-02）
-         */
-        "event_base.schema": {
-            /** @description 语义化版本，主版本与文件名中的 v1 一致 */
-            schema_version: string;
-            /** Format: uuid */
-            event_id: string;
-            /**
-             * Format: date-time
-             * @description UTC，RFC 3339，毫秒精度
-             */
-            ts: string;
         };
         /**
          * SecurityAlertV1
@@ -1331,60 +1411,6 @@ export interface components {
          * @description 检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
          */
         "hyd.vision.track.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["track.schema"];
-        /** @description 平面坐标 [x, y]，单位米 */
-        Point: number[];
-        Polygon: components["schemas"]["Point"][];
-        Line: components["schemas"]["Point"][];
-        /**
-         * SceneFrame
-         * @description 摄像头实时识别的环境，已投影到平面（spec.md FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
-         */
-        "scene_frame.schema": {
-            camera_id: string;
-            /** @description 地面色块 */
-            surfaces: {
-                /** @enum {unknown} */
-                class: "road" | "sidewalk" | "floor" | "grass" | "earth";
-                polygon: components["schemas"]["Polygon"];
-            }[];
-            /** @description 立面：沿墙脚线挤出，高度按类别取默认值。board 为黑板（含投影幕、公告板），line 为其下方的墙脚线，板面离地 0.9 m、高 height_m */
-            walls: {
-                /** @enum {unknown} */
-                class: "wall" | "building" | "fence" | "railing" | "board";
-                line: components["schemas"]["Line"];
-                height_m: number;
-            }[];
-            /** @description 物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块 */
-            objects: {
-                /** @enum {unknown} */
-                class: "table" | "chair" | "cabinet" | "sofa" | "bed" | "furniture" | "street_furniture";
-                polygon: components["schemas"]["Polygon"];
-                height_m: number;
-            }[];
-            /** @description 植被：树干底部中心 */
-            trees: {
-                x: number;
-                y: number;
-                height_m: number;
-            }[];
-            /** @description 路面区域内的白色标线 */
-            markings: {
-                /** @enum {unknown} */
-                class: "crosswalk" | "lane";
-                polygon: components["schemas"]["Polygon"];
-            }[];
-            $defs: {
-                /** @description 平面坐标 [x, y]，单位米 */
-                Point: number[];
-                Polygon: components["schemas"]["Point"][];
-                Line: components["schemas"]["Point"][];
-            };
-        };
-        /**
-         * VisionSceneV1
-         * @description 摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
-         */
-        "hyd.vision.scene.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["scene_frame.schema"];
     };
     responses: {
         /** @description 缺少 X-Request-ID 或参数不合法 */
@@ -1679,6 +1705,31 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getSceneAreaFrames: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 识别帧与暂无识别结果的摄像头 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneAreaFrames"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listCameras: {

@@ -1226,3 +1226,14 @@ class ReportList(ContractModel):
 class VisionScene(RootModel[VisionSceneV1]):
     model_config = {"allow_inf_nan": False}
     root: VisionSceneV1
+
+
+class SceneAreaFrames(ContractModel):
+    frames: list[VisionScene]
+    """
+    区域内各摄像头 10 s 内的最新一帧，坐标为区域内坐标，按摄像头编号排列
+    """
+    stale: list[str]
+    """
+    区域内 10 s 内没有识别帧的摄像头编号（未建立地面映射、断流或画面中无可识别的环境）
+    """
