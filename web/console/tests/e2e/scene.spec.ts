@@ -1,5 +1,5 @@
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
-import { AREA, camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetMotion, presetView, SITE, sceneSettled, signedIn, withoutWebGL2 } from "./helpers";
+import { AREA, camera, expectNoOverflow, freezeClock, mockKpis, mockSocket, open, presetMotion, SITE, sceneSettled, signedIn, withoutWebGL2 } from "./helpers";
 
 test.beforeEach(({ page }) => freezeClock(page));
 
@@ -222,7 +222,6 @@ test.describe("搭建场景", () => {
   ) => {
     if (!webgl2) await withoutWebGL2(page);
     await presetMotion(page, reduced);
-    await presetView(page, "space");
     await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [{ ...AREA, items }], devices } }));
     await mockKpis(page);
     const sockets = await mockSocket(page);
@@ -292,7 +291,6 @@ test.describe("搭建场景", () => {
   });
 
   test("没有任何区域：提示还没有场景区域", async ({ page }) => {
-    await presetView(page, "space");
     await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [], devices: [cam01()] } }));
     await mockKpis(page);
     await mockSocket(page);

@@ -31,15 +31,6 @@ export async function presetMotion(page: Page, reducedMotion = false): Promise<v
   await page.addInitScript((value) => localStorage.setItem("hyd-theme", value), state);
 }
 
-/**
- * 主画布视图（D-115）：默认监控墙。signedIn 与 open 预置为空间态势，供 3D 场景用例沿用；
- * 监控墙用例在其后再调用一次覆盖（后加入的初始化脚本后执行）。
- */
-export async function presetView(page: Page, view: "wall" | "space", layout = "auto"): Promise<void> {
-  const state = JSON.stringify({ state: { view, layout }, version: 0 });
-  await page.addInitScript((value) => localStorage.setItem("hyd-wall", value), state);
-}
-
 /** 模拟 WS /ws：不连后端，连接即建立；按连接顺序记录服务端一侧，用例可借此推送或断开 */
 export async function mockSocket(page: Page): Promise<WebSocketRoute[]> {
   const sockets: WebSocketRoute[] = [];
@@ -62,7 +53,6 @@ export async function mockKpis(page: Page, kpis: object = NO_KPIS): Promise<void
 }
 
 export async function signedIn(page: Page): Promise<WebSocketRoute[]> {
-  await presetView(page, "space");
   await page.route("/api/site", (route) => route.fulfill({ json: SITE }));
   await mockLlmStatus(page);
   await mockKpis(page);
@@ -125,7 +115,6 @@ export const camera = (state: string, id = "cam-01") => ({
 
 /** 以给定设备打开主界面，返回模拟的 WS 服务端一侧 */
 export async function open(page: Page, devices: object[]) {
-  await presetView(page, "space");
   await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices } }));
   await mockLlmStatus(page);
   await mockKpis(page);

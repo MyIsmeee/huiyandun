@@ -7,8 +7,11 @@ type Point = readonly [number, number];
 export const WALL_HEIGHT_M = 2.8;
 /** 相机远裁剪面距离，单位米：远超任何机位的可见范围 */
 export const GROUND_M = 1000;
-/** 留出左下视角控件、底部断线提示（V-U3）与四周边距，单位像素；画布上方不再有浮层（D-115） */
-const INSET = { top: 24, right: 24, bottom: 56, left: 24 };
+/**
+ * 取景时让开浮动卡片（设计 150 §3）：上方的指标卡、右侧的告警与详情卡（宽 340～380）、左下视角控件与底部断线提示（V-U3），
+ * 另留四周边距，单位像素
+ */
+const INSET = { top: 132, right: 412, bottom: 56, left: 24 };
 
 /** 平面上的取景区域：左上角 (x0, y0) 与宽高，单位米 */
 export interface Area {

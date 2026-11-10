@@ -16,8 +16,8 @@ import {
 
 const SITE: Area = { x0: 0, y0: 0, width_m: 40, height_m: 24 };
 const SIZE = { width: 1100, height: 700 };
-// 与 layout.ts 的 INSET 一致：画布上方不再有浮层（D-115），底部留出断线提示
-const AREA = { left: 24, top: 24, right: SIZE.width - 24, bottom: SIZE.height - 56 };
+// 与 layout.ts 的 INSET 一致：让开上方指标卡、右侧告警与详情卡（设计 150 §3），底部留出断线提示
+const AREA = { left: 24, top: 132, right: SIZE.width - 412, bottom: SIZE.height - 56 };
 
 function bounds(points: (readonly [number, number])[]) {
   const xs = points.map(([x]) => x);

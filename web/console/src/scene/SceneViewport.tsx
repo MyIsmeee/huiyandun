@@ -214,8 +214,8 @@ export function SceneViewport({ site, onBuild }: { site: Site; onBuild?: () => v
         </>
       )}
       {(state === "ready" || state === "2d") && !scene?.items.length && (
-        // 不自动补全场景（设计 150 §4）：只显示摄像头与视场，并说明尚未搭建
-        <Empty className="pointer-events-none absolute inset-x-0 top-6 mx-auto w-fit flex-none p-0 md:p-0">
+        // 不自动补全场景（设计 150 §4）：只显示摄像头与视场，并说明尚未搭建；浮在指标卡下方左侧，右侧留给画面引线卡
+        <Empty className="floating-card pointer-events-none absolute top-36 left-4 w-fit flex-none gap-3 border-solid p-4 md:p-4">
           <EmptyHeader>
             <EmptyTitle className="text-base">{scene ? "该区域还没有搭建场景" : "还没有场景区域"}</EmptyTitle>
           </EmptyHeader>

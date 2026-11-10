@@ -25,10 +25,10 @@ function dayStart(): string {
 }
 
 /**
- * 关键指标（ui.md §4工具条）：每 5 s 拉取一次，上一次返回后再计时，请求不会叠加。
+ * 关键指标（ui.md §4）：监控墙工具条中的一行，或态势页左上的一排浮动卡片（cards）。每 5 s 拉取一次，上一次返回后再计时，请求不会叠加。
  * 拉取失败或断线时保留上次数值并标为陈旧，无上次数值显示 —（§8 KpiTile）。
  */
-export function KpiRow({ stale }: { stale: boolean }) {
+export function KpiRow({ stale, cards = false }: { stale: boolean; cards?: boolean }) {
   const [kpis, setKpis] = useState<Kpis | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -52,12 +52,11 @@ export function KpiRow({ stale }: { stale: boolean }) {
     kpis === null && !failed && !stale
       ? { status: "loading" }
       : { status: failed || stale ? "stale" : "ready", value: kpis?.[key].value ?? null, delta: kpis?.[key].delta ?? null };
-  // 主画布工具条中的一行（D-115），不再浮在画布上
   return (
-    <ul aria-label="关键指标" className="flex items-center divide-x">
+    <ul aria-label="关键指标" className={cards ? "flex gap-3" : "flex items-center divide-x"}>
       {KPIS.map(({ key, label, unit, since, format }) => (
         <li key={key}>
-          <KpiTile label={label} unit={unit} since={since} format={format} data={data(key)} />
+          <KpiTile label={label} unit={unit} since={since} format={format} data={data(key)} card={cards} />
         </li>
       ))}
     </ul>
