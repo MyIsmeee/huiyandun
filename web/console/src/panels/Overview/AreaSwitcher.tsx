@@ -20,9 +20,9 @@ export function AreaSwitcher(props: { areas: Area[]; current: Area; alerts: Map<
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" aria-label={`区域：${current.name}`} className="floating-card h-11 gap-2 px-4 hover:bg-secondary">
+        <Button variant="ghost" aria-label={`区域：${current.name}`} className="floating-card pointer-events-auto h-11 min-w-0 shrink gap-2 px-4 hover:bg-secondary">
           <MapPinned aria-hidden className="text-muted-foreground" />
-          <span className="max-w-32 truncate font-medium">{current.name}</span>
+          <span className="max-w-32 min-w-0 truncate font-medium">{current.name}</span>
           {/* 1366 宽下与指标卡同处一行，不写文字说明，悬停提示"其他区域" */}
           {(elsewhere.physical > 0 || elsewhere.cyber > 0) && (
             <span role="group" aria-label="其他区域" title="其他区域" className="border-l pl-2">

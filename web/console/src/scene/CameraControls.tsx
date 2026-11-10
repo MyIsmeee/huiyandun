@@ -19,9 +19,9 @@ export function useAnimate(): () => boolean {
 
 /**
  * 视角控件（V-I1、V-I5，设计 150 §3）：放大、缩小、旋转 90°、返回总览，竖排浮在场景右下、告警与详情卡左侧
- * （1366 宽下顶部一行已被指标卡与区域切换占满）。2D 降级说明为其左侧的一枚小卡。
+ * （1366 宽下顶部一行已被指标卡与区域切换占满）
  */
-export function CameraControls({ notice }: { notice?: { text: string; title: string } }) {
+export function CameraControls() {
   const goal = useCamera((s) => s.goal);
   // 跟随视角下机位由目标或摄像头决定，只有"返回总览"可用（D-058）
   const focused = useCamera((s) => s.focus !== null);
@@ -32,23 +32,21 @@ export function CameraControls({ notice }: { notice?: { text: string; title: str
     ["旋转 90°", RotateCw, rotated, focused],
   ];
   return (
-    <div className="absolute right-[372px] bottom-4 flex items-end gap-3 min-[1600px]:right-[412px]">
-      {notice && (
-        <span title={notice.title} className="floating-card px-3 py-2 text-meta whitespace-nowrap text-muted-foreground">
-          {notice.text}
-        </span>
-      )}
-      <div role="toolbar" aria-label="视角" aria-orientation="vertical" className="floating-card flex flex-col p-1 text-muted-foreground">
-        {buttons.map(([label, Icon, next, disabled]) => (
-          <ControlButton key={label} label={label} disabled={disabled} onClick={() => moveCamera(next(goal), animate())}>
-            <Icon aria-hidden className="size-4" />
-          </ControlButton>
-        ))}
-        <span aria-hidden className="mx-1 my-1 h-px bg-border" />
-        <ControlButton label="返回总览" disabled={false} onClick={() => (focused ? focusOn(null, animate()) : moveCamera(overview(goal), animate()))}>
-          <House aria-hidden className="size-4" />
+    <div
+      role="toolbar"
+      aria-label="视角"
+      aria-orientation="vertical"
+      className="floating-card absolute right-[372px] bottom-4 flex flex-col p-1 text-muted-foreground min-[1600px]:right-[412px]"
+    >
+      {buttons.map(([label, Icon, next, disabled]) => (
+        <ControlButton key={label} label={label} disabled={disabled} onClick={() => moveCamera(next(goal), animate())}>
+          <Icon aria-hidden className="size-4" />
         </ControlButton>
-      </div>
+      ))}
+      <span aria-hidden className="mx-1 my-1 h-px bg-border" />
+      <ControlButton label="返回总览" disabled={false} onClick={() => (focused ? focusOn(null, animate()) : moveCamera(overview(goal), animate()))}>
+        <House aria-hidden className="size-4" />
+      </ControlButton>
     </div>
   );
 }

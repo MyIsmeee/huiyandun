@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { AREA, camera, expectNoOverflow, freezeClock, mockKpis, mockLlmStatus, mockSocket, presetMotion, SITE, sceneSettled } from "./helpers";
+import { AREA, camera, expectApart, expectNoOverflow, freezeClock, mockKpis, mockLlmStatus, mockSocket, presetMotion, SITE, sceneSettled } from "./helpers";
 
 // 态势页区域切换与告警胶囊（设计 150 §3、D-124）
 test.beforeEach(async ({ page }) => {
@@ -21,8 +21,8 @@ const ALERT = {
   summary: "HYD-NET-0001 RTSP authentication brute force",
 }; // prettier-ignore
 
-async function openAreas(page: Page) {
-  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [HALL, ROOM], devices: [CAM01, CAM02] } }));
+async function openAreas(page: Page, areas = [HALL, ROOM], devices = [CAM01, CAM02]) {
+  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas, devices } }));
   await mockLlmStatus(page);
   await mockKpis(page);
   const sockets = await mockSocket(page);
@@ -51,12 +51,21 @@ test("首次进入显示有告警的区域；下拉中有告警的置顶并标�
   await expect(switcher(page)).toHaveAccessibleName("区域：一号楼大厅");
   await expect(switcher(page).getByRole("group", { name: "其他区域" }).getByRole("img", { name: "网络攻击 1 台" })).toBeVisible();
   await sceneSettled(page);
-  // 卡片互不重叠（设计 150 §3）
-  const boxes = await Promise.all([page.getByRole("list", { name: "关键指标" }), switcher(page), side(page)].map((l) => l.boundingBox()));
-  if (boxes.some((b) => !b)) throw new Error("卡片未显示");
-  for (const [i, a] of (boxes as NonNullable<(typeof boxes)[number]>[]).entries())
-    for (const b of (boxes as NonNullable<(typeof boxes)[number]>[]).slice(i + 1)) expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
+  await expectApart([page.getByRole("list", { name: "关键指标" }), switcher(page), side(page)]);
   await expect(page).toHaveScreenshot("area-switched.png");
+});
+
+test("1366 宽下区域名称很长、其他区域两类告警都是两位数：区域切换不碰到告警卡", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const hall = { ...HALL, name: "一号楼地下一层设备间与配电室东侧走廊" };
+  const both = Array.from({ length: 12 }, (_, i) => inArea({ ...camera("both", `cam-${10 + i}`) }, ROOM.id));
+  await openAreas(page, [hall, ROOM], [CAM01, ...both]);
+  await switcher(page).click();
+  await page.getByRole("menuitemradio").filter({ hasText: hall.name }).click();
+  const others = switcher(page).getByRole("group", { name: "其他区域" });
+  await expect(others.getByRole("img", { name: "物理告警 12 台" })).toBeVisible();
+  await expect(others.getByRole("img", { name: "网络攻击 12 台" })).toBeVisible();
+  await expectApart([page.getByRole("list", { name: "关键指标" }), switcher(page), side(page)]);
 });
 
 test("点选另一区域摄像头的告警：切到该区域并显示详情；新告警不自动切换", async ({ page }) => {

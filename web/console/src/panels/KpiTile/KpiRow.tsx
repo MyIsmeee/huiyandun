@@ -53,7 +53,7 @@ export function KpiRow({ stale, cards = false }: { stale: boolean; cards?: boole
       ? { status: "loading" }
       : { status: failed || stale ? "stale" : "ready", value: kpis?.[key].value ?? null, delta: kpis?.[key].delta ?? null };
   return (
-    <ul aria-label="关键指标" className={cards ? "flex gap-3" : "flex items-center divide-x"}>
+    <ul aria-label="关键指标" className={cards ? "flex gap-3 *:pointer-events-auto" : "flex items-center divide-x"}>
       {KPIS.map(({ key, label, unit, since, format }) => (
         <li key={key}>
           <KpiTile label={label} unit={unit} since={since} format={format} data={data(key)} card={cards} />

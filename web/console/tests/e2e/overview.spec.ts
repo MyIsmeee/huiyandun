@@ -1,5 +1,5 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
-import { camera, expectNoOverflow, freezeClock, open, presetMotion } from "./helpers";
+import { expect, type Page, test } from "@playwright/test";
+import { camera, expectApart, expectNoOverflow, freezeClock, open, presetMotion, withoutWebGL2 } from "./helpers";
 
 // TK-156 验收（设计 150 §3、§11）：态势页浮动卡片的选中、返回、Esc；1366×768 与 1920×1080 下互不遮挡、不溢出（V-P3）
 test.beforeEach(async ({ page }) => {
@@ -25,21 +25,11 @@ const CAM02 = { ...camera("cyber_alert", "cam-02"), ip: "172.30.0.12" };
 const side = (page: Page) => page.getByRole("complementary", { name: "告警与详情" });
 const progress = (page: Page) => page.getByRole("region", { name: "处置进度" });
 
-async function openIncident(page: Page) {
-  const [ws] = await open(page, [camera("normal", "cam-01"), CAM02]);
+async function openIncident(page: Page, state: "ready" | "2d" = "ready") {
+  const [ws] = await open(page, [camera("normal", "cam-01"), CAM02], state);
   ws?.send(JSON.stringify({ channel: "alerts", data: ALERT }));
   ws?.send(JSON.stringify({ channel: "incidents", data: INCIDENT }));
   return ws;
-}
-
-/** 浮动卡片两两不重叠 */
-async function expectApart(cards: Locator[]) {
-  const boxes = await Promise.all(cards.map((c) => c.boundingBox()));
-  for (const [i, a] of boxes.entries())
-    for (const b of boxes.slice(i + 1)) {
-      if (!a || !b) throw new Error("卡片未显示");
-      expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
-    }
 }
 
 for (const [width, height] of [
@@ -67,6 +57,36 @@ for (const [width, height] of [
     await expect(page).toHaveScreenshot(`overview-selected-${width}.png`);
   });
 }
+
+test("无 WebGL2 且事件进行中、连接断开：断线提示、2D 降级说明与进度条互不遮挡（1366×768，C-FE-08）", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await withoutWebGL2(page);
+  const ws = await openIncident(page, "2d");
+  await expect(progress(page)).toBeVisible();
+  ws?.close();
+  const degraded = page.getByText("2D 视图 · 不支持 WebGL2");
+  await expectApart([
+    page.getByRole("status", { name: "断线提示" }),
+    degraded,
+    page.getByRole("toolbar", { name: "视角" }),
+    progress(page),
+    side(page),
+  ]);
+  await expectNoOverflow(page);
+});
+
+test("卡片外的区域不拦截指针：区域切换下方的点落在场景上，指标卡本身不透过（V-L3）", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await openIncident(page);
+  const inScene = (x: number, y: number) =>
+    page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[aria-label="场景"]') != null, [x, y] as const);
+  const switcher = await page.getByRole("button", { name: /^区域：/ }).boundingBox();
+  const kpi = await page.getByRole("list", { name: "关键指标" }).getByRole("listitem").first().boundingBox();
+  if (!switcher || !kpi) throw new Error("卡片未显示");
+  // 区域切换比指标卡矮，其下方仍在指标卡所在的一行内
+  expect(await inScene(switcher.x + switcher.width / 2, switcher.y + switcher.height + 8)).toBe(true);
+  expect(await inScene(kpi.x + kpi.width / 2, kpi.y + kpi.height / 2)).toBe(false);
+});
 
 test("返回与 Esc：详情卡回到告警列表；事件结束后进度条消失", async ({ page }) => {
   const ws = await openIncident(page);

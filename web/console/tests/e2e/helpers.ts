@@ -1,4 +1,4 @@
-import { expect, type Page, type WebSocketRoute } from "@playwright/test";
+import { expect, type Locator, type Page, type WebSocketRoute } from "@playwright/test";
 
 /** 首次启动按 site.yaml 尺寸建的默认区域（设计 150 §5），尚未搭建 */
 export const AREA = { id: "area-01", name: "默认区域", width_m: 40, depth_m: 24, items: [], updated_at: "2026-10-27T06:00:00Z" };
@@ -113,8 +113,8 @@ export const camera = (state: string, id = "cam-01") => ({
   },
 });
 
-/** 以给定设备打开主界面，返回模拟的 WS 服务端一侧 */
-export async function open(page: Page, devices: object[]) {
+/** 以给定设备打开主界面，等到场景到达 state，返回模拟的 WS 服务端一侧 */
+export async function open(page: Page, devices: object[], state: "ready" | "2d" = "ready") {
   await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, devices } }));
   await mockLlmStatus(page);
   await mockKpis(page);
@@ -122,8 +122,18 @@ export async function open(page: Page, devices: object[]) {
   await page.goto("/");
   // 先等场景代码与车辆模型加载完：加载按真实时间进行，期间 sceneSettled 逐帧推进的模拟时钟会随加载快慢漂移
   await page.waitForLoadState("networkidle");
-  await sceneSettled(page);
+  await sceneSettled(page, state);
   return sockets;
+}
+
+/** 浮动卡片两两不重叠（设计 150 §3） */
+export async function expectApart(cards: Locator[]): Promise<void> {
+  const boxes = await Promise.all(cards.map((c) => c.boundingBox()));
+  for (const [i, a] of boxes.entries())
+    for (const b of boxes.slice(i + 1)) {
+      if (!a || !b) throw new Error("卡片未显示");
+      expect(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y).toBe(true);
+    }
 }
 
 /** 放大到设备清晰可辨；放大后区域名称移出视口，文字溢出检查须在此之前（V-P3） */

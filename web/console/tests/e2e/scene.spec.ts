@@ -43,8 +43,9 @@ test("无 WebGL2 时降级为 2D 俯视视图（C-FE-08）", async ({ page }) =>
   await page.goto("/");
   await sceneSettled(page, "2d");
 
-  await expect(scene(page).getByText("2D 视图 · 不支持 WebGL2")).toBeVisible();
-  // V-P3：最窄的 1366 宽下，含降级说明的控件组（左下）不与指标条（左上）重叠
+  // 降级说明在场景底部（与断线提示、处置进度条同列），不与视角控件重叠
+  await expect(page.getByText("2D 视图 · 不支持 WebGL2")).toBeVisible();
+  // V-P3：最窄的 1366 宽下，视角控件（右下）不与指标条（左上）重叠
   await page.setViewportSize({ width: 1366, height: 768 });
   const [kpi, toolbar] = await Promise.all([
     page.getByRole("list", { name: "关键指标" }).boundingBox(),
