@@ -19,8 +19,9 @@ const TYPE: Record<Device["type"], string> = { camera: "摄像头", nvr: "录像
  * 实时画面；处置操作（ActionBar，TK-052）固定在底部。
  * stale 为推送连接已断开：状态是断开前的最后值，弱化显示并标注（UP-3、V-U3）。
  */
-export function DetailPanel(props: { device: Device; stale: boolean; onClose: () => void }) {
-  const { device, stale, onClose } = props;
+export function DetailPanel(props: { device: Device; stale: boolean; onClose: () => void; timeline?: boolean }) {
+  // 态势页由底部处置进度条显示五个节点，详情中不再重复（产品负责人 2026-11-09 选定）
+  const { device, stale, onClose, timeline = true } = props;
   const tags = deviceLook(device.state).tags.map((t) => t.text);
   return (
     <Drawer title={device.id} onClose={onClose} footer={<ActionBar deviceId={device.id} />}>
@@ -35,9 +36,11 @@ export function DetailPanel(props: { device: Device; stale: boolean; onClose: ()
           {stale && <Stale />}
         </dd>
       </dl>
-      <Section title="处置时间线">
-        <IncidentTimeline />
-      </Section>
+      {timeline && (
+        <Section title="处置时间线">
+          <IncidentTimeline />
+        </Section>
+      )}
       <AiInvestigation deviceId={device.id} stale={stale} />
       <ReportBar deviceId={device.id} />
       <Section title="实时画面">

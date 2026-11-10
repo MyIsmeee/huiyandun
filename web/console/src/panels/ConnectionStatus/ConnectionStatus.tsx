@@ -46,10 +46,10 @@ export function ConnectionStatus() {
   );
 }
 
-/** 断线时主视图底部居中的提示（V-U3） */
-export function StaleNotice({ lastFrameAt }: { lastFrameAt: number | null }) {
+/** 断线时主视图底部居中的提示（V-U3）；className 覆盖默认的定位 */
+export function StaleNotice({ lastFrameAt, className = "absolute bottom-3 left-1/2 -translate-x-1/2" }: { lastFrameAt: number | null; className?: string }) {
   return (
-    <p className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm">
+    <p role="status" aria-label="断线提示" className={`${className} flex items-center gap-2 rounded-md border border-dashed border-uncertain bg-card/90 px-3 py-1.5 text-meta text-muted-foreground backdrop-blur-sm`}>
       <Clock aria-hidden className="size-4" />
       数据非实时 · 最后更新 {formatTime(lastFrameAt)}
     </p>

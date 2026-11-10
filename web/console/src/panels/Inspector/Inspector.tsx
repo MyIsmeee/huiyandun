@@ -9,15 +9,22 @@ const deselect = () => select(null);
  * 告警 ⇄ 详情（ui.md §4）：未选中时为告警列表，选中设备或目标时换成详情；态势页的右侧浮动卡片与监控墙页的检查栏共用。
  * 告警列表只隐藏不卸载，返回时筛选、展开与滚动位置不丢失。stale 为推送连接已断开（V-U3）
  */
-export function Inspector(props: { devices: Device[]; stale: boolean; lastFrameAt: number | null; onCollapse?: () => void }) {
-  const { devices, stale, lastFrameAt, onCollapse } = props;
+export function Inspector(props: {
+  devices: Device[];
+  stale: boolean;
+  lastFrameAt: number | null;
+  onCollapse?: () => void;
+  /** 详情中是否显示竖向处置时间线：态势页由底部进度条显示，不重复 */
+  timeline?: boolean;
+}) {
+  const { devices, stale, lastFrameAt, onCollapse, timeline } = props;
   const { selected, target } = useInspected(devices);
   return (
     <>
       <div hidden={selected !== undefined || target !== undefined} className="flex min-h-0 flex-1 flex-col">
         <AlertList stale={stale} lastFrameAt={lastFrameAt} onCollapse={onCollapse} />
       </div>
-      {selected && <DetailPanel device={selected} stale={stale} onClose={deselect} />}
+      {selected && <DetailPanel device={selected} stale={stale} onClose={deselect} timeline={timeline} />}
       {target && <TargetPanel target={target} stale={stale} onClose={deselect} />}
     </>
   );

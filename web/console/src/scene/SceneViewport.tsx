@@ -33,9 +33,6 @@ import { HoverMarker, TargetMarker } from "./TargetMarker";
 import { renderedPosition } from "./smoothing";
 import { pickTarget, visibleTargets } from "./targets";
 
-// 降级说明须简短：1366 宽下与 KPI 底板同处顶部一行（V-P3）
-const DEGRADED = { text: "2D 视图 · 不支持 WebGL2", title: "浏览器不支持 WebGL2，已降级为 2D 俯视视图（C-FE-08）" };
-
 /** 还没有任何区域时的取景范围，单位米 */
 const NO_AREA = { width_m: 20, depth_m: 20 };
 const NO_ITEMS: SceneItem[] = [];
@@ -228,7 +225,7 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
         </Empty>
       )}
       {(state === "ready" || state === "2d") && (
-        <CameraControls notice={state === "2d" ? DEGRADED : undefined} />
+        <CameraControls />
       )}
       {state === "loading" && <Note>场景加载中…</Note>}
       {state === "error" && (
