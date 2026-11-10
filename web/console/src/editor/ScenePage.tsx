@@ -60,7 +60,7 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           新区域
         </Button>
         <span className="ml-auto" />
-        {area && <DraftButton area={area} />}
+        {area && <DraftButton key={area.id} area={area} />}
         {area && <HistoryButtons />}
         {area && <SaveButton area={area} />}
       </header>

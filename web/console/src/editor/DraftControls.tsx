@@ -4,32 +4,43 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ApiError, api, type SceneArea } from "../lib/api";
 import { loadCatalog, type SceneItem, useCatalog } from "../scene/assets";
-import { acceptDraft, discardDraft, proposeDraft, useDraft } from "./draft";
+import { acceptDraft, discardDraft, proposeDraft, sameCameras, useDraft } from "./draft";
 import { overlaps } from "./placement";
 import { draftFromFrames } from "./recognition";
 
 /**
  * 从画面生成初稿（设计 150 §7，FR-909）：取区域内摄像头 10 s 内的识别帧，避开页面上已有的物体（含未保存的）转换为草稿，
- * 叠加预览、不保存。只用本页仍在区域内的摄像头；没有识别帧的摄像头提示"暂无识别结果"
+ * 叠加预览、不保存。没有识别帧的摄像头提示"暂无识别结果"。按区域挂载（key），换区域后不显示上一个区域的"生成中"
  */
 export function DraftButton({ area }: { area: SceneArea }) {
   const [busy, setBusy] = useState(false);
+  // 识别帧按已保存的摄像头位置投影到区域平面：页面上的位置与之不同时对不上，须先保存
+  const outdated = () => {
+    const s = useDraft.getState();
+    return s.areaId !== area.id || !sameCameras(s.cameras, s.savedCameras);
+  };
 
   async function generate() {
+    if (outdated()) {
+      toast.warning("摄像头位置有未保存的修改，请先保存再生成初稿");
+      return;
+    }
     setBusy(true);
     try {
       const [{ frames, stale }, { assets }] = await Promise.all([api.getSceneAreaFrames(area.id), loadCatalog()]);
+      // 请求期间换了区域或又改了摄像头：结果已不对应本页，丢弃
+      if (outdated()) return;
       const { items, cameras } = useDraft.getState();
-      const inArea = frames.filter((f) => cameras.some((c) => c.id === f.camera_id));
-      const draft = draftFromFrames(inArea, cameras, [area.width_m, area.depth_m], items, assets);
+      const draft = draftFromFrames(frames, cameras, [area.width_m, area.depth_m], items, assets);
       if (stale.length > 0) toast.warning(`${stale.join("、")} 暂无识别结果`);
       if (draft.length > 0) proposeDraft(draft);
       else if (frames.length > 0) toast.info("识别结果中没有可转换的物体，或都与已有物体重叠");
       else if (stale.length === 0) toast.info("区域内还没有摄像头");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "无法连接服务器，请重试");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (

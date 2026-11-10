@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
-import { canvas, editor, editorReady, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
+import { canvas, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
 import { AREA, expectToast, freezeClock } from "./helpers";
 
 // 从画面生成初稿（设计 150 §7，FR-909）：区域内摄像头的识别帧转换为半透明草稿，接受后随整体保存提交
@@ -64,6 +64,42 @@ test("放弃后场景回到生成前", async ({ page }) => {
   await expect(bar(page)).toHaveCount(0);
   await page.clock.runFor(50);
   expect(await canvas(page).screenshot()).toEqual(before);
+});
+
+test("摄像头位置有未保存的修改时先提示保存，不取识别帧", async ({ page }) => {
+  await openEditor(page);
+  let requested = false;
+  await page.route(FRAMES, (route) => {
+    requested = true;
+    return route.fulfill({ json: { frames: [STREET], stale: [] } });
+  });
+  await library(page).getByRole("group", { name: "摄像头" }).getByRole("button", { name: "移出区域 cam-01" }).click();
+  await editor(page).getByRole("button", { name: "从画面生成初稿" }).click();
+
+  await expectToast(page, "摄像头位置有未保存的修改，请先保存再生成初稿");
+  expect(requested).toBe(false);
+  await expect(bar(page)).toHaveCount(0);
+});
+
+test("生成途中换了区域，结果丢弃", async ({ page }) => {
+  await openEditor(page, [], [LOBBY]);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(FRAMES, async (route) => {
+    await held;
+    await route.fulfill({ json: { frames: [STREET], stale: ["cam-02"] } });
+  });
+  await editor(page).getByRole("button", { name: "从画面生成初稿" }).click();
+  await editor(page).getByRole("button", { name: /^区域：/ }).click();
+  await page.getByRole("menuitemradio", { name: /一号楼大厅/ }).click();
+  await expect(editor(page).getByRole("button", { name: "从画面生成初稿" })).toBeEnabled(); // 新区域不显示"生成中"
+
+  const answered = page.waitForResponse(FRAMES);
+  release();
+  await answered;
+  await page.clock.runFor(500);
+  await expect(page.getByText("cam-02 暂无识别结果")).toHaveCount(0);
+  await expect(bar(page)).toHaveCount(0);
 });
 
 test("没有识别帧或读取失败时说明原因，不出现草稿", async ({ page }) => {

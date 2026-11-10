@@ -94,7 +94,7 @@ export const proposeDraft = (pending: SceneItem[]) => useDraft.setState({ pendin
 export const acceptDraft = (accepted: SceneItem[]) => useDraft.setState((s) => ({ items: [...s.items, ...accepted], pending: [] }));
 export const discardDraft = () => useDraft.setState({ pending: [] });
 
-const sameCameras = (a: CameraPlacement[], b: CameraPlacement[]) =>
+export const sameCameras = (a: CameraPlacement[], b: CameraPlacement[]) =>
   JSON.stringify([...a].sort((x, y) => x.id.localeCompare(y.id))) === JSON.stringify([...b].sort((x, y) => x.id.localeCompare(y.id)));
 export const isDirty = (s: Draft) => JSON.stringify(s.items) !== JSON.stringify(s.saved) || !sameCameras(s.cameras, s.savedCameras);
 
