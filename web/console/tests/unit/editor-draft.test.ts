@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { areaPlacements, normalizedYaw } from "../../src/editor/cameras";
-import { cameraTool, isDirty, loadDraft, placeCamera, placeItem, placingCamera, redo, removeCamera, removeItem, replaceItem, savedDraft, selectItem, selectTool, UNDO_LIMIT, undo, useDraft } from "../../src/editor/draft";
+import { acceptDraft, cameraTool, discardDraft, isDirty, loadDraft, placeCamera, placeItem, placingCamera, proposeDraft, redo, removeCamera, removeItem, replaceItem, savedDraft, selectItem, selectTool, UNDO_LIMIT, undo, useDraft } from "../../src/editor/draft";
 
 const AREA = { id: "area-01", name: "默认区域", width_m: 40, depth_m: 24, items: [], updated_at: "2026-11-09T00:00:00Z" };
 const desk = (x: number) => ({ asset: "desk", x, y: 1.5, rot: 0 as const, len: null });
@@ -100,5 +100,37 @@ describe("区域内摄像头的放置点（设计 150 E-5）", () => {
     const device = (id: string, area_id: string | null) => ({ id, camera: { area_id, pose } }) as never;
     expect(areaPlacements([device("cam-01", "area-01"), device("cam-02", null)], "area-01")).toEqual([{ id: "cam-01", x: 3, y: 4, yaw_deg: 270 }]);
     expect(normalizedYaw(720)).toBe(0);
+  });
+});
+
+describe("从画面生成的初稿（设计 150 §7）", () => {
+  beforeEach(() => loadDraft(AREA, []));
+
+  it("预览不算修改、不进撤销历史、不随保存提交", () => {
+    proposeDraft([desk(1), desk(3)]);
+
+    expect(useDraft.getState().items).toEqual([]);
+    expect(isDirty(useDraft.getState())).toBe(false);
+    expect(history().pastStates).toHaveLength(0);
+  });
+
+  it("全部接受并入物体，算一步，可撤销", () => {
+    proposeDraft([desk(1), desk(3)]);
+    acceptDraft([desk(1)]);
+
+    expect(useDraft.getState()).toMatchObject({ items: [desk(1)], pending: [] });
+    expect(isDirty(useDraft.getState())).toBe(true);
+    undo();
+    expect(count()).toBe(0);
+  });
+
+  it("放弃或换区域都丢弃初稿", () => {
+    proposeDraft([desk(1)]);
+    discardDraft();
+    expect(useDraft.getState().pending).toEqual([]);
+
+    proposeDraft([desk(1)]);
+    loadDraft({ ...AREA, id: "area-02" }, []);
+    expect(useDraft.getState().pending).toEqual([]);
   });
 });

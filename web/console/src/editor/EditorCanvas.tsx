@@ -9,6 +9,7 @@ import type { Camera } from "../scene/devices";
 import { bounds, GROUND_M } from "../scene/layout";
 import { BACKGROUND, FirstFrame, Lights, ShadowCatcher } from "../scene/Scene3D";
 import { selectItem } from "./draft";
+import { DraftPreview } from "./DraftPreview";
 import { Placement } from "./Placement";
 import { EditableScene } from "./Selection";
 import type { EditorView } from "./view";
@@ -54,6 +55,7 @@ export default function EditorCanvas(props: {
       <Lights area={box} />
       <ShadowCatcher area={box} />
       <EditableScene area={box} items={items} />
+      <DraftPreview />
       <GridLines width={area.width_m} depth={area.depth_m} />
       <DeviceMarkers cameras={cameras} />
       <Placement size={[area.width_m, area.depth_m]} items={items} registry={registry} />
