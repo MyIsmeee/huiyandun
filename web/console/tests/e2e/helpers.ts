@@ -25,6 +25,12 @@ export async function expectNoOverflow(page: Page): Promise<void> {
   expect(overflowing).toEqual([]);
 }
 
+/** 打开管理页（admin）：顶栏"管理"进入，再在左侧栏选择（设计 150 §9A） */
+export async function openAdmin(page: Page, name: "摄像头" | "场景" | "模型供应商"): Promise<void> {
+  await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "管理" }).click();
+  await page.getByRole("navigation", { name: "管理" }).getByRole("button", { name }).click();
+}
+
 /** 降低动效开关（V-A4）；未调用时为 playwright.config.ts 预置的关闭 */
 export async function presetMotion(page: Page, reducedMotion = false): Promise<void> {
   const state = JSON.stringify({ state: { reducedMotion }, version: 0 });
