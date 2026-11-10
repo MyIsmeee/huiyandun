@@ -42,6 +42,7 @@ ENDPOINTS = [
     ("post", "/api/scene/areas", "admin"),
     ("put", "/api/scene/areas/{id}", "admin"),
     ("delete", "/api/scene/areas/{id}", "admin"),
+    ("get", "/api/scene/areas/{id}/frames", "admin"),  # FR-909：生成初稿用的识别帧
     ("get", "/api/devices/{id}", "viewer"),
     ("post", "/api/devices/{id}/webrtc", "viewer"),
     ("get", "/api/incidents", "viewer"),

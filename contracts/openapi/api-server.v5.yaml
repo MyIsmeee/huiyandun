@@ -146,6 +146,24 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/scene/areas/{id}/frames:
+    get:
+      operationId: getSceneAreaFrames
+      description: |
+        区域内摄像头最近的识别帧，供场景页"从画面生成初稿"（FR-909）：只含平面坐标，不含图像（C-LLM-04）。
+        只读、不改动区域；草稿由场景页转换，经管理员确认后随整体保存提交
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+      responses:
+        "200":
+          description: 识别帧与暂无识别结果的摄像头
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SceneAreaFrames" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/cameras:
     get:
       operationId: listCameras
@@ -849,6 +867,18 @@ components:
         items: { type: array, maxItems: 2000, items: { $ref: "#/components/schemas/SceneItem" } }
         cameras: { type: array, items: { $ref: "#/components/schemas/CameraPlacement" } }
         updated_at: { type: string, format: date-time, description: 读取时的 updated_at }
+    SceneAreaFrames:
+      type: object
+      required: [frames, stale]
+      properties:
+        frames:
+          type: array
+          items: { $ref: "#/components/schemas/VisionScene" }
+          description: 区域内各摄像头 10 s 内的最新一帧，坐标为区域内坐标，按摄像头编号排列
+        stale:
+          type: array
+          items: { type: string }
+          description: 区域内 10 s 内没有识别帧的摄像头编号（未建立地面映射、断流或画面中无可识别的环境）
     Device:
       type: object
       required: [id, name, type, ip, mode, state, alert_severity, camera]

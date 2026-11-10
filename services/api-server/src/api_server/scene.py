@@ -1,4 +1,4 @@
-"""场景区域（FR-908、D-124、TK-152）：增删改，以及首次启动时的默认区域。
+"""场景区域（FR-908、D-124、TK-152）：增删改，首次启动时的默认区域，以及供生成初稿的识别帧（FR-909）。
 
 区域整体保存（PUT），带 updated_at 防并发覆盖；保存时把本区域摄像头的位置与朝向写回摄像头登记表。
 在摄像头页改位置、朝向或删除摄像头同样更新所在区域的 updated_at（touch），场景页的旧编辑保存时得到 409。
@@ -8,7 +8,7 @@
 import logging
 import math
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -36,8 +36,10 @@ from py_contracts.api import (
     CameraPlacement,
     SceneArea,
     SceneAreaCreate,
+    SceneAreaFrames,
     SceneAreaList,
     SceneAreaUpdate,
+    WsFrame,
 )
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ DEFAULT_NAME = "默认区域"
 MAX_SIZE_M = 500  # 与契约、表约束一致
 # 改动区域或摄像头位置的事务先取这把锁：区域行与摄像头行的加锁顺序因此不会交叉，避免死锁
 SCENE_LOCK = 0x48594432
+FRESH = timedelta(seconds=10)  # 初稿只用 10 s 内的识别帧（设计 150 §7）
 
 metadata = MetaData()
 scene_areas = Table(
@@ -257,6 +260,25 @@ async def save_area(
         )
     await request.app.state.cameras.apply()
     return area
+
+
+@router.get("/areas/{area_id}/frames", dependencies=[Depends(require("admin"))])
+async def get_frames(area_id: str, request: Request) -> SceneAreaFrames:
+    """区域内摄像头最近的识别帧，供场景页生成初稿（FR-909）；只读，草稿由场景页转换。"""
+    async with request.app.state.engine.connect() as conn:
+        if await conn.scalar(select(scene_areas.c.id).where(scene_areas.c.id == area_id)) is None:
+            raise HTTPException(404, "区域不存在")
+        query = select(cameras.c.id).where(cameras.c.area_id == area_id).order_by(cameras.c.id)
+        ids = list((await conn.execute(query)).scalars())
+    scenes: dict[str, WsFrame] = request.app.state.scenes
+    since = datetime.now(UTC) - FRESH
+    fresh = [
+        scenes[i].data
+        for i in ids
+        if i in scenes and datetime.fromisoformat(scenes[i].data["ts"]) >= since
+    ]
+    stale = sorted(set(ids) - {f["camera_id"] for f in fresh})
+    return SceneAreaFrames.model_validate({"frames": fresh, "stale": stale})
 
 
 @router.delete("/areas/{area_id}", status_code=204)

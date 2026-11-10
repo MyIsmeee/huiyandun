@@ -1,9 +1,11 @@
-"""场景区域（FR-908、D-124、TK-152）：首次启动的默认区域、增删改、并发覆盖 409、审计与 site 频道推送。"""
+"""场景区域（FR-908、D-124、TK-152）：首次启动的默认区域、增删改、并发覆盖 409、审计、site 频道推送与初稿识别帧（FR-909）。"""
 
 import asyncio
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -17,6 +19,7 @@ from api_server.audit import audit_log
 from api_server.config import ApiConfig
 from api_server.db import transaction
 from py_contracts.api import WsFrame
+from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 
 rid = iter(range(10**6))
 MARK = WsFrame(channel="system", data={"type": "scene-test-mark"})
@@ -355,3 +358,56 @@ def test_unknown_area_and_roles(client: TestClient, password: str) -> None:
     body = {"name": "x", "width_m": 1, "depth_m": 1}
     assert client.post("/api/scene/areas", json=body, headers=headers()).status_code == 403
     assert client.delete("/api/scene/areas/area-01", headers=headers()).status_code == 403
+
+
+def recognized(camera_id: str, age_s: float) -> WsFrame:
+    """relay 保存的某摄像头最新一帧识别结果，age_s 秒前产生。"""
+    event = VisionSceneV1.model_validate(
+        {
+            "schema_version": "1.1.0",
+            "event_id": uuid.uuid4(),
+            "ts": datetime.now(UTC) - timedelta(seconds=age_s),
+            "camera_id": camera_id,
+            "surfaces": [{"class": "road", "polygon": [[0, 0], [8, 0], [8, 8]]}],
+            "walls": [],
+            "objects": [],
+            "trees": [],
+            "markings": [],
+        }
+    )
+    return WsFrame(channel="scene", data=event.model_dump(mode="json"))
+
+
+def test_frames_of_area_cameras_within_10_s(client: TestClient) -> None:
+    """初稿（FR-909）只用区域内摄像头 10 s 内的识别帧；没有的列为暂无识别结果。"""
+    [area] = areas(client)
+    scenes = client.app.state.scenes
+    scenes["cam-01"] = recognized("cam-01", 1)
+    scenes["cam-02"] = recognized("cam-02", 11)
+
+    r = client.get(f"/api/scene/areas/{area['id']}/frames")
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [f["camera_id"] for f in body["frames"]] == ["cam-01"]
+    assert body["frames"][0] == scenes["cam-01"].data
+    assert body["stale"] == ["cam-02"]
+
+
+def test_frames_skip_cameras_outside_area(client: TestClient) -> None:
+    [area] = areas(client)
+    keep = {"id": "cam-01", "x": 2, "y": 2, "yaw_deg": 45}
+    assert save(client, area, cameras=[keep]).status_code == 200
+    client.app.state.scenes["cam-02"] = recognized("cam-02", 1)
+
+    body = client.get(f"/api/scene/areas/{area['id']}/frames").json()
+
+    assert body == {"frames": [], "stale": ["cam-01"]}
+
+
+def test_frames_need_admin_and_known_area(client: TestClient, password: str) -> None:
+    assert client.get("/api/scene/areas/area-99/frames").status_code == 404
+
+    body = {"username": "viewer", "password": password}
+    client.post("/api/auth/login", json=body, headers=headers())
+    assert client.get("/api/scene/areas/area-01/frames").status_code == 403
