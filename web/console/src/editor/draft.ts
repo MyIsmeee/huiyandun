@@ -20,6 +20,8 @@ interface Draft {
   tool: string | null;
   /** 选中的物体在 items 中的下标（E-4） */
   selected: number | null;
+  /** 从画面生成、尚未接受的初稿（设计 150 §7）：只在本页叠加预览，不随保存提交，不记入撤销历史 */
+  pending: SceneItem[];
 }
 
 /** 撤销、重做的步数上限（设计 150 E-6） */
@@ -31,7 +33,7 @@ export const cameraTool = (tool: string | null) => (tool?.startsWith(CAMERA_TOOL
 
 /** 撤销、重做只记录物体与摄像头位置的变化（zundo，MIT），选模型、载入与保存不算一步 */
 export const useDraft = create<Draft>()(
-  temporal((): Draft => ({ areaId: null, updatedAt: "", saved: [], items: [], savedCameras: [], cameras: [], tool: null, selected: null }), {
+  temporal((): Draft => ({ areaId: null, updatedAt: "", saved: [], items: [], savedCameras: [], cameras: [], tool: null, selected: null, pending: [] }), {
     partialize: (s): Pick<Draft, "items" | "cameras"> => ({ items: s.items, cameras: s.cameras }),
     equality: (a, b) => a.items === b.items && a.cameras === b.cameras,
     limit: UNDO_LIMIT,
@@ -48,7 +50,7 @@ function untracked(change: Partial<Draft>) {
 
 /** 载入区域与其中摄像头的位置：丢弃未保存的修改与撤销历史，退出放置 */
 export function loadDraft(area: SceneArea, cameras: CameraPlacement[]): void {
-  untracked({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, savedCameras: cameras, cameras, tool: null, selected: null });
+  untracked({ areaId: area.id, updatedAt: area.updated_at, saved: area.items, items: area.items, savedCameras: cameras, cameras, tool: null, selected: null, pending: [] });
   useDraft.temporal.getState().clear();
 }
 
@@ -85,6 +87,12 @@ export const placeCamera = (placement: CameraPlacement) =>
 /** 移出区域：保存后该摄像头不属于任何区域，3D 中不出现 */
 export const removeCamera = (id: string) => useDraft.setState((s) => ({ cameras: s.cameras.filter((c) => c.id !== id) }));
 export const placingCamera = (id: string) => selectTool(`${CAMERA_TOOL}${id}`);
+
+/** 叠加显示生成的初稿：退出放置、取消选中，替换上一次未接受的初稿 */
+export const proposeDraft = (pending: SceneItem[]) => useDraft.setState({ pending, tool: null, selected: null });
+/** 接受初稿：accepted（已去掉与现有物体重叠的）并入物体，算一步；之后与手动放置的物体一样可删改，保存时提交 */
+export const acceptDraft = (accepted: SceneItem[]) => useDraft.setState((s) => ({ items: [...s.items, ...accepted], pending: [] }));
+export const discardDraft = () => useDraft.setState({ pending: [] });
 
 const sameCameras = (a: CameraPlacement[], b: CameraPlacement[]) =>
   JSON.stringify([...a].sort((x, y) => x.id.localeCompare(y.id))) === JSON.stringify([...b].sort((x, y) => x.id.localeCompare(y.id)));

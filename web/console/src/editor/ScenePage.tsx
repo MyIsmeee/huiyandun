@@ -23,6 +23,7 @@ import { applySite } from "../store/live";
 import { DeleteAreaDialog, NewAreaDialog } from "./AreaDialogs";
 import { areaPlacements, placedCameras, registryCameras } from "./cameras";
 import { cameraTool, selectTool, useDraft, useDraftSync } from "./draft";
+import { DraftBar, DraftButton } from "./DraftControls";
 import { DiscardDialog, guardLeave, HistoryButtons } from "./History";
 import { Library } from "./Library";
 import { SaveButton } from "./SaveButton";
@@ -59,6 +60,7 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           新区域
         </Button>
         <span className="ml-auto" />
+        {area && <DraftButton area={area} />}
         {area && <HistoryButtons />}
         {area && <SaveButton area={area} />}
       </header>
@@ -178,6 +180,7 @@ function AreaView({ area, devices }: { area: SceneArea; devices: Device[] }) {
       {state === "ready" && (
         <Suspense fallback={null}>
           <SelectionBar width={area.width_m} depth={area.depth_m} />
+          <DraftBar />
         </Suspense>
       )}
       {state === "ready" && placing && (

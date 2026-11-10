@@ -112,6 +112,9 @@ export const api = {
     request<SceneArea>("PUT", `/api/scene/areas/${encodeURIComponent(id)}`, body),
   /** 区域内仍有摄像头时为 409 */
   deleteSceneArea: (id: string) => request<undefined>("DELETE", `/api/scene/areas/${encodeURIComponent(id)}`),
+  /** 区域内摄像头 10 s 内的识别帧，供生成初稿（FR-909） */
+  getSceneAreaFrames: (id: string) =>
+    request<Schemas["SceneAreaFrames"]>("GET", `/api/scene/areas/${encodeURIComponent(id)}/frames`),
   /** 经 go2rtc 取一帧（V-CAM4）；首帧须等关键帧，api-server 等 8 s，这里再加余量 */
   getCameraSnapshot: async (id: string) =>
     (await send("GET", `/api/cameras/${encodeURIComponent(id)}/snapshot`, undefined, undefined, 12_000)).blob(),

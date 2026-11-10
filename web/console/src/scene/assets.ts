@@ -45,7 +45,8 @@ export interface Category {
 }
 let catalog: Promise<{ assets: Map<string, Asset>; categories: Category[] }> | null = null;
 
-function loadCatalog() {
+/** 资产目录，只加载一次；组件中用 useCatalog，事件处理中直接 await */
+export function loadCatalog() {
   catalog ??= fetch(CATALOG_URL).then(async (res) => {
     if (!res.ok) throw new Error(`资产目录加载失败：${res.status}`);
     const { assets, categories } = (await res.json()) as { assets: Asset[]; categories: Category[] };
