@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
-import { canvas, editor, editorReady, openEditor, savedItems } from "./editor-helpers";
+import { canvas, editor, editorReady, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
 import { AREA, expectToast, freezeClock } from "./helpers";
 
 // 从画面生成初稿（设计 150 §7，FR-909）：区域内摄像头的识别帧转换为半透明草稿，接受后随整体保存提交
@@ -37,6 +37,21 @@ test("生成后叠加半透明草稿、不算修改；全部接受后随保存�
   const items = (await savedItems(page)) as { asset: string }[];
   expect(items).toHaveLength(count);
   expect(items.map((i) => i.asset)).toEqual(expect.arrayContaining(["road", "plaza"]));
+});
+
+test("生成后又放下的物体与草稿重叠时，重叠的不接受", async ({ page }) => {
+  await openEditor(page);
+  await generate(page, { frames: [STREET], stale: [] });
+  await expect(bar(page)).toBeVisible();
+  await pickDesk(page);
+  await pointAt(page, [4, 17], true); // 落在草稿中建筑块（小办公楼，中心 (4, 17)）的占地上
+  await settle(page);
+
+  await bar(page).getByRole("button", { name: "全部接受" }).click();
+  await expectToast(page, "1 件与已有物体重叠，未接受");
+  const items = (await savedItems(page)) as { asset: string }[];
+  expect(items.filter((i) => i.asset === "office-small")).toEqual([]);
+  expect(items.filter((i) => i.asset === "desk")).toHaveLength(1);
 });
 
 test("放弃后场景回到生成前", async ({ page }) => {
