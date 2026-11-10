@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { AREA, camera, expectApart, expectNoOverflow, freezeClock, mockKpis, mockLlmStatus, mockSocket, presetMotion, SITE, sceneSettled } from "./helpers";
+import { AREA, camera, expectApart, expectNoOverflow, freezeClock, mockKpis, mockLlmStatus, mockSocket, presetMotion, SITE, sceneSettled, UNAUTHORIZED } from "./helpers";
 
 // 态势页区域切换与告警胶囊（设计 150 §3、D-124）
 test.beforeEach(async ({ page }) => {
@@ -66,6 +66,25 @@ test("1366 宽下区域名称很长、其他区域两类告警都是两位数：
   await expect(others.getByRole("img", { name: "物理告警 12 台" })).toBeVisible();
   await expect(others.getByRole("img", { name: "网络攻击 12 台" })).toBeVisible();
   await expectApart([page.getByRole("list", { name: "关键指标" }), switcher(page), side(page)]);
+});
+
+test("退出后换账户登录：从列表第一个区域开始，不沿用上一账户选的区域", async ({ page }) => {
+  await openAreas(page);
+  await switcher(page).click();
+  await page.getByRole("menuitemradio", { name: /一号楼大厅/ }).click();
+  await expect(switcher(page)).toHaveAccessibleName("区域：一号楼大厅");
+
+  await page.route("/api/site", (route) => route.fulfill({ status: 401, json: UNAUTHORIZED }));
+  await page.route("/api/auth/logout", (route) => route.fulfill({ status: 204 }));
+  await page.getByRole("button", { name: "退出登录" }).click();
+  await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+
+  await page.route("/api/site", (route) => route.fulfill({ json: { ...SITE, areas: [HALL, ROOM], devices: [CAM01, CAM02] } }));
+  await page.route("/api/auth/login", (route) => route.fulfill({ json: { role: "viewer", expires_at: "2026-10-27T08:00:00Z" } }));
+  await page.getByLabel("用户名").fill("viewer");
+  await page.getByLabel("密码", { exact: true }).fill("secret");
+  await page.getByRole("button", { name: "登录" }).click();
+  await expect(switcher(page)).toHaveAccessibleName("区域：二号楼机房");
 });
 
 test("点选另一区域摄像头的告警：切到该区域并显示详情；新告警不自动切换", async ({ page }) => {

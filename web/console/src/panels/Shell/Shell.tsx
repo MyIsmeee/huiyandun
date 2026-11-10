@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { guardLeave } from "../../editor/History";
 import { ScenePage } from "../../editor/ScenePage";
 import { api, type Site } from "../../lib/api";
+import { useArea } from "../../scene/areas";
 import { connect, useConnection } from "../../store/connection";
 import { applySite, useLive } from "../../store/live";
 import { type AdminPage, go, type Page, useNav } from "../../store/nav";
@@ -21,7 +22,8 @@ import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 import { WallPage } from "../VideoWall/WallPage";
 
 const deselect = () => select(null);
-const home = () => go("overview");
+// 关闭管理页回到它盖住的态势或监控墙
+const home = () => go(useNav.getState().main);
 
 /**
  * 主界面（设计 150 §3）：顶栏导航 + 当前页面。态势为默认页（3D 铺满 + 浮动卡片），监控墙为独立视图，二者只挂载当前一个：
@@ -35,8 +37,14 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   const site = useLive((s) => s.site) ?? props.site;
   const [logout, setLogout] = useState<"idle" | "pending" | "failed">("idle");
   const { page, main } = useNav();
-  // 换账户重新登录时从态势页开始
-  useEffect(() => () => useNav.setState(useNav.getInitialState()), []);
+  // 换账户重新登录时从态势页、列表第一个区域开始
+  useEffect(
+    () => () => {
+      useNav.setState(useNav.getInitialState());
+      useArea.setState(useArea.getInitialState());
+    },
+    [],
+  );
   const admin = canManageProviders(useSession((s) => s.role));
   const { open, connecting, lastFrameAt } = useConnection();
   const offline = !open && !connecting;

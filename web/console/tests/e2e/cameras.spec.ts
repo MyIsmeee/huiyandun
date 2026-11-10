@@ -54,3 +54,13 @@ test("管理页侧栏：切换页面、标示当前项、收起为图标栏", as
   await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "态势" }).click();
   await expect(sidebar).toHaveCount(0);
 });
+
+test("管理页盖在监控墙之上时，返回回到监控墙", async ({ page }) => {
+  await openCameras(page, [CAMERA]);
+  const nav = page.getByRole("navigation", { name: "导航" });
+  await nav.getByRole("button", { name: "监控墙" }).click();
+  await nav.getByRole("button", { name: "管理" }).click();
+  await page.getByRole("region", { name: "摄像头" }).getByRole("button", { name: "返回" }).click();
+  await expect(nav.getByRole("button", { name: "监控墙" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("navigation", { name: "管理" })).toHaveCount(0);
+});
