@@ -197,7 +197,7 @@ test("姿态人形：站立、抬手、跌倒与画面姿态一致（FR-109）",
   for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
   await page.clock.runFor(500);
   // 人形朝向摄像头：转到摄像头一侧观看，三种姿态都能看清
-  await page.getByRole("button", { name: "轴测（西南）" }).click();
+  await page.getByRole("button", { name: "旋转 90°" }).click();
   await page.clock.runFor(600);
 
   await expect(scene(page)).toHaveScreenshot("person-poses.png");
@@ -214,7 +214,7 @@ test("人形补全：桌后只见上半身时腿半透明补全，完全不可�
   ];
   for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
   await page.clock.runFor(500);
-  await page.getByRole("button", { name: "轴测（西南）" }).click();
+  await page.getByRole("button", { name: "旋转 90°" }).click();
   await page.clock.runFor(600);
 
   await expect(scene(page)).toHaveScreenshot("person-completion.png");
@@ -295,7 +295,7 @@ test("双击人员：跟随视角，只能返回总览；Esc 先回总览，再�
   await scene(page).dblclick({ position: await targetAt(page, "cam-01/7") });
   await page.clock.runFor(100);
   await expect(panel.getByRole("heading", { level: 2 })).toHaveText("人员 #7");
-  for (const name of ["缩小", "放大", "轴测（东南）", "轴测（西南）", "俯视"]) await expect(toolbar.getByRole("button", { name })).toBeDisabled();
+  for (const name of ["放大", "缩小", "旋转 90°"]) await expect(toolbar.getByRole("button", { name })).toBeDisabled();
   await expect(toolbar.getByRole("button", { name: "返回总览" })).toBeEnabled();
   await expect(scene(page)).toHaveScreenshot("follow-person.png");
 

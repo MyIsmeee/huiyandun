@@ -95,13 +95,10 @@ test.describe("相机控件", () => {
     sockets = await open(page, [camera("uncalibrated"), far]);
   });
 
-  test("命名视角：轴测（西南）、俯视，返回总览回到默认机位（V-I5）", async ({ page }) => {
-    for (const [name, file] of [["轴测（西南）", "axo-left"], ["俯视", "top"]] as const) {
-      await button(page, name).click();
-      await transition(page);
-      await expect(button(page, name)).toHaveAttribute("aria-pressed", "true");
-      await expect(scene(page)).toHaveScreenshot(`scene-preset-${file}.png`);
-    }
+  test("旋转 90°，返回总览回到默认机位（V-I5）", async ({ page }) => {
+    await button(page, "旋转 90°").click();
+    await transition(page);
+    await expect(scene(page)).toHaveScreenshot("scene-rotated.png");
     await button(page, "放大").click();
     await button(page, "返回总览").click();
     await transition(page);
@@ -139,20 +136,20 @@ test.describe("相机控件", () => {
 
   test("转场以动画进行；开启降低动效后瞬时切换", async ({ page }) => {
     const start = await labelAt(page);
-    await button(page, "轴测（西南）").click();
+    await button(page, "旋转 90°").click();
     expect(await labelAt(page)).toEqual(start); // 时钟暂停，转场尚未推进
     await transition(page);
     const rotated = await labelAt(page);
     expect(rotated).not.toEqual(start);
 
     await page.getByRole("button", { name: "降低动效" }).click();
-    await button(page, "轴测（东南）").click();
+    await button(page, "返回总览").click();
 
     await expect.poll(() => labelAt(page)).toEqual(start);
   });
 
   test("转场中断线：立即到位，不再继续（V-U3）", async ({ page }) => {
-    await button(page, "轴测（西南）").click();
+    await button(page, "旋转 90°").click();
     await page.clock.runFor(100);
     const midway = await labelAt(page);
 
@@ -186,7 +183,7 @@ test.describe("相机控件", () => {
     await sockets[0]?.close({ code: 1011 }); // 时钟暂停，重连不会发生
     await expect(page.getByRole("status", { name: "连接状态" })).toHaveText("断线 · 重连中");
 
-    await button(page, "轴测（西南）").click();
+    await button(page, "旋转 90°").click();
 
     await expect.poll(() => labelAt(page)).not.toEqual(start);
     const moved = await labelAt(page);
