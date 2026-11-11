@@ -175,7 +175,7 @@ class CameraPipeline:
         # 没有标定映射时，取到首帧后按安装参数估算（D-102）；估算不成立（如朝向地平线以上）只算一次
         self._pose = pose if mapping is None else None
         self._detector = detector
-        self._vehicles = vehicles  # None 时只检测人员（如关键点录制工具）
+        self._vehicles = vehicles  # None 时没有车辆，人员只有 RTMO 的正向检出
         self._behaviors = BehaviorDetector(climb_lines or [])
         self._freeze = FreezeDetector()
         self._embedder = embedder  # None 时不判定重放、挪位与遮挡
@@ -202,12 +202,16 @@ class CameraPipeline:
             return sv.Detections.empty(), sv.Detections.empty()
         x1, y1, x2, y2 = region
         crop = frame[y1:y2, x1:x2]
-        people = self._confirmed(self._tracker, self._detector(crop, offset=(x1, y1)), timestamp)
-        vehicles = (
-            self._confirmed(self._vehicle_tracker, self._vehicles(crop, offset=(x1, y1)), timestamp)
+        # RF-DETR 一次推理同时给出车辆与人员框；人员框交给 RTMO 合并并配上骨骼（#287）
+        found, persons = (
+            self._vehicles(crop, offset=(x1, y1))
             if self._vehicles is not None
-            else sv.Detections.empty()
+            else (sv.Detections.empty(), None)
         )
+        people = self._confirmed(
+            self._tracker, self._detector(crop, offset=(x1, y1), persons=persons), timestamp
+        )
+        vehicles = self._confirmed(self._vehicle_tracker, found, timestamp)
         self._boxes = np.concatenate([people.xyxy, vehicles.xyxy])
         return people, vehicles
 

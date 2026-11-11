@@ -53,10 +53,17 @@ class FakeDetector:
         self.person = person
         self.lying = lying
         self.calls = 0
+        self.persons: sv.Detections | None = None  # 最近一次收到的 RF-DETR 人员框
 
-    def __call__(self, image: np.ndarray, offset: tuple[int, int] = (0, 0)) -> sv.Detections:
+    def __call__(
+        self,
+        image: np.ndarray,
+        offset: tuple[int, int] = (0, 0),
+        persons: sv.Detections | None = None,
+    ) -> sv.Detections:
         x = 300 + 2 * self.calls
         self.calls += 1
+        self.persons = persons
         if not self.person:
             return sv.Detections.empty()
         keypoints = np.full((1, 17, 2), [x + 50.0, 400])
@@ -109,15 +116,35 @@ class FakeVehicles:
     def __init__(self) -> None:
         self.calls = 0
         self.class_id = 2  # COCO car
+        self.persons = sv.Detections.empty()
 
-    def __call__(self, image: np.ndarray, offset: tuple[int, int] = (0, 0)) -> sv.Detections:
+    def __call__(
+        self, image: np.ndarray, offset: tuple[int, int] = (0, 0)
+    ) -> tuple[sv.Detections, sv.Detections]:
         x = 200 + 20 * self.calls
         self.calls += 1
-        return sv.Detections(
+        car = sv.Detections(
             xyxy=np.array([[x, 300.0, x + 200, 500]]),
             confidence=np.array([0.9]),
             class_id=np.array([self.class_id]),
         )
+        return car, self.persons
+
+
+def test_detr_persons_handed_to_pose_detector() -> None:
+    """#287：RF-DETR 每帧只推理一次，其人员框交给人员检测合并；未配置 RF-DETR 时为 None。"""
+    fake, pose = FakeVehicles(), FakeDetector(person=False)
+    camera = CameraPipeline(
+        "cam-01", MAPPING, cast(PoseDetector, pose), vehicles=cast(VehicleDetector, fake)
+    )
+    alone, pose_alone = pipeline(MAPPING)
+
+    camera.process(frame(0), timestamp=0)
+    alone.process(frame(0), timestamp=0)
+
+    assert (fake.calls, pose.calls) == (1, 1)
+    assert pose.persons is fake.persons
+    assert pose_alone.persons is None
 
 
 def test_vehicles_tracked_with_heading_and_speed() -> None:

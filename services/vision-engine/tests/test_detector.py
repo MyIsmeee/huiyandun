@@ -1,6 +1,6 @@
-"""RTMO 输出换算：模型输入坐标 → 裁剪区域 → 整帧坐标；旋转推理换算回原画面；低分框丢弃。
+"""RTMO 输出换算：模型输入坐标 → 裁剪区域 → 整帧坐标；低分框丢弃；与 RF-DETR 的人员框合并（#287）。
 
-以假会话代替模型；每次检测依次推理原画面、逆时针 90°、顺时针 90° 三次（ROTATIONS）。
+以假会话代替模型；有横躺且没配上骨骼的 RF-DETR 人员时，另推理逆时针 90°、顺时针 90° 两次（ROTATIONS）。
 """
 
 import importlib.util
@@ -10,6 +10,7 @@ from typing import cast
 import numpy as np
 import onnxruntime as ort
 import pytest
+import supervision as sv
 from onnxruntime.datasets import get_example
 
 from vision_engine.detector import PoseDetector, VehicleDetector
@@ -82,16 +83,106 @@ def test_keypoints_follow_their_box_when_low_score_comes_first() -> None:
         (2, [200, 319, 600, 519], [500, 419]),  # 顺时针 90°：旋转画面 (u, v) → (v, 719 - u)
     ],
 )
-def test_rotated_detection_maps_back(on_call: int, box: list[int], keypoint: list[int]) -> None:
-    """横躺者只在旋转画面中被检出时，框与关键点换算回原画面（1280×720，旋转后缩放 0.5）。"""
+def test_lying_person_gets_skeleton_from_rotated_pass(
+    on_call: int, box: list[int], keypoint: list[int]
+) -> None:
+    """RF-DETR 检出的横躺者正向没有骨骼时，旋转画面中的骨骼换算回原画面（1280×720，旋转后缩放 0.5）。"""
     session = FakeSession([[100, 100, 200, 300, 0.9]], on_call=on_call)
     pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
 
-    result = pose(np.zeros((720, 1280, 3), np.uint8))
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([box]))
 
     assert session.calls == 3
-    assert result.xyxy[0].tolist() == box
+    assert result.xyxy.tolist() == [box]
     assert result.data["keypoints"][0, 0].tolist() == keypoint
+    assert result.data["keypoint_scores"][0, 0] == np.float32(0.8)
+
+
+def people(boxes: list[list[int]], score: float = 0.7) -> sv.Detections:
+    """RF-DETR 检出的人员（整帧坐标）。"""
+    return sv.Detections(xyxy=np.array(boxes, float), confidence=np.full(len(boxes), score))
+
+
+def test_same_person_takes_detr_box_and_rtmo_skeleton() -> None:
+    """同一人（IoU ≥ 0.3）：RF-DETR 的框与置信度，RTMO 的骨骼；RTMO 的框偏松，不输出。"""
+    session = FakeSession([[100, 100, 200, 300, 0.9]])  # 整帧 [200, 200, 400, 600]
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[220, 230, 380, 590]]))
+
+    assert session.calls == 1  # 没有缺骨骼的横躺者，不做旋转推理
+    assert result.xyxy.tolist() == [[220, 230, 380, 590]]
+    assert result.confidence.tolist() == [0.7]
+    assert result.data["keypoints"][0, 0].tolist() == [300, 500]
+    assert result.data["keypoint_scores"][0, 0] == np.float32(0.8)
+
+
+def test_low_score_rtmo_candidate_still_gives_skeleton() -> None:
+    """RTMO 对横躺者的置信度常低于 MIN_SCORE：RF-DETR 已确认是人时，低分候选的骨骼照用。"""
+    session = FakeSession([[100, 100, 200, 300, 0.1]])
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[200, 200, 400, 600]]))
+
+    assert len(result) == 1
+    assert result.data["keypoint_scores"][0, 0] == np.float32(0.8)
+
+
+def test_detr_only_person_kept_without_skeleton() -> None:
+    """远处的小人 RTMO 检不出：仍输出，关键点置信度为 0（不参与行为判定，大屏按标准姿态显示）。"""
+    session = FakeSession([[100, 100, 200, 300, 0.9]], on_call=1)  # 正向推理无人
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[600, 100, 630, 180]]))
+
+    assert session.calls == 1  # 竖直的框不是横躺者
+    assert result.xyxy.tolist() == [[600, 100, 630, 180]]
+    assert result.data["keypoints"].shape == (1, 17, 2)
+    assert not result.data["keypoint_scores"].any()
+
+
+def test_rtmo_only_person_kept() -> None:
+    """RF-DETR 漏掉的人（如被家具挡住的倒地者）由 RTMO 补上，用 RTMO 的框。"""
+    session = FakeSession([[100, 100, 200, 300, 0.9]])  # 整帧 [200, 200, 400, 600]
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[800, 100, 900, 400]]))
+
+    assert sorted(result.xyxy.tolist()) == [[200, 200, 400, 600], [800, 100, 900, 400]]
+    assert result.confidence.tolist() == pytest.approx([0.7, 0.9])
+
+
+def test_rtmo_box_wrapping_detr_person_dropped() -> None:
+    """RTMO 把旁人一并框住的松散大框（与其中的人 IoU 不足 0.3）不输出。"""
+    loose = [[50, 50, 400, 350, 0.8]]  # 整帧 [100, 100, 800, 700]
+    session = FakeSession(loose)
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[300, 200, 420, 600]]))
+
+    assert result.xyxy.tolist() == [[300, 200, 420, 600]]
+    assert not result.data["keypoint_scores"].any()
+
+
+def test_second_rtmo_box_on_matched_person_dropped() -> None:
+    """同一人身上 RTMO 的第二个框（NMS 没合掉）不另算一人。"""
+    session = FakeSession([[100, 100, 200, 300, 0.9], [100, 100, 200, 180, 0.6]])
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[200, 200, 400, 600]]))
+
+    assert len(result) == 1
+
+
+def test_no_detr_persons_falls_back_to_rtmo() -> None:
+    """RF-DETR 没有检出人员时，RTMO 的正向检出照常输出。"""
+    session = FakeSession([[100, 100, 200, 300, 0.9]])
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=sv.Detections.empty())
+
+    assert session.calls == 1
+    assert result.xyxy.tolist() == [[200, 200, 400, 600]]
 
 
 def test_no_person() -> None:
@@ -136,7 +227,7 @@ def vehicles(queries: list[tuple[float, float, float, float, int, float]]) -> Ve
 
 def test_vehicles_mapped_to_full_frame_with_class_and_score() -> None:
     """裁剪区域 400×200、左上角 (100, 50)：归一化框按区域尺寸放大后平移回整帧。"""
-    detections = vehicles([(0.5, 0.5, 0.5, 0.5, 2, 0.9)])(
+    detections, _ = vehicles([(0.5, 0.5, 0.5, 0.5, 2, 0.9)])(
         np.zeros((200, 400, 3), np.uint8), offset=(100, 50)
     )
 
@@ -146,8 +237,8 @@ def test_vehicles_mapped_to_full_frame_with_class_and_score() -> None:
 
 
 def test_only_vehicle_classes_above_threshold_kept() -> None:
-    """人员由 RTMO 检出（含骨骼），RF-DETR 只取车辆；低于 0.3 的框丢弃。"""
-    detections = vehicles(
+    """车辆只取五类，低于 0.3 的框丢弃；人员另行返回。"""
+    detections, _ = vehicles(
         [
             (0.2, 0.2, 0.1, 0.1, 0, 0.95),  # person
             (0.5, 0.5, 0.2, 0.2, 5, 0.8),  # bus
@@ -160,9 +251,20 @@ def test_only_vehicle_classes_above_threshold_kept() -> None:
 
 
 def test_no_vehicles_returns_empty() -> None:
-    detections = vehicles([(0.5, 0.5, 0.2, 0.2, 0, 0.9)])(np.zeros((100, 100, 3), np.uint8))
+    detections, _ = vehicles([(0.5, 0.5, 0.2, 0.2, 0, 0.9)])(np.zeros((100, 100, 3), np.uint8))
 
     assert len(detections) == 0
+
+
+def test_persons_returned_separately_in_full_frame() -> None:
+    """同一次推理的人员类一并返回（#287），供与 RTMO 合并；低于 0.3 的丢弃。"""
+    _, persons = vehicles(
+        [(0.5, 0.5, 0.5, 0.5, 0, 0.9), (0.2, 0.2, 0.1, 0.1, 0, 0.2), (0.8, 0.8, 0.1, 0.1, 2, 0.9)]
+    )(np.zeros((200, 400, 3), np.uint8), offset=(100, 50))
+
+    assert len(persons) == 1
+    assert persons.xyxy[0].tolist() == pytest.approx([200, 100, 400, 200])
+    assert persons.confidence.tolist() == pytest.approx([0.9])
 
 
 class PassSession(FakeSession):
@@ -180,27 +282,25 @@ class PassSession(FakeSession):
         return [self.dets[:, start:end], self.keypoints[:, start:end]]
 
 
-def test_contained_box_from_other_rotation_suppressed() -> None:
-    """#134：横躺者在另一旋转方向被检出为把他整个框住的松散框（与紧框 IoU 只有 0.32，NMS 合不掉），
-    视为同一人，只保留高分者，否则同一倒地者产生两条轨迹。"""
-    upright = [[100, 100, 200, 300, 0.74]]  # 整帧 [200, 200, 400, 600]
-    loose = [[75, 339.5, 350, 564.5, 0.51]]  # 逆时针画面中，换算回整帧为 [150, 150, 600, 700]
-    pose = PoseDetector(
-        get_example("sigmoid.onnx"), cast(ort.InferenceSession, PassSession([upright, loose, []]))
-    )
+def test_rotated_pass_never_adds_persons() -> None:
+    """#286：旋转方向的检出多为把旁人或杂物框住的松散框，只用于给缺骨骼的横躺者补骨骼，不新增人员。"""
+    ghost = [[75, 339.5, 350, 564.5, 0.9]]  # 逆时针画面中，换算回整帧为 [150, 150, 600, 700]
+    session = PassSession([[], ghost, []])
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[700, 500, 1100, 600]]))
+
+    assert session.calls == 3  # 有缺骨骼的横躺者
+    assert result.xyxy.tolist() == [[700, 500, 1100, 600]]
+    assert not result.data["keypoint_scores"].any()
+
+
+def test_without_detr_only_upright_pass() -> None:
+    """未配置 RF-DETR（persons=None）时只有 RTMO 的正向检出。"""
+    session = PassSession([[[100, 100, 200, 300, 0.9]], [[100, 100, 200, 300, 0.9]], []])
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
 
     result = pose(np.zeros((720, 1280, 3), np.uint8))
 
+    assert session.calls == 1
     assert result.xyxy.tolist() == [[200, 200, 400, 600]]
-
-
-def test_contained_box_from_same_pass_kept() -> None:
-    """同一方向推理中，远处的人被近处的人的框包住（人群中常见），仍是两个人。"""
-    people = [[100, 100, 300, 300, 0.9], [150, 150, 200, 250, 0.8]]
-    pose = PoseDetector(
-        get_example("sigmoid.onnx"), cast(ort.InferenceSession, PassSession([people, [], []]))
-    )
-
-    result = pose(np.zeros((720, 1280, 3), np.uint8))
-
-    assert len(result) == 2

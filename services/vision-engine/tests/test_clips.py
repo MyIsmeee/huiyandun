@@ -35,7 +35,8 @@ def replay(name: str, lines: list[list[float]]) -> list[Behavior]:
     ("name", "lines", "behavior", "start_s"),
     [
         ("fall-2", [], "fall", (3, 6)),  # 约 3 s 倒地，此后一直躺在路口
-        ("climb-1", [CLIMB_1_LINE], "climb", (12, 16)),  # 约 10～13 s 翻越院墙，此后在墙外
+        # 约 10～13 s 翻越院墙（11.6 s 已蹲在墙顶），此后在墙外
+        ("climb-1", [CLIMB_1_LINE], "climb", (10, 16)),
     ],
 )
 def test_target_action_detected_and_nothing_before(
