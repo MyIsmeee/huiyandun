@@ -28,8 +28,8 @@ class VisionConfig(ServiceConfig):
     model_file: FilePath = Field(description="RTMO ONNX 模型文件的本地路径（C-RU-06、DP-08）")
     vehicle_model_file: FilePath | None = Field(
         None,
-        description="RF-DETR ONNX 模型文件的本地路径，检出车辆（REUSE-22、C-RU-06）；"
-        "未配置时只检测人员（如关键点录制工具）",
+        description="RF-DETR ONNX 模型文件的本地路径，检出车辆与人员框（REUSE-22、C-RU-06）；"
+        "未配置时没有车辆，人员只有 RTMO 的正向检出",
     )
     scene_model_file: FilePath | None = Field(
         None,

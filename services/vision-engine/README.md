@@ -10,8 +10,11 @@
   - 脚点或偏移点位于地平线以上时不输出坐标
 - 推理会话（`runtime.py`）：从本地模型文件创建 ONNX Runtime 会话（C-RU-06）
   - `HYD_DEVICE` 无默认值，须显式声明。`cuda` 时设置显存上限：`HYD_GPU_MEM_LIMIT_MB` 是整个服务的上限，由加载的模型平分（RTMO、RF-DETR、EfficientViT-Seg、DINOv2 各四分之一），总占用不超过该值（C-HW-12），并断言 `CUDAExecutionProvider` 实际生效，回退 CPU 即报错退出（C-CV-11）；`cpu` 为 D0-min 的 CPU 模式（DP-06）
-- 检测（`detector.py`）：rtmlib RTMO 单阶段输出人体框与 COCO 17 关键点（REUSE-05），结果换算回整帧坐标；置信度低于 0.3 的框丢弃
-- 车辆检测（`detector.py` 的 `VehicleDetector`）：RF-DETR-S（REUSE-22）经 rtmlib 推理（`HYD_VEHICLE_MODEL_FILE` 未配置时只检测人员），只取自行车、轿车、摩托车、公交、货车，置信度低于 0.3 的框丢弃；后处理自行完成，以保留 ByteTrack 需要的置信度
+- 人员检测（`detector.py` 的 `PoseDetector`）：rtmlib RTMO 单阶段输出人体框与 COCO 17 关键点（REUSE-05），与 RF-DETR 的人员框取并集（#287），结果为整帧坐标
+  - 同一人（IoU ≥ 0.3）用 RF-DETR 的框与置信度、RTMO 的骨骼；RF-DETR 独有的人（多为远处的小目标）关键点置信度为 0，不参与行为判定
+  - RTMO 独有的框（置信度 ≥ 0.3）保留；把某个 RF-DETR 人员覆盖 ≥ 80% 的松散框丢弃
+  - 有横躺（框宽大于高）且没配上骨骼的 RF-DETR 人员时，另以左右各旋转 90° 的画面推理，只给这些人补骨骼、不新增人员
+- 车辆检测（`detector.py` 的 `VehicleDetector`）：RF-DETR-S（REUSE-22）经 rtmlib 推理，每帧一次，车辆只取自行车、轿车、摩托车、公交、货车，人员框交给人员检测合并，置信度低于 0.3 的框丢弃（`HYD_VEHICLE_MODEL_FILE` 未配置时没有车辆，人员只有 RTMO 的正向检出）；后处理自行完成，以保留 ByteTrack 需要的置信度
 - 运动估计（`kinematics.py`）：由最近 1 s 的实测平面坐标计算朝向与速度；起步不足 3 帧为 null，低于 0.3 m/s 视为静止、不输出朝向；不预测未来位置（FR-102）
 - 运动门控（`motion.py`，借鉴 Frigate）：缩小灰度图与滑动平均背景做帧差，运动区域并入上一帧的轨迹框，扩展 20% 且不小于 640×640 后送推理；无运动且无轨迹时跳过推理。静止的人（如跌倒后）靠轨迹框保持推理
 - 检测链路（`pipeline.py`）：每路摄像头一个读帧线程，经 go2rtc 的 RTSP 取流（C-CV-10），持续解码、只保留最新帧；检测固定 5 FPS 取用最新帧，处理慢时丢帧而不积压延迟（FR-101、C-CV-08）

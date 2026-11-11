@@ -1,7 +1,7 @@
 """录制素材片段的骨骼轨迹，作行为判定的测试数据（TK-022）。
 
-用法：HYD_DEVICE=cpu HYD_MODEL_FILE=<RTMO 模型> uv run --package vision-engine \\
-      python tools/dev/record_keypoints.py <视频> <输出.npz>
+用法：HYD_DEVICE=cpu HYD_MODEL_FILE=<RTMO 模型> HYD_VEHICLE_MODEL_FILE=<RF-DETR 模型> \\
+      uv run --package vision-engine python tools/dev/record_keypoints.py <视频> <输出.npz>
 
 按固定 5 FPS 抽帧，经与检测链路相同的门控、检测与跟踪，保存每帧已确认轨迹的时刻、轨迹 ID、
 关键点与置信度。只含数字，不含图像与人员裁剪（G-04）；坐标为视频原始分辨率的像素坐标。
@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from py_common.config import load_config
-from vision_engine.detector import PoseDetector
+from vision_engine.detector import PoseDetector, VehicleDetector
 from vision_engine.pipeline import FPS, CameraPipeline
 from vision_engine.runtime import VisionConfig, create_session
 
@@ -21,10 +21,14 @@ from vision_engine.runtime import VisionConfig, create_session
 def main() -> None:
     source, output = sys.argv[1], sys.argv[2]
     config = load_config(VisionConfig)
+    assert config.vehicle_model_file is not None  # 人员框来自 RF-DETR 与 RTMO 的合并（#287）
     camera = CameraPipeline(
         "record",
         None,
-        PoseDetector(str(config.model_file), create_session(config, config.model_file)),
+        PoseDetector(str(config.model_file), create_session(config, config.model_file, 2)),
+        vehicles=VehicleDetector(
+            str(config.vehicle_model_file), create_session(config, config.vehicle_model_file, 2)
+        ),
     )
     capture = cv2.VideoCapture(source)
     source_fps = capture.get(cv2.CAP_PROP_FPS)
