@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
 import { canvas, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
-import { AREA, expectToast, freezeClock } from "./helpers";
+import { AREA, camera, expectToast, freezeClock, SITE } from "./helpers";
 
 // 从画面生成初稿（设计 150 §7，FR-909）：区域内摄像头的识别帧转换为半透明草稿，接受后随整体保存提交
 test.beforeEach(({ page }) => freezeClock(page));
@@ -100,6 +100,32 @@ test("生成途中换了区域，结果丢弃", async ({ page }) => {
   await page.clock.runFor(500);
   await expect(page.getByText("cam-02 暂无识别结果")).toHaveCount(0);
   await expect(bar(page)).toHaveCount(0);
+});
+
+test("区域被他人修改而重新载入时，未接受的初稿丢弃并提示", async ({ page }) => {
+  const sockets = await openEditor(page);
+  await generate(page, { frames: [STREET], stale: [] });
+  await expect(bar(page)).toBeVisible();
+
+  // 摄像头页改了本区域的摄像头：区域 updated_at 变化，经 site 频道推送
+  const changed = { ...AREA, updated_at: "2026-10-27T06:31:00Z" };
+  sockets[0]?.send(JSON.stringify({ channel: "site", data: { ...SITE, areas: [changed], devices: [camera("normal")] } }));
+  await expectToast(page, "区域已被修改并重新载入，未接受的初稿已丢弃，可重新生成");
+  await expect(bar(page)).toHaveCount(0);
+});
+
+test("有未保存的修改时区域被他人修改：不重新载入，初稿保留、不提示", async ({ page }) => {
+  const sockets = await openEditor(page);
+  await generate(page, { frames: [STREET], stale: [] });
+  await expect(bar(page)).toBeVisible();
+  await library(page).getByRole("group", { name: "摄像头" }).getByRole("button", { name: "移出区域 cam-01" }).click();
+
+  const changed = { ...AREA, updated_at: "2026-10-27T06:31:00Z" };
+  sockets[0]?.send(JSON.stringify({ channel: "site", data: { ...SITE, areas: [changed], devices: [camera("normal")] } }));
+  await page.clock.runFor(500);
+  await expect(page.getByText("未接受的初稿已丢弃", { exact: false })).toHaveCount(0);
+  await expect(bar(page)).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "保存" })).toBeEnabled(); // 未保存的修改仍在
 });
 
 test("没有识别帧或读取失败时说明原因，不出现草稿", async ({ page }) => {

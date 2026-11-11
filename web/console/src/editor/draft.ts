@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { toast } from "sonner";
 import { temporal } from "zundo";
 import { create } from "zustand";
 import type { SceneArea } from "../lib/api";
@@ -100,12 +101,15 @@ export const isDirty = (s: Draft) => JSON.stringify(s.items) !== JSON.stringify(
 
 /**
  * 草稿跟随区域（设计 150 E-7）：换区域时载入；他人保存了同一区域（updated_at 变化）而本页没有未保存的修改时，
- * 换成最新内容；有未保存的修改时保留，保存时由服务端以 409 拒绝
+ * 换成最新内容；有未保存的修改时保留，保存时由服务端以 409 拒绝。未接受的初稿按旧场景与摄像头位置生成，随之丢弃并提示
  */
 export function useDraftSync(area: SceneArea, cameras: CameraPlacement[]): void {
   const key = JSON.stringify(cameras);
   useEffect(() => {
     const draft = useDraft.getState();
-    if (draft.areaId !== area.id || (draft.updatedAt !== area.updated_at && !isDirty(draft))) loadDraft(area, JSON.parse(key));
+    const switched = draft.areaId !== area.id;
+    if (!switched && (draft.updatedAt === area.updated_at || isDirty(draft))) return;
+    if (!switched && draft.pending.length > 0) toast.warning("区域已被修改并重新载入，未接受的初稿已丢弃，可重新生成");
+    loadDraft(area, JSON.parse(key));
   }, [area, key]);
 }
