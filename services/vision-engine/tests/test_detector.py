@@ -295,6 +295,52 @@ def test_rotated_pass_never_adds_persons() -> None:
     assert not result.data["keypoint_scores"].any()
 
 
+def test_lying_person_with_low_score_upright_match_still_rotated() -> None:
+    """横躺者正向只配上低于 MIN_SCORE 的候选时仍做旋转推理，取骨骼更清楚的（TK-022）。"""
+    weak = [[339.5, 100, 539.5, 200, 0.1]]  # 正向：整帧 [679, 200, 1079, 400]
+    turned = [[100, 100, 200, 300, 0.9]]  # 逆时针画面中，换算回整帧为同一个框
+    session = PassSession([weak, turned, []])
+    session.keypoints[0, 0, :, 2] = 0.4
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[679, 200, 1079, 400]]))
+
+    assert session.calls == 3
+    assert result.data["keypoints"][0, 0].tolist() == [779, 300]
+    assert result.data["keypoint_scores"][0, 0] == np.float32(0.8)
+
+
+@pytest.mark.parametrize(
+    ("scores", "keypoint"),
+    [((0.8, 0.5), [779, 300]), ((0.5, 0.8), [500, 419])],  # (逆时针, 顺时针) 的关键点置信度
+)
+def test_clearer_rotation_gives_skeleton(scores: tuple[float, float], keypoint: list[int]) -> None:
+    """横躺者在两个旋转方向都配上框时，取关键点置信度高的一方，与推理先后无关。"""
+    ccw = [[100, 100, 200, 300, 0.9]]  # 两个方向换算回整帧都是 [679, 200, 1079, 400]
+    cw = [[159.5, 339.5, 259.5, 539.5, 0.9]]
+    session = PassSession([[], ccw, cw])
+    session.keypoints[0, 0, :, 2], session.keypoints[0, 1, :, 2] = scores
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[679, 200, 1079, 400]]))
+
+    assert result.data["keypoints"][0, 0].tolist() == keypoint
+    assert result.data["keypoint_scores"][0, 0] == np.float32(max(scores))
+
+
+def test_high_score_candidate_preferred_over_closer_low_score() -> None:
+    """同一人身上重合度更高的低分候选不抢走高分候选：骨骼取自高分者。"""
+    session = FakeSession([[100, 100, 200, 300, 0.1], [100, 100, 200, 280, 0.9]])
+    session.keypoints[0, 0, :, 0] = 10  # 低分者，与人员框完全重合
+    session.keypoints[0, 1, :, 0] = 150  # 高分者，IoU 0.9
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[200, 200, 400, 600]]))
+
+    assert len(result) == 1
+    assert result.data["keypoints"][0, 0, 0] == 300
+
+
 def test_without_detr_only_upright_pass() -> None:
     """未配置 RF-DETR（persons=None）时只有 RTMO 的正向检出。"""
     session = PassSession([[[100, 100, 200, 300, 0.9]], [[100, 100, 200, 300, 0.9]], []])

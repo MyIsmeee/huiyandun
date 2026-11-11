@@ -66,12 +66,20 @@ class PoseDetector:
             return _people(boxes[own], scores[own], points[own], point_scores[own])
         found = persons.xyxy
         keypoints, keypoint_scores = np.zeros((len(found), 17, 2)), np.zeros((len(found), 17))
-        # 低于 MIN_SCORE 的候选也参与配对：RF-DETR 已确认是人，RTMO 对横躺者的置信度常偏低
-        pairs = _match(found, boxes)
+        # 先在 NMS 保留的候选（≥ MIN_SCORE）中配对；没配上的人再用其余候选：RF-DETR 已确认是人，
+        # RTMO 对横躺者的置信度常偏低。同一人身上重合度略高的低分框不得抢走高分框的骨骼
+        pairs = {i: int(own[j]) for i, j in _match(found, boxes[own]).items()}
+        confident = set(pairs)
+        rest = np.setdiff1d(np.arange(len(boxes)), own)
+        left = [i for i in range(len(found)) if i not in pairs]
+        pairs |= {left[k]: int(rest[j]) for k, j in _match(found[left], boxes[rest]).items()}
         for i, j in pairs.items():
             keypoints[i], keypoint_scores[i] = points[j], point_scores[j]
+        # 只配上低分候选的横躺者同样做旋转推理：正向的低分骨骼质量差（TK-022）
         lying = [
-            i for i, (x1, y1, x2, y2) in enumerate(found) if i not in pairs and x2 - x1 > y2 - y1
+            i
+            for i, (x1, y1, x2, y2) in enumerate(found)
+            if i not in confident and x2 - x1 > y2 - y1
         ]
         if lying:
             height, width = image.shape[:2]
