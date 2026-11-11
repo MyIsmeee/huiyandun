@@ -114,6 +114,20 @@ test("区域被他人修改而重新载入时，未接受的初稿丢弃并提�
   await expect(bar(page)).toHaveCount(0);
 });
 
+test("有未保存的修改时区域被他人修改：不重新载入，初稿保留、不提示", async ({ page }) => {
+  const sockets = await openEditor(page);
+  await generate(page, { frames: [STREET], stale: [] });
+  await expect(bar(page)).toBeVisible();
+  await library(page).getByRole("group", { name: "摄像头" }).getByRole("button", { name: "移出区域 cam-01" }).click();
+
+  const changed = { ...AREA, updated_at: "2026-10-27T06:31:00Z" };
+  sockets[0]?.send(JSON.stringify({ channel: "site", data: { ...SITE, areas: [changed], devices: [camera("normal")] } }));
+  await page.clock.runFor(500);
+  await expect(page.getByText("未接受的初稿已丢弃", { exact: false })).toHaveCount(0);
+  await expect(bar(page)).toBeVisible();
+  await expect(editor(page).getByRole("button", { name: "保存" })).toBeEnabled(); // 未保存的修改仍在
+});
+
 test("没有识别帧或读取失败时说明原因，不出现草稿", async ({ page }) => {
   await openEditor(page);
   await generate(page, { frames: [], stale: [] });
