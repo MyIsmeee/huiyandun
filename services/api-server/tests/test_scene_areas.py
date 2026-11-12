@@ -294,6 +294,74 @@ def test_stale_save_is_rejected(client: TestClient) -> None:
     assert areas(client)[0]["name"] == "大厅"
 
 
+CALIBRATION = [[100, 900, 1, 1], [1800, 900, 9, 1], [300, 500, 2, 8], [1600, 500, 8, 8]]
+
+
+def calibrated(db: tuple[ApiConfig, ApiConfig], camera_id: str) -> tuple[Any, Any]:
+    """读出 (calibration, calibration_error_m)。"""
+
+    async def query() -> tuple[Any, Any]:
+        async with transaction(db[1]) as conn:
+            row = await conn.execute(
+                select(cameras.cameras.c.calibration, cameras.cameras.c.calibration_error_m).where(
+                    cameras.cameras.c.id == camera_id
+                )
+            )
+            points, error = row.one()
+            return points, error
+
+    return asyncio.run(query())
+
+
+def calibrate(db: tuple[ApiConfig, ApiConfig], camera_id: str) -> None:
+    async def main() -> None:
+        async with transaction(db[1]) as conn:
+            await conn.execute(
+                update(cameras.cameras)
+                .where(cameras.cameras.c.id == camera_id)
+                .values(calibration=CALIBRATION, calibration_error_m=0.2)
+            )
+
+    asyncio.run(main())
+
+
+def test_area_change_clears_calibration(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig]
+) -> None:
+    """A11（D-134）：同一区域内移动、转向保留标定；换区域或移出区域时清除并写审计。"""
+    [area] = areas(client)
+    calibrate(db, "cam-01")
+    calibrate(db, "cam-02")
+    moved = {"id": "cam-01", "x": 3, "y": 3, "yaw_deg": 10}
+    keep = {"id": "cam-02", "x": 38, "y": 22, "yaw_deg": 225}
+
+    r = save(client, area, cameras=[moved, keep])
+
+    assert r.status_code == 200, r.text
+    assert calibrated(db, "cam-01") == (CALIBRATION, 0.2)
+    assert audits(db[1], "camera.calibration_cleared", r) == []
+
+    # cam-01 移入新区域，cam-02 移出区域
+    other = client.post(
+        "/api/scene/areas", json={"name": "二号楼", "width_m": 10, "depth_m": 10}, headers=headers()
+    ).json()
+    r = save(client, other, cameras=[moved])
+    assert r.status_code == 200, r.text
+    r2 = save(client, areas(client)[0], cameras=[])
+    assert r2.status_code == 200, r2.text
+
+    for camera_id, response in (("cam-01", r), ("cam-02", r2)):
+        assert calibrated(db, camera_id) == ([], None)
+        [audit] = audits(db[1], "camera.calibration_cleared", response)
+        assert (audit["target"], audit["before"]) == (
+            camera_id,
+            {"points": CALIBRATION, "error_m": 0.2},
+        )
+        assert audit["after"] == {"points": [], "error_m": None, "reason": "换区域"}
+    site = {d["id"]: d["camera"] for d in client.get("/api/site").json()["devices"]}
+    assert site["cam-01"]["mapping"] == "estimated"
+
+
 def test_camera_not_listed_leaves_area(client: TestClient) -> None:
     [area] = areas(client)
     keep = {"id": "cam-01", "x": 2, "y": 2, "yaw_deg": 45}

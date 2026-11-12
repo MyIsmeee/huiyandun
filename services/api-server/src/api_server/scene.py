@@ -1,6 +1,7 @@
 """场景区域（FR-908、D-124、TK-152）：增删改，首次启动时的默认区域，以及供生成初稿的识别帧（FR-909）。
 
-区域整体保存（PUT），带 updated_at 防并发覆盖；保存时把本区域摄像头的位置与朝向写回摄像头登记表。
+区域整体保存（PUT），带 updated_at 防并发覆盖；保存时把本区域摄像头的位置与朝向写回摄像头登记表，
+换区域或移出区域的摄像头清除地面标定（D-134）。
 在摄像头页改位置、朝向或删除摄像头同样更新所在区域的 updated_at（touch），场景页的旧编辑保存时得到 409。
 每次变更写审计（G-13），之后由 cameras.Registry 按库重建站点、经 WS site 频道推送并下发登记表（FR-906）。
 """
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     Integer,
     MetaData,
     Table,
@@ -74,6 +76,8 @@ cameras = Table(
     Column("id", Text, primary_key=True),
     Column("area_id", Text),
     Column("pose", JSONB),
+    Column("calibration", JSONB),
+    Column("calibration_error_m", Float),
     Column("updated_at", DateTime(timezone=True)),
 )
 scene_bootstrap = Table("scene_bootstrap", metadata, Column("default_area_done", Boolean))
@@ -208,6 +212,21 @@ def _check_inside(body: SceneAreaUpdate) -> None:
         raise HTTPException(400, "; ".join(outside))
 
 
+async def _clear_calibration(
+    conn: AsyncConnection, row: Any, principal: Principal, request_id: str
+) -> None:
+    """标定点的地面坐标属于原区域：换区域或移出区域时作废（D-134），回到按安装参数估算。"""
+    await record(
+        conn,
+        actor=principal.username,
+        action="camera.calibration_cleared",
+        target=row["id"],
+        before={"points": row["calibration"], "error_m": row["calibration_error_m"]},
+        after={"points": [], "error_m": None, "reason": "换区域"},
+        request_id=request_id,
+    )
+
+
 @router.put("/areas/{area_id}")
 async def save_area(
     area_id: str, body: SceneAreaUpdate, request: Request, principal: Admin
@@ -242,6 +261,9 @@ async def save_area(
             if p is not None:
                 pose = r["pose"] | {"x": p.x, "y": p.y, "yaw_deg": p.yaw_deg}
                 values |= {"area_id": area_id, "pose": pose}
+            if r["area_id"] not in (None, values["area_id"]) and r["calibration"]:
+                await _clear_calibration(conn, r, principal, request.state.request_id)
+                values |= {"calibration": [], "calibration_error_m": None}
             await conn.execute(update(cameras).where(cameras.c.id == r["id"]).values(values))
         area = SceneArea(
             id=area_id,
