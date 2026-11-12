@@ -97,7 +97,7 @@ const snapshotOf = (id: string): Promise<Snapshot> =>
     (e: unknown) => ({ status: "failed", message: e instanceof ApiError ? e.message : "取不到画面，请重试" }),
   );
 
-type Snapshot = { status: "none" } | { status: "loading" } | { status: "ready"; url: string } | { status: "failed"; message: string };
+export type Snapshot = { status: "none" } | { status: "loading" } | { status: "ready"; url: string } | { status: "failed"; message: string };
 
 /**
  * 添加与编辑摄像头（ui.md §7.2）。保存后自动取一帧预览（V-CAM4），可在预览上点两点画禁止攀爬警戒线（V-CAM7），
