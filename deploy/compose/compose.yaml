@@ -292,7 +292,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # 视觉引擎（architecture.md §8）：经 go2rtc 拉流检测，向 NATS 发布 track 与 scene 事件。启动时断言推理设备（C-CV-11）
+  # 视觉引擎（architecture.md §8）：经 go2rtc 拉流检测，向 NATS 发布 track 等事件，按请求识别环境（D-133）。启动时断言推理设备（C-CV-11）
   # 模型权重由 make fetch-models 下载（R-03）。只接入内部网络：onnxruntime 遥测已关闭，网络再隔一层（G-05）
   vision-engine:
     image: huiyandun/vision-engine:local
@@ -313,7 +313,7 @@ services:
     # 进程退出后自动拉起：单路异常在进程内重试；任一路停滞时进程主动退出（#79）
     restart: unless-stopped
     healthcheck:
-      # 全部检测与场景循环、读帧线程都在 10 s 内有进展时每秒更新心跳文件（#79）
+      # 全部检测循环、读帧线程都在 10 s 内有进展时每秒更新心跳文件（#79）
       test: ["CMD", "python3", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/hyd-vision-alive') > 10)"]
       interval: 10s
       timeout: 5s

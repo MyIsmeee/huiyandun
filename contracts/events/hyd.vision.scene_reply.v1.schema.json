@@ -1,0 +1,24 @@
+{
+  "title": "VisionSceneReplyV1",
+  "description": "hyd.vision.scene_request.v1 的应答（应答方 vision-engine）：请求中的每台摄像头或在 frames 中有一帧，或在 unavailable 中说明原因",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["frames", "unavailable"],
+  "properties": {
+    "frames": { "type": "array", "items": { "$ref": "hyd.vision.scene.v1.schema.json" } },
+    "unavailable": { "type": "array", "items": { "$ref": "#/$defs/SceneUnavailable" } }
+  },
+  "$defs": {
+    "SceneUnavailable": {
+      "type": "object",
+      "required": ["camera_id", "reason"],
+      "properties": {
+        "camera_id": { "type": "string" },
+        "reason": {
+          "enum": ["model_missing", "no_frame", "unmapped", "empty"],
+          "description": "model_missing：未配置环境识别模型；no_frame：断流或尚未取到画面；unmapped：建立不了地面映射（如朝向地平线以上）；empty：画面中没有可识别的环境"
+        }
+      }
+    }
+  }
+}

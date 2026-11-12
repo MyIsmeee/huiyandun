@@ -9,5 +9,5 @@ from .scene_frame_schema import SceneFrame
 
 class VisionSceneV1(EventBase, SceneFrame):
     """
-    摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
+    一台摄像头当前画面中识别到的环境，字段即 SceneFrame（生产者 vision-engine）；只在 hyd.vision.scene_reply.v1 中按请求返回，不单独发布（D-133）
     """

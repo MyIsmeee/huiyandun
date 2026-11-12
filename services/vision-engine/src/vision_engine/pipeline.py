@@ -1,6 +1,7 @@
 """检测链路（TK-021、TK-022、TK-118）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
-hyd.vision.track.v1 与 hyd.vision.behavior.v1；已标定摄像头另以 1 FPS 分割环境 → hyd.vision.scene.v1；
-画面冻结、重放、挪位、遮挡与断流 → hyd.vision.integrity.v1（D-080、TK-114）。
+hyd.vision.track.v1 与 hyd.vision.behavior.v1；画面冻结、重放、挪位、遮挡与断流 →
+hyd.vision.integrity.v1（D-080、TK-114）。环境分割平时不运行：收到 hyd.vision.scene_request.v1 时对
+指定摄像头的当前画面各识别一次，以 hyd.vision.scene_reply.v1 应答（D-133、TK-162）。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
@@ -38,6 +39,9 @@ from py_common.log import configure_logging
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
+from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
+from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine.behavior import BehaviorDetector
 from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector
@@ -59,10 +63,9 @@ from vision_engine.scene import ScenePerception, Segmenter
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
-SCENE_SUBJECT = "hyd.vision.scene.v1"  # 核心 NATS，不持久化
+SCENE_REQUEST_SUBJECT = "hyd.vision.scene_request.v1"  # 核心 NATS 请求/应答，不持久化
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
-SCENE_FPS = 1  # 环境变化慢，每台摄像头每秒识别 1 次（FR-108）
 # 持久化的视觉事件（architecture.md §12）。
 # 保留期取检测事件的默认值 180 天（architecture.md §10）
 STREAM = "HYD_VISION"
@@ -97,6 +100,7 @@ class FrameReader(threading.Thread):
         self._beat = beat  # 每次建连与每读到一帧登记一次，卡在读帧调用中即停滞（#79）
         self._lock = threading.Lock()
         self._latest: tuple[int, np.ndarray] | None = None
+        self._latest_at = float("-inf")  # 取到最新一帧的时刻（time.monotonic）
         self._stopping = threading.Event()  # 摄像头从登记表删除或参数变化时停止（D-101）
         self._beat_lock = threading.Lock()  # stop 返回后不会再有登记
 
@@ -115,6 +119,11 @@ class FrameReader(threading.Thread):
         """(序号, 帧)；序号不变表示没有新帧（如断流期间）。"""
         with self._lock:
             return self._latest
+
+    def age_s(self) -> float:
+        """最新一帧距今的秒数；尚未取到帧时为无穷大。"""
+        with self._lock:
+            return time.monotonic() - self._latest_at
 
     def run(self) -> None:
         seq, lost = 0, False
@@ -143,7 +152,7 @@ class FrameReader(threading.Thread):
                     seq += 1
                     self._alive()
                     with self._lock:
-                        self._latest = (seq, frame)
+                        self._latest, self._latest_at = (seq, frame), time.monotonic()
                 capture.release()
             except cv2.error:
                 # 解码器异常按断流处理并重连，读帧线程不退出（#79）
@@ -452,24 +461,6 @@ async def run_camera(
         beat()
 
 
-async def run_scene(
-    perception: ScenePerception, reader: FrameReader, bus: Bus, beat: Callable[[], None]
-) -> None:
-    loop = asyncio.get_running_loop()
-    next_tick, last_seq = loop.time(), 0
-    while True:
-        next_tick = max(next_tick + 1 / SCENE_FPS, loop.time())
-        await asyncio.sleep(next_tick - loop.time())
-        latest = reader.latest()
-        # 断流时不发布：大屏保留最后一帧（设计 §3.7）
-        if latest is not None and latest[0] != last_seq:
-            last_seq, frame = latest
-            event = await asyncio.to_thread(perception.process, frame)
-            if event is not None:
-                await bus.publish(SCENE_SUBJECT, event)
-        beat()
-
-
 def mapping_of(camera: dict[str, Any], frame: np.ndarray) -> GroundMapping | None:
     """按标定点拟合；不足 4 组时按安装参数与画面尺寸估算（D-102）。"""
     mapping = GroundMapping.fit(camera["calibration"])
@@ -477,27 +468,6 @@ def mapping_of(camera: dict[str, Any], frame: np.ndarray) -> GroundMapping | Non
         height, width = frame.shape[:2]
         mapping = GroundMapping.from_pose(camera["pose"], width, height)
     return mapping
-
-
-async def run_scene_when_ready(
-    camera: dict[str, Any],
-    segmenter: Segmenter,
-    reader: FrameReader,
-    bus: Bus,
-    beat: Callable[[], None],
-) -> None:
-    """取到首帧、建立地面映射后再识别环境；建立不了映射（如朝向地平线以上）的摄像头不识别环境。"""
-    while (latest := reader.latest()) is None:
-        beat()
-        await asyncio.sleep(1 / SCENE_FPS)
-    mapping = mapping_of(camera, latest[1])
-    if mapping is None:
-        log.warning("vision.unmapped", extra={"camera_id": camera["id"]})
-        while True:
-            beat()
-            await asyncio.sleep(1)
-    perception = ScenePerception(camera["id"], mapping, camera["pose"], segmenter)
-    await run_scene(perception, reader, bus, beat)
 
 
 @dataclass
@@ -562,10 +532,43 @@ class Cameras:
                 self._health,
             )
         ]
-        if self._segmenter is not None:
-            scene = partial(run_scene_when_ready, camera, self._segmenter, reader, self._bus)
-            runs.append(supervise(f"{camera_id}/scene", scene, self._health))
         self._running[camera_id] = _Running(camera, reader, [asyncio.create_task(r) for r in runs])
+
+    async def recognize(self, request: VisionSceneRequestV1) -> VisionSceneReplyV1:
+        """对请求中各摄像头的当前画面识别一次环境，供场景初稿（D-133、FR-909）；识别不了的给出原因。"""
+        frames: list[VisionSceneV1] = []
+        unavailable: list[dict[str, str]] = []
+        for camera_id in request.camera_ids:
+            scene = await self._recognize(camera_id)
+            if isinstance(scene, str):
+                unavailable.append({"camera_id": camera_id, "reason": scene})
+            else:
+                frames.append(scene)
+        return VisionSceneReplyV1.model_validate(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "event_id": uuid.uuid4(),
+                "ts": datetime.now(UTC),
+                "frames": frames,
+                "unavailable": unavailable,
+            }
+        )
+
+    async def _recognize(self, camera_id: str) -> VisionSceneV1 | str:
+        """识别帧，或 SceneUnavailable 的 reason。"""
+        if self._segmenter is None:
+            return "model_missing"  # 未配置 HYD_SCENE_MODEL_FILE
+        running = self._running.get(camera_id)
+        latest = running.reader.latest() if running else None
+        # 与检测循环同一断流标准；登记表尚未下发到本服务的摄像头同样没有画面
+        if running is None or latest is None or running.reader.age_s() > STREAM_LOST_S:
+            return "no_frame"
+        frame = latest[1]
+        mapping = mapping_of(running.camera, frame)
+        if mapping is None:
+            return "unmapped"
+        perception = ScenePerception(camera_id, mapping, running.camera["pose"], self._segmenter)
+        return await asyncio.to_thread(perception.process, frame) or "empty"
 
     async def _stop(self, camera_id: str) -> None:
         running = self._running.pop(camera_id)
@@ -625,6 +628,7 @@ async def serve(config: VisionConfig) -> None:
             health.beat("registry")
             await asyncio.sleep(RECONNECT_S)
     health.forget("registry")
+    await bus.serve(SCENE_REQUEST_SUBJECT, VisionSceneRequestV1, cameras.recognize)
     log.info("vision.started", extra={"device": config.device})
     await health.run()
 

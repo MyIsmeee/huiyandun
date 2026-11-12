@@ -5,11 +5,13 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
+import nats
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import delete, select, text, update
 from starlette.testclient import WebSocketTestSession
 
@@ -19,7 +21,8 @@ from api_server.audit import audit_log
 from api_server.config import ApiConfig
 from api_server.db import transaction
 from py_contracts.api import WsFrame
-from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
+from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
+from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
 
 rid = iter(range(10**6))
 MARK = WsFrame(channel="system", data={"type": "scene-test-mark"})
@@ -360,49 +363,104 @@ def test_unknown_area_and_roles(client: TestClient, password: str) -> None:
     assert client.delete("/api/scene/areas/area-01", headers=headers()).status_code == 403
 
 
-def recognized(camera_id: str, age_s: float) -> WsFrame:
-    """relay 保存的某摄像头最新一帧识别结果，age_s 秒前产生。"""
-    event = VisionSceneV1.model_validate(
-        {
-            "schema_version": "1.1.0",
-            "event_id": uuid.uuid4(),
-            "ts": datetime.now(UTC) - timedelta(seconds=age_s),
-            "camera_id": camera_id,
-            "surfaces": [{"class": "road", "polygon": [[0, 0], [8, 0], [8, 8]]}],
-            "walls": [],
-            "objects": [],
-            "trees": [],
-            "markings": [],
-        }
-    )
-    return WsFrame(channel="scene", data=event.model_dump(mode="json"))
+def answer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, reasons: dict[str, str] | Exception
+) -> list[VisionSceneRequestV1]:
+    """以假应答代替 vision-engine：reasons 中的摄像头按原因识别不了，其余各返回一帧；返回收到的请求。"""
+    asked: list[VisionSceneRequestV1] = []
+
+    async def request(
+        subject: str, event: VisionSceneRequestV1, model: type[VisionSceneReplyV1], timeout_s: float
+    ) -> VisionSceneReplyV1:
+        assert subject == "hyd.vision.scene_request.v1"
+        asked.append(event)
+        if isinstance(reasons, Exception):
+            raise reasons
+        stamp = {"schema_version": "1.0.0", "event_id": uuid.uuid4(), "ts": datetime.now(UTC)}
+        surfaces = [{"class": "road", "polygon": [[0, 0], [8, 0], [8, 8]]}]
+        empty: dict[str, Any] = {"walls": [], "objects": [], "trees": [], "markings": []}
+        return model.model_validate(
+            stamp
+            | {
+                "frames": [
+                    stamp | empty | {"camera_id": i, "surfaces": surfaces}
+                    for i in event.camera_ids
+                    if i not in reasons
+                ],
+                "unavailable": [
+                    {"camera_id": i, "reason": reasons[i]} for i in event.camera_ids if i in reasons
+                ],
+            }
+        )
+
+    monkeypatch.setattr(client.app.state.bus, "request", request)
+    return asked
 
 
-def test_frames_of_area_cameras_within_10_s(client: TestClient) -> None:
-    """初稿（FR-909）只用区域内摄像头 10 s 内的识别帧；没有的列为暂无识别结果。"""
+def test_frames_recognized_on_request_with_reasons(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """初稿（FR-909、D-133）：对区域内摄像头各识别一次；识别不了的给出原因（#288）。"""
     [area] = areas(client)
-    scenes = client.app.state.scenes
-    scenes["cam-01"] = recognized("cam-01", 1)
-    scenes["cam-02"] = recognized("cam-02", 11)
+    asked = answer(client, monkeypatch, {"cam-02": "no_frame"})
 
     r = client.get(f"/api/scene/areas/{area['id']}/frames")
 
     assert r.status_code == 200, r.text
     body = r.json()
+    assert [a.camera_ids for a in asked] == [["cam-01", "cam-02"]]
     assert [f["camera_id"] for f in body["frames"]] == ["cam-01"]
-    assert body["frames"][0] == scenes["cam-01"].data
+    assert body["frames"][0]["surfaces"][0]["class"] == "road"
+    assert body["unavailable"] == [{"camera_id": "cam-02", "reason": "no_frame"}]
     assert body["stale"] == ["cam-02"]
 
 
-def test_frames_skip_cameras_outside_area(client: TestClient) -> None:
+def test_frames_skip_cameras_outside_area(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     [area] = areas(client)
     keep = {"id": "cam-01", "x": 2, "y": 2, "yaw_deg": 45}
     assert save(client, area, cameras=[keep]).status_code == 200
-    client.app.state.scenes["cam-02"] = recognized("cam-02", 1)
+    asked = answer(client, monkeypatch, {"cam-01": "model_missing"})
 
     body = client.get(f"/api/scene/areas/{area['id']}/frames").json()
 
-    assert body == {"frames": [], "stale": ["cam-01"]}
+    assert [a.camera_ids for a in asked] == [["cam-01"]]
+    assert body["unavailable"] == [{"camera_id": "cam-01", "reason": "model_missing"}]
+
+
+def test_frames_of_area_without_cameras_ask_nothing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    [area] = areas(client)
+    assert save(client, area, cameras=[]).status_code == 200
+    asked = answer(client, monkeypatch, {})
+
+    body = client.get(f"/api/scene/areas/{area['id']}/frames").json()
+
+    assert body == {"frames": [], "unavailable": [], "stale": []}
+    assert asked == []
+
+
+def invalid_reply() -> ValidationError:
+    with pytest.raises(ValidationError) as caught:
+        VisionSceneReplyV1.model_validate({})
+    return caught.value
+
+
+@pytest.mark.parametrize(
+    "error", [nats.errors.NoRespondersError(), TimeoutError(), invalid_reply()]
+)
+def test_frames_503_when_vision_engine_does_not_answer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    [area] = areas(client)
+    answer(client, monkeypatch, error)
+
+    r = client.get(f"/api/scene/areas/{area['id']}/frames")
+
+    assert r.status_code == 503
+    assert r.json()["message"] == "识别服务未响应，请稍后重试"
 
 
 def test_frames_need_admin_and_known_area(client: TestClient, password: str) -> None:

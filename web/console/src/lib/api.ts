@@ -3,12 +3,15 @@ import type { components } from "../api/schema";
 type Schemas = components["schemas"];
 export type Site = Schemas["Site"];
 export type SceneArea = Schemas["SceneArea"];
+export type SceneUnavailable = Schemas["SceneUnavailable"];
 
 const TIMEOUT_MS = 10_000;
 // 生成报告须等模型逐家尝试，网关总时限 60 s（SC-05）加余量
 const REPORT_TIMEOUT_MS = 70_000;
 // api-server 向 evidence-service 取包时限 30 s（evidence_timeout_s），包含录像可达数十 MB，再加传输余量
 const EVIDENCE_TIMEOUT_MS = 60_000;
+// api-server 等 vision-engine 识别的时限为 15 s（scene.py 的 RECOGNIZE_TIMEOUT_S），超时返回 503；这里须更长，否则先于它放弃
+const RECOGNIZE_TIMEOUT_MS = 20_000;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -112,9 +115,14 @@ export const api = {
     request<SceneArea>("PUT", `/api/scene/areas/${encodeURIComponent(id)}`, body),
   /** 区域内仍有摄像头时为 409 */
   deleteSceneArea: (id: string) => request<undefined>("DELETE", `/api/scene/areas/${encodeURIComponent(id)}`),
-  /** 区域内摄像头 10 s 内的识别帧，供生成初稿（FR-909） */
+  /** 对区域内摄像头的当前画面各识别一次，供生成初稿（FR-909、D-133） */
   getSceneAreaFrames: (id: string) =>
-    request<Schemas["SceneAreaFrames"]>("GET", `/api/scene/areas/${encodeURIComponent(id)}/frames`),
+    request<Schemas["SceneAreaFrames"]>(
+      "GET",
+      `/api/scene/areas/${encodeURIComponent(id)}/frames`,
+      undefined,
+      RECOGNIZE_TIMEOUT_MS,
+    ),
   /** 经 go2rtc 取一帧（V-CAM4）；首帧须等关键帧，api-server 等 8 s，这里再加余量 */
   getCameraSnapshot: async (id: string) =>
     (await send("GET", `/api/cameras/${encodeURIComponent(id)}/snapshot`, undefined, undefined, 12_000)).blob(),

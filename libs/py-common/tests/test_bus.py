@@ -12,6 +12,8 @@ import pytest
 from nats.js.client import JetStreamContext
 
 from py_common.bus import Bus
+from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
+from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 
 SUBJECT = "hyd.vision.track.v1"
@@ -48,6 +50,57 @@ def test_publish_subscribe_roundtrip(nats_url: str) -> None:
 
     sent = track()
     assert asyncio.run(main()) == sent
+
+
+REQUEST = "hyd.vision.scene_request.v1"
+
+
+def scene_request() -> VisionSceneRequestV1:
+    return VisionSceneRequestV1(
+        schema_version="1.0.0", event_id=uuid.uuid4(), ts=datetime.now(UTC), camera_ids=["cam-01"]
+    )
+
+
+def test_request_returns_reply_of_serve(nats_url: str) -> None:
+    async def answer(request: VisionSceneRequestV1) -> VisionSceneReplyV1:
+        return VisionSceneReplyV1(
+            schema_version="1.0.0",
+            event_id=uuid.uuid4(),
+            ts=datetime.now(UTC),
+            frames=[],
+            unavailable=[{"camera_id": i, "reason": "no_frame"} for i in request.camera_ids],
+        )
+
+    async def main() -> VisionSceneReplyV1:
+        server = await Bus.connect(nats_url, name="server", timeout_s=2)
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        await server.serve(REQUEST, VisionSceneRequestV1, answer)
+        try:
+            return await bus.request(REQUEST, scene_request(), VisionSceneReplyV1, 2)
+        finally:
+            await bus.close()
+            await server.close()
+
+    reply = asyncio.run(main())
+    assert [(u.camera_id, u.reason) for u in reply.unavailable] == [("cam-01", "no_frame")]
+
+
+def test_request_fails_without_server_or_reply(nats_url: str) -> None:
+    async def fail(request: VisionSceneRequestV1) -> VisionSceneReplyV1:
+        raise RuntimeError("boom")
+
+    async def main() -> None:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        try:
+            with pytest.raises(nats.errors.NoRespondersError):
+                await bus.request(REQUEST, scene_request(), VisionSceneReplyV1, 2)
+            await bus.serve(REQUEST, VisionSceneRequestV1, fail)
+            with pytest.raises(TimeoutError):  # 处理失败不应答
+                await bus.request(REQUEST, scene_request(), VisionSceneReplyV1, 0.3)
+        finally:
+            await bus.close()
+
+    asyncio.run(main())
 
 
 def test_subscribe_drops_invalid_payload(nats_url: str, caplog: pytest.LogCaptureFixture) -> None:

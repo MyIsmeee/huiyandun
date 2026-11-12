@@ -8,10 +8,12 @@
 import logging
 import math
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
+import nats
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import ValidationError
 from sqlalchemy import (
     Boolean,
     Column,
@@ -39,8 +41,9 @@ from py_contracts.api import (
     SceneAreaFrames,
     SceneAreaList,
     SceneAreaUpdate,
-    WsFrame,
 )
+from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
+from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +52,9 @@ DEFAULT_NAME = "默认区域"
 MAX_SIZE_M = 500  # 与契约、表约束一致
 # 改动区域或摄像头位置的事务先取这把锁：区域行与摄像头行的加锁顺序因此不会交叉，避免死锁
 SCENE_LOCK = 0x48594432
-FRESH = timedelta(seconds=10)  # 初稿只用 10 s 内的识别帧（设计 150 §7）
+RECOGNIZE_SUBJECT = "hyd.vision.scene_request.v1"
+# vision-engine 逐台识别，每台约 0.1 s（#286 实测 1080p 78 ms），首次推理另有预热
+RECOGNIZE_TIMEOUT_S = 15.0
 
 metadata = MetaData()
 scene_areas = Table(
@@ -264,21 +269,30 @@ async def save_area(
 
 @router.get("/areas/{area_id}/frames", dependencies=[Depends(require("admin"))])
 async def get_frames(area_id: str, request: Request) -> SceneAreaFrames:
-    """区域内摄像头最近的识别帧，供场景页生成初稿（FR-909）；只读，草稿由场景页转换。"""
+    """请 vision-engine 对区域内摄像头的当前画面各识别一次（D-133），供场景页生成初稿（FR-909）；
+    只读，草稿由场景页转换。"""
     async with request.app.state.engine.connect() as conn:
         if await conn.scalar(select(scene_areas.c.id).where(scene_areas.c.id == area_id)) is None:
             raise HTTPException(404, "区域不存在")
         query = select(cameras.c.id).where(cameras.c.area_id == area_id).order_by(cameras.c.id)
         ids = list((await conn.execute(query)).scalars())
-    scenes: dict[str, WsFrame] = request.app.state.scenes
-    since = datetime.now(UTC) - FRESH
-    fresh = [
-        scenes[i].data
-        for i in ids
-        if i in scenes and datetime.fromisoformat(scenes[i].data["ts"]) >= since
-    ]
-    stale = sorted(set(ids) - {f["camera_id"] for f in fresh})
-    return SceneAreaFrames.model_validate({"frames": fresh, "stale": stale})
+    if not ids:
+        return SceneAreaFrames(frames=[], unavailable=[], stale=[])
+    ask = VisionSceneRequestV1(
+        schema_version="1.0.0", event_id=uuid.uuid4(), ts=datetime.now(UTC), camera_ids=ids
+    )
+    try:
+        reply = await request.app.state.bus.request(
+            RECOGNIZE_SUBJECT, ask, VisionSceneReplyV1, RECOGNIZE_TIMEOUT_S
+        )
+    except (nats.errors.Error, TimeoutError, ValidationError) as e:  # 含不合契约的应答
+        log.warning("scene.recognize_failed", extra={"area_id": area_id, "error": repr(e)})
+        raise HTTPException(503, "识别服务未响应，请稍后重试") from e
+    found = reply.model_dump(mode="json")
+    stale = [u["camera_id"] for u in found["unavailable"]]
+    return SceneAreaFrames.model_validate(
+        {"frames": found["frames"], "unavailable": found["unavailable"], "stale": stale}
+    )
 
 
 @router.delete("/areas/{area_id}", status_code=204)

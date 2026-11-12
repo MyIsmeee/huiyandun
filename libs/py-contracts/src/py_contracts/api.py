@@ -123,6 +123,14 @@ class SceneAreaUpdate(ContractModel):
     """
 
 
+class SceneUnavailable(ContractModel):
+    camera_id: str
+    reason: Literal["model_missing", "no_frame", "unmapped", "empty"]
+    """
+    model_missing：未配置环境识别模型；no_frame：断流或尚未取到画面；unmapped：建立不了地面映射（如朝向地平线以上）；empty：画面中没有可识别的环境
+    """
+
+
 class CameraSource(ContractModel):
     """
     拉流地址的组成部分，不含凭据；地址由 api-server 拼出，不接受完整地址（D-103）
@@ -555,8 +563,7 @@ class WsFrame(ContractModel):
     WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
-    （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；scene 为 VisionScene
-    （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；site 为 Site（摄像头登记表或场景区域
+    （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
     变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
     各自的最新状态），按发生先后排列（D-077）
@@ -564,7 +571,7 @@ class WsFrame(ContractModel):
     """
 
     channel: Literal[
-        "tracks", "devices", "alerts", "incidents", "executions", "ai", "scene", "site", "system"
+        "tracks", "devices", "alerts", "incidents", "executions", "ai", "site", "system"
     ]
     data: dict[str, Any]
 
@@ -1130,7 +1137,7 @@ class Marking(ContractModel):
 
 class SceneFrame(ContractModel):
     """
-    摄像头实时识别的环境，已投影到平面（spec.md FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
+    摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：只含平面坐标（米）的多边形与线段，不含图像；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
     """
 
     camera_id: str
@@ -1192,7 +1199,7 @@ class AiInvestigation(RootModel[AiInvestigationV1]):
 
 class VisionSceneV1(EventBase, SceneFrame):
     """
-    摄像头实时识别的环境，字段即 SceneFrame（生产者 vision-engine；核心 NATS，不持久化）
+    一台摄像头当前画面中识别到的环境，字段即 SceneFrame（生产者 vision-engine）；只在 hyd.vision.scene_reply.v1 中按请求返回，不单独发布（D-133）
     """
 
 
@@ -1231,9 +1238,13 @@ class VisionScene(RootModel[VisionSceneV1]):
 class SceneAreaFrames(ContractModel):
     frames: list[VisionScene]
     """
-    区域内各摄像头 10 s 内的最新一帧，坐标为区域内坐标，按摄像头编号排列
+    区域内各摄像头当前画面的识别帧，坐标为区域内坐标，按摄像头编号排列
     """
-    stale: list[str]
+    unavailable: list[SceneUnavailable]
     """
-    区域内 10 s 内没有识别帧的摄像头编号（未建立地面映射、断流或画面中无可识别的环境）
+    区域内没有识别帧的摄像头与原因，按摄像头编号排列
+    """
+    stale: list[str] = Field(..., deprecated=True)
+    """
+    unavailable 中的摄像头编号；下次升契约主版本时删除
     """

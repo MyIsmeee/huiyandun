@@ -1,13 +1,13 @@
-"""场景感知（TK-118、FR-108）：EfficientViT-Seg 识别环境 → 归并为渲染类别 → 时间平滑 → 投影到平面。
+"""场景感知（TK-118、FR-909）：EfficientViT-Seg 识别环境 → 归并为渲染类别 → 投影到平面。
 
-每台建立了地面映射的摄像头（标定或按安装参数估算，D-102）每秒 1 次，取最新帧。输出只含平面坐标（米）的多边形与线段，不含图像（G-04）；
+只在生成场景初稿时按请求运行（D-133）：对建立了地面映射的摄像头（标定或按安装参数估算，D-102）的当前画面
+识别一次。输出只含平面坐标（米）的多边形与线段，不含图像（G-04）；
 人员与车辆不在场景中，由 track 事件呈现。地面类别取掩码外轮廓；立面与物体取与地面接触的下边缘
 （每列最低一格）；树取底部中心；路面标线在路面区域内按白色条纹检出（ADE20K 无此类别）。
 """
 
 import threading
 import uuid
-from collections import deque
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -28,7 +28,6 @@ STD = np.array([0.229, 0.224, 0.225]) * 255
 MIN_CONFIDENCE = 0.5
 # 灰度均值超出此范围的格子不输出：暗光、过曝与画面黑边（黑边会被识别为墙）
 DARK, BRIGHT = 40, 250
-HISTORY = 3  # 近 3 次的多数类别：画面变化后连续 2 次识别即翻转（约 2 s）
 SIMPLIFY_M = 0.2
 MAX_POLYGONS = 64  # 地面、物体与标线合计，按面积保留最大的
 MIN_CELLS = 3  # 小于 3 格的区域视为噪声
@@ -94,7 +93,7 @@ def label(name: str) -> int:
 
 class Segmenter:
     """BGR 帧 → GRID×GRID 的渲染类别编号；多路共用一个会话，逐次推理：并发推理各占一份显存，
-    多路同时识别会超出该模型分到的显存上限（C-HW-12）。每路每秒 1 次，排队的等待可忽略。"""
+    多路同时识别会超出该模型分到的显存上限（C-HW-12）。"""
 
     def __init__(self, session: ort.InferenceSession) -> None:
         self._session = session
@@ -115,16 +114,8 @@ class Segmenter:
         return labels
 
 
-def smooth(history: deque[np.ndarray]) -> np.ndarray:
-    """每格取近 3 次的多数；三次各不相同时取最新一次。"""
-    if len(history) < HISTORY:
-        return history[-1]
-    a, b, latest = history
-    return np.where((a == b) & (a != latest), a, latest)
-
-
 class ScenePerception:
-    """单路摄像头的分割、平滑与投影；状态只在本路串行调用的 process 中使用。"""
+    """单路摄像头一帧画面的分割与投影。"""
 
     def __init__(
         self,
@@ -138,13 +129,11 @@ class ScenePerception:
         self._camera = np.array([pose["x"], pose["y"]], dtype=np.float64)
         self._range_m = pose["range_m"]
         self._segmenter = segmenter
-        self._history: deque[np.ndarray] = deque(maxlen=HISTORY)
         self._cell = np.ones(2)  # 每格的像素尺寸，随画面尺寸在 project 中更新
 
     def process(self, frame: np.ndarray) -> VisionSceneV1 | None:
-        """无任何有效识别时返回 None：不发布，大屏保留上一帧并标为陈旧（设计 §3.7）。"""
-        self._history.append(self._segmenter(frame))
-        scene = self.project(smooth(self._history), frame)
+        """无任何有效识别时返回 None。"""
+        scene = self.project(self._segmenter(frame), frame)
         if not any(scene.values()):
             return None
         return VisionSceneV1.model_validate(
