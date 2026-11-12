@@ -23,6 +23,7 @@ const CAM: Camera = {
   area_id: null,
   pose: POSE,
   calibration: [],
+  calibration_error_m: null,
   climb_lines: [],
   created_at: "2026-11-05T00:00:00Z",
   updated_at: "2026-11-05T00:00:00Z",

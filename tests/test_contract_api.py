@@ -38,6 +38,8 @@ ENDPOINTS = [
     ("patch", "/api/cameras/{id}", "admin"),
     ("delete", "/api/cameras/{id}", "admin"),
     ("get", "/api/cameras/{id}/snapshot", "viewer"),  # D-115：摄像头栏缩略图
+    ("post", "/api/cameras/{id}/calibration/check", "admin"),  # FR-910：标定只拟合不保存
+    ("put", "/api/cameras/{id}/calibration", "admin"),
     ("get", "/api/scene/areas", "viewer"),
     ("post", "/api/scene/areas", "admin"),
     ("put", "/api/scene/areas/{id}", "admin"),

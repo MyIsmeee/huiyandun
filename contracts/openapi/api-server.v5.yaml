@@ -210,7 +210,7 @@ paths:
   /api/cameras/{id}:
     patch:
       operationId: updateCamera
-      description: 只修改给出的字段；口令省略表示不修改，clear_password 为 true 时清除；calibration 不可改
+      description: 只修改给出的字段；口令省略表示不修改，clear_password 为 true 时清除；calibration 只经标定接口修改，改安装参数不影响标定（D-134）
       x-min-role: admin
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -268,6 +268,56 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/cameras/{id}/calibration/check:
+    post:
+      operationId: checkCameraCalibration
+      description: 按标定点拟合地面映射，只返回误差、不保存，供标定对话框实时显示（V-CAM10、FR-910）；拟合由 vision-engine 应答（D-132）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CalibrationInput" }
+      responses:
+        "200":
+          description: 拟合结果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CalibrationFit" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/CalibrationAreaChanged" }
+        "503": { $ref: "#/components/responses/CalibrationUnavailable" }
+  /api/cameras/{id}/calibration:
+    put:
+      operationId: saveCameraCalibration
+      description: 拟合通过后保存标定、写审计并下发登记表，视觉引擎按新标定运行（FR-906、FR-910）；points 为空表示清除标定，回到按安装参数估算（D-102）
+      x-min-role: admin
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CalibrationInput" }
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Camera" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/CalibrationAreaChanged" }
+        "503": { $ref: "#/components/responses/CalibrationUnavailable" }
   /api/devices/{id}:
     get:
       operationId: getDevice
@@ -779,6 +829,12 @@ components:
     BadGateway:
       description: 依赖的内部服务不可用或超时（如 go2rtc、llm-gateway），或模型供应商返回错误
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    CalibrationAreaChanged:
+      description: 摄像头未放入区域，或已不在 area_id 所指的区域（标定期间在场景页被移动）
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    CalibrationUnavailable:
+      description: 识别服务（vision-engine）5 s 内未应答，或应答不合契约
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   schemas:
     Error:
@@ -942,7 +998,7 @@ components:
       maxItems: 4
     Camera:
       type: object
-      required: [id, name, ip, ingest, source, username, password_set, area_id, pose, calibration, climb_lines, created_at, updated_at]
+      required: [id, name, ip, ingest, source, username, password_set, area_id, pose, calibration, calibration_error_m, climb_lines, created_at, updated_at]
       properties:
         id: { type: string, description: cam-NN，也是 go2rtc 与录像中的流名 }
         area_id: { anyOf: [{ type: string }, { type: "null" }], description: 所在场景区域；null 表示未放入任何区域，3D 中不出现（D-124） }
@@ -959,8 +1015,11 @@ components:
         pose: { $ref: "#/components/schemas/Pose" }
         calibration:
           type: array
-          description: 地面标定点 [u, v, x, y]，只经 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102）
+          description: 地面标定点 [u, v, x, y]，经标定对话框或 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102）
           items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+        calibration_error_m:
+          anyOf: [{ type: number, minimum: 0 }, { type: "null" }]
+          description: 保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null
         climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -995,6 +1054,22 @@ components:
         clear_password: { type: boolean }
         pose: { $ref: "#/components/schemas/Pose" }
         climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
+    CalibrationInput:
+      type: object
+      required: [area_id, points]
+      properties:
+        area_id: { type: string, description: 打开标定对话框时摄像头所在区域；与库中不一致时 409 }
+        points:
+          type: array
+          description: 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，区域左下为原点）
+          maxItems: 20
+          items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+    CalibrationFit:
+      type: object
+      required: [reproj_error_m, residuals_m]
+      properties:
+        reproj_error_m: { type: number, minimum: 0, description: 均方根重投影误差（米） }
+        residuals_m: { type: array, items: { type: number, minimum: 0 }, description: 各组偏差（米），与 points 一一对应 }
     CameraInfo:
       type: object
       required: [stream, area_id, pose, calibration, mapping, homography, reproj_error_m]

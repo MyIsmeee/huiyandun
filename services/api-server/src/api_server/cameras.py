@@ -24,6 +24,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     Integer,
     LargeBinary,
     MetaData,
@@ -92,6 +93,7 @@ cameras = Table(
     Column("area_id", Text),
     Column("pose", JSONB),
     Column("calibration", JSONB),
+    Column("calibration_error_m", Float),
     Column("climb_lines", JSONB),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
@@ -144,6 +146,7 @@ def view(row: Any) -> Camera:
             "area_id": row["area_id"],
             "pose": row["pose"],
             "calibration": row["calibration"],
+            "calibration_error_m": row["calibration_error_m"],
             "climb_lines": row["climb_lines"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -182,7 +185,7 @@ def device(row: Any, mode: str) -> Device:
                 "calibration": row["calibration"],
                 "mapping": "calibrated" if calibrated else "estimated",
                 "homography": None,
-                "reproj_error_m": None,
+                "reproj_error_m": row["calibration_error_m"] if calibrated else None,
             },
         }
     )
@@ -476,6 +479,7 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         ),
         "pose": body.pose.model_dump(mode="json"),
         "calibration": [],
+        "calibration_error_m": None,
         "climb_lines": [line.root for line in body.climb_lines or []],
         "area_id": None,  # 在场景页放入区域（FR-908）
         "created_at": now,

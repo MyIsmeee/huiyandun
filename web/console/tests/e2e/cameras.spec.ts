@@ -5,7 +5,7 @@ const POSE = { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 9
 const CAMERA = {
   id: "cam-03", name: "大门口", ip: "192.168.8.31", ingest: "pull",
   source: { protocol: "rtsp", host: "192.168.8.31", port: 554, path: "/Streaming/Channels/101", relay: false },
-  username: "admin", password_set: true, pose: POSE, calibration: [], climb_lines: [],
+  username: "admin", password_set: true, pose: POSE, calibration: [], calibration_error_m: null, climb_lines: [],
   created_at: "2026-11-05T00:00:00Z", updated_at: "2026-11-05T00:00:00Z",
 }; // prettier-ignore
 const PUSHED = { ...CAMERA, id: "cam-04", name: "仓库", ip: "192.168.8.32", ingest: "push", source: null, password_set: false };

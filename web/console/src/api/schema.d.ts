@@ -161,7 +161,7 @@ export interface paths {
         delete: operations["deleteCamera"];
         options?: never;
         head?: never;
-        /** @description 只修改给出的字段；口令省略表示不修改，clear_password 为 true 时清除；calibration 不可改 */
+        /** @description 只修改给出的字段；口令省略表示不修改，clear_password 为 true 时清除；calibration 只经标定接口修改，改安装参数不影响标定（D-134） */
         patch: operations["updateCamera"];
         trace?: never;
     };
@@ -175,6 +175,40 @@ export interface paths {
         /** @description 经 go2rtc 取一帧 JPEG 供编辑框预览、画警戒线（V-CAM4、V-CAM7）与摄像头栏缩略图（D-115），不落盘；viewer 本就可经 WebRTC 观看同一路画面 */
         get: operations["getCameraSnapshot"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cameras/{id}/calibration/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 按标定点拟合地面映射，只返回误差、不保存，供标定对话框实时显示（V-CAM10、FR-910）；拟合由 vision-engine 应答（D-132） */
+        post: operations["checkCameraCalibration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cameras/{id}/calibration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description 拟合通过后保存标定、写审计并下发登记表，视觉引擎按新标定运行（FR-906、FR-910）；points 为空表示清除标定，回到按安装参数估算（D-102） */
+        put: operations["saveCameraCalibration"];
         post?: never;
         delete?: never;
         options?: never;
@@ -730,8 +764,10 @@ export interface components {
             /** @description 推流口令（用户名 hyd）：只在新增推流摄像头或改为推流的响应中给出一次，列表中不含（V-CAM2、D-103） */
             push_password?: string | null;
             pose: components["schemas"]["Pose"];
-            /** @description 地面标定点 [u, v, x, y]，只经 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102） */
+            /** @description 地面标定点 [u, v, x, y]，经标定对话框或 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102） */
             calibration: number[][];
+            /** @description 保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null */
+            calibration_error_m: number | null;
             climb_lines: components["schemas"]["ClimbLine"][];
             /** Format: date-time */
             created_at: string;
@@ -769,6 +805,18 @@ export interface components {
             clear_password?: boolean;
             pose?: components["schemas"]["Pose"];
             climb_lines?: components["schemas"]["ClimbLine"][];
+        };
+        CalibrationInput: {
+            /** @description 打开标定对话框时摄像头所在区域；与库中不一致时 409 */
+            area_id: string;
+            /** @description 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，区域左下为原点） */
+            points: number[][];
+        };
+        CalibrationFit: {
+            /** @description 均方根重投影误差（米） */
+            reproj_error_m: number;
+            /** @description 各组偏差（米），与 points 一一对应 */
+            residuals_m: number[];
         };
         CameraInfo: {
             /** @description go2rtc 流名 */
@@ -1479,6 +1527,24 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description 摄像头未放入区域，或已不在 area_id 所指的区域（标定期间在场景页被移动） */
+        CalibrationAreaChanged: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description 识别服务（vision-engine）5 s 内未应答，或应答不合契约 */
+        CalibrationUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         Id: string;
@@ -1914,6 +1980,76 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    checkCameraCalibration: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalibrationInput"];
+            };
+        };
+        responses: {
+            /** @description 拟合结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalibrationFit"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["CalibrationAreaChanged"];
+            503: components["responses"]["CalibrationUnavailable"];
+        };
+    };
+    saveCameraCalibration: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalibrationInput"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["CalibrationAreaChanged"];
+            503: components["responses"]["CalibrationUnavailable"];
         };
     };
     getDevice: {
