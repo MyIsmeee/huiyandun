@@ -41,7 +41,7 @@ export function Scene2D({ items, cameras, view }: { items: SceneItem[]; cameras:
   );
 }
 
-function Footprints({ items }: { items: SceneItem[] }) {
+export function Footprints({ items }: { items: SceneItem[] }) {
   const catalog = useCatalog();
   return footprints(items, catalog).map(({ asset, x, y, length, width, rot }, i) => (
     <rect
@@ -59,7 +59,7 @@ function Footprints({ items }: { items: SceneItem[] }) {
 }
 
 /** 摄像头：视场扇形（颜色与不透明度同 3D 视场）与机身圆点 */
-function CameraTopDown({ camera }: { camera: Camera }) {
+export function CameraTopDown({ camera }: { camera: Camera }) {
   const { x, y, yaw_deg, hfov_deg, range_m } = camera.pose;
   const look = deviceLook(camera.state);
   const fan = Array.from({ length: ARC_STEPS + 1 }, (_, k) => {
