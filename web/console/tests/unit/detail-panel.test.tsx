@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DetailPanel, TargetPanel } from "../../src/panels/DetailPanel/DetailPanel";
-import type { Device, Target } from "../../src/store/live";
+import { type Device, type Target, useLive } from "../../src/store/live";
 
 vi.mock("../../src/panels/LiveVideo/LiveVideo", async (original) => ({
   ...(await original<typeof import("../../src/panels/LiveVideo/LiveVideo")>()),
@@ -89,5 +89,45 @@ describe("TargetPanel", () => {
 
     expect(screen.getByText("—")).toBeTruthy();
     expect(screen.getByText("数据非实时")).toBeTruthy();
+  });
+});
+
+describe("地面映射（V-CAM9、FR-902、FR-910）", () => {
+  const CALIBRATION = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]];
+  const camera = (mapping: "calibrated" | "estimated", reproj_error_m: number | null): Device => ({
+    ...DEVICE,
+    id: "cam-01",
+    type: "camera",
+    state: "normal",
+    camera: {
+      stream: "cam-01",
+      area_id: "area-01",
+      pose: { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 },
+      calibration: mapping === "calibrated" ? CALIBRATION : [],
+      mapping,
+      homography: null,
+      reproj_error_m,
+    },
+  });
+
+  afterEach(() => useLive.setState({ devices: {} }));
+
+  it.each([
+    [camera("calibrated", 0.21), "已标定 · 误差 ±0.21 m"],
+    [camera("estimated", null), "按安装参数估算"],
+  ])("设备详情显示映射方式（A17）", (device, text) => {
+    render(<DetailPanel device={device} stale={false} onClose={vi.fn()} />);
+    expect(screen.getByText(text)).toBeTruthy();
+  });
+
+  it("所属摄像头按安装参数估算时，定位误差注明（A17）", () => {
+    useLive.setState({ devices: { "cam-01": camera("estimated", null) } });
+    render(<TargetPanel target={TARGET} stale={false} onClose={vi.fn()} />);
+    expect(screen.getByText("±0.4 m · 按安装参数估算")).toBeTruthy();
+    cleanup();
+
+    useLive.setState({ devices: { "cam-01": camera("calibrated", 0.21) } });
+    render(<TargetPanel target={TARGET} stale={false} onClose={vi.fn()} />);
+    expect(screen.getByText("±0.4 m")).toBeTruthy();
   });
 });

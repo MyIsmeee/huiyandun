@@ -54,13 +54,13 @@ describe("摄像头列表（ui.md §7.2）", () => {
   };
 
   it("显示不含凭据的地址、口令是否设置、地面映射方式（V-CAM1、V-CAM2）", () => {
-    view([CAM, { ...CAM, id: "cam-01", name: "演示", password_set: false, calibration: [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]] }]);
+    view([CAM, { ...CAM, id: "cam-01", name: "演示", password_set: false, calibration: [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]], calibration_error_m: 0.21 }]);
     const items = within(screen.getByRole("table", { name: "摄像头列表" })).getAllByRole("row").slice(1);
     expect(items[0]?.textContent).toContain("rtsp://192.168.8.31:554/Streaming/Channels/101 · 口令 已设置");
     expect(items[0]?.textContent).toContain("按安装参数估算");
     expect(items[0]?.textContent).not.toContain("admin");
     expect(items[1]?.textContent).toContain("口令 未设置");
-    expect(items[1]?.textContent).toContain("已标定");
+    expect(items[1]?.textContent).toContain("已标定 · 误差 ±0.21 m");
   });
 
   it("删除须二次确认并说明后果（V-CAM5）", () => {
@@ -132,6 +132,37 @@ describe("添加与编辑（ui.md §7.2）", () => {
     fireEvent.click(screen.getByRole("radio", { name: "推流（设备推到本机）" }));
     expect(screen.queryByRole("combobox", { name: "协议" })).toBeNull();
     expect(screen.getByText("推流地址")).toBeTruthy();
+  });
+});
+
+describe("地面映射（V-CAM9、FR-910）", () => {
+  const section = () => within(screen.getByRole("region", { name: "地面映射" }));
+
+  it("未放入区域时标定按钮不可点并注明原因（A16）", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockRejectedValue(new ApiError(502, "无画面"));
+    render(<CameraEditor camera={CAM} onClose={() => {}} onSaved={() => {}} />);
+    await flush();
+
+    expect(section().getByText("按安装参数估算")).toBeTruthy();
+    expect((section().getByRole("button", { name: "标定" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(section().getByText("先在场景页把摄像头放入区域")).toBeTruthy();
+    expect(screen.queryByText(/已标定：位置按标定换算/)).toBeNull();
+  });
+
+  it("已标定时显示误差，安装参数说明注明只用于画视场（A16）", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockRejectedValue(new ApiError(502, "无画面"));
+    const calibrated = { ...CAM, area_id: "area-01", calibration: [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]], calibration_error_m: 0.21 };
+    render(<CameraEditor camera={calibrated} onClose={() => {}} onSaved={() => {}} />);
+    await flush();
+
+    expect(section().getByText("已标定 · 误差 ±0.21 m")).toBeTruthy();
+    expect((section().getByRole("button", { name: "标定" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText(/已标定：位置按标定换算，安装参数只用于画视场；摄像头转动过请重新标定。/)).toBeTruthy();
+  });
+
+  it("新增摄像头保存前不显示地面映射", () => {
+    render(<CameraEditor camera={null} onClose={() => {}} onSaved={() => {}} />);
+    expect(screen.queryByRole("region", { name: "地面映射" })).toBeNull();
   });
 });
 

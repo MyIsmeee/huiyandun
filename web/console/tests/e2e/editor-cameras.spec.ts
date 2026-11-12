@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { dragOnGround, editor, library, openEditor, pointAt, savedCameras } from "./editor-helpers";
-import { camera, freezeClock } from "./helpers";
+import { camera, expectToast, freezeClock } from "./helpers";
 
 // 场景页放置摄像头（设计 150 E-5）：位置与朝向随区域整体保存写回登记表
 test.beforeEach(({ page }) => freezeClock(page));
@@ -25,6 +25,20 @@ test("未放置的摄像头：按下放置，拖动方向为朝向；保存时�
   await page.mouse.move(0, 0);
   await expect(editor(page)).toHaveScreenshot("editor-camera-placed.png");
   expect(await savedCameras(page)).toEqual([CAM01, { id: "cam-02", x: 30, y: 5, yaw_deg: 90 }]);
+});
+
+test("移出已标定的摄像头：提示保存后标定清除；撤销放回后提示撤掉（D-134、A18）", async ({ page }) => {
+  await openEditor(page); // cam-01 有 4 组标定点
+  await cameras(page).getByRole("button", { name: "移出区域 cam-01" }).click();
+  await expectToast(page, "保存后 cam-01 的地面标定将清除");
+
+  await page.keyboard.press("Control+Z");
+  await expect(cameras(page).getByRole("button", { name: "移出区域 cam-01" })).toBeVisible();
+  // 退场动画按模拟时钟推进；总共只推进约 1 s，远短于提示自行消失的 4 s
+  await expect(async () => {
+    await page.clock.runFor(100);
+    await expect(page.getByText("保存后 cam-01 的地面标定将清除")).toHaveCount(0, { timeout: 50 });
+  }).toPass({ intervals: [50], timeout: 1000 });
 });
 
 test("移出区域可撤销；重新放置时单击不拖动保留原朝向", async ({ page }) => {
