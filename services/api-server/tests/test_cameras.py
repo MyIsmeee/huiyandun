@@ -5,23 +5,31 @@ import asyncio
 import base64
 import os
 import time
+import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx2
+import nats
 import pytest
 import yaml
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select, text
+from pydantic import ValidationError
+from sqlalchemy import delete, select, text, update
 
-from api_server import cameras
+from api_server import cameras, scene
 from api_server.app import create_app
 from api_server.audit import audit_log
 from api_server.config import ApiConfig
 from api_server.db import transaction
 from api_server.llm import unseal
+from py_contracts.events.hyd_vision_calibration_reply_v1_schema import VisionCalibrationReplyV1
+from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
+    VisionCalibrationRequestV1,
+)
 
 POSE = {
     "x": 12,
@@ -560,3 +568,258 @@ def test_snapshot_unknown_camera_and_viewer(
     assert client.get("/api/cameras/cam-01/snapshot", headers=headers()).status_code == 200
     client.cookies.clear()
     assert client.get("/api/cameras/cam-01/snapshot", headers=headers()).status_code == 401
+
+
+# 标定（FR-910、D-132、D-134）：拟合由 vision-engine 应答，此处以假应答代替
+CALIBRATION = [[100, 900, 1, 1], [1800, 900, 9, 1], [300, 500, 2, 8], [1600, 500, 8, 8]]
+CALIBRATION += [[900, 700, 5, 4], [500, 800, 3, 2]]
+
+
+@pytest.fixture
+def area(client: TestClient, db: tuple[ApiConfig, ApiConfig]) -> Iterator[str]:
+    """新建 10×10 m 的区域并放入 cam-01；用后删除，不影响其他用例。"""
+    created = client.post(
+        "/api/scene/areas", json={"name": "标定", "width_m": 10, "depth_m": 10}, headers=headers()
+    ).json()
+    body = {k: created[k] for k in ("name", "width_m", "depth_m", "items", "updated_at")}
+    body["cameras"] = [{"id": "cam-01", "x": 5, "y": 0, "yaw_deg": 90}]
+    r = client.put(f"/api/scene/areas/{created['id']}", json=body, headers=headers())
+    assert r.status_code == 200, r.text
+    yield created["id"]
+
+    async def remove() -> None:
+        async with transaction(db[1]) as conn:
+            await conn.execute(
+                update(cameras.cameras)
+                .where(cameras.cameras.c.area_id == created["id"])
+                .values(area_id=None)
+            )
+            await conn.execute(
+                delete(scene.scene_areas).where(scene.scene_areas.c.id == created["id"])
+            )
+
+    asyncio.run(remove())
+
+
+def fit_reply(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, outcome: float | str | Exception = 0.21
+) -> list[VisionCalibrationRequestV1]:
+    """outcome 为误差时拟合成功，各组偏差相同；为字符串时是失败原因；为异常时视为未应答。"""
+    asked: list[VisionCalibrationRequestV1] = []
+
+    async def request(
+        subject: str,
+        event: VisionCalibrationRequestV1,
+        model: type[VisionCalibrationReplyV1],
+        timeout_s: float,
+    ) -> VisionCalibrationReplyV1:
+        assert subject == "hyd.vision.calibration_request.v1"
+        asked.append(event)
+        if isinstance(outcome, Exception):
+            raise outcome
+        stamp = {"schema_version": "1.0.0", "event_id": uuid.uuid4(), "ts": datetime.now(UTC)}
+        if isinstance(outcome, str):
+            reply = {"reason": outcome, "reproj_error_m": None, "residuals_m": None}
+        else:
+            residuals = [outcome] * len(event.points)
+            reply = {"reason": None, "reproj_error_m": outcome, "residuals_m": residuals}
+        return model.model_validate(stamp | reply)
+
+    monkeypatch.setattr(cast(Any, client.app).state.bus, "request", request)
+    return asked
+
+
+def calibrate(
+    client: TestClient, area_id: str, points: list[list[float]], check: bool = False
+) -> Any:
+    body = {"area_id": area_id, "points": points}
+    if check:
+        return client.post("/api/cameras/cam-01/calibration/check", json=body, headers=headers())
+    return client.put("/api/cameras/cam-01/calibration", json=body, headers=headers())
+
+
+def audited(config: ApiConfig, action: str, r: Any) -> list[dict[str, Any]]:
+    """审计表只增不删，按本次请求的请求 ID 取。"""
+    request_id = r.request.headers["X-Request-ID"]
+    return [a for a in audits(config, action) if a["request_id"] == request_id]
+
+
+def site_camera(client: TestClient, camera_id: str) -> dict[str, Any]:
+    [device] = [d for d in client.get("/api/site").json()["devices"] if d["id"] == camera_id]
+    return device["camera"]
+
+
+def test_calibration_check_does_not_save(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig], area: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A5：只拟合、不保存，不写审计。"""
+    asked = fit_reply(client, monkeypatch, 0.21)
+
+    r = calibrate(client, area, CALIBRATION, check=True)
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"reproj_error_m": 0.21, "residuals_m": [0.21] * 6}
+    assert [(a.camera_id, [p.root for p in a.points]) for a in asked] == [("cam-01", CALIBRATION)]
+    assert stored(db[1], "cam-01")["calibration"] == []
+    assert audited(db[1], "camera.calibrated", r) == []
+
+
+def test_calibration_saved(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig], area: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A6：保存点与误差、写审计、下发登记表，设备按标定映射。"""
+    fit_reply(client, monkeypatch, 0.21)
+    state = cast(Any, client.app).state
+    published: list[Any] = []
+    js_publish = state.bus.js_publish
+
+    async def capture(subject: str, event: Any) -> None:
+        published.append(event)
+        await js_publish(subject, event)
+
+    monkeypatch.setattr(state.bus, "js_publish", capture)
+
+    r = calibrate(client, area, CALIBRATION)
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["calibration"], r.json()["calibration_error_m"]) == (CALIBRATION, 0.21)
+    row = stored(db[1], "cam-01")
+    assert (row["calibration"], row["calibration_error_m"]) == (CALIBRATION, 0.21)
+    [audit] = audited(db[1], "camera.calibrated", r)
+    assert audit["before"] == {"points": [], "error_m": None}
+    assert audit["after"] == {"points": CALIBRATION, "error_m": 0.21}
+    [cam] = [c for c in published[-1].model_dump(mode="json")["cameras"] if c["id"] == "cam-01"]
+    assert cam["calibration"] == CALIBRATION
+    camera = site_camera(client, "cam-01")
+    assert (camera["mapping"], camera["reproj_error_m"]) == ("calibrated", 0.21)
+
+
+@pytest.mark.parametrize(
+    ("points", "area_id", "status", "message"),
+    [
+        (CALIBRATION[:3], None, 400, "至少需要 4 组点"),
+        (CALIBRATION[:4] + [[900, 700, 10.5, 4]], None, 400, "第 5 组"),
+        (CALIBRATION[:4] + [[-1, 700, 5, 4]], None, 400, "第 5 组"),
+        (CALIBRATION, "area-99", 409, "摄像头已换区域，请关闭后重新标定"),
+    ],
+)
+def test_calibration_rejected(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    area: str,
+    monkeypatch: pytest.MonkeyPatch,
+    points: list[list[float]],
+    area_id: str | None,
+    status: int,
+    message: str,
+) -> None:
+    """A7：点数不足、越界、区域不一致时拒绝，不请求拟合、库中不变。"""
+    asked = fit_reply(client, monkeypatch)
+
+    for check in (True, False):
+        r = calibrate(client, area_id or area, points, check)
+        assert r.status_code == status, r.text
+        assert message in r.json()["message"]
+    assert asked == []
+    assert stored(db[1], "cam-01")["calibration"] == []
+
+
+def test_calibration_rejected_outside_area(
+    client: TestClient, area: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A7：摄像头未放入区域时 409；不存在时 404。"""
+    fit_reply(client, monkeypatch)
+    unplaced = client.post("/api/cameras", json=GATE, headers=headers()).json()["id"]
+    body = {"area_id": area, "points": CALIBRATION}
+    for camera_id, status in ((unplaced, 409), ("cam-99", 404)):
+        r = client.put(f"/api/cameras/{camera_id}/calibration", json=body, headers=headers())
+        assert r.status_code == status, r.text
+
+
+@pytest.mark.parametrize(
+    ("reason", "message"),
+    [
+        ("pixels_collinear", "画面上的点至少要有 4 个不在同一直线上"),
+        ("ground_collinear", "地面上的点至少要有 4 个不在同一直线上"),
+        ("inconsistent", "这些点对不上"),
+    ],
+)
+def test_calibration_fit_failure_explained(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    area: str,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+    message: str,
+) -> None:
+    fit_reply(client, monkeypatch, reason)
+
+    for check in (True, False):
+        r = calibrate(client, area, CALIBRATION, check)
+        assert r.status_code == 400, r.text
+        assert message in r.json()["message"]
+    assert stored(db[1], "cam-01")["calibration"] == []
+
+
+def invalid_fit() -> ValidationError:
+    with pytest.raises(ValidationError) as caught:
+        VisionCalibrationReplyV1.model_validate({})
+    return caught.value
+
+
+@pytest.mark.parametrize("error", [nats.errors.NoRespondersError(), TimeoutError(), invalid_fit()])
+def test_calibration_vision_unavailable(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    area: str,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    """A8：视觉引擎不应答或应答不合契约时 503，库中不变。"""
+    fit_reply(client, monkeypatch, error)
+
+    for check in (True, False):
+        r = calibrate(client, area, CALIBRATION, check)
+        assert r.status_code == 503, r.text
+        assert r.json()["message"] == "识别服务未响应，请稍后重试"
+    assert stored(db[1], "cam-01")["calibration"] == []
+
+
+def test_calibration_requires_admin(client: TestClient, area: str, password: str) -> None:
+    """A9。"""
+    for role in ("viewer", "operator"):
+        login(client, role, password)
+        for check in (True, False):
+            assert calibrate(client, area, CALIBRATION, check).status_code == 403
+
+
+def test_calibration_cleared(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig], area: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A10：空 points 清除标定，不请求拟合，回到按安装参数估算。"""
+    asked = fit_reply(client, monkeypatch, 0.21)
+    assert calibrate(client, area, CALIBRATION).status_code == 200
+
+    r = calibrate(client, area, [])
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["calibration"], r.json()["calibration_error_m"]) == ([], None)
+    assert len(asked) == 1
+    [audit] = audited(db[1], "camera.calibrated", r)
+    assert audit["after"] == {"points": [], "error_m": None}
+    camera = site_camera(client, "cam-01")
+    assert (camera["mapping"], camera["reproj_error_m"]) == ("estimated", None)
+
+
+def test_pose_change_keeps_calibration(
+    client: TestClient, area: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A12：摄像头页改俯角、朝向不清除标定（D-134）。"""
+    fit_reply(client, monkeypatch, 0.21)
+    assert calibrate(client, area, CALIBRATION).status_code == 200
+
+    pose = POSE | {"x": 5, "y": 0, "pitch_deg": -45, "yaw_deg": 120}
+    r = client.patch("/api/cameras/cam-01", json={"pose": pose}, headers=headers())
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["calibration"], r.json()["calibration_error_m"]) == (CALIBRATION, 0.21)

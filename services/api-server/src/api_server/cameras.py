@@ -4,6 +4,8 @@
 按登记表增删 go2rtc 的流，发布 hyd.config.cameras.v1（只保留最新一条，不含凭据与取流地址），
 各服务据此热更新（FR-906）。取流地址只由本模块按协议、主机、端口、路径拼出，不接受完整地址：
 go2rtc 的 exec: 等源可执行命令（D-103）。口令只写不读（C-ST-03），日志不含地址（G-14、SD-06）。
+
+地面标定（FR-910、D-132）：拟合由 vision-engine 应答，本模块只校验、保存与下发；改安装参数不影响标定（D-134）。
 """
 
 import asyncio
@@ -18,8 +20,10 @@ from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx2
+import nats
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import ValidationError
 from sqlalchemy import (
     Boolean,
     Column,
@@ -45,9 +49,23 @@ from api_server.audit import record
 from api_server.auth import Principal, require
 from api_server.llm import seal, unseal
 from api_server.site import MIN_CALIBRATION_POINTS
-from py_contracts.api import Camera, CameraCreate, CameraList, CameraUpdate, Device, Site, WsFrame
+from py_contracts.api import (
+    CalibrationFit,
+    CalibrationInput,
+    Camera,
+    CameraCreate,
+    CameraList,
+    CameraUpdate,
+    Device,
+    Site,
+    WsFrame,
+)
 from py_contracts.config.site_schema import SiteConfig
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
+from py_contracts.events.hyd_vision_calibration_reply_v1_schema import VisionCalibrationReplyV1
+from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
+    VisionCalibrationRequestV1,
+)
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +92,14 @@ SNAPSHOT_ERRORS = {
 }
 # go2rtc 连上了但不认这路流的编码（如 SDP 把媒体标为 sendonly）：提示打开兼容模式（04 V-CAM8、D-117）
 SNAPSHOT_UNRECOGNIZED = "视频服务无法识别这路流的编码：可在编辑中打开兼容模式（经中继拉流）"
+CALIBRATE_SUBJECT = "hyd.vision.calibration_request.v1"  # 核心 NATS 请求/应答
+CALIBRATE_TIMEOUT_S = 5.0  # 纯计算，20 组点远小于 1 s
+CALIBRATE_UNAVAILABLE = "识别服务未响应，请稍后重试"
+CALIBRATE_REASONS = {
+    "pixels_collinear": "画面上的点至少要有 4 个不在同一直线上",
+    "ground_collinear": "地面上的点至少要有 4 个不在同一直线上",
+    "inconsistent": "这些点对不上：检查每组画面点与地面点是否对应，画面点是否点在地面上",
+}
 
 metadata = MetaData()
 cameras = Table(
@@ -613,3 +639,103 @@ async def snapshot(camera_id: str, request: Request) -> Response:
             raise HTTPException(502, SNAPSHOT_UNRECOGNIZED)
         raise HTTPException(502, SNAPSHOT_ERRORS.get(res.status_code, SNAPSHOT_ERRORS[500]))
     return Response(res.content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+def _calibration_audit(row: Any) -> dict[str, Any]:
+    return {"points": row["calibration"], "error_m": row["calibration_error_m"]}
+
+
+async def _check_calibration(conn: AsyncConnection, row: Any, body: CalibrationInput) -> None:
+    """标定点数、所在区域与点的范围（FR-910、D-125）；拟合前与保存时各查一次。"""
+    if 0 < len(body.points) < MIN_CALIBRATION_POINTS:
+        raise HTTPException(400, f"至少需要 {MIN_CALIBRATION_POINTS} 组点")
+    if row["area_id"] is None or row["area_id"] != body.area_id:
+        raise HTTPException(409, "摄像头已换区域，请关闭后重新标定")
+    query = select(scene.scene_areas.c.width_m, scene.scene_areas.c.depth_m).where(
+        scene.scene_areas.c.id == body.area_id
+    )
+    width, depth = (await conn.execute(query)).one()
+    for i, (u, v, x, y) in enumerate(p.root for p in body.points):
+        if u < 0 or v < 0:
+            raise HTTPException(400, f"第 {i + 1} 组：画面坐标不能为负")
+        if not (0 <= x <= width and 0 <= y <= depth):
+            raise HTTPException(
+                400, f"第 {i + 1} 组：地面位置 ({x:g}, {y:g}) 超出区域 {width}×{depth} m"
+            )
+
+
+async def _fit(request: Request, camera_id: str, body: CalibrationInput) -> CalibrationFit:
+    """请 vision-engine 拟合（D-132）：拟合不了时 400 并说明原因，未应答或应答不合契约时 503。"""
+    if len(body.points) < MIN_CALIBRATION_POINTS:
+        raise HTTPException(400, f"至少需要 {MIN_CALIBRATION_POINTS} 组点")
+    ask = VisionCalibrationRequestV1.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "event_id": uuid.uuid4(),
+            "ts": datetime.now(UTC),
+            "camera_id": camera_id,
+            "points": [p.root for p in body.points],
+        }
+    )
+    try:
+        reply = await request.app.state.bus.request(
+            CALIBRATE_SUBJECT, ask, VisionCalibrationReplyV1, CALIBRATE_TIMEOUT_S
+        )
+        if reply.reason is not None:
+            raise HTTPException(400, CALIBRATE_REASONS[reply.reason])
+        return CalibrationFit.model_validate(
+            {"reproj_error_m": reply.reproj_error_m, "residuals_m": reply.residuals_m}
+        )
+    except (nats.errors.Error, TimeoutError, ValidationError) as e:  # 含不合契约的应答
+        log.warning("cameras.calibrate_failed", extra={"camera_id": camera_id, "error": repr(e)})
+        raise HTTPException(503, CALIBRATE_UNAVAILABLE) from e
+
+
+async def _check_camera(request: Request, camera_id: str, body: CalibrationInput) -> None:
+    async with request.app.state.engine.connect() as conn:
+        query = select(cameras).where(cameras.c.id == camera_id)
+        row = (await conn.execute(query)).mappings().first()
+        if row is None:
+            raise HTTPException(404, "摄像头不存在")
+        await _check_calibration(conn, row, body)
+
+
+@router.post("/cameras/{camera_id}/calibration/check", dependencies=[Depends(require("admin"))])
+async def check_calibration(
+    camera_id: str, body: CalibrationInput, request: Request
+) -> CalibrationFit:
+    """只拟合、不保存，供标定对话框实时显示误差（V-CAM10）。"""
+    await _check_camera(request, camera_id, body)
+    return await _fit(request, camera_id, body)
+
+
+@router.put("/cameras/{camera_id}/calibration")
+async def save_calibration(
+    camera_id: str, body: CalibrationInput, request: Request, principal: Admin
+) -> Camera:
+    """拟合通过后保存并下发，视觉引擎按新标定重启这一路（FR-906）；points 为空表示清除标定（D-102）。"""
+    await _check_camera(request, camera_id, body)
+    fit = await _fit(request, camera_id, body) if body.points else None
+    async with request.app.state.engine.begin() as conn:
+        await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
+        row = await _locked(conn, camera_id)
+        await _check_calibration(conn, row, body)  # 拟合期间可能在场景页被移动或缩小区域
+        changes = {
+            "calibration": [p.root for p in body.points],
+            "calibration_error_m": fit.reproj_error_m if fit else None,
+            "updated_at": datetime.now(UTC),
+        }
+        # 标定不是放置变化：不更新区域的 updated_at，场景页的编辑不因此失效
+        await conn.execute(update(cameras).where(cameras.c.id == camera_id).values(changes))
+        values = dict(row) | changes
+        await record(
+            conn,
+            actor=principal.username,
+            action="camera.calibrated",
+            target=camera_id,
+            before=_calibration_audit(row),
+            after=_calibration_audit(values),
+            request_id=request.state.request_id,
+        )
+    await request.app.state.cameras.apply()
+    return view(values)
