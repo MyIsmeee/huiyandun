@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 版本 | `efficientvit-seg-l1-ade20k@cf3ccaf9+hyd.1`（未修改上游权重，只转换格式） |
-| 用途 | 场景语义分割：识别摄像头画面中的地面、路面、人行道、草地、墙、建筑、围栏、家具（桌、椅、柜、沙发、床）、黑板、树，投影到地面后供实时感知大屏重建环境（spec.md FR-108）。人员、车辆类别不使用，由 rtmo-s、rfdetr-s 检出 |
+| 用途 | 场景语义分割：识别摄像头画面中的地面、路面、人行道、草地、墙、建筑、围栏、家具（桌、椅、柜、沙发、床）、黑板、树，投影到地面后供场景初稿（spec.md FR-909、D-133）。人员、车辆类别不使用，由 rtmo-s、rfdetr-s 检出 |
 | 上游 | MIT Han Lab EfficientViT-Seg L1（ADE20K）；权重为 Hugging Face `han-cai/efficientvit-seg` 提交 `cf3ccaf9` 的 `efficientvit_seg_l1_ade20k.pt`，模型代码为 `mit-han-lab/efficientvit` 提交 `de7d7733` |
 | 许可证 | Apache-2.0（代码与权重） |
 | 训练数据 | ADE20K（上游公开数据集，使用条款见其官网） |

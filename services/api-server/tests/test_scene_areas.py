@@ -11,6 +11,7 @@ from typing import Any
 import nats
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import delete, select, text, update
 from starlette.testclient import WebSocketTestSession
 
@@ -441,7 +442,15 @@ def test_frames_of_area_without_cameras_ask_nothing(
     assert asked == []
 
 
-@pytest.mark.parametrize("error", [nats.errors.NoRespondersError(), TimeoutError()])
+def invalid_reply() -> ValidationError:
+    with pytest.raises(ValidationError) as caught:
+        VisionSceneReplyV1.model_validate({})
+    return caught.value
+
+
+@pytest.mark.parametrize(
+    "error", [nats.errors.NoRespondersError(), TimeoutError(), invalid_reply()]
+)
 def test_frames_503_when_vision_engine_does_not_answer(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:

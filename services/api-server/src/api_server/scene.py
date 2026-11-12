@@ -13,6 +13,7 @@ from typing import Annotated, Any
 
 import nats
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import ValidationError
 from sqlalchemy import (
     Boolean,
     Column,
@@ -284,7 +285,7 @@ async def get_frames(area_id: str, request: Request) -> SceneAreaFrames:
         reply = await request.app.state.bus.request(
             RECOGNIZE_SUBJECT, ask, VisionSceneReplyV1, RECOGNIZE_TIMEOUT_S
         )
-    except (nats.errors.Error, TimeoutError) as e:
+    except (nats.errors.Error, TimeoutError, ValidationError) as e:  # 含不合契约的应答
         log.warning("scene.recognize_failed", extra={"area_id": area_id, "error": repr(e)})
         raise HTTPException(503, "识别服务未响应，请稍后重试") from e
     found = reply.model_dump(mode="json")
