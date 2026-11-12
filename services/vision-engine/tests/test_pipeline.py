@@ -20,6 +20,9 @@ import supervision as sv
 from py_common.bus import Bus
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
+    VisionCalibrationRequestV1,
+)
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine import pipeline as pipeline_module
@@ -35,6 +38,7 @@ from vision_engine.pipeline import (
     CameraPipeline,
     FrameReader,
     Health,
+    calibrate,
     run_camera,
     supervise,
 )
@@ -836,3 +840,47 @@ def test_removed_camera_does_not_leave_stale_heartbeat(
     assert "cam-01/reader" in health._beats
     for running in cameras._running.values():
         running.reader.stop()
+
+
+def test_calibration_reply() -> None:
+    """A4：按请求中的标定点拟合，应答误差与各组偏差（FR-910）；不依赖摄像头是否在运行。"""
+    pixels = [(0, 0), (1000, 0), (0, 700), (1000, 700), (500, 300), (300, 500)]
+    points = [[u, v, u / 100, v / 100] for u, v in pixels]
+    points[4][2] += 0.5  # 一组地面点量偏
+    request = VisionCalibrationRequestV1.model_validate(
+        {
+            "schema_version": "1.0.0",
+            "event_id": uuid.uuid4(),
+            "ts": "2026-11-12T08:00:00Z",
+            "camera_id": "cam-09",
+            "points": points,
+        }
+    )
+
+    reply = asyncio.run(calibrate(request))
+
+    assert reply.reason is None
+    assert reply.residuals_m is not None and len(reply.residuals_m) == 6
+    assert max(reply.residuals_m) == reply.residuals_m[4]
+    assert reply.reproj_error_m == pytest.approx(np.sqrt(np.mean(np.square(reply.residuals_m))))
+    assert 0 < reply.reproj_error_m < 0.5
+
+
+def test_calibration_reply_gives_reason() -> None:
+    request = VisionCalibrationRequestV1.model_validate(
+        {
+            "schema_version": "1.0.0",
+            "event_id": uuid.uuid4(),
+            "ts": "2026-11-12T08:00:00Z",
+            "camera_id": "cam-09",
+            "points": [[i * 100, i * 100, i, i * i] for i in range(4)],
+        }
+    )
+
+    reply = asyncio.run(calibrate(request))
+
+    assert (reply.reason, reply.reproj_error_m, reply.residuals_m) == (
+        "pixels_collinear",
+        None,
+        None,
+    )

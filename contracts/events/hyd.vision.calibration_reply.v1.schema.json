@@ -1,0 +1,21 @@
+{
+  "title": "VisionCalibrationReplyV1",
+  "description": "hyd.vision.calibration_request.v1 的应答（应答方 vision-engine）：拟合成功时 reason 为 null，给出误差；失败时给出原因，误差为 null",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["reason", "reproj_error_m", "residuals_m"],
+  "properties": {
+    "reason": {
+      "anyOf": [{ "enum": ["pixels_collinear", "ground_collinear", "inconsistent"] }, { "type": "null" }],
+      "description": "pixels_collinear：画面点中找不到 4 个任意三点不共线的点；ground_collinear：地面点同理；inconsistent：单应矩阵退化，或标定点分处地平线两侧（多为配错或点到了墙面、天空）"
+    },
+    "reproj_error_m": {
+      "anyOf": [{ "type": "number" }, { "type": "null" }],
+      "description": "标定点映射残差的均方根（米）"
+    },
+    "residuals_m": {
+      "anyOf": [{ "type": "array", "items": { "type": "number" } }, { "type": "null" }],
+      "description": "各组标定点的映射残差（米），与请求的 points 一一对应"
+    }
+  }
+}

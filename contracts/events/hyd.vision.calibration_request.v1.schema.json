@@ -1,0 +1,17 @@
+{
+  "title": "VisionCalibrationRequestV1",
+  "description": "请求按标定点拟合地面映射（请求方 api-server，应答方 vision-engine；D-132、FR-910）。纯计算，不依赖该摄像头是否在运行。核心 NATS 请求/应答，不持久化；应答为 hyd.vision.calibration_reply.v1",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["camera_id", "points"],
+  "properties": {
+    "camera_id": { "type": "string", "description": "只用于日志" },
+    "points": {
+      "type": "array",
+      "description": "标定点 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米）",
+      "items": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+      "minItems": 4,
+      "maxItems": 20
+    }
+  }
+}

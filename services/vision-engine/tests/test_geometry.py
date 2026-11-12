@@ -2,6 +2,7 @@
 
 import math
 
+import numpy as np
 import pytest
 
 from vision_engine.geometry import GroundMapping
@@ -164,3 +165,60 @@ def test_from_pose_error_grows_with_distance() -> None:
 
 def test_from_pose_looking_at_horizon_is_unmapped() -> None:
     assert GroundMapping.from_pose(POSE | {"pitch_deg": 60.0}, 1280, 720) is None
+
+
+# 安装高度 3 m、俯角 10° 的 1920×1080 画面：地平线约在 v = 375，标定点取在其下
+TILTED = GroundMapping.from_pose(
+    {"x": 0, "y": 0, "height_m": 3, "yaw_deg": 90, "pitch_deg": -10, "hfov_deg": 90, "range_m": 30},
+    1920,
+    1080,
+)
+
+
+def tilted(pixels: list[tuple[float, float]]) -> list[list[float]]:
+    """由已知单应生成标定点 [u, v, x, y]。"""
+    assert TILTED is not None
+    ground = TILTED.to_plane(np.array(pixels, dtype=np.float64))
+    return [[u, v, float(x), float(y)] for (u, v), (x, y) in zip(pixels, ground, strict=True)]
+
+
+def test_calibrate_exact() -> None:
+    """A1：4 组点由已知单应生成，拟合后各组偏差为 0。"""
+    points = tilted([(300, 600), (1600, 620), (400, 1000), (1500, 950)])
+
+    result = GroundMapping.calibrate(points)
+
+    assert not isinstance(result, str)
+    mapping, residuals = result
+    assert residuals == pytest.approx([0] * 4, abs=1e-6)
+    assert mapping.reproj_error_m == pytest.approx(0, abs=1e-6)
+
+
+def test_calibrate_residuals_match_points() -> None:
+    d = 0.3
+    calibration = [[u, v, u / 100 + s, v / 100] for u, v in CORNERS for s in (d, -d)]
+
+    result = GroundMapping.calibrate(calibration)
+
+    assert not isinstance(result, str)
+    assert result[1] == pytest.approx([d] * 8)
+
+
+def test_calibrate_collinear() -> None:
+    """A2：画面点或地面点找不到 4 个任意三点不共线的点时，分别指出。"""
+    line = [(100, 100), (200, 200), (300, 300), (400, 400)]
+    pixels_collinear = [[u, v, i, i * i] for i, (u, v) in enumerate(line)]
+    # 画面点为正方形四角；地面点有 3 个在 y = 0 上
+    ground_collinear = [[u, v, i, 0 if i < 3 else 1] for i, (u, v) in enumerate(CORNERS)]
+
+    assert GroundMapping.calibrate(pixels_collinear) == "pixels_collinear"
+    assert GroundMapping.calibrate(ground_collinear) == "ground_collinear"
+
+
+def test_calibrate_inconsistent() -> None:
+    """A3：一组画面点移到地平线以上，拟合后标定点分处地平线两侧。"""
+    points = tilted([(300, 600), (1600, 620), (900, 800), (400, 1000), (1500, 950)])
+    points[2][1] = 150
+
+    assert GroundMapping.calibrate(points) == "inconsistent"
+    assert GroundMapping.fit(points) is None

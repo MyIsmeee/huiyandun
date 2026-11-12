@@ -1,7 +1,8 @@
 """检测链路（TK-021、TK-022、TK-118）：go2rtc 拉流 → 运动门控 → RTMO → ByteTrack →
 hyd.vision.track.v1 与 hyd.vision.behavior.v1；画面冻结、重放、挪位、遮挡与断流 →
 hyd.vision.integrity.v1（D-080、TK-114）。环境分割平时不运行：收到 hyd.vision.scene_request.v1 时对
-指定摄像头的当前画面各识别一次，以 hyd.vision.scene_reply.v1 应答（D-133、TK-162）。
+指定摄像头的当前画面各识别一次，以 hyd.vision.scene_reply.v1 应答（D-133、TK-162）。收到
+hyd.vision.calibration_request.v1 时按标定点拟合地面映射，以 hyd.vision.calibration_reply.v1 应答（D-132）。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
 处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
@@ -38,6 +39,10 @@ from py_common.config import load_config
 from py_common.log import configure_logging
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_calibration_reply_v1_schema import VisionCalibrationReplyV1
+from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
+    VisionCalibrationRequestV1,
+)
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
 from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
@@ -64,6 +69,7 @@ FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_REQUEST_SUBJECT = "hyd.vision.scene_request.v1"  # 核心 NATS 请求/应答，不持久化
+CALIBRATION_REQUEST_SUBJECT = "hyd.vision.calibration_request.v1"  # 同上
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
 # 持久化的视觉事件（architecture.md §12）。
@@ -583,6 +589,25 @@ class Cameras:
             log.warning("vision.reader_stop_slow", extra={"camera_id": camera_id})
 
 
+async def calibrate(request: VisionCalibrationRequestV1) -> VisionCalibrationReplyV1:
+    """按标定点拟合地面映射，供标定对话框显示误差与保存前校验（FR-910）。纯计算，与该路是否运行无关。"""
+    # 退化时最坏要遍历 C(20, 4) 种组合：放到线程里算，不阻塞同进程的检测与心跳
+    result = await asyncio.to_thread(GroundMapping.calibrate, [p.root for p in request.points])
+    if isinstance(result, str):
+        reply: dict[str, Any] = {"reason": result, "reproj_error_m": None, "residuals_m": None}
+    else:
+        mapping, residuals = result
+        reply = {"reason": None, "reproj_error_m": mapping.reproj_error_m, "residuals_m": residuals}
+    log.info(
+        "vision.calibration_checked",
+        extra={"camera_id": request.camera_id, "points": len(request.points)} | reply,
+    )
+    return VisionCalibrationReplyV1.model_validate(
+        {"schema_version": SCHEMA_VERSION, "event_id": uuid.uuid4(), "ts": datetime.now(UTC)}
+        | reply
+    )
+
+
 async def serve(config: VisionConfig) -> None:
     models = len(model_files(config))  # 显存上限由加载的模型平分（C-HW-12）
     detector = PoseDetector(
@@ -629,6 +654,7 @@ async def serve(config: VisionConfig) -> None:
             await asyncio.sleep(RECONNECT_S)
     health.forget("registry")
     await bus.serve(SCENE_REQUEST_SUBJECT, VisionSceneRequestV1, cameras.recognize)
+    await bus.serve(CALIBRATION_REQUEST_SUBJECT, VisionCalibrationRequestV1, calibrate)
     log.info("vision.started", extra={"device": config.device})
     await health.run()
 
