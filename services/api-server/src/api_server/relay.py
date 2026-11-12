@@ -22,7 +22,6 @@ from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecuti
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
-from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 
 EXPIRE_TICK_S = 1.0  # 检查告警态是否到期解除的周期
@@ -40,15 +39,11 @@ def _push(hub: Hub, device: Device | None) -> None:
         hub.broadcast(_frame("devices", device))
 
 
-async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]) -> None:
-    """scenes：各摄像头最新一帧场景，供新连接补推（只保留最新一帧，不持久化）。核心订阅只收实时事件。"""
+async def start(bus: Bus, hub: Hub, devices: Devices) -> None:
+    """核心订阅只收实时事件。"""
 
     async def on_track(event: VisionTrackV1) -> None:
         hub.broadcast(_frame("tracks", event))
-
-    async def on_scene(event: VisionSceneV1) -> None:
-        scenes[event.camera_id] = _frame("scene", event)
-        hub.broadcast(scenes[event.camera_id])
 
     # 先推行为事件与告警、再推设备：设备变色时事件卡内容已就绪
     async def on_behavior(event: VisionBehaviorV1) -> None:
@@ -64,7 +59,6 @@ async def start(bus: Bus, hub: Hub, devices: Devices, scenes: dict[str, WsFrame]
             _push(hub, devices.on_stream_lost(event, time.monotonic()))
 
     await bus.subscribe("hyd.vision.track.v1", VisionTrackV1, on_track)
-    await bus.subscribe("hyd.vision.scene.v1", VisionSceneV1, on_scene)
     await bus.subscribe("hyd.vision.behavior.v1", VisionBehaviorV1, on_behavior)
     await bus.subscribe("hyd.security.alert.v1", SecurityAlertV1, on_alert)
     # 只用核心订阅更新离线：JetStream 重放的历史断流不应把设备置为离线

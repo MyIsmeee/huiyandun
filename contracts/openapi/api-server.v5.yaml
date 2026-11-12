@@ -150,20 +150,25 @@ paths:
     get:
       operationId: getSceneAreaFrames
       description: |
-        区域内摄像头最近的识别帧，供场景页"从画面生成初稿"（FR-909）：只含平面坐标，不含图像（C-LLM-04）。
-        只读、不改动区域；草稿由场景页转换，经管理员确认后随整体保存提交
+        对区域内摄像头的当前画面各识别一次环境，供场景页"从画面生成初稿"（FR-909、D-133）：只含平面坐标，
+        不含图像（C-LLM-04）。只读、不改动区域；草稿由场景页转换，经管理员确认后随整体保存提交
       x-min-role: admin
       parameters:
         - { $ref: "#/components/parameters/Id" }
       responses:
         "200":
-          description: 识别帧与暂无识别结果的摄像头
+          description: 识别帧与没有识别结果的摄像头及原因
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SceneAreaFrames" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: 识别服务未响应
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/cameras:
     get:
       operationId: listCameras
@@ -869,16 +874,21 @@ components:
         updated_at: { type: string, format: date-time, description: 读取时的 updated_at }
     SceneAreaFrames:
       type: object
-      required: [frames, stale]
+      required: [frames, unavailable, stale]
       properties:
         frames:
           type: array
           items: { $ref: "#/components/schemas/VisionScene" }
-          description: 区域内各摄像头 10 s 内的最新一帧，坐标为区域内坐标，按摄像头编号排列
+          description: 区域内各摄像头当前画面的识别帧，坐标为区域内坐标，按摄像头编号排列
+        unavailable:
+          type: array
+          items: { $ref: "../events/hyd.vision.scene_reply.v1.schema.json#/$defs/SceneUnavailable" }
+          description: 区域内没有识别帧的摄像头与原因，按摄像头编号排列
         stale:
           type: array
           items: { type: string }
-          description: 区域内 10 s 内没有识别帧的摄像头编号（未建立地面映射、断流或画面中无可识别的环境）
+          deprecated: true
+          description: unavailable 中的摄像头编号；下次升契约主版本时删除
     Device:
       type: object
       required: [id, name, type, ip, mode, state, alert_severity, camera]
@@ -1307,14 +1317,13 @@ components:
         WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
         alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
-        （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；scene 为 VisionScene
-        （各摄像头识别的环境，连接建立时先补推各摄像头最新一帧，FR-108）；site 为 Site（摄像头登记表或场景区域
+        （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
         变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
         连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
         各自的最新状态），按发生先后排列（D-077）
       required: [channel, data]
       properties:
-        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, scene, site, system] }
+        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, site, system] }
         data: { type: object }
     AiInvestigation: { $ref: "../events/hyd.ai.investigation.v1.schema.json" }
     Investigation:

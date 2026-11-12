@@ -149,7 +149,7 @@ def create_app(config: ApiConfig) -> FastAPI:
             ),
         ]
         try:
-            await relay.start(bus, app.state.hub, app.state.devices, app.state.scenes)
+            await relay.start(bus, app.state.hub, app.state.devices)
             yield
         finally:
             for task in tasks:
@@ -173,7 +173,6 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.site = site.load(config.site_file)
     app.state.hub = ws.Hub()
     app.state.devices = Devices(app.state.site.devices)
-    app.state.scenes = {}
     app.state.history = History()
     app.state.kpis = kpis.KpiTracker(app.state.devices, app.state.history, datetime.now(UTC))
     app.state.llm_last = None  # 最近一次模型调用的结果（llm_chain.invoke），供顶栏模型状态

@@ -684,6 +684,33 @@ def test_reader_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not reader.is_alive()
 
 
+def test_reader_reports_age_of_latest_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """按需识别据此判断断流（#288）：尚未取到帧时为无穷大，断流后随时间增长。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
+    reads = iter([(True, frame(0))])
+
+    class Capture:
+        def read(self) -> tuple[bool, np.ndarray | None]:
+            return next(reads, (False, None))
+
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", lambda *a: Capture())
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: None)
+    assert reader.age_s() == float("inf")
+
+    reader.start()
+    try:
+        while reader.latest() is None:
+            time.sleep(0.01)
+        time.sleep(0.3)
+        assert 0.3 <= reader.age_s() < 2
+    finally:
+        reader.stop()
+        reader.join(2)
+
+
 class FakeReaderThread:
     started: list[str] = []
     stopped: list[str] = []

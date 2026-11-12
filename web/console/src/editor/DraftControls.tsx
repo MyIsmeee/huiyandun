@@ -2,15 +2,31 @@ import { ScanEye } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type SceneArea } from "../lib/api";
+import { ApiError, api, type SceneArea, type SceneUnavailable } from "../lib/api";
 import { loadCatalog, type SceneItem, useCatalog } from "../scene/assets";
 import { acceptDraft, discardDraft, proposeDraft, sameCameras, useDraft } from "./draft";
 import { overlaps } from "./placement";
 import { draftFromFrames } from "./recognition";
 
+const REASONS: Record<SceneUnavailable["reason"], string> = {
+  model_missing: "未配置环境识别模型",
+  no_frame: "没有画面（断流或刚接入）",
+  unmapped: "无法建立地面映射，请检查安装高度与俯角",
+  empty: "画面中没有可识别的环境",
+};
+
+/** 同一原因的摄像头合并为一句 */
+function explain(unavailable: SceneUnavailable[]): string {
+  return (Object.keys(REASONS) as SceneUnavailable["reason"][])
+    .map((reason) => [reason, unavailable.filter((u) => u.reason === reason).map((u) => u.camera_id)] as const)
+    .filter(([, ids]) => ids.length > 0)
+    .map(([reason, ids]) => `${ids.join("、")} ${REASONS[reason]}`)
+    .join("；");
+}
+
 /**
- * 从画面生成初稿（设计 150 §7，FR-909）：取区域内摄像头 10 s 内的识别帧，避开页面上已有的物体（含未保存的）转换为草稿，
- * 叠加预览、不保存。没有识别帧的摄像头提示"暂无识别结果"。按区域挂载（key），换区域后不显示上一个区域的"生成中"
+ * 从画面生成初稿（ui.md V-SC11，FR-909）：请识别服务对区域内摄像头的当前画面各识别一次（D-133），避开页面上已有的物体
+ * （含未保存的）转换为草稿，叠加预览、不保存。识别不了的摄像头提示原因。按区域挂载（key），换区域后不显示上一个区域的"生成中"
  */
 export function DraftButton({ area }: { area: SceneArea }) {
   const [busy, setBusy] = useState(false);
@@ -27,15 +43,15 @@ export function DraftButton({ area }: { area: SceneArea }) {
     }
     setBusy(true);
     try {
-      const [{ frames, stale }, { assets }] = await Promise.all([api.getSceneAreaFrames(area.id), loadCatalog()]);
+      const [{ frames, unavailable }, { assets }] = await Promise.all([api.getSceneAreaFrames(area.id), loadCatalog()]);
       // 请求期间换了区域或又改了摄像头：结果已不对应本页，丢弃
       if (outdated()) return;
       const { items, cameras } = useDraft.getState();
       const draft = draftFromFrames(frames, cameras, [area.width_m, area.depth_m], items, assets);
-      if (stale.length > 0) toast.warning(`${stale.join("、")} 暂无识别结果`);
+      if (unavailable.length > 0) toast.warning(explain(unavailable));
       if (draft.length > 0) proposeDraft(draft);
       else if (frames.length > 0) toast.info("识别结果中没有可转换的物体，或都与已有物体重叠");
-      else if (stale.length === 0) toast.info("区域内还没有摄像头");
+      else if (unavailable.length === 0) toast.info("区域内还没有摄像头");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "无法连接服务器，请重试");
     } finally {

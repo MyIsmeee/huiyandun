@@ -33,8 +33,8 @@ class VisionConfig(ServiceConfig):
     )
     scene_model_file: FilePath | None = Field(
         None,
-        description="EfficientViT-Seg ONNX 模型文件的本地路径，识别已标定摄像头画面中的环境"
-        "（REUSE-25、FR-108）；未配置时不输出场景",
+        description="EfficientViT-Seg ONNX 模型文件的本地路径，生成场景初稿时识别摄像头画面中的环境"
+        "（REUSE-25、FR-909、D-133）；未配置时初稿提示未配置环境识别模型",
     )
     integrity_model_file: FilePath | None = Field(
         None,

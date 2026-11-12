@@ -10,7 +10,7 @@
 | 转换 | `make fetch-models` 核对上游权重哈希后，由 `tools/dev/export_efficientvit_seg.py` 在 uv 临时环境中以 PyTorch 2.8.0 CPU 导出（opset 17）；依赖锁定于同名 `.lock`，导出可复现（两次导出哈希一致），不进入运行镜像 |
 | 导出精度 | FP32；输入 `1×3×512×512`（ImageNet 均值方差归一化的 RGB）；输出 150 类 `64×64` logits |
 | 目标平台 | ONNX Runtime：CUDA EP（D0：sm_120；开发机：sm_86）与 CPU EP（D0-min） |
-| 输入帧率 | 每台已标定摄像头每秒 1 次，取最新帧 |
+| 输入帧率 | 平时不推理；场景页生成初稿时对区域内每台摄像头的当前画面识别一次（D-133） |
 
 ## 评测指标
 

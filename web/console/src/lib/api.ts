@@ -3,6 +3,7 @@ import type { components } from "../api/schema";
 type Schemas = components["schemas"];
 export type Site = Schemas["Site"];
 export type SceneArea = Schemas["SceneArea"];
+export type SceneUnavailable = Schemas["SceneUnavailable"];
 
 const TIMEOUT_MS = 10_000;
 // 生成报告须等模型逐家尝试，网关总时限 60 s（SC-05）加余量

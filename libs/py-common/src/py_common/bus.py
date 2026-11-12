@@ -4,7 +4,8 @@
 - js_publish：JetStream，等待服务端确认；以 event_id 去重，重试不会产生重复消息；主题所属的流
   由生产者启动时以 ensure_stream 创建；
 - subscribe：消息按模型校验；非法消息与 handler 异常记录错误后跳过，不中断订阅；
-- js_subscribe：从指定时刻起重放流中的消息后持续接收新消息，重启后据此恢复窗口内的状态。
+- js_subscribe：从指定时刻起重放流中的消息后持续接收新消息，重启后据此恢复窗口内的状态；
+- request / serve：核心 NATS 请求/应答，用于按需取一次结果（如场景初稿的环境识别）。
 """
 
 import asyncio
@@ -128,6 +129,30 @@ class Bus:
         self, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]]
     ) -> None:
         await self._client.subscribe(subject, cb=_on_message(model, handler))
+        await self._client.flush(timeout=self._timeout_s)
+
+    async def request[T: EventBase](
+        self, subject: str, event: EventBase, model: type[T], timeout_s: float
+    ) -> T:
+        """请求一次应答。没有应答方时按 NoRespondersError 报错，timeout_s 内没有应答按 TimeoutError 报错。"""
+        msg = await self._client.request(
+            subject, event.model_dump_json().encode(), timeout=timeout_s
+        )
+        return model.model_validate_json(msg.data)
+
+    async def serve[T: EventBase](
+        self, subject: str, model: type[T], handler: Callable[[T], Awaitable[EventBase]]
+    ) -> None:
+        """应答 request：handler 的返回值即应答，同一主题的请求逐个处理。非法请求与 handler 异常记录错误后
+        不应答，请求方按超时处理。"""
+
+        async def on_message(msg: Msg) -> None:
+            async def reply(event: T) -> None:
+                await msg.respond((await handler(event)).model_dump_json().encode())
+
+            await _on_message(model, reply)(msg)
+
+        await self._client.subscribe(subject, cb=on_message)
         await self._client.flush(timeout=self._timeout_s)
 
     async def js_subscribe[T: EventBase](

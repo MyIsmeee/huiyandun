@@ -15,6 +15,8 @@ from py_contracts.events.hyd_playbook_rollback_v1_schema import PlaybookRollback
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
+from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from py_contracts.events.incident_schema import Incident
@@ -185,6 +187,11 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             ]
         },
     ),
+    "hyd.vision.scene_request.v1": (VisionSceneRequestV1, {"camera_ids": ["cam-01", "cam-02"]}),
+    "hyd.vision.scene_reply.v1": (
+        VisionSceneReplyV1,
+        {"frames": [], "unavailable": [{"camera_id": "cam-02", "reason": "no_frame"}]},
+    ),
 }
 
 
@@ -302,6 +309,13 @@ def test_ignores_unknown_field_from_newer_minor() -> None:
             [{"class": "wall", "line": [[0, 0], [1, 0]], "height_m": 0}],
         ),
         ("hyd.vision.scene.v1", "trees", [{"x": 1.0, "y": 2.0}]),
+        ("hyd.vision.scene_request.v1", "camera_ids", []),
+        (
+            "hyd.vision.scene_reply.v1",
+            "unavailable",
+            [{"camera_id": "cam-02", "reason": "offline"}],
+        ),
+        ("hyd.vision.scene_reply.v1", "frames", [{"camera_id": "cam-01"}]),
     ],
 )
 def test_rejects_invalid_value(subject: str, field: str, value: Any) -> None:

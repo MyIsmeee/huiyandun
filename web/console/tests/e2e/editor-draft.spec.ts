@@ -23,9 +23,9 @@ const bar = (page: Page) => editor(page).getByRole("toolbar", { name: "初稿" }
 
 test("生成后叠加半透明草稿、不算修改；全部接受后随保存提交", async ({ page }) => {
   await openEditor(page);
-  await generate(page, { frames: [STREET], stale: ["cam-02"] });
+  await generate(page, { frames: [STREET], unavailable: [{ camera_id: "cam-02", reason: "no_frame" }], stale: ["cam-02"] });
 
-  await expectToast(page, "cam-02 暂无识别结果");
+  await expectToast(page, "cam-02 没有画面（断流或刚接入）");
   await expect(bar(page)).toContainText(/初稿 \d+ 件/);
   await editorReady(page);
   await expect(editor(page)).toHaveScreenshot("editor-draft.png"); // 半透明模型 + 蓝色虚线占地
@@ -41,7 +41,7 @@ test("生成后叠加半透明草稿、不算修改；全部接受后随保存�
 
 test("生成后又放下的物体与草稿重叠时，重叠的不接受", async ({ page }) => {
   await openEditor(page);
-  await generate(page, { frames: [STREET], stale: [] });
+  await generate(page, { frames: [STREET], unavailable: [], stale: [] });
   await expect(bar(page)).toBeVisible();
   await pickDesk(page);
   await pointAt(page, [4, 17], true); // 落在草稿中建筑块（小办公楼，中心 (4, 17)）的占地上
@@ -57,7 +57,7 @@ test("生成后又放下的物体与草稿重叠时，重叠的不接受", async
 test("放弃后场景回到生成前", async ({ page }) => {
   await openEditor(page);
   const before = await canvas(page).screenshot();
-  await generate(page, { frames: [STREET], stale: [] });
+  await generate(page, { frames: [STREET], unavailable: [], stale: [] });
   await expect(bar(page)).toBeVisible();
 
   await bar(page).getByRole("button", { name: "放弃" }).click();
@@ -71,7 +71,7 @@ test("摄像头位置有未保存的修改时先提示保存，不取识别帧",
   let requested = false;
   await page.route(FRAMES, (route) => {
     requested = true;
-    return route.fulfill({ json: { frames: [STREET], stale: [] } });
+    return route.fulfill({ json: { frames: [STREET], unavailable: [], stale: [] } });
   });
   await library(page).getByRole("group", { name: "摄像头" }).getByRole("button", { name: "移出区域 cam-01" }).click();
   await editor(page).getByRole("button", { name: "从画面生成初稿" }).click();
@@ -87,7 +87,7 @@ test("生成途中换了区域，结果丢弃", async ({ page }) => {
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route(FRAMES, async (route) => {
     await held;
-    await route.fulfill({ json: { frames: [STREET], stale: ["cam-02"] } });
+    await route.fulfill({ json: { frames: [STREET], unavailable: [{ camera_id: "cam-02", reason: "no_frame" }], stale: ["cam-02"] } });
   });
   await editor(page).getByRole("button", { name: "从画面生成初稿" }).click();
   await editor(page).getByRole("button", { name: /^区域：/ }).click();
@@ -98,13 +98,13 @@ test("生成途中换了区域，结果丢弃", async ({ page }) => {
   release();
   await answered;
   await page.clock.runFor(500);
-  await expect(page.getByText("cam-02 暂无识别结果")).toHaveCount(0);
+  await expect(page.getByText("cam-02 没有画面（断流或刚接入）")).toHaveCount(0);
   await expect(bar(page)).toHaveCount(0);
 });
 
 test("区域被他人修改而重新载入时，未接受的初稿丢弃并提示", async ({ page }) => {
   const sockets = await openEditor(page);
-  await generate(page, { frames: [STREET], stale: [] });
+  await generate(page, { frames: [STREET], unavailable: [], stale: [] });
   await expect(bar(page)).toBeVisible();
 
   // 摄像头页改了本区域的摄像头：区域 updated_at 变化，经 site 频道推送
@@ -116,7 +116,7 @@ test("区域被他人修改而重新载入时，未接受的初稿丢弃并提�
 
 test("有未保存的修改时区域被他人修改：不重新载入，初稿保留、不提示", async ({ page }) => {
   const sockets = await openEditor(page);
-  await generate(page, { frames: [STREET], stale: [] });
+  await generate(page, { frames: [STREET], unavailable: [], stale: [] });
   await expect(bar(page)).toBeVisible();
   await library(page).getByRole("group", { name: "摄像头" }).getByRole("button", { name: "移出区域 cam-01" }).click();
 
@@ -130,8 +130,20 @@ test("有未保存的修改时区域被他人修改：不重新载入，初稿�
 
 test("没有识别帧或读取失败时说明原因，不出现草稿", async ({ page }) => {
   await openEditor(page);
-  await generate(page, { frames: [], stale: [] });
+  await generate(page, { frames: [], unavailable: [], stale: [] });
   await expectToast(page, "区域内还没有摄像头");
+
+  await page.unroute(FRAMES);
+  const unavailable = [
+    { camera_id: "cam-01", reason: "model_missing" },
+    { camera_id: "cam-02", reason: "model_missing" },
+  ];
+  await generate(page, { frames: [], unavailable, stale: ["cam-01", "cam-02"] });
+  await expectToast(page, "cam-01、cam-02 未配置环境识别模型");
+
+  await page.unroute(FRAMES);
+  await generate(page, { code: "unavailable", message: "识别服务未响应，请稍后重试", request_id: "r" }, 503);
+  await expectToast(page, "识别服务未响应，请稍后重试");
 
   await page.unroute(FRAMES);
   await generate(page, { code: "not_found", message: "区域不存在", request_id: "r" }, 404);

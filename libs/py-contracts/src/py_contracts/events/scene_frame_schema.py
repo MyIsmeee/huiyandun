@@ -64,7 +64,7 @@ class Marking(ContractModel):
 
 class SceneFrame(ContractModel):
     """
-    摄像头实时识别的环境，已投影到平面（spec.md FR-108）：只含平面坐标（米）的多边形与线段，不含图像；每台摄像头每秒 1 帧，只保留最新一帧，不持久化（architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
+    摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：只含平面坐标（米）的多边形与线段，不含图像；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
     """
 
     camera_id: str
