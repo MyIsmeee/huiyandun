@@ -169,9 +169,49 @@ class CalibrationItem(RootModel[list[float]]):
     root: list[float] = Field(..., max_length=4, min_length=4)
 
 
+class CalibrationErrorM(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0)
+    """
+    保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null
+    """
+
+
 class Username(RootModel[str]):
     model_config = {"allow_inf_nan": False}
     root: str = Field(..., max_length=128)
+
+
+class Point(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[float] = Field(..., max_length=4, min_length=4)
+
+
+class CalibrationInput(ContractModel):
+    area_id: str
+    """
+    打开标定对话框时摄像头所在区域；与库中不一致时 409
+    """
+    points: list[Point] = Field(..., max_length=20)
+    """
+    0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，区域左下为原点）
+    """
+
+
+class ResidualsMItem(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0)
+
+
+class CalibrationFit(ContractModel):
+    reproj_error_m: float = Field(..., ge=0.0)
+    """
+    均方根重投影误差（米）
+    """
+    residuals_m: list[ResidualsMItem]
+    """
+    各组偏差（米），与 points 一一对应
+    """
 
 
 class HomographyItem(RootModel[list[float]]):
@@ -708,7 +748,7 @@ class Tree(ContractModel):
     height_m: float = Field(..., gt=0.0)
 
 
-class Point(RootModel[list[float]]):
+class PointModel(RootModel[list[float]]):
     """
     平面坐标 [x, y]，单位米
     """
@@ -828,7 +868,11 @@ class Camera(ContractModel):
     pose: Pose
     calibration: list[CalibrationItem]
     """
-    地面标定点 [u, v, x, y]，只经 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102）
+    地面标定点 [u, v, x, y]，经标定对话框或 site.yaml 初始导入；少于 4 组时按安装参数估算（D-102）
+    """
+    calibration_error_m: CalibrationErrorM | None
+    """
+    保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null
     """
     climb_lines: list[ClimbLine]
     created_at: AwareDatetime
@@ -977,14 +1021,14 @@ class VisionTrackV1(EventBase, Track):
     """
 
 
-class Line(RootModel[list[Point]]):
+class Line(RootModel[list[PointModel]]):
     model_config = {"allow_inf_nan": False}
-    root: list[Point] = Field(..., min_length=2)
+    root: list[PointModel] = Field(..., min_length=2)
 
 
-class Polygon(RootModel[list[Point]]):
+class Polygon(RootModel[list[PointModel]]):
     model_config = {"allow_inf_nan": False}
-    root: list[Point] = Field(..., min_length=3)
+    root: list[PointModel] = Field(..., min_length=3)
 
 
 class VisionBehavior(RootModel[VisionBehaviorV1]):

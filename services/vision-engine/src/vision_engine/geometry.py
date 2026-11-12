@@ -12,11 +12,12 @@ import numpy as np
 MIN_POINTS = 4  # 单应矩阵至少需要 4 组对应点（FR-902、C-CV-05）
 FOOT_ERROR_RATIO = 0.05  # 脚点定位误差：上下各偏移人体框高度的 5%（C-CV-06）
 MIN_AREA_PX = 1.0  # 三点围成的三角形不足 1 平方像素视为共线
+MIN_AREA_M2 = 0.01  # 地面三点围成的三角形不足 0.01 平方米视为共线
 ESTIMATE_ERROR_RATIO = 0.1  # 按安装参数估算时，误差另加与摄像头水平距离的 10%（D-102）
 MAX_GROUND_M = 500.0  # 估算时取样点的落地距离上限：接近地平线的视线落点不稳定
 
 
-def _general_position(pixels: np.ndarray) -> bool:
+def _general_position(points: np.ndarray, min_area: float) -> bool:
     """是否存在 4 个点，其中任意 3 点不共线；否则单应矩阵不唯一。"""
 
     def area(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
@@ -24,8 +25,8 @@ def _general_position(pixels: np.ndarray) -> bool:
         return abs(float(x1 * y2 - x2 * y1)) / 2
 
     return any(
-        all(area(*tri) >= MIN_AREA_PX for tri in combinations(quad, 3))
-        for quad in combinations(pixels, MIN_POINTS)
+        all(area(*tri) >= min_area for tri in combinations(quad, 3))
+        for quad in combinations(points, MIN_POINTS)
     )
 
 
@@ -38,20 +39,30 @@ class GroundMapping:
     @classmethod
     def fit(cls, calibration: list[list[float]]) -> Self | None:
         """由标定点 [u, v, x, y] 拟合。点数不足或退化时返回 None：按未标定处理（FR-902）。"""
+        result = cls.calibrate(calibration)
+        return None if isinstance(result, str) else result[0]
+
+    @classmethod
+    def calibrate(cls, calibration: list[list[float]]) -> tuple[Self, list[float]] | str:
+        """由标定点 [u, v, x, y] 拟合，返回映射与各组残差（米）。失败时返回原因（FR-910）：
+        pixels_collinear、ground_collinear：画面点或地面点中找不到 4 个任意三点不共线的点；
+        inconsistent：单应矩阵退化，或标定点分处地平线两侧（多为配错或点到了墙面、天空）。"""
         points = np.asarray(calibration, dtype=np.float64).reshape(-1, 4)
-        if len(points) < MIN_POINTS or not _general_position(points[:, :2]):
-            return None
+        if len(points) < MIN_POINTS or not _general_position(points[:, :2], MIN_AREA_PX):
+            return "pixels_collinear"
+        if not _general_position(points[:, 2:], MIN_AREA_M2):
+            return "ground_collinear"
         homography, _ = cv2.findHomography(points[:, :2], points[:, 2:], 0)
         if homography is None or np.linalg.matrix_rank(homography) < 3:
-            return None
+            return "inconsistent"
         w = _homogeneous(points[:, :2]) @ homography[2]
         if not (np.all(w > 0) or np.all(w < 0)):
-            return None  # 标定点分处地平线两侧
+            return "inconsistent"  # 标定点分处地平线两侧
         homography *= np.sign(w[0])
         projected = _project(homography, points[:, :2])
         assert projected is not None  # 上面已保证 w > 0
         residuals = np.linalg.norm(projected - points[:, 2:], axis=1)
-        return cls(homography, float(np.sqrt(np.mean(residuals**2))))
+        return cls(homography, float(np.sqrt(np.mean(residuals**2)))), residuals.tolist()
 
     @classmethod
     def from_pose(cls, pose: dict[str, Any], width: int, height: int) -> Self | None:
@@ -76,7 +87,7 @@ class GroundMapping:
         t = np.where(valid, -h / np.where(valid, rays[:, 2], -1), 0.0)  # 不落地的视线由 keep 剔除
         ground = np.array([pose["x"], pose["y"]]) + rays[:, :2] * t[:, None]
         keep = valid & (np.linalg.norm(ground - [pose["x"], pose["y"]], axis=1) < MAX_GROUND_M)
-        if keep.sum() < MIN_POINTS or not _general_position(pixels[keep]):
+        if keep.sum() < MIN_POINTS or not _general_position(pixels[keep], MIN_AREA_PX):
             return None
         homography, _ = cv2.findHomography(pixels[keep], ground[keep], 0)
         if homography is None:

@@ -33,6 +33,7 @@
   - 投影（与 track 同一套单应映射）：地面取外轮廓（人与车辆遮挡处不留孔洞）；立面取每列最低一格的底边为墙脚线，遇跳变断开，高度按类别取 2.8 / 6 / 1.2 / 1.0 m，黑板取其下方的墙脚线、高 1.2 m；物体取底边并向远离摄像头一侧补出底面，深与高按类别取常见尺寸（`scene.py` 的 `OBJECT_SIZE_M`）；树取底部中心，高 5 m（盆栽 1 m）；地平线以上与超出 `pose.range_m` 的部分丢弃；按 0.2 m 简化
   - 路面标线：路面外轮廓内亮度 ≥ 190、饱和度 ≤ 50 的细长条纹（长宽比 ≥ 3、宽 ≤ 1 m）；至少 3 条平行并排、间距 3 m 内的为斑马线，其余为车道线
   - 地面、物体与标线合计保留面积最大的 64 个多边形；每台摄像头在应答中或有一帧 `hyd.vision.scene.v1`，或给出原因：`model_missing`（未配置 `HYD_SCENE_MODEL_FILE`）、`no_frame`（最新一帧已超过 5 s 或尚未取到帧，与断流判定同一标准）、`unmapped`（建立不了地面映射）、`empty`（无任何有效识别）
+- 地面标定（`geometry.py`，FR-910、D-132）：收到 `hyd.vision.calibration_request.v1`（核心 NATS 请求/应答，api-server 在标定对话框检查与保存时发出）时按标定点拟合单应矩阵，以 `hyd.vision.calibration_reply.v1` 应答均方根误差与各组偏差；拟合不了时给出原因 `pixels_collinear` / `ground_collinear`（画面点或地面点找不到 4 个任意三点不共线的点）或 `inconsistent`（单应矩阵退化，或标定点分处地平线两侧）。纯计算，与该路是否运行无关
 - 依赖：supervision 声明的 PyAV（自带 GPL 的 x264 / x265）与 matplotlib 由根 `pyproject.toml` 的 `override-dependencies` 去掉（G-08、REUSE-07）
 
 ## 命令

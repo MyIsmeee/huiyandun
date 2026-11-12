@@ -14,6 +14,10 @@ from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecuti
 from py_contracts.events.hyd_playbook_rollback_v1_schema import PlaybookRollbackV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_calibration_reply_v1_schema import VisionCalibrationReplyV1
+from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
+    VisionCalibrationRequestV1,
+)
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
 from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
@@ -192,6 +196,14 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
         VisionSceneReplyV1,
         {"frames": [], "unavailable": [{"camera_id": "cam-02", "reason": "no_frame"}]},
     ),
+    "hyd.vision.calibration_request.v1": (
+        VisionCalibrationRequestV1,
+        {"camera_id": "cam-01", "points": [[312, 540, 4.0, 6.0]] * 4},
+    ),
+    "hyd.vision.calibration_reply.v1": (
+        VisionCalibrationReplyV1,
+        {"reason": None, "reproj_error_m": 0.2, "residuals_m": [0.1, 0.3, 0.2, 0.1]},
+    ),
 }
 
 
@@ -316,6 +328,10 @@ def test_ignores_unknown_field_from_newer_minor() -> None:
             [{"camera_id": "cam-02", "reason": "offline"}],
         ),
         ("hyd.vision.scene_reply.v1", "frames", [{"camera_id": "cam-01"}]),
+        ("hyd.vision.calibration_request.v1", "points", [[312, 540, 4.0, 6.0]] * 3),
+        ("hyd.vision.calibration_request.v1", "points", [[312, 540, 4.0, 6.0]] * 21),
+        ("hyd.vision.calibration_request.v1", "points", [[312, 540, 4.0]] * 4),
+        ("hyd.vision.calibration_reply.v1", "reason", "too_few"),
     ],
 )
 def test_rejects_invalid_value(subject: str, field: str, value: Any) -> None:
