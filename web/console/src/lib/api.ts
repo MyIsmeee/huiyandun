@@ -108,6 +108,12 @@ export const api = {
   updateCamera: (id: string, body: Schemas["CameraUpdate"]) =>
     request<Schemas["Camera"]>("PATCH", `/api/cameras/${encodeURIComponent(id)}`, body),
   deleteCamera: (id: string) => request<undefined>("DELETE", `/api/cameras/${encodeURIComponent(id)}`),
+  /** 地面标定（FR-910）：拟合由 vision-engine 应答，api-server 等 5 s，未应答时 503；check 只拟合不保存 */
+  checkCameraCalibration: (id: string, body: Schemas["CalibrationInput"]) =>
+    request<Schemas["CalibrationFit"]>("POST", `/api/cameras/${encodeURIComponent(id)}/calibration/check`, body),
+  /** points 为空表示清除标定；摄像头已换区域时 409 */
+  saveCameraCalibration: (id: string, body: Schemas["CalibrationInput"]) =>
+    request<Schemas["Camera"]>("PUT", `/api/cameras/${encodeURIComponent(id)}/calibration`, body),
   /** 场景区域（FR-908，D-124），增删改仅 admin；变更后经 WS site 频道推送 */
   createSceneArea: (body: Schemas["SceneAreaCreate"]) => request<SceneArea>("POST", "/api/scene/areas", body),
   /** 整体保存；updated_at 与库中不一致时为 409，放置点超出区域时为 400（D-125） */
