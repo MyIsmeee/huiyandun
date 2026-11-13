@@ -38,6 +38,7 @@ from vision_engine.pipeline import (
     CameraPipeline,
     FrameReader,
     Health,
+    Relinker,
     calibrate,
     run_camera,
     supervise,
@@ -57,6 +58,7 @@ class FakeDetector:
         self.person = person
         self.lying = lying
         self.calls = 0
+        self.shift = 0  # 框与关键点另加的右移像素：设为接近框宽时跟踪器换新编号
         self.persons: sv.Detections | None = None  # 最近一次收到的 RF-DETR 人员框
 
     def __call__(
@@ -65,7 +67,7 @@ class FakeDetector:
         offset: tuple[int, int] = (0, 0),
         persons: sv.Detections | None = None,
     ) -> sv.Detections:
-        x = 300 + 2 * self.calls
+        x = 300 + 2 * self.calls + self.shift
         self.calls += 1
         self.persons = persons
         if not self.person:
@@ -201,6 +203,69 @@ def test_fall_detected_on_uncalibrated_camera() -> None:
     assert (fall.camera_id, fall.behavior, fall.confidence_avg) == ("cam-01", "fall", 0.9)
     assert fall.duration_s == pytest.approx(2.0)
     assert (fall.ts_end - fall.ts_start).total_seconds() == pytest.approx(2.0)
+
+
+def test_relink_after_brief_loss() -> None:
+    """A6：丢失 3 s 后在 0.5 m 外以新跟踪编号出现，沿用原编号（FR-911）。"""
+    relinker = Relinker()
+    [first] = relinker.assign(0.0, [(1, (2.0, 3.0, 0.2))])
+    relinker.assign(1.0, [(1, (2.0, 3.0, 0.2))])
+    relinker.assign(2.0, [])
+
+    assert relinker.assign(4.0, [(7, (2.5, 3.0, 0.2))]) == [first]
+    assert relinker.assign(4.2, [(7, (2.6, 3.0, 0.2))]) == [first]
+
+
+def test_relink_with_two_candidates_uses_new_id() -> None:
+    """A6：两条丢失的轨迹都在 1 m 内：宁可断号，不把两个人接错。"""
+    relinker = Relinker()
+    old = relinker.assign(0.0, [(1, (2.0, 3.0, 0.2)), (2, (2.0, 3.8, 0.2))])
+
+    [new] = relinker.assign(1.0, [(7, (2.0, 3.4, 0.2))])
+
+    assert new not in old
+
+
+def test_relink_after_6_s_uses_new_id() -> None:
+    """A6：丢失超过 5 s 不再续接。"""
+    relinker = Relinker()
+    [first] = relinker.assign(0.0, [(1, (2.0, 3.0, 0.2))])
+
+    assert relinker.assign(6.0, [(7, (2.0, 3.0, 0.2))]) != [first]
+
+
+def test_relink_radius_grows_with_uncertainty() -> None:
+    """距离上限取 1 m 与两者 uncertainty_m 之大者：远处目标位置误差大，1.5 m 外仍可续接。"""
+    relinker = Relinker()
+    [first] = relinker.assign(0.0, [(1, (2.0, 3.0, 2.0))])
+
+    assert relinker.assign(1.0, [(7, (3.5, 3.0, 0.2))]) == [first]
+    assert relinker.assign(2.0, [(8, (9.0, 3.0, 0.2))]) != [first]
+
+
+def test_relinked_id_not_shared_when_old_track_returns() -> None:
+    """跟踪器在丢失保留期内恢复原轨迹时，编号已由续接的轨迹沿用：原轨迹按新出现处理，不会两人同号。"""
+    relinker = Relinker()
+    [first] = relinker.assign(0.0, [(1, (2.0, 3.0, 0.2))])
+    assert relinker.assign(1.0, [(7, (2.5, 3.0, 0.2))]) == [first]
+
+    ids = relinker.assign(1.2, [(7, (2.5, 3.0, 0.2)), (1, (8.0, 3.0, 0.2))])
+
+    assert ids[0] == first and ids[1] != first
+
+
+def test_fall_survives_relink() -> None:
+    """A7：跌倒计时中跟踪器换了编号（框跳开 96 像素、IoU 不足 0.05），按地面位置续接后计时不中断。"""
+    camera, fake = pipeline(MAPPING, lying=True)
+    events = []
+    for i in range(15):
+        fake.shift = 96 if i >= 6 else 0  # MAPPING 下即 0.96 m
+        events += camera.process(frame(i), timestamp=i / FPS)
+
+    tracks = [e for e in events if isinstance(e, VisionTrackV1)]
+    [fall] = [e for e in events if isinstance(e, VisionBehaviorV1)]
+    assert {e.track_id for e in tracks} == {fall.track_id}
+    assert fall.duration_s == pytest.approx(2.0)
 
 
 def test_uncalibrated_camera_publishes_nothing() -> None:
