@@ -146,6 +146,12 @@ def test_go2rtc_api_reachable_only_by_its_clients() -> None:
     assert "core-net" not in internal
 
 
+@pytest.mark.parametrize("name", ["web-console", "go2rtc"])
+def test_lan_ip_defaults_to_loopback(name: str) -> None:
+    """#303：不设 HYD_LAN_IP 时取 127.0.0.1，控制台证书与 WebRTC 候选与只供本机访问时相同。"""
+    assert SERVICES[name]["environment"]["HYD_LAN_IP"] == "${HYD_LAN_IP:-127.0.0.1}"
+
+
 @pytest.mark.parametrize(("module", "network"), [("api", "video-net"), ("rtsp", "demo-net")])
 def test_go2rtc_listens_only_on_internal_network(module: str, network: str) -> None:
     """#97：edge-net、camera-net 有宿主网关，宿主进程经它们可访问 go2rtc。API（信令、取帧、增删流）
