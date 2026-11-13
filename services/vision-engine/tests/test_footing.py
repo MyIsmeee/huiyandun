@@ -63,6 +63,18 @@ def test_ratio_learned_per_track() -> None:
     assert other == pytest.approx(280 + DEFAULT_RATIO * torso)
 
 
+def test_first_sample_after_hidden_legs_is_taken_as_is() -> None:
+    """轨迹开头脚踝被挡时默认值不算样本：第一个真实样本直接作为比例。"""
+    footing = PersonFooting()
+    torso = 280 - 160
+    footing.foot(1, BOX, *person(ankle_v=None), 0.0)
+    footing.foot(1, BOX, *person(ankle_v=280 + 0.9 * torso - 0.04 * 400), 0.2)
+
+    _, v, _ = footing.foot(1, BOX, *person(ankle_v=None), 0.4)
+
+    assert v == pytest.approx(280 + 0.9 * torso)
+
+
 def test_learned_ratio_is_bounded_and_forgotten() -> None:
     """比例限 0.6～2.0；轨迹 5 s 未出现后丢弃学到的值。"""
     footing = PersonFooting()

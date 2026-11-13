@@ -39,7 +39,8 @@ class PersonFooting:
     """人员脚点；按轨迹学习"髋到脚点 / 躯干长"，状态只在本路串行调用中使用。"""
 
     def __init__(self) -> None:
-        self._ratios: dict[int, tuple[float, float]] = {}  # 轨迹 → (比例, 最近出现的时刻)
+        # 轨迹 → (学到的比例，尚无样本为 None；最近出现的时刻)
+        self._ratios: dict[int, tuple[float | None, float]] = {}
 
     def foot(
         self,
@@ -53,8 +54,8 @@ class PersonFooting:
         self._ratios = {k: r for k, r in self._ratios.items() if t - r[1] <= RATIO_FORGET_S}
         x1, _, x2, y2 = box
         box_h = y2 - box[1]
-        learned = self._ratios.get(track_id)
-        ratio = DEFAULT_RATIO if learned is None else learned[0]
+        learned = self._ratios.get(track_id, (None, t))[0]
+        ratio = DEFAULT_RATIO if learned is None else learned
         torso = self._upright_torso(keypoints, scores, box_h)
         visible = [i for i in ANKLES if scores[i] >= KEYPOINT_MIN]
         if visible:
@@ -63,7 +64,8 @@ class PersonFooting:
             if torso is not None:
                 hip_v, length = torso
                 sample = (v - hip_v) / length
-                ratio = sample if learned is None else ratio + RATIO_ALPHA * (sample - ratio)
+                learned = sample if learned is None else learned + RATIO_ALPHA * (sample - learned)
+                learned = float(np.clip(learned, *RATIO_RANGE))
             result = (u, v, FOOT_ERROR_RATIO * box_h)
         elif torso is not None:
             hips = _mean(keypoints, scores, HIPS)
@@ -72,7 +74,7 @@ class PersonFooting:
             result = (float(hips[0]), hip_v + ratio * length, TORSO_ERROR_RATIO * length)
         else:
             result = ((x1 + x2) / 2, y2, FOOT_ERROR_RATIO * box_h)
-        self._ratios[track_id] = (float(np.clip(ratio, *RATIO_RANGE)), t)
+        self._ratios[track_id] = (learned, t)
         return result
 
     @staticmethod
