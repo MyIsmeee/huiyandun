@@ -21,14 +21,18 @@ from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
 SITE = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
-NOW = datetime.now(UTC)
 ATTACKER = "172.30.0.100"
 TECHNIQUES = {"T1110": {"name": "Brute Force", "tactics": ["Credential Access"]}}
 
 
+def ago(minutes: float) -> datetime:
+    # 构造时按实时时刻计算：被测工具按实时时刻取窗口，导入时固定的时刻在全量运行中会滑出窗口（#301）
+    return datetime.now(UTC) - timedelta(minutes=minutes)
+
+
 def common(minutes_ago: float) -> dict[str, Any]:
     return {"schema_version": "1.1.0", "event_id": uuid.uuid4(),
-            "ts": NOW - timedelta(minutes=minutes_ago)}  # fmt: skip
+            "ts": ago(minutes_ago)}  # fmt: skip
 
 
 def alert(
@@ -43,7 +47,7 @@ def alert(
 
 
 def behavior(minutes_ago: float, camera: str = "cam-02") -> VisionBehaviorV1:
-    ts = NOW - timedelta(minutes=minutes_ago)
+    ts = ago(minutes_ago)
     return VisionBehaviorV1(
         **common(minutes_ago) | {"schema_version": "1.0.0"}, camera_id=camera, track_id=1,
         behavior="climb", confidence_avg=0.8, duration_s=2.0, ts_start=ts, ts_end=ts,
@@ -58,7 +62,7 @@ def integrity(minutes_ago: float, camera: str = "cam-02") -> VisionIntegrityV1:
 
 
 def conn(minutes_ago: float, orig: str, resp: str, port: int, state: str) -> str:
-    ts = (NOW - timedelta(minutes=minutes_ago)).timestamp()
+    ts = ago(minutes_ago).timestamp()
     return json.dumps({
         "ts": ts, "uid": "C1", "id.orig_h": orig, "id.orig_p": 40000, "id.resp_h": resp,
         "id.resp_p": port, "proto": "tcp", "conn_state": state, "orig_bytes": 100,
