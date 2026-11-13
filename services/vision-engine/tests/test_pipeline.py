@@ -226,6 +226,17 @@ def test_relink_with_two_candidates_uses_new_id() -> None:
     assert new not in old
 
 
+def test_relink_with_two_new_tracks_near_one_lost_uses_new_ids() -> None:
+    """A6：同一帧两条新轨迹都在一条丢失轨迹 1 m 内：两者都用新编号，不按先后交给其中一个。"""
+    relinker = Relinker()
+    [first] = relinker.assign(0.0, [(1, (2.0, 3.0, 0.2))])
+
+    new = relinker.assign(1.0, [(7, (2.0, 3.4, 0.2)), (8, (2.0, 2.6, 0.2))])
+
+    assert first not in new
+    assert len(set(new)) == 2
+
+
 def test_relink_after_6_s_uses_new_id() -> None:
     """A6：丢失超过 5 s 不再续接。"""
     relinker = Relinker()

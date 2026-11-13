@@ -114,8 +114,8 @@ class Relinker:
     """按地面位置把新的人员轨迹续接到刚丢失的轨迹（FR-911、D-135），不用外观特征（G-04）。
 
     跟踪器编号映射为输出编号。新的跟踪编号首次出现时，在 RELINK_S 内丢失、尚未被续接的输出编号中，
-    找末位置与其首个位置相距不超过上限的：恰好一个时沿用，没有或多于一个时用新编号（宁可断号，
-    不把两个人接错）。输出编号由本类分配：被续接的编号归新轨迹所有，原跟踪编号再出现时按新出现处理，
+    找末位置与其首个位置相距不超过上限的：恰好一个、且本帧没有别的新轨迹也靠近它时沿用，否则用新编号
+    （宁可断号，不把两个人接错）。输出编号由本类分配：被续接的编号归新轨迹所有，原跟踪编号再出现时按新出现处理，
     不会两人同号。
     """
 
@@ -136,10 +136,11 @@ class Relinker:
         self._last = {o: p for o, p in self._last.items() if t - p[0] <= RELINK_S}
         present = {self._ids[i] for i, _ in tracks if i in self._ids}
         lost = {o: p for o, p in self._last.items() if o not in present}
+        new = [located for i, located in tracks if i not in self._ids and located is not None]
         out = []
         for track_id, located in tracks:
             if track_id not in self._ids:
-                output = self._relink(located, lost)
+                output = self._relink(located, lost, new)
                 if output is None:
                     output, self._next = self._next, self._next + 1
                 else:
@@ -156,16 +157,21 @@ class Relinker:
     def _relink(
         located: tuple[float, float, float] | None,
         lost: dict[int, tuple[float, float, float, float]],
+        new: list[tuple[float, float, float]],
     ) -> int | None:
+        """双向唯一才续接：该新轨迹附近只有一个丢失轨迹，且那个丢失轨迹附近只有这一个新轨迹。"""
         if located is None:
             return None
-        x, y, error = located
-        near = [
-            o
-            for o, (_, lx, ly, lerror) in lost.items()
-            if np.hypot(x - lx, y - ly) <= max(RELINK_M, error, lerror)
-        ]
-        return near[0] if len(near) == 1 else None
+        near = [o for o, last in lost.items() if _near(located, last[1:])]
+        if len(near) != 1:
+            return None
+        rivals = [n for n in new if _near(n, lost[near[0]][1:])]
+        return near[0] if len(rivals) == 1 else None
+
+
+def _near(a: tuple[float, float, float], b: tuple[float, float, float]) -> bool:
+    """两个 (x, y, 误差) 地面位置相距不超过续接上限：1 m 与双方误差中的较大者。"""
+    return bool(np.hypot(a[0] - b[0], a[1] - b[1]) <= max(RELINK_M, a[2], b[2]))
 
 
 class FrameReader(threading.Thread):
