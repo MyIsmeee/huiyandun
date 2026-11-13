@@ -103,8 +103,9 @@ def test_tracks_published_with_floor_coordinates() -> None:
     assert {e.track_id for e in events} == {events[0].track_id}
     last = events[-1]
     assert last.camera_id == "cam-01"
-    # 第 4 帧框 [306, 200, 406, 600]：脚点 (356, 600) → (3.56 m, 6.0 m)；框高 400 → 偏移 20 像素
-    assert (last.x, last.y) == pytest.approx((3.56, 6.0))
+    # 第 4 帧框 [306, 200, 406, 600]，脚踝 (356, 600)：脚点再低 4% 框高 (356, 616) → (3.56 m, 6.16 m)；
+    # 框高 400 → 上下误差 20 像素（FR-911）
+    assert (last.x, last.y) == pytest.approx((3.56, 6.16))
     assert last.uncertainty_m == pytest.approx(0.2)
     # 画面叠加用的归一化框与骨骼（FR-107）：1280×720 画面
     sent = last.model_dump(mode="json")
@@ -167,6 +168,11 @@ def test_vehicles_tracked_with_heading_and_speed() -> None:
     assert (first["heading_deg"], first["speed_mps"]) == (None, None)  # 不足 3 帧
     # 每 0.2 s 向 +x 移动 0.2 m
     assert (last["heading_deg"], last["speed_mps"]) == pytest.approx((0, 1.0))
+    # 接地点（FR-911）：框底中点 y = 5.0 m，沿视线（画面上方即 −y）外移车身投影长度的一半。
+    # 尚无朝向时取长宽平均 (4.5 + 1.8) / 4；朝向 +x 与视线垂直时为宽的一半 0.9 m，误差另加其 25%。
+    # 朝向按框底近端点估计，不受外移量变化影响
+    assert first["y"] == pytest.approx(5.0 - (4.5 + 1.8) / 4)
+    assert (last["y"], last["uncertainty_m"]) == pytest.approx((5.0 - 0.9, 0.1 + 0.25 * 0.9))
 
 
 def test_vehicle_class_is_majority_over_track() -> None:
@@ -656,7 +662,7 @@ def test_tracks_located_by_pose_without_calibration() -> None:
     last = events[-1]
     expected = GroundMapping.from_pose(POSE, 1280, 720)
     assert expected is not None
-    assert (last.x, last.y, last.uncertainty_m) == pytest.approx(expected.locate(356, 600, 400))
+    assert (last.x, last.y, last.uncertainty_m) == pytest.approx(expected.locate(356, 616, 20))
     assert last.x > 0  # 在摄像头前方
 
 
