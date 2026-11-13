@@ -50,6 +50,12 @@ from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine.behavior import BehaviorDetector
 from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector
+from vision_engine.footing import (
+    FOOT_ERROR_RATIO,
+    VEHICLE_ERROR_RATIO,
+    PersonFooting,
+    vehicle_offset,
+)
 from vision_engine.geometry import GroundMapping
 from vision_engine.integrity import (
     FREEZE_S,
@@ -207,6 +213,7 @@ class CameraPipeline:
             for _ in range(2)
         )
         self._motion = Motion()
+        self._footing = PersonFooting()
         self._votes: dict[int, Counter[int]] = {}  # 车辆轨迹 → 各帧检出类别的计数
         self._boxes = np.empty((0, 4))
 
@@ -304,7 +311,7 @@ class CameraPipeline:
             return events  # 没有地面映射不输出坐标（FR-902）
         scale = np.array([width, height], dtype=np.float32)
         targets = [
-            (int(i), "person", box, np.column_stack([points / scale, scores]))
+            (int(i), "person", box, (points, scores))
             for box, i, points, scores in (
                 zip(
                     tracked.xyxy,
@@ -326,13 +333,32 @@ class CameraPipeline:
         ]
         current = set(vehicles.tracker_id.tolist()) if len(vehicles) else set()
         self._votes = {i: v for i, v in self._votes.items() if i in current}
-        for track_id, object_class, (bx1, by1, bx2, by2), keypoints in targets:
-            # 脚点（车辆为接地点）取框底边中点
-            located = self._mapping.locate((bx1 + bx2) / 2, by2, by2 - by1)
-            if located is None:
-                continue
-            x, y, uncertainty = located
-            heading, speed = self._motion.update(track_id, timestamp, x, y)
+        for track_id, object_class, (bx1, by1, bx2, by2), skeleton in targets:
+            if skeleton is not None:  # 人员取站立的脚点（FR-911）
+                u, v, delta_v = self._footing.foot(
+                    track_id, (bx1, by1, bx2, by2), *skeleton, timestamp
+                )
+                located = self._mapping.locate(u, v, delta_v)
+                if located is None:
+                    continue
+                x, y, uncertainty = located
+                heading, speed = self._motion.update(track_id, timestamp, x, y)
+            else:
+                # 车辆：朝向与速度按框底边中点映射的近端点估计，再沿视线外移到车身中心（FR-911）。
+                # 不按外移后的位置估计：外移量随朝向变化，会反过来扰动朝向
+                u = (bx1 + bx2) / 2
+                located = self._mapping.locate(u, by2, FOOT_ERROR_RATIO * (by2 - by1))
+                outward = self._mapping.outward(u, by2)
+                if located is None or outward is None:
+                    continue
+                near_x, near_y, uncertainty = located
+                heading, speed = self._motion.update(track_id, timestamp, near_x, near_y)
+                offset = vehicle_offset(object_class, heading, outward)
+                x, y = near_x + float(offset[0]), near_y + float(offset[1])
+                uncertainty += VEHICLE_ERROR_RATIO * float(np.hypot(*offset))
+            keypoints = (
+                None if skeleton is None else np.column_stack([skeleton[0] / scale, skeleton[1]])
+            )
             events.append(
                 VisionTrackV1(
                     schema_version=TRACK_SCHEMA_VERSION,

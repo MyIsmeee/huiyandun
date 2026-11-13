@@ -25,7 +25,7 @@ def test_four_points_fit_exactly() -> None:
 
     assert mapping.reproj_error_m == pytest.approx(0, abs=1e-6)  # 浮点误差，1 µm 以内
     for u, v, x, y in CAM_01:
-        located = mapping.locate(u, v, box_h=0)
+        located = mapping.locate(u, v, 0)
         assert located is not None
         assert located[:2] == pytest.approx((x, y))
 
@@ -72,8 +72,8 @@ def test_misordered_plane_points_are_uncalibrated() -> None:
 
 
 def test_uncertainty_is_foot_offset_on_ground() -> None:
-    # 人体框高 200 像素 → 脚点上下偏移 10 像素 → 地面上 0.1 m
-    located = fit(TOP_DOWN).locate(300, 300, box_h=200)
+    # 脚点上下偏移 10 像素 → 地面上 0.1 m
+    located = fit(TOP_DOWN).locate(300, 300, 10)
 
     assert located == pytest.approx((3.0, 3.0, 0.1))
 
@@ -82,7 +82,7 @@ def test_uncertainty_adds_reproj_error() -> None:
     d = 0.3
     calibration = [[u, v, u / 100 + s, v / 100] for u, v in CORNERS for s in (d, -d)]
 
-    located = fit(calibration).locate(300, 300, box_h=200)
+    located = fit(calibration).locate(300, 300, 10)
 
     assert located is not None
     assert located[2] == pytest.approx(d + 0.1)
@@ -90,8 +90,8 @@ def test_uncertainty_adds_reproj_error() -> None:
 
 def test_uncertainty_grows_with_distance() -> None:
     mapping = fit(CAM_01)
-    near = mapping.locate(640, 550, box_h=200)
-    far = mapping.locate(640, 300, box_h=200)
+    near = mapping.locate(640, 550, 10)
+    far = mapping.locate(640, 300, 10)
 
     assert near is not None
     assert far is not None
@@ -108,21 +108,30 @@ def horizon_calibration() -> list[list[float]]:
 
 
 def test_locates_below_horizon() -> None:
-    located = fit(horizon_calibration()).locate(500, 500, box_h=100)
+    located = fit(horizon_calibration()).locate(500, 500, 5)
 
     assert located is not None
     assert all(math.isfinite(value) for value in located)
 
 
 @pytest.mark.parametrize(
-    ("v", "box_h"),
+    ("v", "delta_v"),
     [
         (150, 0),  # 脚点在地平线以上
-        (205, 200),  # 脚点在地平线以下，上偏 10 像素越过地平线
+        (205, 10),  # 脚点在地平线以下，上偏 10 像素越过地平线
     ],
 )
-def test_no_location_above_horizon(v: float, box_h: float) -> None:
-    assert fit(horizon_calibration()).locate(500, v, box_h=box_h) is None
+def test_no_location_above_horizon(v: float, delta_v: float) -> None:
+    assert fit(horizon_calibration()).locate(500, v, delta_v) is None
+
+
+def test_outward_points_away_from_camera() -> None:
+    """正视地面时画面上方即平面 −y；从摄像头位置看，远处方向与视线一致。"""
+    assert fit(TOP_DOWN).outward(300, 300) == pytest.approx([0, -1])
+    mapping = GroundMapping.from_pose(POSE | {"yaw_deg": 90.0}, 1280, 720)
+    assert mapping is not None
+    assert mapping.outward(640, 500) == pytest.approx([0, 1], abs=1e-6)
+    assert fit(horizon_calibration()).outward(500, 150) is None
 
 
 POSE = {

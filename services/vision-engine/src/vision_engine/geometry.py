@@ -10,7 +10,6 @@ import cv2
 import numpy as np
 
 MIN_POINTS = 4  # 单应矩阵至少需要 4 组对应点（FR-902、C-CV-05）
-FOOT_ERROR_RATIO = 0.05  # 脚点定位误差：上下各偏移人体框高度的 5%（C-CV-06）
 MIN_AREA_PX = 1.0  # 三点围成的三角形不足 1 平方像素视为共线
 MIN_AREA_M2 = 0.01  # 地面三点围成的三角形不足 0.01 平方米视为共线
 ESTIMATE_ERROR_RATIO = 0.1  # 按安装参数估算时，误差另加与摄像头水平距离的 10%（D-102）
@@ -95,10 +94,12 @@ class GroundMapping:
         homography *= np.sign(_homogeneous(pixels[keep][:1]) @ homography[2])[0]
         return cls(homography, 0.0, (float(pose["x"]), float(pose["y"])))
 
-    def locate(self, u: float, v: float, box_h: float) -> tuple[float, float, float] | None:
-        """脚点 (u, v) → (x, y, uncertainty_m)。脚点或其偏移点位于地平线以上时返回 None。"""
-        delta = FOOT_ERROR_RATIO * box_h
-        projected = _project(self.homography, np.array([[u, v], [u, v - delta], [u, v + delta]]))
+    def locate(self, u: float, v: float, delta_v: float) -> tuple[float, float, float] | None:
+        """脚点 (u, v) → (x, y, uncertainty_m)；delta_v 为脚点的上下误差（像素，C-CV-06），
+        其在地面上的偏移计入误差。脚点或其偏移点位于地平线以上时返回 None。"""
+        projected = _project(
+            self.homography, np.array([[u, v], [u, v - delta_v], [u, v + delta_v]])
+        )
         if projected is None:
             return None
         offset = float(np.linalg.norm(projected[1:] - projected[0], axis=1).max())
@@ -109,6 +110,15 @@ class GroundMapping:
                 np.hypot(x - self.camera_xy[0], y - self.camera_xy[1])
             )
         return x, y, error
+
+    def outward(self, u: float, v: float) -> np.ndarray | None:
+        """画面点 (u, v) 处远离摄像头的地面单位方向：取其正上方 1 像素的点在地面上的方向。
+        位于地平线以上时返回 None。"""
+        projected = _project(self.homography, np.array([[u, v], [u, v - 1]]))
+        if projected is None:
+            return None
+        step = projected[1] - projected[0]
+        return step / np.linalg.norm(step)
 
     def to_plane(self, pixels: np.ndarray) -> np.ndarray:
         """像素 (N, 2) → 平面 (N, 2)；位于地平线以上（w ≤ 0）的点为 NaN。"""
