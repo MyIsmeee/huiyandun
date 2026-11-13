@@ -228,6 +228,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data  # 本地 CA：重建容器后浏览器已导入的根证书仍有效
+    environment: { HYD_LAN_IP: "${HYD_LAN_IP:-127.0.0.1}" }  # 本机局域网地址，在 deploy/compose/.env 设置（ops.md §5）
     ports: ["443:8443"]
     depends_on: { api-server: { condition: service_healthy } }
     networks: [core-net, edge-net]
@@ -245,6 +246,7 @@ services:
     # 故启动时把只读的基础配置复制到容器内的临时目录再运行，重启后由 api-server 补齐
     volumes: ["./go2rtc.yaml:/base/go2rtc.yaml:ro"]
     tmpfs: [/config]
+    environment: { HYD_LAN_IP: "${HYD_LAN_IP:-127.0.0.1}" }
     command: ["sh", "-c", "cp /base/go2rtc.yaml /config/go2rtc.yaml && exec go2rtc -config /config/go2rtc.yaml"]
     # 只开放 WebRTC 媒体端口（C-OPS-05、D-02）。API（1984）无鉴权且可新建 exec 源：
     # 不接入 core-net，只经 video-net 供 api-server 转发信令、经 demo-net 供 vision-engine 取流；
