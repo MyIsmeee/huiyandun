@@ -98,10 +98,80 @@ STREAM_LOST_REPEAT_S = 30  # 断流期间每 30 s 重报 stream_lost，api-serve
 STALL_S = 10.0  # 任一循环超过此时长未完成周期即视为停滞，与 compose 健康检查的阈值一致
 # 新轨迹须连续 2 帧、置信度 ≥ 0.5；RTMO 对远处行人的置信度多在 0.5～0.6（模型卡）
 TRACK_ACTIVATION = 0.5
+# 丢失的轨迹保留 3 s 供重新关联：trackers 按 30 帧/秒换算，90 在 5 FPS 下为 15 帧；关联 IoU 下限 0.05。
+# 实测遮挡多的素材新编号降 8%～33%，人·秒不减（TK-164）
+LOST_TRACK_BUFFER = 90
+MIN_IOU = 0.05
 # 车辆与人员分别跟踪（骑车人与自行车框重叠，混合跟踪会互换编号）；车辆轨迹编号加此偏移，同一路内不重复
 VEHICLE_ID_BASE = 1_000_000
+RELINK_S = 5.0  # 人员轨迹丢失后在此时长内可被续接（FR-911、D-135）
+RELINK_M = 1.0  # 续接的距离上限：取此值与两者 uncertainty_m 之大者
 
 log = logging.getLogger(__name__)
+
+
+class Relinker:
+    """按地面位置把新的人员轨迹续接到刚丢失的轨迹（FR-911、D-135），不用外观特征（G-04）。
+
+    跟踪器编号映射为输出编号。新的跟踪编号首次出现时，在 RELINK_S 内丢失、尚未被续接的输出编号中，
+    找末位置与其首个位置相距不超过上限的：恰好一个、且本帧没有别的新轨迹也靠近它时沿用，否则用新编号
+    （宁可断号，不把两个人接错）。输出编号由本类分配：被续接的编号归新轨迹所有，原跟踪编号再出现时按新出现处理，
+    不会两人同号。
+    """
+
+    def __init__(self) -> None:
+        self._ids: dict[int, int] = {}  # 跟踪编号 → 输出编号
+        self._seen: dict[int, float] = {}  # 跟踪编号 → 最近出现的时刻
+        self._last: dict[
+            int, tuple[float, float, float, float]
+        ] = {}  # 输出编号 → (时刻, x, y, 误差)
+        self._next = 1
+
+    def assign(
+        self, t: float, tracks: list[tuple[int, tuple[float, float, float] | None]]
+    ) -> list[int]:
+        """tracks 为本帧的 (跟踪编号, (x, y, uncertainty_m) 或 None)，按序返回输出编号。"""
+        self._seen = {i: s for i, s in self._seen.items() if t - s <= RELINK_S}
+        self._ids = {i: o for i, o in self._ids.items() if i in self._seen}
+        self._last = {o: p for o, p in self._last.items() if t - p[0] <= RELINK_S}
+        present = {self._ids[i] for i, _ in tracks if i in self._ids}
+        lost = {o: p for o, p in self._last.items() if o not in present}
+        new = [located for i, located in tracks if i not in self._ids and located is not None]
+        out = []
+        for track_id, located in tracks:
+            if track_id not in self._ids:
+                output = self._relink(located, lost, new)
+                if output is None:
+                    output, self._next = self._next, self._next + 1
+                else:
+                    del lost[output]
+                    self._ids = {i: o for i, o in self._ids.items() if o != output}
+                self._ids[track_id] = output
+            self._seen[track_id] = t
+            if located is not None:
+                self._last[self._ids[track_id]] = (t, *located)
+            out.append(self._ids[track_id])
+        return out
+
+    @staticmethod
+    def _relink(
+        located: tuple[float, float, float] | None,
+        lost: dict[int, tuple[float, float, float, float]],
+        new: list[tuple[float, float, float]],
+    ) -> int | None:
+        """双向唯一才续接：该新轨迹附近只有一个丢失轨迹，且那个丢失轨迹附近只有这一个新轨迹。"""
+        if located is None:
+            return None
+        near = [o for o, last in lost.items() if _near(located, last[1:])]
+        if len(near) != 1:
+            return None
+        rivals = [n for n in new if _near(n, lost[near[0]][1:])]
+        return near[0] if len(rivals) == 1 else None
+
+
+def _near(a: tuple[float, float, float], b: tuple[float, float, float]) -> bool:
+    """两个 (x, y, 误差) 地面位置相距不超过续接上限：1 m 与双方误差中的较大者。"""
+    return bool(np.hypot(a[0] - b[0], a[1] - b[1]) <= max(RELINK_M, a[2], b[2]))
 
 
 class FrameReader(threading.Thread):
@@ -206,14 +276,17 @@ class CameraPipeline:
         self._gate = MotionGate()
         self._tracker, self._vehicle_tracker = (
             ByteTrackTracker(
+                lost_track_buffer=LOST_TRACK_BUFFER,
                 frame_rate=FPS,
                 track_activation_threshold=TRACK_ACTIVATION,
+                minimum_iou_threshold=MIN_IOU,
                 high_conf_det_threshold=TRACK_ACTIVATION,
             )
             for _ in range(2)
         )
         self._motion = Motion()
         self._footing = PersonFooting()
+        self._relinker = Relinker()
         self._votes: dict[int, Counter[int]] = {}  # 车辆轨迹 → 各帧检出类别的计数
         self._boxes = np.empty((0, 4))
 
@@ -277,6 +350,39 @@ class CameraPipeline:
         tracked, vehicles = self.track(frame, timestamp)
         if not len(tracked) and not len(vehicles):
             return integrity
+        height, width = frame.shape[:2]
+        if self._mapping is None and self._pose is not None:
+            self._mapping = GroundMapping.from_pose(self._pose, width, height)
+            self._pose = None
+        mapping = self._mapping
+        people = (
+            list(
+                zip(
+                    tracked.xyxy,
+                    tracked.tracker_id,
+                    tracked.data["keypoints"],
+                    tracked.data["keypoint_scores"],
+                    strict=True,
+                )
+            )
+            if len(tracked)  # 空结果不含关键点数据
+            else []
+        )
+        # 先算位置再续接，行为判定用续接后的编号；没有地面映射时不续接、用跟踪编号（FR-911、C-CV-05）
+        positions = [
+            None
+            if mapping is None
+            else mapping.locate(*self._footing.foot(int(i), tuple(box), points, scores, timestamp))
+            for box, i, points, scores in people
+        ]
+        ids = (
+            [int(i) for _, i, _, _ in people]
+            if mapping is None
+            else self._relinker.assign(
+                timestamp,
+                [(int(p[1]), located) for p, located in zip(people, positions, strict=True)],
+            )
+        )
         now = datetime.now(UTC)
         # 未标定摄像头同样判定行为：只输出设备级告警（C-CV-05）
         events: list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1] = integrity + [
@@ -294,37 +400,25 @@ class CameraPipeline:
             )
             for b in (
                 self._behaviors.update(
-                    tracked.tracker_id,
+                    np.array(ids),
                     tracked.data["keypoints"],
                     tracked.data["keypoint_scores"],
                     timestamp,
                 )
-                if len(tracked)  # 空结果不含关键点数据
+                if people
                 else []
             )
         ]
-        height, width = frame.shape[:2]
-        if self._mapping is None and self._pose is not None:
-            self._mapping = GroundMapping.from_pose(self._pose, width, height)
-            self._pose = None
-        if self._mapping is None:
+        if mapping is None:
             return events  # 没有地面映射不输出坐标（FR-902）
         scale = np.array([width, height], dtype=np.float32)
         targets = [
-            (int(i), "person", box, (points, scores))
-            for box, i, points, scores in (
-                zip(
-                    tracked.xyxy,
-                    tracked.tracker_id,
-                    tracked.data["keypoints"],
-                    tracked.data["keypoint_scores"],
-                    strict=True,
-                )
-                if len(tracked)
-                else []
+            (output_id, "person", box, (points, scores), located)
+            for (box, _, points, scores), output_id, located in zip(
+                people, ids, positions, strict=True
             )
         ] + [
-            (VEHICLE_ID_BASE + i, VEHICLES[self._vote(i, c)], box, None)
+            (VEHICLE_ID_BASE + i, VEHICLES[self._vote(i, c)], box, None, None)
             for box, i, c in (
                 zip(vehicles.xyxy, vehicles.tracker_id, vehicles.class_id, strict=True)
                 if len(vehicles)
@@ -333,12 +427,8 @@ class CameraPipeline:
         ]
         current = set(vehicles.tracker_id.tolist()) if len(vehicles) else set()
         self._votes = {i: v for i, v in self._votes.items() if i in current}
-        for track_id, object_class, (bx1, by1, bx2, by2), skeleton in targets:
+        for track_id, object_class, (bx1, by1, bx2, by2), skeleton, located in targets:
             if skeleton is not None:  # 人员取站立的脚点（FR-911）
-                u, v, delta_v = self._footing.foot(
-                    track_id, (bx1, by1, bx2, by2), *skeleton, timestamp
-                )
-                located = self._mapping.locate(u, v, delta_v)
                 if located is None:
                     continue
                 x, y, uncertainty = located
@@ -347,8 +437,8 @@ class CameraPipeline:
                 # 车辆：朝向与速度按框底边中点映射的近端点估计，再沿视线外移到车身中心（FR-911）。
                 # 不按外移后的位置估计：外移量随朝向变化，会反过来扰动朝向
                 u = (bx1 + bx2) / 2
-                located = self._mapping.locate(u, by2, FOOT_ERROR_RATIO * (by2 - by1))
-                outward = self._mapping.outward(u, by2)
+                located = mapping.locate(u, by2, FOOT_ERROR_RATIO * (by2 - by1))
+                outward = mapping.outward(u, by2)
                 if located is None or outward is None:
                     continue
                 near_x, near_y, uncertainty = located
