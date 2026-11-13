@@ -2,9 +2,9 @@ import { ArrowLeft, Clock } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { deviceLook } from "../../scene/devices";
+import { deviceLook, mappingText } from "../../scene/devices";
 import { CLASS_LABEL, kmh } from "../../scene/targets";
-import type { Device, Target } from "../../store/live";
+import { type Device, type Target, useLive } from "../../store/live";
 import { ActionBar } from "../ActionBar/ActionBar";
 import { AiInvestigation } from "../AiInvestigation/AiInvestigation";
 import { IncidentTimeline } from "../IncidentTimeline/IncidentTimeline";
@@ -35,6 +35,12 @@ export function DetailPanel(props: { device: Device; stale: boolean; onClose: ()
           {tags.length > 0 ? tags.join(" · ") : "正常"}
           {stale && <Stale />}
         </dd>
+        {device.camera && (
+          <>
+            <dt className="text-subtle-foreground">地面映射</dt>
+            <dd>{mappingText(device.camera.calibration, device.camera.reproj_error_m)}</dd>
+          </>
+        )}
       </dl>
       {timeline && (
         <Section title="处置时间线">
@@ -55,6 +61,8 @@ export function DetailPanel(props: { device: Device; stale: boolean; onClose: ()
 export function TargetPanel(props: { target: Target; stale: boolean; onClose: () => void }) {
   const { target, stale, onClose } = props;
   const speed = kmh(target.speed_mps);
+  // 所属摄像头按安装参数估算时，误差含随距离增加的估算部分（D-102），如实注明（FR-902）
+  const estimated = useLive((s) => (s.devices[target.camera_id] ?? s.site?.devices.find((d) => d.id === target.camera_id))?.camera?.mapping === "estimated");
   return (
     <Drawer title={`${CLASS_LABEL[target.object_class]} #${target.track_id}`} onClose={onClose}>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
@@ -70,7 +78,9 @@ export function TargetPanel(props: { target: Target; stale: boolean; onClose: ()
         <dt className="text-subtle-foreground">摄像头</dt>
         <dd className="font-mono">{target.camera_id}</dd>
         <dt className="text-subtle-foreground">定位误差</dt>
-        <dd className="tabular-nums">±{target.uncertainty_m.toFixed(1)} m</dd>
+        <dd className="tabular-nums">
+          ±{target.uncertainty_m.toFixed(1)} m{estimated && " · 按安装参数估算"}
+        </dd>
       </dl>
       <Section title="实时画面">
         <LiveVideo key={target.camera_id} deviceId={target.camera_id} />

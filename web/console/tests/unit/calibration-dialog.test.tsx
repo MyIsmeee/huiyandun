@@ -161,4 +161,16 @@ describe("地面标定对话框（V-CAM10、FR-910）", () => {
     expect(save.mock.calls[1]).toEqual(["cam-09", { area_id: "area-01", points: POINTS }]);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("已标定时可二次确认后清除标定", async () => {
+    vi.spyOn(api, "checkCameraCalibration").mockResolvedValue({ reproj_error_m: 0.21, residuals_m: [0.2, 0.2, 0.2, 0.2] });
+    const save = vi.spyOn(api, "saveCameraCalibration").mockResolvedValue(CAM);
+    open({ ...CAM, calibration: POINTS, calibration_error_m: 0.21 });
+    expect(rows()).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "清除标定" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "清除" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith("cam-09", { area_id: "area-01", points: [] }));
+  });
 });

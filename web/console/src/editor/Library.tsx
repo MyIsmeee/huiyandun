@@ -1,5 +1,6 @@
 import { BrickWall, Building2, Cctv, DoorOpen, type LucideIcon, Package, Route, Search, Sofa, Trees } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -77,18 +78,31 @@ export function Library({ devices }: { devices: Device[] }) {
 
 /**
  * 摄像头（设计 150 E-5）：未放入任何区域的摄像头点选后在地面上按下即放置，拖动方向为朝向；
- * 本区域的摄像头可重新放置或移出区域。安装高度、俯角、视场角在摄像头页编辑
+ * 本区域的摄像头可重新放置或移出区域；移出已标定的摄像头时提示保存后标定清除（D-134）。安装高度、俯角、视场角在摄像头页编辑
  */
+/** 移出已标定摄像头时的提示，按摄像头编号去重，放回后撤掉 */
+const clearNotice = (id: string) => `calibration-cleared-${id}`;
+
 function Cameras({ devices }: { devices: Device[] }) {
   const placed = useDraft((s) => s.cameras);
   const areaId = useDraft((s) => s.areaId);
   const placing = cameraTool(useDraft((s) => s.tool));
   const ids = new Set(placed.map((c) => c.id));
+  const placedKey = placed.map((c) => c.id).join(",");
+  useEffect(() => {
+    // 保存前又放回本区域（重新放置或撤销）：保存时不会清除标定，撤掉移出时的提示
+    for (const id of placedKey.split(",")) toast.dismiss(clearNotice(id));
+  }, [placedKey]);
   const cameras = devices.filter((d) => d.camera);
   // 未放入任何区域的，以及本页刚从本区域移出、尚未保存的
   const free = cameras.filter((d) => !ids.has(d.id) && (!d.camera?.area_id || d.camera.area_id === areaId));
   const here = cameras.filter((d) => ids.has(d.id));
   if (free.length === 0 && here.length === 0) return null;
+  function remove(d: Device) {
+    removeCamera(d.id);
+    // 只有原本就在本区域的摄像头带着本区域的标定；其他摄像头放入前已不属于任何区域，没有标定
+    if (d.camera?.area_id === areaId && d.camera.calibration.length >= 4) toast.warning(`保存后 ${d.id} 的地面标定将清除`, { id: clearNotice(d.id) });
+  }
   return (
     <div role="group" aria-label="摄像头" className="grid gap-0.5 border-t pt-2">
       <p className="flex items-center gap-2 px-2 text-xs text-subtle-foreground">
@@ -107,7 +121,7 @@ function Cameras({ devices }: { devices: Device[] }) {
           <Button variant="ghost" size="sm" aria-pressed={placing === d.id} aria-label={`重新放置 ${d.name}`} onClick={() => placingCamera(d.id)}>
             重新放置
           </Button>
-          <Button variant="ghost" size="sm" aria-label={`移出区域 ${d.name}`} onClick={() => removeCamera(d.id)}>
+          <Button variant="ghost" size="sm" aria-label={`移出区域 ${d.name}`} onClick={() => remove(d)}>
             移出
           </Button>
         </div>

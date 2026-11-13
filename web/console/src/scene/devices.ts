@@ -45,6 +45,12 @@ export function useCameras(devices: Device[], areaId: string | null): Camera[] {
     [devices, pushed, areaId],
   );
 }
+/** 地面映射方式（V-CAM9）：≥ 4 组标定点为已标定，有保存时的误差则一并显示；否则按安装参数估算（D-102） */
+export function mappingText(calibration: number[][], errorM: number | null | undefined): string {
+  if (calibration.length < 4) return "按安装参数估算";
+  return errorM == null ? "已标定" : `已标定 · 误差 ±${errorM.toFixed(2)} m`;
+}
+
 export type TagIcon = "offline" | "uncalibrated" | "physical" | "cyber" | "pending" | "contained" | "notified";
 
 export interface Look {

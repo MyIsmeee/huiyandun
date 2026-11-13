@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
+import { mappingText } from "../../scene/devices";
 import { useLive } from "../../store/live";
 import { type Camera, CameraEditor, PUSH_USER, pushUrl } from "../CameraEditor/CameraEditor";
 
@@ -142,7 +143,7 @@ export function CameraListView(props: {
                 <TableHead>名称与地址</TableHead>
                 <TableHead className="w-44">接入</TableHead>
                 <TableHead className="w-16">状态</TableHead>
-                <TableHead className="w-28">地面映射</TableHead>
+                <TableHead className="w-40">地面映射</TableHead>
                 <TableHead className="w-24 pr-4 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -163,7 +164,7 @@ export function CameraListView(props: {
                     </TableCell>
                     {/* 在线状态以图标形状 + 文字表达，不使用状态色（V-CAM1） */}
                     <TableCell className="text-xs">{offline ? "○ 离线" : "● 在线"}</TableCell>
-                    <TableCell className="text-xs text-subtle-foreground">{camera.calibration.length >= 4 ? "已标定" : "按安装参数估算"}</TableCell>
+                    <TableCell className="text-xs text-subtle-foreground">{mappingText(camera.calibration, camera.calibration_error_m)}</TableCell>
                     <TableCell className="space-x-2 pr-4 text-right">
                       <button type="button" aria-label={`编辑 ${camera.name}`} onClick={() => props.onEdit(camera)} className={button}>
                         <Pencil aria-hidden className="size-4" />

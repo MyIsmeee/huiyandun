@@ -1,6 +1,7 @@
 import { CircleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,7 @@ export function CalibrationDialog(props: {
   const [check, setCheck] = useState<Check | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     if (pairs.length < MIN_PAIRS) return;
@@ -66,7 +68,7 @@ export function CalibrationDialog(props: {
     setMessage(null);
     try {
       const saved = await api.saveCameraCalibration(camera.id, { area_id: areaId, points });
-      toast.success("已保存标定");
+      toast.success(points.length > 0 ? "已保存标定" : "已清除标定");
       props.onSaved(saved);
       props.onClose();
     } catch (e) {
@@ -204,6 +206,11 @@ export function CalibrationDialog(props: {
             </p>
           )}
           <footer className="flex gap-2">
+            {camera.calibration.length >= MIN_PAIRS && (
+              <button type="button" disabled={saving} onClick={() => setClearing(true)} className={button}>
+                清除标定
+              </button>
+            )}
             <button type="button" onClick={props.onClose} className={`${button} ml-auto`}>
               取消
             </button>
@@ -212,6 +219,29 @@ export function CalibrationDialog(props: {
             </button>
           </footer>
         </div>
+        {clearing && (
+          <AlertDialog open onOpenChange={(open) => !open && setClearing(false)}>
+            <AlertDialogContent className="sm:max-w-md">
+              <AlertDialogTitle className="text-base font-medium">清除标定</AlertDialogTitle>
+              <AlertDialogDescription>清除 {camera.id} 的地面标定？清除后人员位置按安装参数估算。</AlertDialogDescription>
+              <p className="flex justify-end gap-2">
+                <button type="button" onClick={() => setClearing(false)} className={button}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClearing(false);
+                    void save([]);
+                  }}
+                  className={buttonVariants({ size: "sm" })}
+                >
+                  清除
+                </button>
+              </p>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </DialogContent>
     </Dialog>
   );

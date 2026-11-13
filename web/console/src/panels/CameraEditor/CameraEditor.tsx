@@ -9,6 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import { type MouseEvent, useEffect, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
+import { mappingText } from "../../scene/devices";
+import { CalibrationDialog } from "./CalibrationDialog";
 
 type Schemas = components["schemas"];
 export type Camera = Schemas["Camera"];
@@ -111,7 +113,9 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
   const [snapshot, setSnapshot] = useState<Snapshot>(() => (props.camera ? { status: "loading" } : { status: "none" }));
   const [point, setPoint] = useState<[number, number] | null>(null);
   const [pushPassword, setPushPassword] = useState<string | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
   const set = (patch: Partial<CameraForm>) => setForm((f) => ({ ...f, ...patch }));
+  const calibrated = (saved?.calibration.length ?? 0) >= 4;
 
   async function preview(id: string) {
     setSnapshot({ status: "loading" });
@@ -267,7 +271,10 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
 
         <fieldset className="flex flex-col gap-2 border-t border-border pt-3">
           <legend className="pr-2 font-medium">安装参数</legend>
-          <p className="text-xs text-subtle-foreground">朝向自平面 x 轴正方向逆时针计；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。</p>
+          <p className="text-xs text-subtle-foreground">
+            朝向自平面 x 轴正方向逆时针计；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。
+            {calibrated && "已标定：位置按标定换算，安装参数只用于画视场；摄像头转动过请重新标定。"}
+          </p>
           <div className="grid grid-cols-4 gap-x-3 gap-y-2">
             {POSE_FIELDS.map(([key, label, unit]) => (
               <Label key={key} className="flex items-center gap-2">
@@ -285,6 +292,17 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             ))}
           </div>
         </fieldset>
+
+        {saved && (
+          <section aria-label="地面映射" className="flex items-center gap-3 border-t border-border pt-3">
+            <h3 className="font-medium">地面映射</h3>
+            <span className="text-subtle-foreground">{mappingText(saved.calibration, saved.calibration_error_m)}</span>
+            {!saved.area_id && <span className="ml-auto text-xs text-subtle-foreground">先在场景页把摄像头放入区域</span>}
+            <button type="button" disabled={!saved.area_id} onClick={() => setCalibrating(true)} className={`${button} ${saved.area_id ? "ml-auto" : ""}`}>
+              标定
+            </button>
+          </section>
+        )}
 
         <section aria-label="预览" className="flex flex-col gap-2 border-t border-border pt-3">
           <div className="flex items-center gap-2">
@@ -316,6 +334,18 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
         </footer>
       </form>
       </DialogContent>
+      {calibrating && saved?.area_id && (
+        <CalibrationDialog
+          camera={saved}
+          areaId={saved.area_id}
+          snapshot={snapshot}
+          onClose={() => setCalibrating(false)}
+          onSaved={(camera) => {
+            setSaved(camera);
+            props.onSaved();
+          }}
+        />
+      )}
     </Dialog>
   );
 }
