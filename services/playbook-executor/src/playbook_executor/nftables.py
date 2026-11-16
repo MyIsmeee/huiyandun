@@ -27,7 +27,14 @@ class Helper:
         self._key = key
 
     async def send(self, action: str, ip: str, ttl_s: int | None = None) -> Reply:
-        line = encode(command(action, ip, ttl_s), self._key)
+        try:
+            line = encode(command(action, ip, ttl_s), self._key)
+        except ValidationError as e:
+            # 指令本身不合协议（如回环、链路本地、组播地址，或超出范围的时长）：helper 同样会拒绝。按动作
+            # 失败处理：否则异常穿过编排（只处理 ActionError），执行停在"执行中"且目标一直被占用；重启恢复时
+            # 再次抛出，执行器反复启动失败
+            reasons = "；".join(err["msg"] for err in e.errors())
+            raise HelperError(f"指令不合 privileged-helper 协议：{reasons}") from e
 
         async def exchange() -> bytes:
             reader, writer = await asyncio.open_unix_connection(str(self._socket))

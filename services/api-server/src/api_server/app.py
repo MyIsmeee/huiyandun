@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
 
@@ -43,6 +43,7 @@ from api_server.devices import Devices
 from api_server.history import History
 from api_server.investigation_tools import Tools
 from api_server.localtime import site_tz
+from api_server.pose_checks import PoseChecks
 from py_common.bus import Bus
 from py_common.log import bind_request_id
 
@@ -149,13 +150,16 @@ def create_app(config: ApiConfig) -> FastAPI:
             ),
         ]
         try:
-            await relay.start(bus, app.state.hub, app.state.devices)
+            await relay.start(bus, app.state.hub, app.state.devices, app.state.pose_checks)
             yield
         finally:
             for task in tasks:
                 task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+            # 逐个等待并只忽略取消：此前已因异常结束的后台任务会在这里把异常重新抛出，其后的总线与
+            # 数据库连接就不关了。统一收集，异常记录后照常收尾
+            for result in await asyncio.gather(*tasks, return_exceptions=True):
+                if isinstance(result, Exception):
+                    log.error("api.background_task_failed", exc_info=result)
             await bus.close()
             await app.state.go2rtc.aclose()
             await app.state.ingest.aclose()
@@ -173,6 +177,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.site = site.load(config.site_file)
     app.state.hub = ws.Hub()
     app.state.devices = Devices(app.state.site.devices)
+    app.state.pose_checks = PoseChecks()
     app.state.history = History()
     app.state.kpis = kpis.KpiTracker(app.state.devices, app.state.history, datetime.now(UTC))
     app.state.llm_last = None  # 最近一次模型调用的结果（llm_chain.invoke），供顶栏模型状态

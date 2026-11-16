@@ -123,6 +123,16 @@ def test_non_http_url_rejected(url: str) -> None:
     assert e.value.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "url", ["http://192.168.1.50:abc/v1", "http://192.168.1.50:99999/v1", "http://[::1/v1"]
+)
+def test_unparsable_url_rejected_not_crashed(url: str) -> None:
+    """端口不是数字或超出范围、方括号不成对：400 并说明，不存入库（否则每次调用都在网关报错）。"""
+    with pytest.raises(HTTPException) as e:
+        llm.normalize(url)
+    assert e.value.status_code == 400
+
+
 def test_api_key_sealed_with_random_nonce(key_file: Path) -> None:
     """C-ST-03：AES-256-GCM，密文不含明文，同一 Key 两次加密结果不同，可解密还原。"""
     a, b = llm.seal(key_file, KEY), llm.seal(key_file, KEY)

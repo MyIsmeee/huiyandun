@@ -106,14 +106,16 @@ async def subscribe(executor: Executor, bus: Bus) -> None:
 
     await bus.js_subscribe(EXECUTION_SUBJECT, PlaybookExecutionV1, restore, now - EXECUTION_REPLAY)
     await executor.resume()
+    # 先重放关联事件、再重放确认：停机期间到达的关联事件此时才建出等待确认的执行，值班员在停机期间点的确认
+    # 须在其后才对得上；反过来确认找不到执行即被忽略，执行白等到 30 分钟过期，而审计里已记了"已确认"
+    await bus.js_subscribe(
+        INCIDENT_SUBJECT, CorrelatorIncidentV1, executor.on_incident, now - INCIDENT_REPLAY
+    )
     await bus.js_subscribe(
         CONFIRMATION_SUBJECT,
         CorrelatorConfirmationV1,
         executor.on_confirmation,
         now - CONFIRM_TIMEOUT,
-    )
-    await bus.js_subscribe(
-        INCIDENT_SUBJECT, CorrelatorIncidentV1, executor.on_incident, now - INCIDENT_REPLAY
     )
     await bus.js_subscribe(
         ROLLBACK_SUBJECT, PlaybookRollbackV1, executor.on_rollback, now - ROLLBACK_REPLAY

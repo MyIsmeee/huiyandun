@@ -89,6 +89,17 @@ def test_helper_failure_raised_with_reason(tmp_path: Path) -> None:
     with_helper(tmp_path, FakeNft(fail=True), scenario)
 
 
+@pytest.mark.parametrize("target", ["127.0.0.1", "169.254.1.1", "fe80::1", "224.0.0.1", "::"])
+def test_address_rejected_by_protocol_is_action_failure(tmp_path: Path, target: str) -> None:
+    """指令协议拒绝的地址在客户端构造指令时即被拒：按动作失败（HelperError）处理，编排据此回滚并释放目标，
+    不让校验异常穿过编排、重启恢复时把执行器带崩。"""
+    action = BlockIp(Helper(tmp_path / "unused.sock", KEY))
+    ctx = ActionContext(target=ip_address(target), ttl_s=60, params={})
+    for step in (action.execute, action.verify, action.rollback, action.intercepted):
+        with pytest.raises(HelperError, match="不合 privileged-helper 协议"):
+            asyncio.run(step(ctx))
+
+
 def test_helper_unreachable_raised(tmp_path: Path) -> None:
     action = BlockIp(Helper(tmp_path / "missing.sock", KEY))
     with pytest.raises(HelperError, match="不可达"):

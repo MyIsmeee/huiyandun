@@ -72,3 +72,29 @@ def test_oversized_package_exits_2(
 
     assert main(["verify", str(big), "--fingerprint", "sha256:00"]) == 2
     assert "过大" in capsys.readouterr().err
+
+
+def test_corrupted_or_unsupported_entry_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """包内某个文件的压缩流被改坏，或用了读不了的压缩方式：按读不了的包处理（退出码 2），不以 traceback 收场。"""
+    payload = bytes(range(256)) * 40
+    damaged = tmp_path / "damaged.zip"
+    with zipfile.ZipFile(damaged, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", payload)
+    raw = bytearray(damaged.read_bytes())
+    start = raw.index(b"manifest.json") + len("manifest.json")
+    raw[start : start + 8] = b"\xff" * 8  # 压缩流开头
+    damaged.write_bytes(raw)
+    unsupported = tmp_path / "unsupported.zip"
+    with zipfile.ZipFile(unsupported, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", payload)
+    raw = bytearray(unsupported.read_bytes())
+    for marker in (b"PK\x03\x04", b"PK\x01\x02"):  # 本地文件头与中央目录中的压缩方式改为未定义的 99
+        at = raw.index(marker) + (8 if marker.endswith(b"\x04") else 10)
+        raw[at : at + 2] = (99).to_bytes(2, "little")
+    unsupported.write_bytes(raw)
+
+    for package in (damaged, unsupported):
+        assert main(["verify", str(package), "--fingerprint", "sha256:00"]) == 2
+        assert "无法读取证据包" in capsys.readouterr().err

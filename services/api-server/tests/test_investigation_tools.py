@@ -5,6 +5,7 @@ import json
 import threading
 import uuid
 from datetime import UTC, datetime, timedelta
+from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +122,22 @@ def test_list_alerts_by_ip_in_window_newest_first(tools: Tools) -> None:
     )
 
 
+def test_list_alerts_by_ip_excludes_unrelated_unregistered_targets(
+    history: History, tools: Tools
+) -> None:
+    """按地址查时不带设备：目标未登记（device_id 为 null）的无关告警不得因"都为空"而混入，
+    否则无关的地址会进入交给模型的结果与回溯依据（FR-1103）。"""
+    unrelated = alert(1, src="10.9.9.9", summary="无关告警").model_copy(
+        update={"dst_ip": IPv4Address("10.8.8.8"), "device_id": None}
+    )
+    history.add_alert(unrelated)
+
+    r = run(tools, "list_alerts", {"ip": ATTACKER})
+
+    assert r.data["total"] == 2
+    assert "无关告警" not in [i["summary"] for i in r.data["items"]]
+
+
 def test_alert_times_in_site_timezone(tools: Tools) -> None:
     """交给模型的时刻按站点时区并带偏移，与界面一致（D-106）。"""
     r = run(tools, "list_alerts", {"ip": ATTACKER})
@@ -167,6 +184,26 @@ def test_query_sessions_aggregates_by_peer(tools: Tools) -> None:
          "states": {"S0": 1}},
     ]  # fmt: skip
     assert r.summary == "近 10 分钟 5 个会话，对端 2 个，最多：172.30.0.12:8554 4 次"
+
+
+def test_query_sessions_skips_lines_that_are_not_sessions(tools: Tools, tmp_path: Path) -> None:
+    """日志来自解析不可信流量的探针：合法 JSON 但不是一条会话的行跳过，不让查询报错。"""
+    with (tmp_path / "conn.log").open("a") as f:
+        f.write(json.dumps([ATTACKER]) + "\n" + json.dumps(ATTACKER) + "\n{not json " + ATTACKER)
+
+    assert run(tools, "query_sessions", {"ip": ATTACKER}).data["total"] == 5
+
+
+def test_unreadable_source_reported_to_model(tools: Tools, monkeypatch: pytest.MonkeyPatch) -> None:
+    """文件在检查之后被轮转或暂时读不了：作为工具结果告诉模型，这一轮调查继续。"""
+
+    def denied(*args: object) -> None:
+        raise PermissionError("conn.log")
+
+    monkeypatch.setattr(investigation_tools, "_read_conn_log", denied)
+    r = run(tools, "query_sessions", {"ip": ATTACKER})
+
+    assert r.data == {"error": "数据源暂时读不了"} and r.summary == "数据源读取失败"
 
 
 def test_query_sessions_without_log(history: History, tmp_path: Path) -> None:

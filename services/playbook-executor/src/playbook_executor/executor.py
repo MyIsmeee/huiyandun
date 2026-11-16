@@ -110,20 +110,28 @@ class Executor:
     async def resume(self) -> None:
         now = datetime.now(UTC)
         for execution in list(self._executions.values()):
-            if execution.state == "pending":
-                self._spawn(
-                    execution.id, self._expire(execution, CONFIRM_TIMEOUT - (now - execution.ts))
-                )
-            elif execution.state == "contained" and execution.expires_at is not None:
-                self._active.add(execution.target)
-                self._spawn(execution.id, self._ttl(execution))
-            elif execution.state in ("executing", "verifying"):
-                # 执行到一半时退出：撤销可能已写入的封禁，如实记为失败
-                failed = await self._undo(execution)
-                reason = "执行中断：处置执行器重启"
-                if failed:
-                    reason += f"；回滚失败：{failed}，封禁可能仍在，将于到期时自动解除"
-                await self._update(execution, state="failed", reason=reason)
+            try:
+                await self._resume(execution, now)
+            except Exception:
+                # 一条恢复不了的记录不拖垮整个执行器：否则重放窗口（24 小时）内每次启动都在同一条上失败，
+                # 期间全部处置停摆。记录后继续恢复其余执行
+                log.exception("playbook.resume_failed", extra={"execution_id": execution.id})
+
+    async def _resume(self, execution: PlaybookExecutionV1, now: datetime) -> None:
+        if execution.state == "pending":
+            self._spawn(
+                execution.id, self._expire(execution, CONFIRM_TIMEOUT - (now - execution.ts))
+            )
+        elif execution.state == "contained" and execution.expires_at is not None:
+            self._active.add(execution.target)
+            self._spawn(execution.id, self._ttl(execution))
+        elif execution.state in ("executing", "verifying"):
+            # 执行到一半时退出：撤销可能已写入的封禁，如实记为失败
+            failed = await self._undo(execution)
+            reason = "执行中断：处置执行器重启"
+            if failed:
+                reason += f"；回滚失败：{failed}，封禁可能仍在，将于到期时自动解除"
+            await self._update(execution, state="failed", reason=reason)
 
     # ── 编排 ──────────────────────────────────────────────
 
@@ -151,6 +159,10 @@ class Executor:
         """白名单（C-SEC-03、FR-403）：未配置时只告警；目标在其中时不处置。"""
         if incident.source_ip is None:
             return "关联事件没有攻击源"
+        ip = incident.source_ip
+        if ip.is_loopback or ip.is_multicast or ip.is_unspecified or ip.is_link_local:
+            # 与 privileged-helper 指令协议拒绝的地址一致（C-SEC-06）：封不了，如实记为不处置
+            return "攻击源是本机或非单播地址，不处置"
         if not self._whitelist:
             return "未配置核心业务白名单，只告警不处置"
         if any(incident.source_ip in net for net in self._whitelist):
@@ -300,7 +312,18 @@ class Executor:
 
     def _spawn(self, execution_id: str, coro: Coroutine[Any, Any, None]) -> None:
         self._cancel(execution_id)
-        self._tasks[execution_id] = asyncio.create_task(coro)
+        task = self._tasks[execution_id] = asyncio.create_task(coro)
+        task.add_done_callback(lambda done: self._report(execution_id, done))
+
+    @staticmethod
+    def _report(execution_id: str, task: asyncio.Task[None]) -> None:
+        """编排任务因未预料的异常结束时留下记录：任务的异常没有人等待，不记就无从得知执行为何停住。"""
+        if not task.cancelled() and task.exception() is not None:
+            log.error(
+                "playbook.task_failed",
+                extra={"execution_id": execution_id},
+                exc_info=task.exception(),
+            )
 
     def _cancel(self, execution_id: str) -> None:
         task = self._tasks.pop(execution_id, None)

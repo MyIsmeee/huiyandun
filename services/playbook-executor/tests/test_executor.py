@@ -186,6 +186,12 @@ def test_model_evidence_waits_without_executing() -> None:
         ({"whitelist": []}, {}, "未配置核心业务白名单，只告警不处置"),  # C-SEC-03
         ({}, {"source_ip": "172.30.0.5"}, "目标在核心业务白名单内，不处置"),  # FR-403
         ({}, {"source_ip": None}, "关联事件没有攻击源"),
+        # privileged-helper 的指令协议拒绝的地址：不进入执行（否则封不了还占着目标）
+        ({}, {"source_ip": "127.0.0.1"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "169.254.10.20"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "fe80::1"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "224.0.0.251"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "0.0.0.0"}, "攻击源是本机或非单播地址，不处置"),
     ],
 )
 def test_skipped_with_reason(kwargs: dict[str, Any], changes: dict[str, Any], reason: str) -> None:
@@ -428,3 +434,50 @@ def test_resume_with_removed_playbook() -> None:
     run(h.executor.resume())
     final = {e.id: e.state for e in h.published}
     assert final == {"a": "failed", "b": "expired"}
+
+
+def test_resume_survives_record_that_cannot_be_undone(caplog: pytest.LogCaptureFixture) -> None:
+    """一条执行中的记录在恢复时抛出未预料的异常：记录后继续，其余执行照常恢复，执行器不因此起不来。"""
+
+    class Broken(FakeAction):
+        async def rollback(self, ctx: ActionContext) -> None:
+            if str(ctx.target) == "172.30.0.101":
+                raise ValueError("未预料的错误")
+            await super().rollback(ctx)
+
+    h = Harness(Broken())
+    base = {
+        "schema_version": "1.1.0",
+        "event_id": str(uuid.uuid4()),
+        "ts": datetime.now(UTC).isoformat(),
+        "playbook_id": "isolate-attacker",
+        "playbook_version": "1.0.0",
+        "incident_id": "inc-1",
+        "device_ids": ["cam-02"],
+        "reason": None,
+        "ttl_s": 150,
+        "expires_at": None,
+        "verify_result": None,
+        "state": "executing",
+    }
+    for i, target in enumerate(("172.30.0.101", "172.30.0.102")):
+        h.executor.restore(
+            PlaybookExecutionV1.model_validate(base | {"id": f"exe-{i}", "target": target})
+        )
+    run(h.executor.resume())
+
+    assert {e.id: e.state for e in h.published} == {"exe-1": "failed"}
+    assert any(r.getMessage() == "playbook.resume_failed" for r in caplog.records)
+
+
+def test_unexpected_task_error_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    """编排任务没有等待者：未预料的异常须留下记录。"""
+
+    class Broken(FakeAction):
+        async def execute(self, ctx: ActionContext) -> None:
+            raise ValueError("未预料的错误")
+
+    h = Harness(Broken())
+    run(h.executor.on_incident(incident()))
+
+    assert any(r.getMessage() == "playbook.task_failed" for r in caplog.records)

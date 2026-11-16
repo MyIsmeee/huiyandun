@@ -5,6 +5,7 @@
 熔断借鉴 cc-switch（D-084）：连续失败 4 次的供应商 60 s 内跳过，到期后放行一次，成功即清零。
 """
 
+import asyncio
 import json
 import logging
 import secrets
@@ -17,7 +18,12 @@ from typing import Any, Literal, Self
 
 import httpx2
 import yaml
-from openai import APIConnectionError, APIResponseValidationError, APIStatusError
+from openai import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APIStatusError,
+    APITimeoutError,
+)
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from pydantic import (
     BaseModel,
@@ -28,7 +34,7 @@ from pydantic import (
     model_validator,
 )
 
-from llm_gateway.connect import Target, client, explain
+from llm_gateway.connect import NOT_COMPATIBLE, ProbeFailure, Target, client, explain
 from llm_gateway.probe import strip_reasoning
 from llm_gateway.redact import Pseudonyms, untraced
 from py_contracts.llm.incident_investigation_v1_schema import IncidentInvestigationTurn
@@ -38,7 +44,6 @@ log = logging.getLogger(__name__)
 
 FAILURES, COOLDOWN = 4, timedelta(seconds=60)
 CONNECT_S = 2.0  # 连不上即转下一家，全部不可用时尽快落模板（FR-502）
-NOT_COMPATIBLE = "返回的不是 OpenAI 兼容格式"
 
 
 class InvestigationTurn(IncidentInvestigationTurn):
@@ -203,19 +208,32 @@ class Chain:
         elif provider.structured_output == "json_object":
             extra["response_format"] = {"type": "json_object"}
         tokens = 0
-        async with client(provider, self._transport) as c:
+        try:
+            opened = client(provider, self._transport)
+        except ProbeFailure as e:  # 地址无法解析：这一家失败，转下一家
+            raise CallFailed(e.reason, tokens) from e
+        async with opened as c:
             for _ in range(2):  # 校验失败重试 1 次（C-LLM-05）
-                remaining = min(provider.timeout_s, deadline - time.monotonic())
+                budget = deadline - time.monotonic()
+                remaining = min(provider.timeout_s, budget)
                 if remaining <= 0:
                     raise CallFailed(limit, tokens)
                 try:
-                    completion = await c.chat.completions.create(
-                        model=provider.model,
-                        messages=messages,
-                        temperature=task.temperature,
-                        timeout=httpx2.Timeout(remaining, connect=min(CONNECT_S, remaining)),
-                        **extra,
-                    )
+                    # SDK 的超时是每次读的空闲时长：持续滴字节（如保活空白）的响应永远不触发。另按墙上时钟
+                    # 限定整次调用，总时限才是真正的上限
+                    async with asyncio.timeout(remaining):
+                        completion = await c.chat.completions.create(
+                            model=provider.model,
+                            messages=messages,
+                            temperature=task.temperature,
+                            timeout=httpx2.Timeout(remaining, connect=min(CONNECT_S, remaining)),
+                            **extra,
+                        )
+                except (TimeoutError, APITimeoutError) as e:
+                    # 先用完的是这一家自己的超时，还是任务的总时限
+                    own = provider.timeout_s <= budget
+                    reason = f"{provider.timeout_s:g} 秒内无响应" if own else limit
+                    raise CallFailed(reason, tokens) from e
                 except (APIConnectionError, APIStatusError) as e:
                     raise CallFailed(explain(e, provider).reason, tokens) from e
                 except (APIResponseValidationError, ValueError) as e:  # 200 但响应体不是 JSON

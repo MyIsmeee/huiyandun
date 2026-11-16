@@ -278,6 +278,52 @@ def test_deadline_skips_remaining_providers() -> None:
     assert p.seen["b"] == []
 
 
+def test_deadline_is_wall_clock_even_if_provider_keeps_responding() -> None:
+    """总时限按墙上时钟计：响应迟迟不结束（如持续发保活字节，读超时永不触发）时到点即放弃这一家。"""
+
+    async def endless(_: httpx2.Request) -> httpx2.Response:
+        await asyncio.sleep(2)
+        return completion(json.dumps(REAL))
+
+    p = Providers(a=endless, b=ok())
+    p.chain.tasks = {
+        "incident_report": TASKS["incident_report"].model_copy(update={"deadline_s": 0.2})
+    }
+    started = asyncio.new_event_loop().time()
+    result = p.invoke(provider("a"), provider("b"))
+    elapsed = asyncio.new_event_loop().time() - started
+
+    assert elapsed < 1.5
+    assert [(a.outcome, a.reason) for a in result.attempts] == [
+        ("failed", "超出 0.2 秒总时限"),
+        ("skipped", "超出 0.2 秒总时限"),
+    ]
+
+
+def test_provider_timeout_reported_as_its_own() -> None:
+    """先用完的是这一家自己的超时：原因写它的超时，并转下一家。"""
+
+    async def slow(_: httpx2.Request) -> httpx2.Response:
+        await asyncio.sleep(2)
+        return completion(json.dumps(REAL))
+
+    p = Providers(a=slow, b=ok())
+    result = p.invoke(provider("a", timeout_s=0.2), provider("b"))
+
+    assert result.provider_id == "b"
+    assert result.attempts[0].reason == "0.2 秒内无响应"
+
+
+def test_unparsable_provider_address_fails_over() -> None:
+    """地址无法解析（端口不是数字）的一家记为失败并转下一家，不让整次调用以网关出错收场。"""
+    p = Providers(a=ok(), b=ok())
+    result = p.invoke(provider("a", base_url="http://a.lan:abc/v1"), provider("b"))
+
+    assert result.provider_id == "b"
+    assert (result.attempts[0].outcome, result.attempts[0].reason) == ("failed", "地址格式不正确")
+    assert p.seen["a"] == []
+
+
 def test_endpoint_rejects_unknown_task() -> None:
     config = GatewayConfig(
         prompts_dir=ROOT / "prompts",
