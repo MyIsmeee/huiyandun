@@ -1,0 +1,8 @@
+{
+  "description": "5 分钟人流，无跌倒与攀爬",
+  "report_only": false,
+  "climb_lines": [],
+  "events": [],
+  "ambiguous": [],
+  "source": "依据仓库记录（test_clips.py 注释、models/cards/rtmo-s.md、demo/media/*.meta.yaml），未对照原视频逐帧核对；有原视频后应复核起止时刻"
+}

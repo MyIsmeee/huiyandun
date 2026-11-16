@@ -97,8 +97,12 @@ class Engine:
 
     def feed(self, subject: str, event: Event) -> list[CorrelatorIncidentV1]:
         device = _key(event)
-        # monitor 告警只显示，不参与关联（D-068）
-        if device is None or (isinstance(event, SecurityAlertV1) and event.mode == "monitor"):
+        # monitor 告警只显示，不参与关联（D-068）；疑似跌倒同样只在控制台提示（TK-160）
+        if (
+            device is None
+            or (isinstance(event, SecurityAlertV1) and event.mode == "monitor")
+            or (isinstance(event, VisionBehaviorV1) and event.level == "suspected")
+        ):
             return []
         incidents = []
         for rule in self._rules:

@@ -65,16 +65,18 @@ class GroundMapping:
 
     @classmethod
     def from_pose(cls, pose: dict[str, Any], width: int, height: int) -> Self | None:
-        """按安装高度、朝向（平面 +x 起逆时针）、俯角（向下为负）与水平视场角估算（D-102）。
-        画面中心为主点，像素为正方形；取画面下半部的网格点求视线与地面的交点后拟合。"""
+        """按安装高度、朝向（自平面 +x 转向 +y）、俯角（向下为负）与水平视场角估算（D-102）。
+        画面中心为主点，像素为正方形；取画面下半部的网格点求视线与地面的交点后拟合。
+        平面坐标与控制台一致：俯视时 x 向右、y 向下（场景布局与标定点都在这一约定下录入），
+        画面右方为平面 (−sin yaw, cos yaw)；取相反手性时估算的位置与控制台场景左右镜像。"""
         yaw, pitch = np.radians(pose["yaw_deg"]), np.radians(pose["pitch_deg"])
         h = float(pose["height_m"])
         f_px = (width / 2) / np.tan(np.radians(pose["hfov_deg"]) / 2)
         forward = np.array(
             [np.cos(pitch) * np.cos(yaw), np.cos(pitch) * np.sin(yaw), np.sin(pitch)]
         )
-        right = np.array([np.sin(yaw), -np.cos(yaw), 0.0])
-        down = np.cross(forward, right)
+        right = np.array([-np.sin(yaw), np.cos(yaw), 0.0])
+        down = np.cross(right, forward)  # z 分量为 −cos(pitch)：指向画面下方
         us, vs = np.meshgrid(np.linspace(0, width, 5), np.linspace(height / 2, height, 5))
         pixels = np.column_stack([us.ravel(), vs.ravel()])
         rays = (

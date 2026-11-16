@@ -12,15 +12,17 @@ from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecuti
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 
 SITE = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
 
 
-def behavior(camera_id: str = "cam-01") -> VisionBehaviorV1:
+def behavior(camera_id: str = "cam-01", level: str = "confirmed") -> VisionBehaviorV1:
     now = datetime.now(UTC)
     return VisionBehaviorV1(
-        schema_version="1.0.0", event_id=uuid.uuid4(), ts=now, camera_id=camera_id,
-        track_id=3, behavior="fall", confidence_avg=0.8, duration_s=2.0, ts_start=now, ts_end=now,
+        schema_version="1.1.0", event_id=uuid.uuid4(), ts=now, camera_id=camera_id,
+        track_id=3, behavior="fall", level=level, confidence_avg=0.8, duration_s=2.0,
+        ts_start=now, ts_end=now,
     )  # fmt: skip
 
 
@@ -64,6 +66,22 @@ def test_behavior_enters_physical_alert_and_expires(devices: Devices) -> None:
     assert devices.expire(PHYSICAL_HOLD_S - 0.1) == []
     [restored] = devices.expire(PHYSICAL_HOLD_S)
     assert (restored.id, restored.state) == ("cam-01", "normal")
+
+
+def test_suspected_fall_does_not_enter_physical_alert(devices: Devices) -> None:
+    """疑似跌倒只在告警栏提示（TK-160）：设备不变色，补推时也不作为事件卡。"""
+    assert devices.on_behavior(behavior(level="suspected"), now=0) is None
+    assert states(devices)["cam-01"] == ("normal", None)
+    assert [f for f in devices.snapshot() if f.channel == "alerts"] == []
+
+
+def test_behavior_without_level_is_confirmed(devices: Devices) -> None:
+    """1.0 的事件没有级别字段，按确认处理（JetStream 中的旧事件）。"""
+    old = behavior().model_dump(mode="json", exclude={"level"}) | {"schema_version": "1.0.0"}
+
+    changed = devices.on_behavior(VisionBehaviorV1.model_validate(old), now=0)
+
+    assert changed is not None and changed.state == "physical_alert"
 
 
 def test_repeated_behavior_extends_hold_without_push(devices: Devices) -> None:
@@ -236,3 +254,28 @@ def test_sync_keeps_kept_devices_and_drops_removed(devices: Devices) -> None:
     # 处置覆盖仍在：解除后回到仍未到期的网络告警
     [rolled] = devices.on_execution(execution("rolled_back"), now=3)
     assert (rolled.state, rolled.alert_severity) == ("cyber_alert", "high")
+
+
+def rule(level: str = "confirmed", phase: str = "start") -> VisionRuleV1:
+    now = datetime.now(UTC)
+    return VisionRuleV1(
+        schema_version="1.0.0", event_id=uuid.uuid4(), ts=now, camera_id="cam-01",
+        rule_id="yard", rule_name="库区", rule_type="intrusion", phase=phase,
+        episode_id=uuid.uuid4(), level=level, track_id=3, object_class="person", x=1.0, y=2.0,
+        uncertainty_m=0.2, since=now, direction=None, mapping="calibrated", inferred=False,
+        end_reason="exit" if phase == "end" else None,
+    )  # fmt: skip
+
+
+def test_confirmed_rule_enters_physical_alert(devices: Devices) -> None:
+    """轨迹规则：确认事件进入物理告警并作为事件卡补推；疑似与 end 不进入、不延长。"""
+    assert devices.on_rule(rule("suspected"), now=0) is None
+    assert devices.on_rule(rule(phase="end"), now=0) is None
+
+    changed = devices.on_rule(rule(), now=0)
+
+    assert changed is not None and changed.state == "physical_alert"
+    [card] = [f for f in devices.snapshot() if f.channel == "alerts"]
+    assert card.data["rule_id"] == "yard"
+    assert devices.on_rule(rule(phase="end"), now=50) is None
+    assert [d.state for d in devices.expire(PHYSICAL_HOLD_S)] == ["normal"]

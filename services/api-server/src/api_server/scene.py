@@ -78,6 +78,7 @@ cameras = Table(
     Column("pose", JSONB),
     Column("calibration", JSONB),
     Column("calibration_error_m", Float),
+    Column("rules", JSONB),
     Column("updated_at", DateTime(timezone=True)),
 )
 scene_bootstrap = Table("scene_bootstrap", metadata, Column("default_area_done", Boolean))
@@ -212,6 +213,21 @@ def _check_inside(body: SceneAreaUpdate) -> None:
         raise HTTPException(400, "; ".join(outside))
 
 
+async def _clear_rules(
+    conn: AsyncConnection, row: Any, principal: Principal, request_id: str
+) -> None:
+    """轨迹规则的几何属于原区域：换区域或移出区域时清除，写审计。"""
+    await record(
+        conn,
+        actor=principal.username,
+        action="camera.rules_cleared",
+        target=row["id"],
+        before={"rules": row["rules"]},
+        after={"rules": [], "reason": "换区域"},
+        request_id=request_id,
+    )
+
+
 async def _clear_calibration(
     conn: AsyncConnection, row: Any, principal: Principal, request_id: str
 ) -> None:
@@ -264,6 +280,10 @@ async def save_area(
             if r["area_id"] not in (None, values["area_id"]) and r["calibration"]:
                 await _clear_calibration(conn, r, principal, request.state.request_id)
                 values |= {"calibration": [], "calibration_error_m": None}
+            # 规则几何同样是所在区域的平面坐标：换区域或移出后按原坐标判定会在新区域里错位，未放置时又无从删除
+            if r["area_id"] != values["area_id"] and r["rules"]:
+                await _clear_rules(conn, r, principal, request.state.request_id)
+                values |= {"rules": []}
             await conn.execute(update(cameras).where(cameras.c.id == r["id"]).values(values))
         area = SceneArea(
             id=area_id,

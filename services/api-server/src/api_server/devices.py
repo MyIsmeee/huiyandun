@@ -12,6 +12,7 @@ from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecuti
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 
 PHYSICAL_HOLD_S = 60  # 最后一次行为事件后保持物理告警的时长
 CYBER_HOLD_S = 300  # 最后一次网络告警后保持网络攻击的时长，与 FR-303 的关联窗口一致
@@ -40,7 +41,7 @@ class _Entry:
     cyber_until: float = float("-inf")
     offline_until: float = float("-inf")
     severity: Severity | None = None
-    behavior: VisionBehaviorV1 | None = None  # 物理告警期间最近一次行为事件
+    behavior: VisionBehaviorV1 | VisionRuleV1 | None = None  # 物理告警期间最近一次行为或规则事件
     overrides: dict[str, Override] = field(default_factory=dict)  # 执行 ID → 仍有效的覆盖
 
 
@@ -49,9 +50,20 @@ class Devices:
         self._entries = {d.id: _Entry(initial=d, current=d) for d in devices}
 
     def on_behavior(self, event: VisionBehaviorV1, now: float) -> Device | None:
-        """返回变化后的设备；未登记的摄像头或状态未变时返回 None。"""
+        """返回变化后的设备；未登记的摄像头或状态未变时返回 None。疑似跌倒只在告警列表中提示，
+        不进入物理告警（TK-160）。"""
         entry = self._entries.get(event.camera_id)
-        if entry is None:
+        if entry is None or event.level == "suspected":
+            return None
+        entry.physical_until = now + PHYSICAL_HOLD_S
+        entry.behavior = event
+        return self._update(entry, now)
+
+    def on_rule(self, event: VisionRuleV1, now: float) -> Device | None:
+        """轨迹规则（区域入侵、越线）：确认事件进入物理告警，区域告警持续期间的 update 保持；end 不延长，
+        到期解除。疑似（估算映射、遮挡中推断）只在告警栏提示。"""
+        entry = self._entries.get(event.camera_id)
+        if entry is None or event.level == "suspected" or event.phase == "end":
             return None
         entry.physical_until = now + PHYSICAL_HOLD_S
         entry.behavior = event

@@ -645,7 +645,7 @@ export interface components {
         SceneItem: {
             /** @description 资产目录中的编号 */
             asset: string;
-            /** @description 米，区域左下为原点，按网格吸附 */
+            /** @description 米，俯视时区域左上角为原点、x 向右、y 向下，按网格吸附 */
             x: number;
             y: number;
             /**
@@ -744,6 +744,7 @@ export interface components {
         };
         /** @description 禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）；不能是竖直线段 */
         ClimbLine: number[];
+        CameraRule: components["schemas"]["camera_rule.schema"];
         Camera: {
             /** @description cam-NN，也是 go2rtc 与录像中的流名 */
             id: string;
@@ -768,7 +769,11 @@ export interface components {
             calibration: number[][];
             /** @description 保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null */
             calibration_error_m: number | null;
+            /** @description 视觉引擎对安装参数的最新自检结果；已标定、未收到自检或视觉引擎重启后尚未上报时为 null（列表中给出，其余响应不含） */
+            pose_check?: components["schemas"]["pose_check.schema"] | null;
             climb_lines: components["schemas"]["ClimbLine"][];
+            /** @description 轨迹规则（区域入侵、有向越线） */
+            rules: components["schemas"]["camera_rule.schema"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -789,6 +794,7 @@ export interface components {
             password?: string;
             pose: components["schemas"]["Pose"];
             climb_lines?: components["schemas"]["ClimbLine"][];
+            rules?: components["schemas"]["camera_rule.schema"][];
         };
         CameraUpdate: {
             name?: string;
@@ -805,11 +811,13 @@ export interface components {
             clear_password?: boolean;
             pose?: components["schemas"]["Pose"];
             climb_lines?: components["schemas"]["ClimbLine"][];
+            /** @description 省略表示不修改；给出时整体替换 */
+            rules?: components["schemas"]["camera_rule.schema"][];
         };
         CalibrationInput: {
             /** @description 打开标定对话框时摄像头所在区域；与库中不一致时 409 */
             area_id: string;
-            /** @description 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，区域左下为原点） */
+            /** @description 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，俯视时区域左上角为原点、x 向右、y 向下） */
             points: number[][];
         };
         CalibrationFit: {
@@ -839,7 +847,7 @@ export interface components {
             y: number;
             /** @description 安装高度（米） */
             height_m: number;
-            /** @description 朝向，自平面 x 轴正方向逆时针计（度） */
+            /** @description 朝向，自平面 +x 转向 +y 计（度；俯视 y 向下时为顺时针） */
             yaw_deg: number;
             /** @description 俯角，向下为负（度） */
             pitch_deg: number;
@@ -1072,7 +1080,7 @@ export interface components {
         /**
          * @description WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
          *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-         *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
+         *     alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
          *     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
          *     变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
          *     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
@@ -1099,6 +1107,7 @@ export interface components {
         VisionTrack: components["schemas"]["hyd.vision.track.v1.schema"];
         VisionScene: components["schemas"]["hyd.vision.scene.v1.schema"];
         VisionBehavior: components["schemas"]["hyd.vision.behavior.v1.schema"];
+        VisionRule: components["schemas"]["hyd.vision.rule.v1.schema"];
         SecurityAlert: components["schemas"]["hyd.security.alert.v1.schema"];
         VisionIntegrity: components["schemas"]["hyd.vision.integrity.v1.schema"];
         /**
@@ -1177,6 +1186,60 @@ export interface components {
              * @enum {unknown}
              */
             reason: "model_missing" | "no_frame" | "unmapped" | "empty";
+        };
+        /**
+         * PoseCheck
+         * @description 安装参数自检结果（D-102 估算映射的兜底检查）：由画面中站立行人推算安装高度与俯角，只对按安装参数估算地面映射的摄像头给出
+         */
+        "pose_check.schema": {
+            camera_id: string;
+            /**
+             * @description ok：与行人尺度相符；suspect：安装高度、俯角可能填错或人员速度虚高；insufficient：站立行人样本不足，暂不能判断
+             * @enum {unknown}
+             */
+            status: "ok" | "suspect" | "insufficient";
+            /** @description 参与推算的站立行人样本数（全身入镜、腿伸直） */
+            samples: number;
+            /** @description 按当前参数推算的行人身高中位（米）；样本不足时为 null */
+            person_height_m: number | null;
+            /** @description 移动人员速度的 95 分位（米每秒）；移动样本不足时为 null */
+            speed_p95_mps: number | null;
+            /** @description 使行人推算身高符合常人的安装高度（米）；样本不足时为 null */
+            suggested_height_m: number | null;
+            /** @description 使远近行人推算身高一致的俯角（度，向下为负）；行人远近分布不足时为 null */
+            suggested_pitch_deg: number | null;
+            /** @description 给值守人员看的白话说明 */
+            reasons: string[];
+        };
+        /**
+         * CameraRule
+         * @description 摄像头上的轨迹规则（区域入侵、有向越线）：几何为所在场景区域的平面坐标（米），与目标位置同一坐标系；只在有地面映射的摄像头上判定。按安装参数估算映射的摄像头上，事件一律为 suspected
+         */
+        "camera_rule.schema": {
+            /** @description 同一摄像头内唯一 */
+            id: string;
+            name: string;
+            /** @enum {unknown} */
+            type: "intrusion" | "line_crossing";
+            /** @description 平面坐标 [x, y]（米）：intrusion 为多边形顶点（≥ 3，首尾不重复），line_crossing 为折线（≥ 2） */
+            points: number[][];
+            /**
+             * @description 只用于 line_crossing：沿折线由第一点走向末点，forward 为从前进方向的右侧穿到左侧（平面俯视 x 向右、y 向下）
+             * @default any
+             * @enum {unknown}
+             */
+            direction: "forward" | "backward" | "any";
+            /**
+             * @default [
+             *       "person"
+             *     ]
+             */
+            classes: ("person" | "bicycle" | "car" | "motorcycle" | "bus" | "truck")[];
+            /**
+             * @description 只用于 intrusion：确认在区内满此时长才告警
+             * @default 1
+             */
+            min_duration_s: number;
         };
         /**
          * Incident
@@ -1283,6 +1346,12 @@ export interface components {
             track_id: number;
             /** @enum {unknown} */
             behavior: "fall" | "climb";
+            /**
+             * @description 1.1 起。suspected 为疑似跌倒（倒地满 2 s），只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认（倒地且基本不动满 8 s），进入物理告警。攀爬只有 confirmed；1.0 的事件没有此字段，按 confirmed
+             * @default confirmed
+             * @enum {unknown}
+             */
+            level: "suspected" | "confirmed";
             confidence_avg: number;
             duration_s: number;
             /** Format: date-time */
@@ -1457,7 +1526,7 @@ export interface components {
             /** @description 平面坐标，单位米 */
             y: number;
             uncertainty_m: number;
-            /** @description 平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null */
+            /** @description 平面上的运动方向，0 为 +x 方向、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；起步不足 3 帧或静止时为 null */
             heading_deg: number | null;
             /** @description 平面速度，单位米每秒；起步不足 3 帧时为 null */
             speed_mps: number | null;
@@ -1471,6 +1540,47 @@ export interface components {
          * @description 检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
          */
         "hyd.vision.track.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["track.schema"];
+        /**
+         * VisionRuleV1
+         * @description 轨迹规则事件（生产者 vision-engine）：越线为脉冲事件（pulse）；区域入侵为状态事件，同一次进入的 start / update / end 共用 episode_id，持续期间每 30 s 发 update 保持物理告警
+         */
+        "hyd.vision.rule.v1.schema": {
+            camera_id: string;
+            rule_id: string;
+            rule_name: string;
+            /** @enum {unknown} */
+            rule_type: "intrusion" | "line_crossing";
+            /** @enum {unknown} */
+            phase: "pulse" | "start" | "update" | "end";
+            /** Format: uuid */
+            episode_id: string;
+            /**
+             * @description confirmed 进入物理告警；suspected 只在控制台提示：按安装参数估算的地面映射（位置可能有系统性偏差），或越线发生在遮挡中（inferred）
+             * @enum {unknown}
+             */
+            level: "suspected" | "confirmed";
+            /** @description 会话内临时编号，不跨摄像头、不含生物特征（G-04） */
+            track_id: number;
+            /** @enum {unknown} */
+            object_class: "person" | "bicycle" | "car" | "motorcycle" | "bus" | "truck";
+            /** @description 平面坐标（米）：越线为越线时的位置，区域为当前位置 */
+            x: number;
+            y: number;
+            uncertainty_m: number;
+            /**
+             * Format: date-time
+             * @description 状态开始时刻：区域为确认进入时刻，越线为越线时刻
+             */
+            since: string;
+            /** @description 越线方向；区域为 null */
+            direction?: ("forward" | "backward") | null;
+            /** @enum {unknown} */
+            mapping: "calibrated" | "estimated";
+            /** @description 越线发生在遮挡中，由消失前后的位置推断 */
+            inferred: boolean;
+            /** @description phase 为 end 时：exit 确认离开，lost 轨迹消失 */
+            end_reason?: ("exit" | "lost") | null;
+        } & components["schemas"]["event_base.schema"];
     };
     responses: {
         /** @description 缺少 X-Request-ID 或参数不合法 */

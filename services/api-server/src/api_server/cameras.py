@@ -121,6 +121,7 @@ cameras = Table(
     Column("calibration", JSONB),
     Column("calibration_error_m", Float),
     Column("climb_lines", JSONB),
+    Column("rules", JSONB),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
 )
@@ -174,6 +175,7 @@ def view(row: Any) -> Camera:
             "calibration": row["calibration"],
             "calibration_error_m": row["calibration_error_m"],
             "climb_lines": row["climb_lines"],
+            "rules": row.get("rules") or [],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -225,7 +227,11 @@ def registry(rows: list[Any]) -> ConfigCamerasV1:
             "ts": datetime.now(UTC).isoformat(),
             "cameras": [
                 {k: (str(r[k]) if k == "ip" else r[k]) for k in ("id", "name", "ip", "pose")}
-                | {"calibration": r["calibration"], "climb_lines": r["climb_lines"]}
+                | {
+                    "calibration": r["calibration"],
+                    "climb_lines": r["climb_lines"],
+                    "rules": r.get("rules") or [],
+                }
                 for r in rows
             ],
         }
@@ -243,6 +249,26 @@ def _check(values: dict[str, Any]) -> None:
     for i, (u1, _, u2, _) in enumerate(values["climb_lines"]):
         if u1 == u2:
             raise HTTPException(400, f"climb_lines.{i}: 警戒线不能是竖直线段")
+    _check_rules(values.get("rules") or [])
+
+
+MIN_EDGE_M = 0.1  # 规则几何相邻两点的最小间距：重合的点使方向与边界无从定义
+
+
+def _check_rules(rules: list[dict[str, Any]]) -> None:
+    """规则编号唯一；区域至少 3 个顶点、越线至少 2 点；相邻两点不重合。"""
+    seen: set[str] = set()
+    for i, rule in enumerate(rules):
+        if rule["id"] in seen:
+            raise HTTPException(400, f"rules.{i}.id: 规则编号 {rule['id']} 重复")
+        seen.add(rule["id"])
+        points = rule["points"]
+        if rule["type"] == "intrusion" and len(points) < 3:
+            raise HTTPException(400, f"rules.{i}.points: 区域至少要有 3 个顶点")
+        closed = points + points[:1] if rule["type"] == "intrusion" else points
+        for a, b in zip(closed, closed[1:], strict=False):
+            if ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 < MIN_EDGE_M:
+                raise HTTPException(400, f"rules.{i}.points: 相邻两点不能重合（间距至少 0.1 m）")
 
 
 def _local(host: str) -> bool:
@@ -306,6 +332,7 @@ def seeds(site_file: Path, now: datetime) -> list[dict[str, Any]]:
                 "pose": c["pose"],
                 "calibration": c.get("calibration") or [],
                 "climb_lines": c.get("climb_lines") or [],
+                "rules": [],
                 "created_at": now,
                 "updated_at": now,
             }
@@ -486,8 +513,17 @@ async def _locked(conn: AsyncConnection, camera_id: str) -> Any:
 
 @router.get("/cameras", dependencies=[Depends(require("admin"))])
 async def list_cameras(request: Request) -> CameraList:
+    """附上视觉引擎对安装参数的最新自检（只对按安装参数估算映射的摄像头）。"""
+    checks = request.app.state.pose_checks
     async with request.app.state.engine.connect() as conn:
-        return CameraList(items=[view(r) for r in await _rows(conn)])
+        return CameraList(
+            items=[
+                view(r).model_copy(
+                    update={"pose_check": checks.get(r["id"], len(r["calibration"]))}
+                )
+                for r in await _rows(conn)
+            ]
+        )
 
 
 @router.post("/cameras", status_code=201)
@@ -507,6 +543,7 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         "calibration": [],
         "calibration_error_m": None,
         "climb_lines": [line.root for line in body.climb_lines or []],
+        "rules": [rule.model_dump(mode="json", exclude_none=True) for rule in body.rules or []],
         "area_id": None,  # 在场景页放入区域（FR-908）
         "created_at": now,
         "updated_at": now,
@@ -558,6 +595,8 @@ async def update_camera(
                 values["pose"] = body.pose.model_dump(mode="json")
             if body.climb_lines is not None:
                 values["climb_lines"] = [line.root for line in body.climb_lines]
+            if body.rules is not None:
+                values["rules"] = [r.model_dump(mode="json", exclude_none=True) for r in body.rules]
             values["ingest"] = body.ingest or row["ingest"]
             # 未给出 source 时沿用库中的拉流地址（如只改接入方式）
             source = changes.get("source", None if row["protocol"] is None else dict(row))
@@ -589,6 +628,8 @@ async def update_camera(
             )
     except IntegrityError as e:
         raise HTTPException(409, f"设备 IP {body.ip} 已被其他摄像头使用") from e
+    if values["pose"] != row["pose"]:
+        request.app.state.pose_checks.forget(camera_id)  # 旧建议是相对旧参数说的
     await request.app.state.cameras.apply()
     return with_push_password(request, camera, camera.ingest == "push" and before.ingest != "push")
 

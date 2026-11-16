@@ -13,6 +13,7 @@ from api_server.devices import Devices
 from api_server.history import WINDOW, History
 from api_server.investigator import Investigator
 from api_server.kpis import KpiTracker
+from api_server.pose_checks import PoseChecks
 from api_server.ws import Hub
 from py_common.bus import Bus
 from py_contracts.api import Device, WsFrame
@@ -22,6 +23,8 @@ from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecuti
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_pose_check_v1_schema import VisionPoseCheckV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 
 EXPIRE_TICK_S = 1.0  # 检查告警态是否到期解除的周期
@@ -39,8 +42,10 @@ def _push(hub: Hub, device: Device | None) -> None:
         hub.broadcast(_frame("devices", device))
 
 
-async def start(bus: Bus, hub: Hub, devices: Devices) -> None:
-    """核心订阅只收实时事件。"""
+async def start(
+    bus: Bus, hub: Hub, devices: Devices, pose_checks: PoseChecks | None = None
+) -> None:
+    """核心订阅只收实时事件；安装参数自检只记下每路最新一条，随摄像头列表给出。"""
 
     async def on_track(event: VisionTrackV1) -> None:
         hub.broadcast(_frame("tracks", event))
@@ -49,6 +54,10 @@ async def start(bus: Bus, hub: Hub, devices: Devices) -> None:
     async def on_behavior(event: VisionBehaviorV1) -> None:
         hub.broadcast(_frame("alerts", event))
         _push(hub, devices.on_behavior(event, time.monotonic()))
+
+    async def on_rule(event: VisionRuleV1) -> None:
+        hub.broadcast(_frame("alerts", event))
+        _push(hub, devices.on_rule(event, time.monotonic()))
 
     async def on_alert(event: SecurityAlertV1) -> None:
         hub.broadcast(_frame("alerts", event))
@@ -59,7 +68,14 @@ async def start(bus: Bus, hub: Hub, devices: Devices) -> None:
             _push(hub, devices.on_stream_lost(event, time.monotonic()))
 
     await bus.subscribe("hyd.vision.track.v1", VisionTrackV1, on_track)
+    if pose_checks is not None:
+
+        async def on_pose_check(event: VisionPoseCheckV1) -> None:
+            pose_checks.on_check(event)
+
+        await bus.subscribe("hyd.vision.pose_check.v1", VisionPoseCheckV1, on_pose_check)
     await bus.subscribe("hyd.vision.behavior.v1", VisionBehaviorV1, on_behavior)
+    await bus.subscribe("hyd.vision.rule.v1", VisionRuleV1, on_rule)
     await bus.subscribe("hyd.security.alert.v1", SecurityAlertV1, on_alert)
     # 只用核心订阅更新离线：JetStream 重放的历史断流不应把设备置为离线
     await bus.subscribe("hyd.vision.integrity.v1", VisionIntegrityV1, on_integrity)
@@ -99,6 +115,7 @@ async def follow(
     await asyncio.gather(
         _subscribe(bus, "hyd.security.alert.v1", SecurityAlertV1, on_alert, since),
         _subscribe(bus, "hyd.vision.behavior.v1", VisionBehaviorV1, on_alert, since),
+        _subscribe(bus, "hyd.vision.rule.v1", VisionRuleV1, on_alert, since),
         _subscribe(bus, "hyd.vision.integrity.v1", VisionIntegrityV1, on_integrity, since),
         _subscribe(bus, "hyd.correlator.incident.v1", CorrelatorIncidentV1, on_incident, since),
         _subscribe(bus, "hyd.playbook.execution.v1", PlaybookExecutionV1, on_execution, since),

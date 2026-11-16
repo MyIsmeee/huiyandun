@@ -18,6 +18,10 @@ class VisionBehaviorV1(EventBase):
     camera_id: str
     track_id: int
     behavior: Literal["fall", "climb"]
+    level: Literal["suspected", "confirmed"] | None = "confirmed"
+    """
+    1.1 起。suspected 为疑似跌倒（倒地满 2 s），只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认（倒地且基本不动满 8 s），进入物理告警。攀爬只有 confirmed；1.0 的事件没有此字段，按 confirmed
+    """
     confidence_avg: float = Field(..., ge=0.0, le=1.0)
     duration_s: float = Field(..., ge=0.0)
     ts_start: AwareDatetime

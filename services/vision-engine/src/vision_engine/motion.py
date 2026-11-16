@@ -28,9 +28,11 @@ class MotionGate:
             (5, 5),
             0,
         ).astype(np.float32)
-        if self._background is None:
+        # 首帧没有参照，整帧推理。分辨率或宽高比改变（摄像头换码流、重连后分辨率不同）时旧背景
+        # 尺寸不符，同样重新记背景：否则帧差每帧抛异常，该路检测循环反复失败、不会自行恢复
+        if self._background is None or self._background.shape != gray.shape:
             self._background = gray
-            return 0, 0, w, h  # 首帧没有参照，整帧推理
+            return 0, 0, w, h
         mask = cv2.absdiff(gray, self._background) > DIFF_THRESHOLD
         cv2.accumulateWeighted(gray, self._background, ALPHA)
 

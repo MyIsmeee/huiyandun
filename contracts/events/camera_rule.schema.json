@@ -1,0 +1,38 @@
+{
+  "title": "CameraRule",
+  "description": "摄像头上的轨迹规则（区域入侵、有向越线）：几何为所在场景区域的平面坐标（米），与目标位置同一坐标系；只在有地面映射的摄像头上判定。按安装参数估算映射的摄像头上，事件一律为 suspected",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "type", "points"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$", "description": "同一摄像头内唯一" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "type": { "enum": ["intrusion", "line_crossing"] },
+    "points": {
+      "type": "array",
+      "description": "平面坐标 [x, y]（米）：intrusion 为多边形顶点（≥ 3，首尾不重复），line_crossing 为折线（≥ 2）",
+      "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+      "minItems": 2,
+      "maxItems": 32
+    },
+    "direction": {
+      "enum": ["forward", "backward", "any"],
+      "default": "any",
+      "description": "只用于 line_crossing：沿折线由第一点走向末点，forward 为从前进方向的右侧穿到左侧（平面俯视 x 向右、y 向下）"
+    },
+    "classes": {
+      "type": "array",
+      "items": { "enum": ["person", "bicycle", "car", "motorcycle", "bus", "truck"] },
+      "minItems": 1,
+      "uniqueItems": true,
+      "default": ["person"]
+    },
+    "min_duration_s": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 600,
+      "default": 1,
+      "description": "只用于 intrusion：确认在区内满此时长才告警"
+    }
+  }
+}

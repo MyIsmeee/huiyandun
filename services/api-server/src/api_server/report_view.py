@@ -143,7 +143,9 @@ def _entry(entry: ReportTimelineEntry, tz: timezone) -> dict[str, Any]:
         text = f"{e.summary}（{e.src_ip} → {e.dst_ip}，规则 {e.rule_id} v{e.rule_version}，{e.technique}）"
     elif entry.kind == "behavior":
         kind, source = "行为事件", _source("model", e.confidence_avg)
-        text = f"{e.camera_id} {BEHAVIOR.get(e.behavior, e.behavior)}，持续 {e.duration_s:.1f} s"
+        suspected = "疑似" if e.level == "suspected" else ""
+        name = suspected + BEHAVIOR.get(e.behavior, e.behavior)
+        text = f"{e.camera_id} {name}，持续 {e.duration_s:.1f} s"
     else:
         kind, source = "画面完整性", _source(e.source, e.confidence)
         text = f"{e.camera_id} {INTEGRITY[e.type]}，持续 {e.duration_s:.1f} s"

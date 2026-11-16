@@ -7,7 +7,7 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, Field, RootModel, SecretStr
+from pydantic import AwareDatetime, ConfigDict, Field, RootModel, SecretStr
 
 from py_contracts.base import ContractModel
 
@@ -58,7 +58,7 @@ class SceneItem(ContractModel):
     """
     x: float = Field(..., ge=0.0, le=500.0)
     """
-    米，区域左下为原点，按网格吸附
+    米，俯视时区域左上角为原点、x 向右、y 向下，按网格吸附
     """
     y: float = Field(..., ge=0.0, le=500.0)
     rot: Literal[0, 90, 180, 270]
@@ -164,6 +164,42 @@ class ClimbLine(RootModel[list[float]]):
     """
 
 
+class Point(RootModel[list[float]]):
+    model_config = {"allow_inf_nan": False}
+    root: list[float] = Field(..., max_length=2, min_length=2)
+
+
+class CameraRule1(ContractModel):
+    """
+    摄像头上的轨迹规则（区域入侵、有向越线）：几何为所在场景区域的平面坐标（米），与目标位置同一坐标系；只在有地面映射的摄像头上判定。按安装参数估算映射的摄像头上，事件一律为 suspected
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    id: str = Field(..., pattern="^[a-z0-9][a-z0-9-]{0,39}$")
+    """
+    同一摄像头内唯一
+    """
+    name: str = Field(..., max_length=40, min_length=1)
+    type: Literal["intrusion", "line_crossing"]
+    points: list[Point] = Field(..., max_length=32, min_length=2)
+    """
+    平面坐标 [x, y]（米）：intrusion 为多边形顶点（≥ 3，首尾不重复），line_crossing 为折线（≥ 2）
+    """
+    direction: Literal["forward", "backward", "any"] | None = "any"
+    """
+    只用于 line_crossing：沿折线由第一点走向末点，forward 为从前进方向的右侧穿到左侧（平面俯视 x 向右、y 向下）
+    """
+    classes: list[Literal["person", "bicycle", "car", "motorcycle", "bus", "truck"]] | None = Field(
+        ["person"], min_length=1
+    )
+    min_duration_s: float | None = Field(1, ge=0.0, le=600.0)
+    """
+    只用于 intrusion：确认在区内满此时长才告警
+    """
+
+
 class CalibrationItem(RootModel[list[float]]):
     model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=4, min_length=4)
@@ -177,12 +213,80 @@ class CalibrationErrorM(RootModel[float]):
     """
 
 
+class PersonHeightM(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0)
+    """
+    按当前参数推算的行人身高中位（米）；样本不足时为 null
+    """
+
+
+class SpeedP95Mps(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=0.0)
+    """
+    移动人员速度的 95 分位（米每秒）；移动样本不足时为 null
+    """
+
+
+class SuggestedHeightM(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., gt=0.0)
+    """
+    使行人推算身高符合常人的安装高度（米）；样本不足时为 null
+    """
+
+
+class SuggestedPitchDeg(RootModel[float]):
+    model_config = {"allow_inf_nan": False}
+    root: float = Field(..., ge=-90.0, le=90.0)
+    """
+    使远近行人推算身高一致的俯角（度，向下为负）；行人远近分布不足时为 null
+    """
+
+
+class PoseCheck(ContractModel):
+    """
+    安装参数自检结果（D-102 估算映射的兜底检查）：由画面中站立行人推算安装高度与俯角，只对按安装参数估算地面映射的摄像头给出
+    """
+
+    camera_id: str
+    status: Literal["ok", "suspect", "insufficient"]
+    """
+    ok：与行人尺度相符；suspect：安装高度、俯角可能填错或人员速度虚高；insufficient：站立行人样本不足，暂不能判断
+    """
+    samples: int = Field(..., ge=0)
+    """
+    参与推算的站立行人样本数（全身入镜、腿伸直）
+    """
+    person_height_m: PersonHeightM | None
+    """
+    按当前参数推算的行人身高中位（米）；样本不足时为 null
+    """
+    speed_p95_mps: SpeedP95Mps | None
+    """
+    移动人员速度的 95 分位（米每秒）；移动样本不足时为 null
+    """
+    suggested_height_m: SuggestedHeightM | None
+    """
+    使行人推算身高符合常人的安装高度（米）；样本不足时为 null
+    """
+    suggested_pitch_deg: SuggestedPitchDeg | None
+    """
+    使远近行人推算身高一致的俯角（度，向下为负）；行人远近分布不足时为 null
+    """
+    reasons: list[str]
+    """
+    给值守人员看的白话说明
+    """
+
+
 class Username(RootModel[str]):
     model_config = {"allow_inf_nan": False}
     root: str = Field(..., max_length=128)
 
 
-class Point(RootModel[list[float]]):
+class Point1(RootModel[list[float]]):
     model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=4, min_length=4)
 
@@ -192,9 +296,9 @@ class CalibrationInput(ContractModel):
     """
     打开标定对话框时摄像头所在区域；与库中不一致时 409
     """
-    points: list[Point] = Field(..., max_length=20)
+    points: list[Point1] = Field(..., max_length=20)
     """
-    0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，区域左下为原点）
+    0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，俯视时区域左上角为原点、x 向右、y 向下）
     """
 
 
@@ -238,7 +342,7 @@ class Pose(ContractModel):
     """
     yaw_deg: float
     """
-    朝向，自平面 x 轴正方向逆时针计（度）
+    朝向，自平面 +x 转向 +y 计（度；俯视 y 向下时为顺时针）
     """
     pitch_deg: float = Field(..., ge=-90.0, lt=0.0)
     """
@@ -602,7 +706,7 @@ class WsFrame(ContractModel):
     """
     WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-    alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
+    alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
     变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
@@ -669,7 +773,7 @@ class HeadingDeg(RootModel[float]):
     model_config = {"allow_inf_nan": False}
     root: float = Field(..., ge=0.0, lt=360.0)
     """
-    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    平面上的运动方向，0 为 +x 方向、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；起步不足 3 帧或静止时为 null
     """
 
 
@@ -726,7 +830,7 @@ class Track(ContractModel):
     uncertainty_m: float = Field(..., ge=0.0)
     heading_deg: HeadingDeg | None
     """
-    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    平面上的运动方向，0 为 +x 方向、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；起步不足 3 帧或静止时为 null
     """
     speed_mps: SpeedMps | None
     """
@@ -768,10 +872,59 @@ class VisionBehaviorV1(EventBase):
     camera_id: str
     track_id: int
     behavior: Literal["fall", "climb"]
+    level: Literal["suspected", "confirmed"] | None = "confirmed"
+    """
+    1.1 起。suspected 为疑似跌倒（倒地满 2 s），只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认（倒地且基本不动满 8 s），进入物理告警。攀爬只有 confirmed；1.0 的事件没有此字段，按 confirmed
+    """
     confidence_avg: float = Field(..., ge=0.0, le=1.0)
     duration_s: float = Field(..., ge=0.0)
     ts_start: AwareDatetime
     ts_end: AwareDatetime
+
+
+class VisionRuleV1(EventBase):
+    """
+    轨迹规则事件（生产者 vision-engine）：越线为脉冲事件（pulse）；区域入侵为状态事件，同一次进入的 start / update / end 共用 episode_id，持续期间每 30 s 发 update 保持物理告警
+    """
+
+    camera_id: str
+    rule_id: str
+    rule_name: str
+    rule_type: Literal["intrusion", "line_crossing"]
+    phase: Literal["pulse", "start", "update", "end"]
+    episode_id: UUID
+    level: Literal["suspected", "confirmed"]
+    """
+    confirmed 进入物理告警；suspected 只在控制台提示：按安装参数估算的地面映射（位置可能有系统性偏差），或越线发生在遮挡中（inferred）
+    """
+    track_id: int
+    """
+    会话内临时编号，不跨摄像头、不含生物特征（G-04）
+    """
+    object_class: Literal["person", "bicycle", "car", "motorcycle", "bus", "truck"]
+    x: float
+    """
+    平面坐标（米）：越线为越线时的位置，区域为当前位置
+    """
+    y: float
+    uncertainty_m: float = Field(..., ge=0.0)
+    since: AwareDatetime
+    """
+    状态开始时刻：区域为确认进入时刻，越线为越线时刻
+    """
+    direction: Literal["forward", "backward"] | None = None
+    """
+    越线方向；区域为 null
+    """
+    mapping: Literal["calibrated", "estimated"]
+    inferred: bool
+    """
+    越线发生在遮挡中，由消失前后的位置推断
+    """
+    end_reason: Literal["exit", "lost"] | None = None
+    """
+    phase 为 end 时：exit 确认离开，lost 轨迹消失
+    """
 
 
 class SecurityAlertV1(EventBase):
@@ -837,6 +990,11 @@ class VisionIntegrityV1(EventBase):
     """
 
 
+class CameraRule(RootModel[CameraRule1]):
+    model_config = {"allow_inf_nan": False}
+    root: CameraRule1
+
+
 class Camera(ContractModel):
     id: str
     """
@@ -874,7 +1032,15 @@ class Camera(ContractModel):
     """
     保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null
     """
+    pose_check: PoseCheck | None = None
+    """
+    视觉引擎对安装参数的最新自检结果；已标定、未收到自检或视觉引擎重启后尚未上报时为 null（列表中给出，其余响应不含）
+    """
     climb_lines: list[ClimbLine]
+    rules: list[CameraRule]
+    """
+    轨迹规则（区域入侵、有向越线）
+    """
     created_at: AwareDatetime
     updated_at: AwareDatetime
 
@@ -895,6 +1061,7 @@ class CameraCreate(ContractModel):
     password: SecretStr | None = Field(None, max_length=128)
     pose: Pose
     climb_lines: list[ClimbLine] | None = None
+    rules: list[CameraRule] | None = Field(None, max_length=32)
 
 
 class CameraUpdate(ContractModel):
@@ -910,6 +1077,10 @@ class CameraUpdate(ContractModel):
     clear_password: bool | None = None
     pose: Pose | None = None
     climb_lines: list[ClimbLine] | None = None
+    rules: list[CameraRule] | None = Field(None, max_length=32)
+    """
+    省略表示不修改；给出时整体替换
+    """
 
 
 class CameraInfo(ContractModel):
@@ -1034,6 +1205,11 @@ class Polygon(RootModel[list[PointModel]]):
 class VisionBehavior(RootModel[VisionBehaviorV1]):
     model_config = {"allow_inf_nan": False}
     root: VisionBehaviorV1
+
+
+class VisionRule(RootModel[VisionRuleV1]):
+    model_config = {"allow_inf_nan": False}
+    root: VisionRuleV1
 
 
 class SecurityAlert(RootModel[SecurityAlertV1]):

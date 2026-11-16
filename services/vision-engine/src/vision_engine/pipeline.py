@@ -5,7 +5,8 @@ hyd.vision.integrity.v1（D-080、TK-114）。环境分割平时不运行：收�
 hyd.vision.calibration_request.v1 时按标定点拟合地面映射，以 hyd.vision.calibration_reply.v1 应答（D-132）。
 
 每路摄像头一个读帧线程，持续解码以跟上源帧率、只保留最新一帧；检测按固定 5 FPS 取用最新帧，
-处理慢时丢帧而不积压延迟。只经 go2rtc 取流，不直连摄像头（C-CV-10）。
+处理慢时丢帧而不积压延迟。解码出的帧只在临近检测取用时才转换成 BGR 画面（见 FrameReader）。
+只经 go2rtc 取流，不直连摄像头（C-CV-10）。
 
 各路相互隔离（#79）：单路循环异常只重试该路；任一路循环或读帧线程停滞时进程退出，由 Compose 拉起。
 
@@ -15,12 +16,13 @@ hyd.vision.calibration_request.v1 时按标定点拟合地面映射，以 hyd.vi
 
 import asyncio
 import logging
+import math
 import os
 import sys
 import threading
 import time
 import uuid
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -44,12 +46,14 @@ from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
     VisionCalibrationRequestV1,
 )
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_pose_check_v1_schema import VisionPoseCheckV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
 from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine.behavior import BehaviorDetector
-from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector
+from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector, pose_detector
 from vision_engine.footing import (
     FOOT_ERROR_RATIO,
     VEHICLE_ERROR_RATIO,
@@ -68,6 +72,8 @@ from vision_engine.integrity import (
 )
 from vision_engine.kinematics import Motion
 from vision_engine.motion import MotionGate
+from vision_engine.pose_check import PoseChecker
+from vision_engine.rules import Observation, RuleEngine, RuleEvent
 from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
 from vision_engine.scene import ScenePerception, Segmenter
 
@@ -77,15 +83,22 @@ BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_REQUEST_SUBJECT = "hyd.vision.scene_request.v1"  # 核心 NATS 请求/应答，不持久化
 CALIBRATION_REQUEST_SUBJECT = "hyd.vision.calibration_request.v1"  # 同上
 INTEGRITY_SUBJECT = "hyd.vision.integrity.v1"
+RULE_SUBJECT = "hyd.vision.rule.v1"
+type VisionEvent = VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1 | VisionRuleV1
+POSE_CHECK_SUBJECT = "hyd.vision.pose_check.v1"  # 核心 NATS，不持久化：消费方只取每路最新一条
+POSE_CHECK_S = 30.0  # 安装参数自检的上报间隔
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
 # 持久化的视觉事件（architecture.md §12）。
 # 保留期取检测事件的默认值 180 天（architecture.md §10）
 STREAM = "HYD_VISION"
-STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, INTEGRITY_SUBJECT]
+STREAM_SUBJECTS = [BEHAVIOR_SUBJECT, INTEGRITY_SUBJECT, RULE_SUBJECT]
 STREAM_MAX_AGE_S = 180 * 86400
 SCHEMA_VERSION = "1.0.0"
 INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（architecture.md §12）
 TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（architecture.md §12）
+BEHAVIOR_SCHEMA_VERSION = "1.1.0"
+RULE_SCHEMA_VERSION = "1.0.0"  # 1.1：跌倒分疑似、确认两级（TK-160）
+POSE_CHECK_SCHEMA_VERSION = "1.0.0"
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
 STOP_WAIT_S = 2 * TIMEOUT_MS / 1000 + 1  # 停止一路时等读帧线程退出的上限
@@ -96,6 +109,9 @@ STREAM_LOST_S = 5.0
 STARTUP_GRACE_S = 5.0
 STREAM_LOST_REPEAT_S = 30  # 断流期间每 30 s 重报 stream_lost，api-server 据此保持离线（D-092）
 STALL_S = 10.0  # 任一循环超过此时长未完成周期即视为停滞，与 compose 健康检查的阈值一致
+# 建连的额外宽限：OpenCV 的 FFmpeg 后端建连时持有全局锁，多路同时断流时各路建连排队、各等 TIMEOUT_MS，
+# 后排的一路会超过 STALL_S；读帧不排队，仍按 STALL_S 判定
+OPEN_GRACE_S = 30.0
 # 新轨迹须连续 2 帧、置信度 ≥ 0.5；RTMO 对远处行人的置信度多在 0.5～0.6（模型卡）
 TRACK_ACTIVATION = 0.5
 # 丢失的轨迹保留 3 s 供重新关联：trackers 按 30 帧/秒换算，90 在 5 FPS 下为 15 帧；关联 IoU 下限 0.05。
@@ -106,6 +122,10 @@ MIN_IOU = 0.05
 VEHICLE_ID_BASE = 1_000_000
 RELINK_S = 5.0  # 人员轨迹丢失后在此时长内可被续接（FR-911、D-135）
 RELINK_M = 1.0  # 续接的距离上限：取此值与两者 uncertainty_m 之大者
+# 读帧线程按需转换画面：下次取用前 CONVERT_LEAD × 近期最大帧间隔之内的帧才转换；统计近 GAP_SAMPLES 帧的间隔，
+# 攒满之前每帧都转换
+CONVERT_LEAD = 2.0
+GAP_SAMPLES = 50
 
 log = logging.getLogger(__name__)
 
@@ -175,14 +195,27 @@ def _near(a: tuple[float, float, float], b: tuple[float, float, float]) -> bool:
 
 
 class FrameReader(threading.Thread):
-    def __init__(self, camera_id: str, url: str, beat: Callable[[], None]) -> None:
+    """持续解码、只保留最新一帧。解码（grab）每帧都做，才能跟上源帧率；把解码结果转换成 BGR 画面并拷出
+    （retrieve）在 1080p 上与解码本身耗时相当，而检测每秒只取用 5 帧：只转换下次取用前不久的帧。
+
+    检测循环每次 latest 之后，预计 period_s 后再来取；距该时刻不足"近期最大帧间隔 × CONVERT_LEAD"的帧才转换，
+    过了该时刻仍没人来取（处理超时、循环重试中）则每帧都转换。来帧不均匀时最大间隔变大、提前量随之变大，直至
+    每帧都转换；取用时拿到的仍是不早于一个帧间隔的最新帧。25 帧/秒的 1080p 流实测省去约一半的转换。"""
+
+    def __init__(
+        self, camera_id: str, url: str, beat: Callable[[float], None], period_s: float = 1 / FPS
+    ) -> None:
         super().__init__(name=f"reader-{camera_id}", daemon=True)
         self._camera_id = camera_id
         self._url = url
-        self._beat = beat  # 每次建连与每读到一帧登记一次，卡在读帧调用中即停滞（#79）
+        self._beat = (
+            beat  # 每次建连与每读到一帧登记一次，卡在读帧调用中即停滞（#79）；参数为宽限秒数
+        )
+        self._period = period_s
         self._lock = threading.Lock()
         self._latest: tuple[int, np.ndarray] | None = None
         self._latest_at = float("-inf")  # 取到最新一帧的时刻（time.monotonic）
+        self._due = float("-inf")  # 预计下次取用的时刻；尚未有人取用时每帧都转换
         self._stopping = threading.Event()  # 摄像头从登记表删除或参数变化时停止（D-101）
         self._beat_lock = threading.Lock()  # stop 返回后不会再有登记
 
@@ -191,14 +224,22 @@ class FrameReader(threading.Thread):
         with self._beat_lock:
             self._stopping.set()
 
-    def _alive(self) -> None:
+    def _alive(self, grace: float = 0.0) -> None:
         """停止后不再登记：否则读完正在进行的一帧后，已移除的健康登记被写回，10 s 后整个进程被判停滞。"""
         with self._beat_lock:
             if not self._stopping.is_set():
-                self._beat()
+                self._beat(grace)
 
     def latest(self) -> tuple[int, np.ndarray] | None:
-        """(序号, 帧)；序号不变表示没有新帧（如断流期间）。"""
+        """(序号, 帧)；序号不变表示没有新帧（如断流期间）。供按周期取用的检测循环调用：读帧线程据此
+        预计下次取用的时刻；周期之外偶尔看一眼用 peek。"""
+        with self._lock:
+            self._due = time.monotonic() + self._period
+            return self._latest
+
+    def peek(self) -> tuple[int, np.ndarray] | None:
+        """最近转换出的一帧，不影响读帧线程对下次取用时刻的预计（如按需的环境识别）；比实际画面至多晚
+        一个检测周期。"""
         with self._lock:
             return self._latest
 
@@ -207,10 +248,16 @@ class FrameReader(threading.Thread):
         with self._lock:
             return time.monotonic() - self._latest_at
 
+    def _wanted(self, now: float, gaps: deque[float]) -> bool:
+        """这一帧是否转换：已临近预计的取用时刻。"""
+        lead = CONVERT_LEAD * max(gaps) if len(gaps) == GAP_SAMPLES else self._period
+        with self._lock:
+            return now >= self._due - lead
+
     def run(self) -> None:
         seq, lost = 0, False
         while not self._stopping.is_set():
-            self._alive()
+            self._alive(OPEN_GRACE_S)
             try:
                 capture = cv2.VideoCapture(
                     self._url,
@@ -222,17 +269,26 @@ class FrameReader(threading.Thread):
                         TIMEOUT_MS,
                     ],
                 )
-                # 建连与读帧各有 5 s 超时：建连后再登记一次，断流重连的整个周期不超过 STALL_S
+                # 建连与读帧各有 5 s 超时：建连后再登记一次，此后读帧按 STALL_S 判定停滞
                 self._alive()
-                while not self._stopping.is_set():
-                    ok, frame = capture.read()
-                    if not ok:
-                        break
+                # 近期相邻两帧到达的间隔：每次建连重新统计（重连后帧率可能不同）
+                gaps: deque[float] = deque(maxlen=GAP_SAMPLES)
+                grabbed: float | None = None  # 首帧之前的等待（建连、等关键帧）不算帧间隔
+                while not self._stopping.is_set() and capture.grab():
+                    now = time.monotonic()
+                    if grabbed is not None:
+                        gaps.append(now - grabbed)
+                    grabbed = now
                     if lost:
                         log.info("vision.stream_restored", extra={"camera_id": self._camera_id})
                         lost = False
-                    seq += 1
                     self._alive()
+                    if not self._wanted(now, gaps):
+                        continue
+                    ok, frame = capture.retrieve()
+                    if not ok:
+                        break
+                    seq += 1
                     with self._lock:
                         self._latest, self._latest_at = (seq, frame), time.monotonic()
                 capture.release()
@@ -260,11 +316,18 @@ class CameraPipeline:
         vehicles: VehicleDetector | None = None,
         embedder: FrameEmbedder | None = None,
         pose: dict[str, Any] | None = None,
+        rules: list[dict[str, Any]] | None = None,
     ) -> None:
         self._camera_id = camera_id
         self._mapping = mapping
+        self._rules = RuleEngine(rules or [])
+        # 按安装参数估算的映射可能有系统性偏差：规则事件一律为 suspected（只在控制台提示）
+        self._estimated = mapping is None
         # 没有标定映射时，取到首帧后按安装参数估算（D-102）；估算不成立（如朝向地平线以上）只算一次
         self._pose = pose if mapping is None else None
+        # 只有按安装参数估算的映射才自检安装参数；取到首帧（知道画面尺寸）后建立
+        self._checker: PoseChecker | None = None
+        self._checked_at = -math.inf
         self._detector = detector
         self._vehicles = vehicles  # None 时没有车辆，人员只有 RTMO 的正向检出
         self._behaviors = BehaviorDetector(climb_lines or [])
@@ -323,9 +386,7 @@ class CameraPipeline:
         tracked = tracker.update(detections, timestamp=timestamp)
         return tracked[tracked.tracker_id >= 0]  # -1 为尚未确认的轨迹
 
-    def process(
-        self, frame: np.ndarray, timestamp: float
-    ) -> list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1]:
+    def process(self, frame: np.ndarray, timestamp: float) -> list[VisionEvent]:
         # 画面可信度判定先于运动门控：定格画面没有运动，门控会跳过推理（C-CV-09）
         integrity: list[VisionIntegrityV1] = []
         if self._freeze.update(frame, timestamp):
@@ -349,10 +410,14 @@ class CameraPipeline:
                 )
         tracked, vehicles = self.track(frame, timestamp)
         if not len(tracked) and not len(vehicles):
-            return integrity
+            return integrity + self._rule_events(
+                [], timestamp
+            )  # 无目标时同样推进：消失的轨迹按时结束
         height, width = frame.shape[:2]
         if self._mapping is None and self._pose is not None:
             self._mapping = GroundMapping.from_pose(self._pose, width, height)
+            if self._mapping is not None:
+                self._checker = PoseChecker(self._pose, (width, height))
             self._pose = None
         mapping = self._mapping
         people = (
@@ -368,6 +433,9 @@ class CameraPipeline:
             if len(tracked)  # 空结果不含关键点数据
             else []
         )
+        if self._checker is not None:
+            for (_, by1, _, by2), i, points, scores in people:
+                self._checker.add(int(i), points, scores, float(by2 - by1), timestamp)
         # 先算位置再续接，行为判定用续接后的编号；没有地面映射时不续接、用跟踪编号（FR-911、C-CV-05）
         positions = [
             None
@@ -385,14 +453,15 @@ class CameraPipeline:
         )
         now = datetime.now(UTC)
         # 未标定摄像头同样判定行为：只输出设备级告警（C-CV-05）
-        events: list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1] = integrity + [
+        events: list[VisionEvent] = integrity + [
             VisionBehaviorV1(
-                schema_version=SCHEMA_VERSION,
+                schema_version=BEHAVIOR_SCHEMA_VERSION,
                 event_id=uuid.uuid4(),
                 ts=now,
                 camera_id=self._camera_id,
                 track_id=b.track_id,
                 behavior=b.behavior,
+                level=b.level,
                 confidence_avg=b.confidence_avg,
                 duration_s=b.end - b.start,
                 ts_start=now - timedelta(seconds=b.end - b.start),
@@ -425,6 +494,7 @@ class CameraPipeline:
                 else []
             )
         ]
+        observations: list[Observation] = []
         current = set(vehicles.tracker_id.tolist()) if len(vehicles) else set()
         self._votes = {i: v for i, v in self._votes.items() if i in current}
         for track_id, object_class, (bx1, by1, bx2, by2), skeleton, located in targets:
@@ -433,6 +503,8 @@ class CameraPipeline:
                     continue
                 x, y, uncertainty = located
                 heading, speed = self._motion.update(track_id, timestamp, x, y)
+                if self._checker is not None:
+                    self._checker.add_speed(speed)
             else:
                 # 车辆：朝向与速度按框底边中点映射的近端点估计，再沿视线外移到车身中心（FR-911）。
                 # 不按外移后的位置估计：外移量随朝向变化，会反过来扰动朝向
@@ -446,6 +518,7 @@ class CameraPipeline:
                 offset = vehicle_offset(object_class, heading, outward)
                 x, y = near_x + float(offset[0]), near_y + float(offset[1])
                 uncertainty += VEHICLE_ERROR_RATIO * float(np.hypot(*offset))
+            observations.append(Observation(track_id, object_class, x, y, uncertainty))
             keypoints = (
                 None if skeleton is None else np.column_stack([skeleton[0] / scale, skeleton[1]])
             )
@@ -468,7 +541,61 @@ class CameraPipeline:
                     keypoints=None if keypoints is None else np.clip(keypoints, 0, 1).tolist(),
                 )
             )
-        return events
+        return events + self._rule_events(observations, timestamp)
+
+    def _rule_events(self, observations: list[Observation], timestamp: float) -> list[VisionRuleV1]:
+        """轨迹规则（区域入侵、有向越线）；没有规则或没有地面映射时为空。"""
+        if not self._rules or self._mapping is None:
+            return []
+        now = datetime.now(UTC)
+        return [
+            self._rule_event(e, now, timestamp) for e in self._rules.update(observations, timestamp)
+        ]
+
+    def _rule_event(self, e: RuleEvent, now: datetime, timestamp: float) -> VisionRuleV1:
+        estimated = self._estimated
+        return VisionRuleV1(
+            schema_version=RULE_SCHEMA_VERSION,
+            event_id=uuid.uuid4(),
+            ts=now,
+            camera_id=self._camera_id,
+            rule_id=e.rule_id,
+            rule_name=e.rule_name,
+            rule_type=e.rule_type,
+            phase=e.phase,
+            episode_id=e.episode_id,
+            level="suspected" if estimated or e.inferred else "confirmed",
+            track_id=e.track_id,
+            object_class=e.object_class,
+            x=e.x,
+            y=e.y,
+            uncertainty_m=e.sigma,
+            since=now - timedelta(seconds=max(0.0, timestamp - e.since)),
+            direction=e.direction,
+            mapping="estimated" if estimated else "calibrated",
+            inferred=e.inferred,
+            end_reason=e.end_reason,
+        )
+
+    def pose_check(self, now: float) -> VisionPoseCheckV1 | None:
+        """每 POSE_CHECK_S 给出一次安装参数自检结果；已标定或尚未取到画面时为 None。"""
+        if self._checker is None or now - self._checked_at < POSE_CHECK_S:
+            return None
+        self._checked_at = now
+        result = self._checker.check()
+        return VisionPoseCheckV1(
+            schema_version=POSE_CHECK_SCHEMA_VERSION,
+            event_id=uuid.uuid4(),
+            ts=datetime.now(UTC),
+            camera_id=self._camera_id,
+            status=result.status,
+            samples=result.samples,
+            person_height_m=result.person_height_m,
+            speed_p95_mps=result.speed_p95_mps,
+            suggested_height_m=result.suggested_height_m,
+            suggested_pitch_deg=result.suggested_pitch_deg,
+            reasons=result.reasons,
+        )
 
     def stream_lost(self, last_frame: float, now: float) -> VisionIntegrityV1 | None:
         """last_frame 为最近一次取到新帧的时刻：满 STREAM_LOST_S 没有新帧时上报，持续断流每
@@ -511,8 +638,9 @@ class Health:
         self._file = heartbeat_file
         self._beats: dict[str, float] = {}
 
-    def beat(self, name: str) -> None:
-        self._beats[name] = time.monotonic()
+    def beat(self, name: str, grace: float = 0.0) -> None:
+        """grace：本次登记后额外允许的秒数（建连排队，见 OPEN_GRACE_S）。"""
+        self._beats[name] = time.monotonic() + grace
 
     def forget(self, prefix: str) -> None:
         """停止的摄像头不再参与停滞判断。"""
@@ -557,7 +685,7 @@ async def run_camera(
         next_tick = max(next_tick + 1 / FPS, loop.time())  # 处理超时后不补跑积压的周期
         await asyncio.sleep(next_tick - loop.time())
         latest, now = reader.latest(), time.monotonic()
-        events: list[VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1] = []
+        events: list[VisionEvent] = []
         if latest is not None and latest[0] != last_seq:
             last_seq, frame = latest
             last_frame = now
@@ -565,12 +693,19 @@ async def run_camera(
         lost = pipeline.stream_lost(last_frame, now)
         if lost is not None:
             events.append(lost)
+        check = pipeline.pose_check(now)
+        if check is not None:
+            await bus.publish(POSE_CHECK_SUBJECT, check)
         for event in events:
             if isinstance(event, VisionTrackV1):
                 await bus.publish(TRACK_SUBJECT, event)
                 continue
             subject = (
-                INTEGRITY_SUBJECT if isinstance(event, VisionIntegrityV1) else BEHAVIOR_SUBJECT
+                INTEGRITY_SUBJECT
+                if isinstance(event, VisionIntegrityV1)
+                else RULE_SUBJECT
+                if isinstance(event, VisionRuleV1)
+                else BEHAVIOR_SUBJECT
             )
             try:
                 await bus.js_publish(subject, event)
@@ -646,6 +781,7 @@ class Cameras:
             self._vehicles,
             self._embedder,
             camera["pose"],
+            camera.get("rules") or [],
         )
         runs = [
             supervise(
@@ -681,7 +817,7 @@ class Cameras:
         if self._segmenter is None:
             return "model_missing"  # 未配置 HYD_SCENE_MODEL_FILE
         running = self._running.get(camera_id)
-        latest = running.reader.latest() if running else None
+        latest = running.reader.peek() if running else None
         # 与检测循环同一断流标准；登记表尚未下发到本服务的摄像头同样没有画面
         if running is None or latest is None or running.reader.age_s() > STREAM_LOST_S:
             return "no_frame"
@@ -726,7 +862,7 @@ async def calibrate(request: VisionCalibrationRequestV1) -> VisionCalibrationRep
 
 async def serve(config: VisionConfig) -> None:
     models = len(model_files(config))  # 显存上限由加载的模型平分（C-HW-12）
-    detector = PoseDetector(
+    detector = pose_detector(
         str(config.model_file), create_session(config, config.model_file, models)
     )
     vehicles = (

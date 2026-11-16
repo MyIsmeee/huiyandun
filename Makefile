@@ -1,5 +1,5 @@
 .PHONY: licenses lint lint-py lint-imports lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	console-ca fetch-models verify-models test-rules llm-check attack attack-slow tamper
+	console-ca fetch-models verify-models test-rules eval-behavior llm-check attack attack-slow tamper
 
 WEB = pnpm --dir web/console
 
@@ -113,6 +113,10 @@ licenses:
 test-rules:
 	docker build -q -t huiyandun/suricata:local -f agents/sensor/suricata/Dockerfile . > /dev/null
 	uv run python tools/dev/check_rules.py huiyandun/suricata:local rules
+
+# 行为判定事件级评测（TK-160）：回放 services/vision-engine/tests/clips 的骨骼轨迹，按同名标注统计召回、误报与延迟
+eval-behavior:
+	uv run --all-packages python tools/dev/eval_behavior.py
 
 # 占位目标：对应任务实现前，执行即失败
 todo = @echo "$@：由 $(1) 实现" >&2; exit 1

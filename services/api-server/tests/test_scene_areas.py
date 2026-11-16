@@ -362,6 +362,51 @@ def test_area_change_clears_calibration(
     assert site["cam-01"]["mapping"] == "estimated"
 
 
+RULE = {
+    "id": "zone-1",
+    "name": "库区",
+    "type": "intrusion",
+    "points": [[1, 1], [4, 1], [4, 4]],
+    "direction": "any",
+    "classes": ["person"],
+    "min_duration_s": 1,
+}
+
+
+def rules_of(c: TestClient, camera_id: str) -> list[dict[str, Any]]:
+    [camera] = [cam for cam in c.get("/api/cameras").json()["items"] if cam["id"] == camera_id]
+    return camera["rules"]
+
+
+def test_area_change_clears_rules(client: TestClient, db: tuple[ApiConfig, ApiConfig]) -> None:
+    """规则几何属于所在区域：同一区域内移动保留规则；换区域或移出区域时清除并写审计。"""
+    [area] = areas(client)
+    for camera_id in ("cam-01", "cam-02"):
+        r = client.patch(f"/api/cameras/{camera_id}", json={"rules": [RULE]}, headers=headers())
+        assert r.status_code == 200, r.text
+    moved = {"id": "cam-01", "x": 3, "y": 3, "yaw_deg": 10}
+    keep = {"id": "cam-02", "x": 38, "y": 22, "yaw_deg": 225}
+
+    r = save(client, areas(client)[0], cameras=[moved, keep])
+    assert r.status_code == 200, r.text
+    assert rules_of(client, "cam-01") == [RULE]
+    assert audits(db[1], "camera.rules_cleared", r) == []
+
+    other = client.post(
+        "/api/scene/areas", json={"name": "二号楼", "width_m": 10, "depth_m": 10}, headers=headers()
+    ).json()
+    r = save(client, other, cameras=[moved])
+    assert r.status_code == 200, r.text
+    r2 = save(client, areas(client)[0], cameras=[])
+    assert r2.status_code == 200, r2.text
+
+    for camera_id, response in (("cam-01", r), ("cam-02", r2)):
+        assert rules_of(client, camera_id) == []
+        [audit] = audits(db[1], "camera.rules_cleared", response)
+        assert (audit["target"], audit["before"]) == (camera_id, {"rules": [RULE]})
+    assert area["id"] == "area-01"
+
+
 def test_camera_not_listed_leaves_area(client: TestClient) -> None:
     [area] = areas(client)
     keep = {"id": "cam-01", "x": 2, "y": 2, "yaw_deg": 45}

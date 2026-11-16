@@ -48,6 +48,15 @@ def test_motion_region_covers_moving_object() -> None:
     assert 0 <= x1 and x2 <= W and 0 <= y1 and y2 <= H
 
 
+def test_resolution_change_resets_background() -> None:
+    # 摄像头换码流或重连后分辨率、宽高比改变：重新记背景并整帧推理，不因旧背景尺寸不符而抛异常
+    gate = primed()
+    smaller = np.full((480, 640, 3), 40, np.uint8)  # 4:3，缩小后高度与 16:9 的旧背景不同
+
+    assert gate.region(smaller, NO_BOXES) == (0, 0, 640, 480)
+    assert gate.region(smaller, NO_BOXES) is None  # 新背景生效：静止画面照常跳过
+
+
 def test_still_track_keeps_region() -> None:
     # 跌倒后静止的人没有帧差，仍须推理以维持轨迹
     gate = primed()

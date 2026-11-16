@@ -880,7 +880,7 @@ components:
       required: [asset, x, y, rot, len]
       properties:
         asset: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$", description: 资产目录中的编号 }
-        x: { type: number, minimum: 0, maximum: 500, description: 米，区域左下为原点，按网格吸附 }
+        x: { type: number, minimum: 0, maximum: 500, description: 米，俯视时区域左上角为原点、x 向右、y 向下，按网格吸附 }
         y: { type: number, minimum: 0, maximum: 500 }
         rot: { enum: [0, 90, 180, 270], description: 旋转角（度） }
         len:
@@ -996,9 +996,10 @@ components:
       items: { type: number }
       minItems: 4
       maxItems: 4
+    CameraRule: { $ref: "../events/camera_rule.schema.json" }
     Camera:
       type: object
-      required: [id, name, ip, ingest, source, username, password_set, area_id, pose, calibration, calibration_error_m, climb_lines, created_at, updated_at]
+      required: [id, name, ip, ingest, source, username, password_set, area_id, pose, calibration, calibration_error_m, climb_lines, rules, created_at, updated_at]
       properties:
         id: { type: string, description: cam-NN，也是 go2rtc 与录像中的流名 }
         area_id: { anyOf: [{ type: string }, { type: "null" }], description: 所在场景区域；null 表示未放入任何区域，3D 中不出现（D-124） }
@@ -1020,7 +1021,11 @@ components:
         calibration_error_m:
           anyOf: [{ type: number, minimum: 0 }, { type: "null" }]
           description: 保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null
+        pose_check:
+          anyOf: [{ $ref: "../events/pose_check.schema.json" }, { type: "null" }]
+          description: 视觉引擎对安装参数的最新自检结果；已标定、未收到自检或视觉引擎重启后尚未上报时为 null（列表中给出，其余响应不含）
         climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
+        rules: { type: array, items: { $ref: "#/components/schemas/CameraRule" }, description: 轨迹规则（区域入侵、有向越线） }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     CameraList:
@@ -1041,6 +1046,7 @@ components:
         password: { type: string, format: password, writeOnly: true, maxLength: 128 }
         pose: { $ref: "#/components/schemas/Pose" }
         climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
+        rules: { type: array, items: { $ref: "#/components/schemas/CameraRule" }, maxItems: 32 }
     CameraUpdate:
       type: object
       properties:
@@ -1054,6 +1060,7 @@ components:
         clear_password: { type: boolean }
         pose: { $ref: "#/components/schemas/Pose" }
         climb_lines: { type: array, items: { $ref: "#/components/schemas/ClimbLine" } }
+        rules: { type: array, items: { $ref: "#/components/schemas/CameraRule" }, maxItems: 32, description: 省略表示不修改；给出时整体替换 }
     CalibrationInput:
       type: object
       required: [area_id, points]
@@ -1061,7 +1068,7 @@ components:
         area_id: { type: string, description: 打开标定对话框时摄像头所在区域；与库中不一致时 409 }
         points:
           type: array
-          description: 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，区域左下为原点）
+          description: 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，俯视时区域左上角为原点、x 向右、y 向下）
           maxItems: 20
           items: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
     CalibrationFit:
@@ -1099,7 +1106,7 @@ components:
         x: { type: number }
         y: { type: number }
         height_m: { type: number, exclusiveMinimum: 0, maximum: 50, description: 安装高度（米） }
-        yaw_deg: { type: number, description: 朝向，自平面 x 轴正方向逆时针计（度） }
+        yaw_deg: { type: number, description: 朝向，自平面 +x 转向 +y 计（度；俯视 y 向下时为顺时针） }
         pitch_deg: { type: number, minimum: -90, exclusiveMaximum: 0, description: 俯角，向下为负（度） }
         hfov_deg: { type: number, exclusiveMinimum: 0, exclusiveMaximum: 180, description: 水平视场角（度） }
         range_m: { type: number, exclusiveMinimum: 0, maximum: 200, description: 可视距离（米），只用于画视场锥体 }
@@ -1391,7 +1398,7 @@ components:
       description: |
         WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-        alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
+        alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
         （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
         变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
         连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
@@ -1424,5 +1431,6 @@ components:
     VisionTrack: { $ref: "../events/hyd.vision.track.v1.schema.json" }
     VisionScene: { $ref: "../events/hyd.vision.scene.v1.schema.json" }
     VisionBehavior: { $ref: "../events/hyd.vision.behavior.v1.schema.json" }
+    VisionRule: { $ref: "../events/hyd.vision.rule.v1.schema.json" }
     SecurityAlert: { $ref: "../events/hyd.security.alert.v1.schema.json" }
     VisionIntegrity: { $ref: "../events/hyd.vision.integrity.v1.schema.json" }

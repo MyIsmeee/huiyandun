@@ -104,6 +104,47 @@ class PoseDetector:
         )
 
 
+YOLO_INPUT = 640  # tools/dev/export_yolo_pose.py 导出时的输入边长
+YOLO_PAD = 114  # ultralytics 训练与推理时补边的灰度
+YOLO_FLOOR = 0.05  # 免 NMS 输出头固定给 300 行，绝大多数是置信度近 0 的空行：低于此值不作候选
+
+
+class YoloPoseDetector(PoseDetector):
+    """试用：Ultralytics YOLO26-pose 代替 RTMO 提供人体框与骨骼，与 RF-DETR 的合并、横躺者的旋转推理
+    沿用 PoseDetector。输出 (1, 300, 57)：框 xyxy、置信度、类别、17 × (x, y, 置信度)，均为输入画面坐标。
+
+    AGPL-3.0，未列入 models/registry.yaml；正式采用前须先确认许可证。"""
+
+    def __init__(self, session: ort.InferenceSession) -> None:
+        self._session = session
+        self._input = session.get_inputs()[0].name
+
+    def _infer(self, image: np.ndarray) -> Candidates:
+        height, width = image.shape[:2]
+        ratio = YOLO_INPUT / max(height, width)
+        w, h = round(width * ratio), round(height * ratio)
+        left, top = (YOLO_INPUT - w) // 2, (YOLO_INPUT - h) // 2
+        canvas = np.full((YOLO_INPUT, YOLO_INPUT, 3), YOLO_PAD, np.uint8)
+        canvas[top : top + h, left : left + w] = cv2.resize(image, (w, h))
+        blob = canvas[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255  # BGR → RGB
+        rows = self._session.run(None, {self._input: blob})[0][0]
+        rows = rows[rows[:, 4] >= YOLO_FLOOR]
+        points = rows[:, 6:].reshape(-1, 17, 3)
+        return (
+            (rows[:, :4] - (left, top, left, top)) / ratio,
+            rows[:, 4],
+            (points[:, :, :2] - (left, top)) / ratio,
+            points[:, :, 2],
+        )
+
+
+def pose_detector(model_file: str, session: ort.InferenceSession) -> PoseDetector:
+    """按模型的输出个数选择骨骼模型：RTMO 有框与关键点两个输出，YOLO-pose 只有一个。"""
+    if len(session.get_outputs()) == 1:
+        return YoloPoseDetector(session)
+    return PoseDetector(model_file, session)
+
+
 def _people(
     boxes: np.ndarray, scores: np.ndarray, points: np.ndarray, point_scores: np.ndarray
 ) -> sv.Detections:
@@ -147,19 +188,27 @@ VEHICLE_INPUT = (512, 512)  # RF-DETR-S 导出时的输入尺寸
 
 
 class VehicleDetector:
-    """车辆与人员框检测：rtmlib RFDETR 负责预处理与推理；后处理自行完成，以保留 ByteTrack 需要的置信度
-    （rtmlib 的多类别模式不返回置信度）。DETR 每个查询只出一个框，不需要 NMS。"""
+    """车辆与人员框检测：rtmlib RFDETR 负责推理；后处理自行完成，以保留 ByteTrack 需要的置信度
+    （rtmlib 的多类别模式不返回置信度）。DETR 每个查询只出一个框，不需要 NMS。
+
+    前处理与 rtmlib 的算式相同（缩放到输入尺寸后 (v / 255 − mean) / std），改为查表：缩放后的画面是 8 位，
+    每个通道只有 256 种取值，按同样的 float32 算式先算好，结果逐位相同；rtmlib 逐像素做三遍浮点运算，
+    1080p 实测约 3 ms，查表约 0.5 ms。"""
 
     def __init__(self, model_file: str, session: ort.InferenceSession) -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             self._model = RFDETR(model_file, model_input_size=VEHICLE_INPUT, device="cpu")
         self._model.session = session
+        levels = np.arange(256, dtype=np.float32)[:, None]
+        self._lut = (((levels / 255.0) - self._model.mean) / self._model.std).reshape(256, 1, 3)
 
     def __call__(
         self, image: np.ndarray, offset: tuple[int, int] = (0, 0)
     ) -> tuple[sv.Detections, sv.Detections]:
         """检测 image（可为整帧的裁剪区域），返回（车辆, 人员）；offset 为裁剪区域左上角，结果换算回整帧坐标。"""
-        resized, (height, width) = self._model.preprocess(image)
+        resized = cv2.LUT(cv2.resize(image, VEHICLE_INPUT[::-1]), self._lut)
+        # 与 rtmlib 给出的原图尺寸同为 float32：框的换算逐位不变
+        height, width = (np.float32(side) for side in image.shape[:2])
         boxes, logits = self._model.inference(resized)
         # 第 0 类为背景；每个查询取前景中概率最高的类别
         probs = 1 / (1 + np.exp(-logits[0, :, 1:]))

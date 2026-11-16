@@ -420,7 +420,7 @@ class Reader:
     def is_alive(self) -> bool:
         return False
 
-    def latest(self) -> tuple[int, np.ndarray] | None:
+    def peek(self) -> tuple[int, np.ndarray] | None:
         if self._camera_id == "cam-02":
             return None
         return 1, blank(0 if self._camera_id == "cam-04" else 100)

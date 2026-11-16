@@ -3,7 +3,9 @@
 以假会话代替模型；有横躺且没配上骨骼的 RF-DETR 人员时，另推理逆时针 90°、顺时针 90° 两次（ROTATIONS）。
 """
 
+import contextlib
 import importlib.util
+import io
 from types import SimpleNamespace
 from typing import cast
 
@@ -12,8 +14,9 @@ import onnxruntime as ort
 import pytest
 import supervision as sv
 from onnxruntime.datasets import get_example
+from rtmlib import RFDETR
 
-from vision_engine.detector import PoseDetector, VehicleDetector
+from vision_engine.detector import PoseDetector, VehicleDetector, YoloPoseDetector, pose_detector
 
 
 class FakeSession:
@@ -225,6 +228,27 @@ def vehicles(queries: list[tuple[float, float, float, float, int, float]]) -> Ve
     return VehicleDetector(get_example("sigmoid.onnx"), session)
 
 
+@pytest.mark.parametrize("shape", [(1080, 1920, 3), (200, 400, 3), (512, 512, 3)])
+def test_vehicle_preprocess_matches_rtmlib_bit_for_bit(shape: tuple[int, int, int]) -> None:
+    """查表的前处理与 rtmlib 的逐像素浮点运算逐位相同：模型看到的输入不变。"""
+    image = np.random.default_rng(0).integers(0, 256, shape, np.uint8)
+    fed: list[np.ndarray] = []
+
+    class Session(FakeDetrSession):
+        def run(self, names: list[str], feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+            fed.append(feed["input"])
+            return super().run(names, feed)
+
+    session = cast(ort.InferenceSession, Session([(0.5, 0.5, 0.2, 0.2, 2, 0.9)]))
+    VehicleDetector(get_example("sigmoid.onnx"), session)(image)
+    with contextlib.redirect_stdout(io.StringIO()):
+        reference = RFDETR(get_example("sigmoid.onnx"), model_input_size=(512, 512), device="cpu")
+    expected, _ = reference.preprocess(image)
+
+    assert fed[0].dtype == np.float32
+    assert np.array_equal(fed[0][0], expected.transpose(2, 0, 1))
+
+
 def test_vehicles_mapped_to_full_frame_with_class_and_score() -> None:
     """裁剪区域 400×200、左上角 (100, 50)：归一化框按区域尺寸放大后平移回整帧。"""
     detections, _ = vehicles([(0.5, 0.5, 0.5, 0.5, 2, 0.9)])(
@@ -350,3 +374,46 @@ def test_without_detr_only_upright_pass() -> None:
 
     assert session.calls == 1
     assert result.xyxy.tolist() == [[200, 200, 400, 600]]
+
+
+class FakeYoloSession:
+    """按 YOLO26-pose 免 NMS 导出的格式返回 (1, 300, 57)：框、置信度、类别、17 × (x, y, 置信度)。"""
+
+    def __init__(self, rows: list[list[float]]) -> None:
+        self.output = np.zeros((1, 300, 57), np.float32)
+        for i, row in enumerate(rows):
+            self.output[0, i, :5] = row
+            self.output[0, i, 6:] = np.tile([150, 390, 0.8], 17)
+
+    def get_inputs(self) -> list[SimpleNamespace]:
+        return [SimpleNamespace(name="images")]
+
+    def get_outputs(self) -> list[SimpleNamespace]:
+        return [SimpleNamespace(name="output0")]
+
+    def run(self, names: list[str], feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        assert feed["images"].shape == (1, 3, 640, 640)
+        assert feed["images"].dtype == np.float32
+        assert feed["images"].max() <= 1
+        return [self.output]
+
+
+def test_yolo_maps_letterboxed_output_to_full_frame() -> None:
+    # 1280×720 的裁剪区域缩放为 0.5，上下各补 140 像素；区域左上角位于整帧 (100, 40)
+    session = FakeYoloSession([[100, 240, 200, 440, 0.9], [400, 240, 450, 340, 0.1]])
+    image = np.zeros((720, 1280, 3), np.uint8)
+
+    result = pose_detector("unused.onnx", cast(ort.InferenceSession, session))(image, (100, 40))
+
+    assert len(result) == 1  # 低分框与置信度为 0 的空行丢弃
+    assert result.xyxy[0].tolist() == [300, 240, 500, 640]
+    assert result.data["keypoints"][0, 0].tolist() == [400, 540]
+    assert result.data["keypoint_scores"][0, 0] == np.float32(0.8)
+
+
+def test_pose_detector_picks_model_by_output_count() -> None:
+    yolo = pose_detector("unused.onnx", cast(ort.InferenceSession, FakeYoloSession([])))
+    rtmo = pose_detector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, FakeSession([])))
+
+    assert isinstance(yolo, YoloPoseDetector)
+    assert not isinstance(rtmo, YoloPoseDetector)

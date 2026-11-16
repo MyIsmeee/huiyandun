@@ -19,6 +19,8 @@ from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
     VisionCalibrationRequestV1,
 )
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_pose_check_v1_schema import VisionPoseCheckV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneReplyV1
 from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
@@ -74,6 +76,40 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "duration_s": 2.5,
             "ts_start": TS,
             "ts_end": TS,
+        },
+    ),
+    "hyd.vision.rule.v1": (
+        VisionRuleV1,
+        {
+            "camera_id": "cam-01",
+            "rule_id": "gate",
+            "rule_name": "大门",
+            "rule_type": "line_crossing",
+            "phase": "pulse",
+            "episode_id": "6f1c2b9e-4a3d-4c8e-9b1a-2d3e4f5a6b7c",
+            "level": "confirmed",
+            "track_id": 3,
+            "object_class": "person",
+            "x": 4.2,
+            "y": 6.1,
+            "uncertainty_m": 0.2,
+            "since": TS,
+            "direction": "forward",
+            "mapping": "calibrated",
+            "inferred": False,
+        },
+    ),
+    "hyd.vision.pose_check.v1": (
+        VisionPoseCheckV1,
+        {
+            "camera_id": "cam-03",
+            "status": "suspect",
+            "samples": 24,
+            "person_height_m": 4.9,
+            "speed_p95_mps": 12.5,
+            "suggested_height_m": 1.0,
+            "suggested_pitch_deg": -8.0,
+            "reasons": ["按当前参数推算行人身高约 4.9 m"],
         },
     ),
     "hyd.vision.integrity.v1": (
@@ -285,6 +321,12 @@ def test_ignores_unknown_field_from_newer_minor() -> None:
         ("hyd.vision.track.v1", "uncertainty_m", -0.1),
         ("hyd.vision.behavior.v1", "behavior", "run"),
         ("hyd.vision.behavior.v1", "confidence_avg", 1.5),
+        ("hyd.vision.behavior.v1", "level", "maybe"),
+        ("hyd.vision.pose_check.v1", "status", "bad"),
+        ("hyd.vision.rule.v1", "phase", "begin"),
+        ("hyd.vision.rule.v1", "rule_type", "loitering"),
+        ("hyd.vision.rule.v1", "level", "maybe"),
+        ("hyd.vision.pose_check.v1", "samples", -1),
         ("hyd.vision.integrity.v1", "type", "blur"),
         ("hyd.security.alert.v1", "severity", "urgent"),
         ("hyd.security.alert.v1", "src_ip", "999.0.0.1"),

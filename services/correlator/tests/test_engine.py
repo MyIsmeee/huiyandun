@@ -154,6 +154,10 @@ def test_behavior_event_requires_confirmation() -> None:
     (incident,) = feed(Engine([rule], ATTACK), (ALERT, alert(0)), (BEHAVIOR, fall))
     assert incident.requires_confirmation
 
+    # 疑似跌倒只在控制台提示，不参与关联（TK-160）
+    suspected = fall.model_copy(update={"schema_version": "1.1.0", "level": "suspected"})
+    assert feed(Engine([rule], ATTACK), (ALERT, alert(0)), (BEHAVIOR, suspected)) == []
+
 
 def test_unregistered_device_alert_ignored() -> None:
     """目标未登记为设备的告警没有关联键，不参与关联。"""

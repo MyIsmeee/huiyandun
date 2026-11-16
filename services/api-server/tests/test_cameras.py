@@ -30,6 +30,7 @@ from py_contracts.events.hyd_vision_calibration_reply_v1_schema import VisionCal
 from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
     VisionCalibrationRequestV1,
 )
+from py_contracts.events.hyd_vision_pose_check_v1_schema import VisionPoseCheckV1
 
 POSE = {
     "x": 12,
@@ -149,11 +150,19 @@ def test_create_password_write_only_and_audited(
     )
 
 
+ZONE_RULE = {"id": "yard", "name": "库区", "type": "intrusion", "points": [[0, 0], [4, 0], [4, 3]]}
+LINE_RULE = {"id": "gate", "name": "大门", "type": "line_crossing", "points": [[0, 0], [0, 5]]}
+
+
 @pytest.mark.parametrize(
     ("change", "status"),
     [
         ({"source": None}, 400),  # 拉流须有地址
         ({"climb_lines": [[100, 50, 100, 300]]}, 400),  # 竖直警戒线
+        ({"rules": [ZONE_RULE | {"points": [[0, 0], [1, 0]]}]}, 400),  # 区域不足 3 个顶点
+        ({"rules": [LINE_RULE, LINE_RULE]}, 400),  # 规则编号重复
+        ({"rules": [LINE_RULE | {"points": [[0, 0], [0.05, 0]]}]}, 400),  # 两点重合
+        ({"rules": [LINE_RULE | {"type": "loitering"}]}, 400),  # 未知类型
         ({"source": GATE["source"] | {"path": "/live#video=copy"}}, 400),  # go2rtc 参数
         ({"source": GATE["source"] | {"host": "exec:rm -rf /"}}, 400),
         ({"source": GATE["source"] | {"protocol": "exec"}}, 400),
@@ -389,7 +398,15 @@ def test_registry_event_has_no_credentials() -> None:
           "climb_lines": [], "username": "admin", "password_enc": b"x", "host": "192.168.8.31"}]
     )  # fmt: skip
     dumped = event.model_dump(mode="json")
-    assert set(dumped["cameras"][0]) == {"id", "name", "ip", "pose", "calibration", "climb_lines"}
+    assert set(dumped["cameras"][0]) == {
+        "id",
+        "name",
+        "ip",
+        "pose",
+        "calibration",
+        "climb_lines",
+        "rules",
+    }
 
 
 class FakeSite:
@@ -823,3 +840,56 @@ def test_pose_change_keeps_calibration(
 
     assert r.status_code == 200, r.text
     assert (r.json()["calibration"], r.json()["calibration_error_m"]) == (CALIBRATION, 0.21)
+
+
+# 放在最后：新增与修改摄像头会留下审计记录，其他用例按审计条数断言
+def test_pose_check_listed_until_pose_changed(client: TestClient) -> None:
+    """视觉引擎的安装参数自检随列表给出；改了安装参数即丢弃（旧建议相对旧参数）。"""
+    camera_id = client.post("/api/cameras", json=GATE, headers=headers()).json()["id"]
+    event = VisionPoseCheckV1.model_validate({
+        "schema_version": "1.0.0", "event_id": str(uuid.uuid4()), "ts": datetime.now(UTC).isoformat(),
+        "camera_id": camera_id, "status": "suspect", "samples": 24, "person_height_m": 4.9,
+        "speed_p95_mps": 12.5, "suggested_height_m": 1.0, "suggested_pitch_deg": -8.0,
+        "reasons": ["按当前参数推算行人身高约 4.9 m"],
+    })  # fmt: skip
+    cast(Any, client.app).state.pose_checks.on_check(event)
+
+    listed = {c["id"]: c for c in client.get("/api/cameras").json()["items"]}
+    assert listed[camera_id]["pose_check"]["suggested_height_m"] == 1.0
+    assert listed["cam-01"]["pose_check"] is None
+
+    patch = {"pose": POSE | {"height_m": 1.0, "pitch_deg": -8}}
+    assert (
+        client.patch(f"/api/cameras/{camera_id}", json=patch, headers=headers()).status_code == 200
+    )
+    listed = {c["id"]: c for c in client.get("/api/cameras").json()["items"]}
+    assert listed[camera_id]["pose_check"] is None
+
+
+# 放在文件末尾：审计日志在测试间不清空，前面的用例按条数断言
+def test_rules_saved_with_defaults_and_sent_in_registry(client: TestClient) -> None:
+    """轨迹规则随摄像头保存、补齐默认值，并随登记表下发给 vision-engine。"""
+    client.post("/api/cameras", json=GATE, headers=headers())
+    r = client.patch(
+        "/api/cameras/cam-03",
+        json={"rules": [ZONE_RULE, LINE_RULE | {"direction": "forward"}]},
+        headers=headers(),
+    )
+    assert r.status_code == 200, r.text
+    zone, line = r.json()["rules"]
+    assert (zone["classes"], zone["min_duration_s"], zone["direction"]) == (["person"], 1, "any")
+    assert line["direction"] == "forward"
+
+    rows = [dict(c) for c in client.get("/api/cameras").json()["items"]]
+    event = cameras.registry([r | {"ip": r["ip"]} for r in rows])
+    [sent] = [c for c in event.model_dump(mode="json")["cameras"] if c["id"] == "cam-03"]
+    assert [rule["id"] for rule in sent["rules"]] == ["yard", "gate"]
+
+    # 省略 rules 不修改；给出空列表即清空
+    assert client.patch("/api/cameras/cam-03", json={"name": "后门"}, headers=headers()).json()[
+        "rules"
+    ]
+    assert (
+        client.patch("/api/cameras/cam-03", json={"rules": []}, headers=headers()).json()["rules"]
+        == []
+    )
