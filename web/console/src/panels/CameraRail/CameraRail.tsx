@@ -128,7 +128,9 @@ function RailCard(props: { device: Device; collapsed: boolean; selected: boolean
  */
 export function Thumbnail({ id, offline, refreshMs = REFRESH_MS }: { id: string; offline: boolean; refreshMs?: number }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [url, setUrl] = useState<string | null>(null);
+  // 记下画面属于哪台摄像头：换了摄像头（引线卡复用本组件）即不再显示上一台的画面，等新摄像头的首帧
+  const [shot, setShot] = useState<{ id: string; url: string } | null>(null);
+  const url = shot?.id === id ? shot.url : null;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let visible = false;
@@ -145,7 +147,7 @@ export function Thumbnail({ id, offline, refreshMs = REFRESH_MS }: { id: string;
       if (!active) return;
       if (blob) {
         const next = URL.createObjectURL(blob);
-        setUrl(next);
+        setShot({ id, url: next });
         if (current) URL.revokeObjectURL(current);
         current = next;
       }

@@ -46,9 +46,10 @@ const length = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] -
 /** 第一段为躯干（肩中到髋中） */
 const torso = (f: Figure | null) => (f?.bones[0] ? length(f.bones[0].from, f.bones[0].to) : Number.NaN);
 const heights = (f: Figure | null) => f?.bones.flatMap((b) => [b.from[1], b.to[1]]) ?? [];
-/** 骨段次序：躯干、颈部、双肩、双髋、左上臂、左前臂、右上臂、右前臂、左大腿、左小腿、右大腿、右小腿（左右为 COCO 序号 5/6 等） */
+/** 骨段次序：躯干、颈部、双肩、双髋、左上臂、左前臂、右上臂、右前臂、左大腿、左小腿、右大腿、右小腿、左脚、右脚（左右为 COCO 序号 5/6 等） */
 const [SHOULDER_LINE, WRIST_5, UPPER_ARM_6, FOREARM_6] = [2, 5, 6, 7];
 const LEGS = [8, 9, 10, 11];
+const FEET = [12, 13];
 const inferred = (f: Figure | null) => f?.bones.flatMap((b, i) => (b.inferred ? [i] : [])) ?? [];
 const RIGHT: [number, number] = [1, 0];
 
@@ -91,7 +92,7 @@ describe("figure", () => {
     const f = figure(keypoints, bbox, RIGHT);
     const forearm = f?.bones[WRIST_5];
 
-    expect(f?.bones).toHaveLength(12);
+    expect(f?.bones).toHaveLength(14);
     expect(inferred(f)).toEqual([WRIST_5]);
     expect(forearm && length(forearm.from, forearm.to)).toBeCloseTo(0.26, 5);
     expect(forearm?.to[0]).toBeCloseTo(forearm?.from[0] ?? Number.NaN, 5);
@@ -164,7 +165,7 @@ describe("figure", () => {
     const f = figure(keypoints, bbox, RIGHT);
     const hip = f?.bones[LEGS[0] ?? 0]?.from;
 
-    expect(inferred(f)).toEqual(LEGS);
+    expect(inferred(f)).toEqual([...LEGS, ...FEET]); // 脚随所在小腿
     expect(Math.min(...heights(f))).toBeCloseTo(0, 5);
     expect(hip?.[1]).toBeCloseTo(0.84, 5);
     expect(torso(f)).toBeCloseTo(0.5, 1);
@@ -196,8 +197,8 @@ describe("figure", () => {
       const f = figure(keypoints, bbox, RIGHT);
       const sides = f?.bones.flatMap((b) => [b.from[0], b.to[0]]) ?? [];
 
-      expect(f?.bones).toHaveLength(12);
-      expect(inferred(f)).toHaveLength(12);
+      expect(f?.bones).toHaveLength(14);
+      expect(inferred(f)).toHaveLength(14);
       expect(f?.head.inferred).toBe(true);
       expect((f?.head.at[1] ?? 0) + HEAD_R).toBeCloseTo(1.7, 1);
       expect(Math.min(...heights(f))).toBeGreaterThanOrEqual(0);
@@ -205,6 +206,33 @@ describe("figure", () => {
       expect(Math.max(...sides) + Math.min(...sides)).toBeCloseTo(0, 5);
     });
   }
+
+  it("各骨段标出部位：躯干带左右方向，肩、髋连线没有零件", () => {
+    const { keypoints, bbox } = frame(STANDING);
+    const f = figure(keypoints, bbox, RIGHT);
+
+    expect(f?.bones.map((b) => b.part)).toEqual([
+      "torso", "neck", undefined, undefined, "upperArm", "forearm", "upperArm", "forearm", "thigh", "shin", "thigh", "shin", "foot", "foot",
+    ]);
+    const line = f?.bones[SHOULDER_LINE];
+    // 躯干的左右方向与双肩连线（from 为 COCO 5、to 为 6）相反：右肩 → 左肩
+    expect(f?.bones[0]?.side?.[0]).toBeCloseTo((line?.from[0] ?? 0) - (line?.to[0] ?? 0), 5);
+  });
+
+  it("站立：双脚自脚踝水平伸向摄像头一侧 0.19 m，脚背朝上", () => {
+    const { keypoints, bbox } = frame(STANDING);
+    const f = figure(keypoints, bbox, RIGHT);
+
+    for (const i of FEET) {
+      const [shin, foot] = [f?.bones[LEGS[1 + 2 * (i - 12)] ?? 0], f?.bones[i]];
+      expect(foot?.from).toEqual(shin?.to);
+      expect(foot && length(foot.from, foot.to)).toBeCloseTo(0.19, 5);
+      expect(foot?.to[1]).toBeCloseTo(foot?.from[1] ?? Number.NaN, 5);
+      // 人形平面的水平方向为 +x 时，面向摄像头为 +z（场景坐标的平面 y）
+      expect((foot?.to[2] ?? 0) - (foot?.from[2] ?? 0)).toBeCloseTo(0.19, 5);
+      expect(foot?.inferred).toBe(false);
+    }
+  });
 
   it("车辆没有关键点：不生成人形", () => {
     expect(figure(null, [0, 0, 1, 1], RIGHT)).toBeNull();

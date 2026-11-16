@@ -14,19 +14,24 @@ const SHOULDERS = [5, 6];
 const HIPS = [11, 12];
 const HEAD = [0, 1, 2, 3, 4]; // 鼻、双眼、双耳
 const ANKLES = [15, 16];
-/** 四肢与肩、髋连线：两端关键点（COCO 17 点序号）与胶囊半径（米） */
-const LIMBS: (readonly [number, number, number])[] = [
+/** 骨段的部位：按部位取人形零件（parts.ts）；肩、髋连线没有零件，画成胶囊 */
+export type Part = "torso" | "neck" | "upperArm" | "forearm" | "thigh" | "shin" | "foot";
+/** 四肢与肩、髋连线：两端关键点（COCO 17 点序号）、半径（米）与部位 */
+export const LIMBS: (readonly [number, number, number, Part?])[] = [
   [5, 6, 0.06],
   [11, 12, 0.07],
-  [5, 7, 0.05],
-  [7, 9, 0.045],
-  [6, 8, 0.05],
-  [8, 10, 0.045],
-  [11, 13, 0.065],
-  [13, 15, 0.055],
-  [12, 14, 0.065],
-  [14, 16, 0.055],
+  [5, 7, 0.05, "upperArm"],
+  [7, 9, 0.045, "forearm"],
+  [6, 8, 0.05, "upperArm"],
+  [8, 10, 0.045, "forearm"],
+  [11, 13, 0.065, "thigh"],
+  [13, 15, 0.055, "shin"],
+  [12, 14, 0.065, "thigh"],
+  [14, 16, 0.055, "shin"],
 ];
+/** 脚长（米）：脚踝到脚尖；脚的半径只用于包围盒 */
+const FOOT_M = 0.19;
+const FOOT_R = 0.045;
 /** 尺度参照：1.7 m 人员的躯干（肩中到髋中）、大腿、小腿长度（米）；抬手、弯腰、跌倒时长度不变，检测框高度会变 */
 const BONES: (readonly [number[], number[], number])[] = [
   [SHOULDERS, HIPS, 0.5],
@@ -54,6 +59,10 @@ export interface Bone {
   radius: number;
   /** 由标准骨长推测、不是实测（D-056）：半透明呈现 */
   inferred: boolean;
+  /** 部位：有零件的骨段按零件呈现，否则为半径 radius 的胶囊 */
+  part?: Part;
+  /** 零件绕骨段的转角参照（见 parts.ts placePart）：躯干为右肩 → 左肩，脚为使零件 +z 朝脚背的方向 */
+  side?: Vec3;
 }
 /** 姿态人形：以脚点为原点的场景坐标（x、高度、平面 y），平面坐标与场景一致 */
 export interface Figure {
@@ -64,10 +73,37 @@ export interface Figure {
 /** 人形平面内的点：画面右侧为正的横向偏移、离地高度（米） */
 type P = [number, number];
 const add = (p: P, q: P, k = 1): P => [p[0] + q[0] * k, p[1] + q[1] * k];
+/** 单位向量；零长（如肩中与髋中在画面上重合）时取竖直向上，不产生 NaN 使人形整个不画 */
 const unit = ([s, h]: P): P => {
   const n = Math.hypot(s, h);
-  return [s / n, h / n];
+  return n > 1e-9 ? [s / n, h / n] : [0, 1];
 };
+
+/**
+ * 双脚：关键点没有脚尖，自各小腿末端（脚踝）伸出 FOOT_M，方向取身体朝向 front 垂直于小腿的分量（站立时水平向前，
+ * 抬腿时随小腿转动；小腿与朝向平行时取朝上，即仰面躺着脚尖朝上），脚尖不低于地面。是否推测随所在小腿
+ */
+export function feet(bones: Bone[], front: Vec3): Bone[] {
+  return bones.flatMap((shin): Bone[] => {
+    if (shin.part !== "shin") return [];
+    const ankle = shin.to;
+    const d: Vec3 = [shin.to[0] - shin.from[0], shin.to[1] - shin.from[1], shin.to[2] - shin.from[2]];
+    const n = Math.hypot(...d);
+    const s: Vec3 = n > 1e-9 ? [d[0] / n, d[1] / n, d[2] / n] : [0, -1, 0];
+    const across = (v: Vec3): Vec3 => {
+      const k = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
+      return [v[0] - s[0] * k, v[1] - s[1] * k, v[2] - s[2] * k];
+    };
+    let dir = across(front);
+    if (Math.hypot(...dir) < 0.2) dir = across([0, 1, 0]);
+    const m = Math.hypot(...dir);
+    const to: Vec3 = [ankle[0] + (dir[0] / m) * FOOT_M, Math.max(0, ankle[1] + (dir[1] / m) * FOOT_M), ankle[2] + (dir[2] / m) * FOOT_M];
+    // side = 脚尖方向 × 脚背方向（脚背朝膝盖一侧，即 −s）
+    const f: Vec3 = [to[0] - ankle[0], to[1] - ankle[1], to[2] - ankle[2]];
+    const side: Vec3 = [f[2] * s[1] - f[1] * s[2], f[0] * s[2] - f[2] * s[0], f[1] * s[0] - f[0] * s[1]];
+    return [{ from: ankle, to, radius: FOOT_R, inferred: shin.inferred, part: "foot", side }];
+  });
+}
 
 /** 人形所在竖直平面的水平方向：垂直于摄像头到人员的连线，即画面中的向右方向（平面坐标 [x, y]） */
 export function facing(pose: Camera["pose"], x: number, y: number): [number, number] {
@@ -138,15 +174,22 @@ export function figure(keypoints: Target["keypoints"], bbox: Target["bbox"], rig
   const upright = shoulders[1] - hips[1] > Math.abs(shoulders[0] - hips[0]);
   const lift = upright ? Math.max(0, ...ANKLES.flatMap((i) => (guessed[i] ? [-(points[i] as P)[1]] : []))) : 0;
   const at = ([side, height]: P): Vec3 => [right[0] * side, Math.max(0, height + lift), right[1] * side];
+  // 躯干零件的左右：右肩 → 左肩；侧身时两肩重合，取人形平面的水平方向
+  const [left, rightShoulder] = [at(points[5] as P), at(points[6] as P)];
+  const span: Vec3 = [left[0] - rightShoulder[0], left[1] - rightShoulder[1], left[2] - rightShoulder[2]];
+  const side: Vec3 = Math.hypot(...span) > 1e-6 ? span : [right[0], 0, right[1]];
   const bones: Bone[] = [
-    { from: at(shoulders), to: at(hips), radius: TORSO_R, inferred: !torso },
-    { from: at(shoulders), to: at(head), radius: NECK_R, inferred: headGuessed },
-    ...LIMBS.map(([a, b, radius]) => ({
+    { from: at(shoulders), to: at(hips), radius: TORSO_R, inferred: !torso, part: "torso", side },
+    { from: at(shoulders), to: at(head), radius: NECK_R, inferred: headGuessed, part: "neck" },
+    ...LIMBS.map(([a, b, radius, part]) => ({
       from: at(points[a] as P),
       to: at(points[b] as P),
       radius,
       inferred: Boolean(guessed[a] || guessed[b]),
+      part,
     })),
   ];
+  // 画面平面人形面向摄像头：朝向取平面内垂直于 right、指向摄像头的方向（见 facing）
+  bones.push(...feet(bones, [-right[1], 0, right[0]]));
   return { bones, head: { at: at(head), inferred: headGuessed } };
 }

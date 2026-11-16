@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../src/api/schema";
 import { ApiError, api } from "../../src/lib/api";
-import { type Report, ReportBar } from "../../src/panels/ReportBar/ReportBar";
+import { type Report, ReportBar, useReports } from "../../src/panels/ReportBar/ReportBar";
 import { receive, useLive } from "../../src/store/live";
 import { type Role, useSession } from "../../src/store/session";
 
@@ -47,7 +47,10 @@ function show(role: Role | null) {
   return render(<ReportBar deviceId="cam-02" />);
 }
 
-beforeEach(() => useLive.setState(useLive.getInitialState()));
+beforeEach(() => {
+  useLive.setState(useLive.getInitialState());
+  useReports.setState(useReports.getInitialState());
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -217,6 +220,83 @@ describe("ReportBar", () => {
 
     expect(screen.getByRole("alert").textContent).toBe("关联事件不存在或已超过 24 小时");
     expect(screen.getByRole("button", { name: "生成报告" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("生成期间关闭再打开详情：仍为生成中、不能再点；结果回来时打开新报告", async () => {
+    push(incident("inc-1"));
+    vi.spyOn(api, "listReports").mockResolvedValue({ items: [] });
+    let resolve: (r: Report) => void = () => {};
+    const create = vi.spyOn(api, "createReport").mockReturnValue(new Promise((r) => (resolve = r)));
+    const first = show("operator");
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "生成报告" }));
+    first.unmount();
+
+    show("operator");
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: "生成中…" }).hasAttribute("disabled")).toBe(true);
+    await act(async () => resolve(report({ id: "rep-new" })));
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(frame().getAttribute("src")).toBe("/api/reports/rep-new/export?format=html");
+  });
+
+  it("生成超时：说明可能仍在生成，并重新读取列表", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    push(incident("inc-1"));
+    const list = vi.spyOn(api, "listReports").mockResolvedValue({ items: [] });
+    vi.spyOn(api, "createReport").mockRejectedValue(new DOMException("signal timed out", "TimeoutError"));
+    show("operator");
+    await act(async () => {});
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "生成报告" })));
+    expect(screen.getByRole("alert").textContent).toContain("报告可能仍在生成");
+    expect(list).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(list).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it("复核请求返回前已返回报告栏：不重新打开报告页", async () => {
+    push(incident("inc-1"));
+    vi.spyOn(api, "listReports").mockResolvedValue({ items: [report()] });
+    let resolve: (r: Report) => void = () => {};
+    vi.spyOn(api, "reviewReport").mockReturnValue(new Promise((r) => (resolve = r)));
+    show("operator");
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("list", { name: "历史报告" })).getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: "标记已复核" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+
+    await act(async () => resolve(report({ reviewed_by: "operator", reviewed_at: "2026-11-08T02:05:00Z" })));
+    expect(page()).toBeNull();
+    expect(screen.getByTitle("模板生成 · 已复核：operator")).toBeTruthy();
+  });
+
+  it("已被他人复核（409）：重读列表，打开的报告更新为已复核", async () => {
+    push(incident("inc-1"));
+    vi.spyOn(api, "listReports")
+      .mockResolvedValueOnce({ items: [report()] })
+      .mockResolvedValue({ items: [report({ reviewed_by: "admin", reviewed_at: "2026-11-08T02:05:00Z" })] });
+    vi.spyOn(api, "reviewReport").mockRejectedValue(new ApiError(409, "报告已复核"));
+    show("operator");
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("list", { name: "历史报告" })).getByRole("button"));
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "标记已复核" })));
+    expect(screen.queryByRole("button", { name: "标记已复核" })).toBeNull();
+    expect(screen.getByText("模板生成 · 已复核：admin")).toBeTruthy();
+  });
+
+  it("Esc 关闭报告页", async () => {
+    push(incident("inc-1"));
+    vi.spyOn(api, "listReports").mockResolvedValue({ items: [report()] });
+    show("viewer");
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("list", { name: "历史报告" })).getByRole("button"));
+    expect(page()).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(page()).toBeNull();
   });
 
   it("导出证据包：取回后以 evidence-<事件 ID>.zip 交给浏览器保存（FR-702）", async () => {

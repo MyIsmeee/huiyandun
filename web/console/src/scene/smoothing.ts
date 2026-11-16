@@ -13,6 +13,8 @@ export const DELAY_MIN_MS = 150;
 export const DELAY_MAX_MS = 400;
 /** 尚无足够间隔可估时的渲染延迟 */
 const DELAY_DEFAULT_MS = 250;
+/** 姿态队列的条数上限：正常只保留最大渲染延迟内的实测（8～30 FPS 下 4～13 条），推送异常密集时仍有界 */
+const POSE_QUEUE_MAX = 64;
 /** 关键点可见性滞回（V-A8）：≥ 0.3 转可见、< 0.2 转不可见；0.3 与 pose.ts 的 KEYPOINT_MIN 一致 */
 const SHOW_SCORE = 0.3;
 const HIDE_SCORE = 0.2;
@@ -58,7 +60,7 @@ interface Point {
   last: [number, number] | null;
 }
 
-/** 一个目标的平滑状态（由 TargetModels 按目标保存） */
+/** 一个目标的平滑状态（按目标保存在 smoothers 中） */
 export class TargetSmoother {
   private readonly x = filter(POSITION);
   private readonly y = filter(POSITION);
@@ -66,8 +68,11 @@ export class TargetSmoother {
   private headingIn: number | null = null;
   private readonly box = [0, 1, 2, 3].map(() => filter(IMAGE));
   private readonly points: Point[] = [];
-  private previous: PoseSample | null = null;
-  private current: PoseSample | null = null;
+  /**
+   * 近期各次实测的滤波后姿态，按时刻先后。渲染时刻落后最新实测一个渲染延迟（至多 DELAY_MAX_MS），
+   * 只留最近两次时它有一半时间早于前一次，姿态先冻结、新实测到达再跳半步：保留到能包住最早的渲染时刻为止
+   */
+  private poses: PoseSample[] = [];
   /** 滤波后的轨迹 [x, y, 到达时刻]，与 Target.trail 一一对应 */
   trail: [number, number, number][] = [];
   /** 滤波后的朝向（弧度，已展开）；尚无朝向时为 null */
@@ -112,16 +117,28 @@ export class TargetSmoother {
         point.last = [point.u.filter(u, t), point.v.filter(v, t)];
         return [...point.last, point.visible ? 1 : 0];
       }) ?? null;
-    this.previous = this.current;
-    this.current = { keypoints: points, bbox: box, at };
+    this.poses.push({ keypoints: points, bbox: box, at });
+    // 渲染时刻不早于最新实测减 DELAY_MAX_MS：其前只需再留一条，供两者之间插值
+    const oldest = at - DELAY_MAX_MS;
+    let drop = Math.max(0, this.poses.length - POSE_QUEUE_MAX);
+    while (drop < this.poses.length - 1 && (this.poses[drop + 1]?.at ?? at) <= oldest) drop += 1;
+    if (drop > 0) this.poses.splice(0, drop);
   }
 
-  /** 渲染时刻 t 的姿态：在前后两次实测之间插值；可见性取较近的一次 */
+  /**
+   * 渲染时刻 t 的姿态：在包住 t 的前后两次实测之间插值，与位置同一渲染时间轴；可见性取较近的一次。
+   * 晚于最新一次取最新，早于最早一次取最早，不外推
+   */
   pose(t: number): Pose | null {
-    const { previous, current } = this;
-    if (!current) return null;
-    if (!previous || t >= current.at) return current;
-    const k = Math.max(0, Math.min(1, (t - previous.at) / (current.at - previous.at || 1)));
+    const { poses } = this;
+    const last = poses.at(-1);
+    if (!last) return null;
+    if (t >= last.at) return last;
+    const next = poses.findIndex(({ at }) => at >= t);
+    const [previous, current] = [poses[next - 1], poses[next]];
+    if (!current) return last;
+    if (!previous) return current;
+    const k = (t - previous.at) / (current.at - previous.at || 1);
     const lerp = (a: number, b: number) => a + (b - a) * k;
     const near = k < 0.5 ? previous : current;
     return {
@@ -137,8 +154,20 @@ export class TargetSmoother {
   }
 }
 
-/** 各目标的平滑状态：TargetModels 逐帧更新；跟随视角与点选按画面上看到的位置取 */
+/**
+ * 各目标的平滑状态，由多个使用者共用：3D 场景（TargetModels）、2D 视图与各路画面叠加（DetectionOverlay）取同一份滤波结果；
+ * 跟随视角与点选按画面上看到的位置取
+ */
 export const smoothers = new Map<string, TargetSmoother>();
+/** 各使用者声明的仍在使用的目标键：状态只在没有任何使用者声明时释放 */
+const claims = new Map<object, ReadonlySet<string>>();
+
+const NONE: ReadonlySet<string> = new Set();
+
+function claimed(key: string): boolean {
+  for (const keys of claims.values()) if (keys.has(key)) return true;
+  return false;
+}
 
 /** 取（或建立）目标的平滑状态并跟上最新实测 */
 export function smoothed(key: string, target: Target): TargetSmoother {
@@ -162,7 +191,21 @@ export function renderedPosition(key: string, target: Target, now: number, motio
   return smoothers.get(key)?.position(t) ?? positionAt(target.trail, t);
 }
 
-/** 目标消失后释放其平滑状态 */
+/**
+ * 使用者 owner 声明自己仍在使用的目标键（整体替换上一次的声明），并释放不再被任何使用者声明的状态。
+ * 各使用者只管自己的目标：一方不再使用的状态若另一方仍在用就保留，否则对方的滤波每帧被清空重建
+ */
+export function retain(owner: object, alive: ReadonlySet<string>): void {
+  claims.set(owner, alive);
+  forget(alive);
+}
+
+/** 使用者卸载：撤销其声明并释放只有它在用的状态 */
+export function release(owner: object): void {
+  if (claims.delete(owner)) forget(NONE);
+}
+
+/** 释放不在 alive 中、也没有任何使用者声明的状态 */
 export function forget(alive: ReadonlySet<string>): void {
-  for (const key of smoothers.keys()) if (!alive.has(key)) smoothers.delete(key);
+  for (const key of smoothers.keys()) if (!alive.has(key) && !claimed(key)) smoothers.delete(key);
 }

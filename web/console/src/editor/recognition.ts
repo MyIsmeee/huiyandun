@@ -119,8 +119,13 @@ function wallItem(asset: Asset, line: Point[], size: [number, number], catalog: 
   const alongX = x1 - x0 >= y1 - y0;
   const clamp = ([x, y]: Point): Point => [Math.min(Math.max(x, 0), size[0]), Math.min(Math.max(y, 0), size[1])];
   const across = median(line.map((p) => p[alongX ? 1 : 0]));
-  const item = stroke(asset, clamp(alongX ? [x0, across] : [across, y0]), clamp(alongX ? [x1, across] : [across, y1]));
-  const [length] = asset.footprint;
+  const stroked = stroke(asset, clamp(alongX ? [x0, across] : [across, y0]), clamp(alongX ? [x1, across] : [across, y1]));
+  const [length, width] = asset.footprint;
+  // 横向按占地就近吸附：中线在 floor 与 floor+1 之间时占地覆盖脚线（stroke 先把脚线取整再让半格，会整体偏向正方向），
+  // 并收在区域内，贴区域远边的墙不因占地越界而整段丢弃
+  const limit = size[alongX ? 1 : 0];
+  const center = Math.min(Math.max(Math.round(across - width / 2), 0), Math.max(limit - width, 0)) + width / 2;
+  const item = alongX ? { ...stroked, y: center } : { ...stroked, x: center };
   for (let len = item.len ?? length; len >= length; len -= length) if (inside({ ...item, len }, catalog, size)) return { ...item, len };
   return null;
 }

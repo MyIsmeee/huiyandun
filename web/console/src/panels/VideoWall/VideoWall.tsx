@@ -13,14 +13,15 @@ const ZOOMED: Grid = { cols: 1, rows: 1, capacity: 1, featured: false, fixed: fa
 
 /**
  * 监控墙（ui.md §4、D-115）：登记顺序的摄像头按宫格分页播放实时画面；
- * 不在当前页的摄像头不建立连接（V-W3）。选中的摄像头不在当前页时自动翻到所在页（V-W1）。
+ * 不在当前页的摄像头不建立连接（V-W3）。选中的摄像头不在当前页时自动翻到所在页（V-W1）；放大时改为放大所选的摄像头。
  */
 export function VideoWall({ devices }: { devices: Device[] }) {
   const pushed = useLive((s) => s.devices);
   const cameras = useMemo(() => devices.filter((d) => d.camera).map((d) => pushed[d.id] ?? d), [devices, pushed]);
   const { layout, page, zoomed } = useWall();
   const selectedId = useSelection((s) => s.deviceId);
-  const grid = wallGrid(cameras.length, layout);
+  const [ref, size] = useSize();
+  const grid = wallGrid(cameras.length, layout, size ? { w: size.w, h: size.h, gap: GAP } : undefined);
   const pages = pageCount(cameras.length, grid);
   const current = Math.min(page, pages - 1);
 
@@ -30,11 +31,16 @@ export function VideoWall({ devices }: { devices: Device[] }) {
     if (selectedId === followed.current) return;
     followed.current = selectedId;
     if (!selectedId) return;
+    // 放大时在摄像头栏或告警中选了另一台：放大随之换到它，墙上显示的与检查栏、高亮一致
+    const { zoomed: big } = useWall.getState();
+    if (big && big !== selectedId && cameras.some((c) => c.id === selectedId)) {
+      useWall.setState({ zoomed: selectedId });
+      return;
+    }
     const target = pageOf(cameras, grid, selectedId, selectedId);
     if (target !== null && target !== current) setPage(target);
   }, [selectedId, cameras, grid, current]);
 
-  const [ref, size] = useSize();
   const zoomedCamera = zoomed ? cameras.find((c) => c.id === zoomed) : undefined;
   // 放大的摄像头被删除：清掉放大状态，宫格与分页一并恢复
   useEffect(() => {

@@ -20,7 +20,7 @@ export interface Area {
   width_m: number;
   height_m: number;
 }
-/** 场景区域的取景范围（设计 150 §9）：区域坐标以左下为原点，宽沿 x、深沿 y */
+/** 场景区域的取景范围（设计 150 §9）：俯视时区域左上角为原点，宽沿 x（向右）、深沿 y（向下） */
 export function bounds(area: { width_m: number; depth_m: number }): Area {
   return { x0: 0, y0: 0, width_m: area.width_m, height_m: area.depth_m };
 }
@@ -56,7 +56,12 @@ const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const along = (a: Vec3, axis: Vec3, k: number): Vec3 => [a[0] + axis[0] * k, a[1] + axis[1] * k, a[2] + axis[2] * k];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const unit = (a: Vec3): Vec3 => along([0, 0, 0], a, 1 / Math.hypot(...a));
+const unit = (a: Vec3): Vec3 => {
+  const n = Math.hypot(...a);
+  return n === 0 ? [0, 0, 0] : along([0, 0, 0], a, 1 / n);
+};
+/** 摄像头视角的俯角上限（度）：正下视（−90°）时视线与竖直轴平行，画面的左右失去参照（three 的 lookAt 同样退化） */
+const MAX_DOWN_DEG = 89;
 /** 绕竖轴旋转：相机绕站点逆时针（俯视）转动，场景在画面上顺时针转动 */
 const turn = ([x, y, z]: Vec3, a: number): Vec3 => [
   x * Math.cos(a) + z * Math.sin(a),
@@ -172,7 +177,9 @@ type CameraPose = { x: number; y: number; height_m: number; yaw_deg: number; pit
 
 /** 摄像头视角：视点在摄像头安装位置，沿其朝向与俯仰看出去，水平视场与摄像头一致 */
 export function cameraShot(pose: CameraPose, size: Size): Shot {
-  const [yaw, pitch] = [(pose.yaw_deg * Math.PI) / 180, (pose.pitch_deg * Math.PI) / 180];
+  // 正下视按 89° 取景：保留朝向决定的画面左右，不因浮点舍入随机滚转、也不产生 NaN
+  const pitchDeg = Math.max(-MAX_DOWN_DEG, Math.min(MAX_DOWN_DEG, pose.pitch_deg));
+  const [yaw, pitch] = [(pose.yaw_deg * Math.PI) / 180, (pitchDeg * Math.PI) / 180];
   const eye: Vec3 = [pose.x, pose.height_m, pose.y];
   const direction: Vec3 = [Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)];
   const fov = 2 * Math.atan((Math.tan((pose.hfov_deg * Math.PI) / 360) * size.height) / size.width);

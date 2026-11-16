@@ -5,14 +5,15 @@ import { Button } from "@/components/ui/button";
 import { ApiError, api, type SceneArea } from "../lib/api";
 import { applySite } from "../store/live";
 import { areaPlacements } from "./cameras";
-import { isDirty, loadDraft, savedDraft, useDraft } from "./draft";
+import { draftToken, isDirty, loadDraft, MAX_ITEMS, savedDraft, tooMany, useDraft } from "./draft";
 
 /** 重新读取站点并载入该区域的最新内容，丢弃未保存的修改 */
 async function reload(areaId: string) {
   const site = await api.getSite();
   applySite(site);
   const area = site.areas.find((a) => a.id === areaId);
-  if (area) loadDraft(area, areaPlacements(site.devices, areaId));
+  // 读取期间换到了别的区域：不把这个区域载入成当前草稿
+  if (area && useDraft.getState().areaId === areaId) loadDraft(area, areaPlacements(site.devices, areaId));
 }
 
 /**
@@ -25,6 +26,12 @@ export function SaveButton({ area }: { area: SceneArea }) {
 
   async function save() {
     const { items, cameras, updatedAt } = useDraft.getState();
+    // 服务端按契约拒收，提示为英文校验信息：先在本页说明
+    if (tooMany(items.length)) {
+      toast.error(`区域最多 ${MAX_ITEMS} 件物体，当前 ${items.length} 件`, { description: "删去部分物体后再保存" });
+      return;
+    }
+    const token = draftToken();
     setPending(true);
     try {
       const saved = await api.saveSceneArea(area.id, {
@@ -35,7 +42,7 @@ export function SaveButton({ area }: { area: SceneArea }) {
         cameras,
         updated_at: updatedAt,
       });
-      savedDraft(saved, cameras);
+      savedDraft(saved, cameras, token);
       toast.success("已保存，态势页随后更新");
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {

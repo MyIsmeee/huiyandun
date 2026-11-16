@@ -6,6 +6,15 @@ export function formatTime(ms: number | null): string {
   return ms === null ? "—" : new Date(ms).toLocaleTimeString("zh-CN", { hour12: false });
 }
 
+/** 事件时刻：当天的只显示时分秒；补推覆盖近 24 小时，不是当天的加上月日，昨天深夜的告警不被看成今天的 */
+export function formatStamp(ms: number | null, now = Date.now()): string {
+  if (ms === null) return "—";
+  const [at, today] = [new Date(ms), new Date(now)];
+  if (at.toDateString() === today.toDateString()) return formatTime(ms);
+  const day = at.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }).replace("/", "-");
+  return `${day} ${formatTime(ms)}`;
+}
+
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {

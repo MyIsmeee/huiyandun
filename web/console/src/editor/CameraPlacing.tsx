@@ -4,7 +4,7 @@ import { DoubleSide } from "three";
 import { DeviceMarkers } from "../scene/DeviceMarkers";
 import type { Camera } from "../scene/devices";
 import { normalizedYaw } from "./cameras";
-import { placeCamera } from "./draft";
+import { placeCamera, useDraft } from "./draft";
 
 /** 拖动短于此距离（米）视为单击：保留原来的朝向 */
 const DRAG_M = 0.5;
@@ -18,6 +18,8 @@ const point = (e: ThreeEvent<PointerEvent>): [number, number] => [e.point.x, e.p
  * 预览为该摄像头的机身与视场
  */
 export function CameraPlacing({ camera, size }: { camera: Camera; size: [number, number] }) {
+  // 单击保留的朝向取草稿中的：重新放置前刚拖出的朝向尚未保存，登记表里还是旧值
+  const drafted = useDraft((s) => s.cameras.find((c) => c.id === camera.id)?.yaw_deg);
   const [hover, setHover] = useState<[number, number] | null>(null);
   const [from, setFrom] = useState<[number, number] | null>(null);
   const at = from ?? hover;
@@ -25,7 +27,7 @@ export function CameraPlacing({ camera, size }: { camera: Camera; size: [number,
   const dragged = from && hover && Math.hypot(hover[0] - from[0], hover[1] - from[1]) > DRAG_M;
   const yaw = dragged
     ? normalizedYaw(Math.round((Math.atan2(hover[1] - from[1], hover[0] - from[0]) * 180) / Math.PI / YAW_STEP) * YAW_STEP)
-    : camera.pose.yaw_deg;
+    : (drafted ?? camera.pose.yaw_deg);
   const placement = snapped && { id: camera.id, x: snapped[0] ?? 0, y: snapped[1] ?? 0, yaw_deg: normalizedYaw(yaw) };
 
   // 在画布外松开同样放下

@@ -74,7 +74,7 @@ export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?
       style={style}
       className="group relative cursor-pointer overflow-hidden rounded-lg bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <LiveVideoView status={status} onRetry={onRetry} className={cn("size-full rounded-none border-0 bg-black", offline && "grayscale")} />
+      <LiveVideoView status={status} onRetry={onRetry} dark className={cn("size-full rounded-none border-0 bg-black", offline && "grayscale")} />
       {status.kind === "playing" && overlay}
       {/* 底部渐隐遮罩保证白字对比度（V-W2） */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />

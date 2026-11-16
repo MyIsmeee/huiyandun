@@ -73,14 +73,20 @@ export function inside(item: SceneItem, catalog: Map<string, Asset>, [width, dep
 }
 
 /**
- * 旋转 90°（设计 150 E-4）：普通物体绕占地中心转，再吸附网格（长宽奇偶不同时中心挪半格）；线状资产绕起点转。
+ * 旋转 90°（设计 150 E-4）：普通物体绕占地中心转，再吸附网格（长宽奇偶不同时中心挪半格）；线状资产绕起点转，
+ * 再把占地的外接矩形挪到网格上——奇数宽的墙原样转过去中线落在整米上，占地两边各偏半格，之后按整米拖动也回不到网格。
  * 不挪回区域内：转后超出区域时返回 null，由调用方提示
  */
 export function rotated(item: SceneItem, asset: Asset, catalog: Map<string, Asset>, size: [number, number]): SceneItem | null {
   const rot = ((item.rot + 90) % 360) as Rot;
   const [sx, sy] = span(asset, rot);
   const grid = (p: number, s: number) => Math.round(p - s / 2) + s / 2;
-  const next = asset.line ? { ...item, rot } : { ...item, rot, x: grid(item.x, sx), y: grid(item.y, sy) };
+  let next: SceneItem = asset.line ? { ...item, rot } : { ...item, rot, x: grid(item.x, sx), y: grid(item.y, sy) };
+  if (asset.line) {
+    const [x0, y0] = extent(next, catalog);
+    const tidy = (v: number) => Math.round(v * 1e6) / 1e6;
+    next = { ...next, x: tidy(next.x + Math.round(x0) - x0), y: tidy(next.y + Math.round(y0) - y0) };
+  }
   return inside(next, catalog, size) ? next : null;
 }
 

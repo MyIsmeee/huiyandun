@@ -21,6 +21,7 @@ const CAM: Camera = {
   calibration: [],
   calibration_error_m: null,
   climb_lines: [],
+  rules: [],
   created_at: "2026-11-12T00:00:00Z",
   updated_at: "2026-11-12T00:00:00Z",
 };
@@ -172,5 +173,53 @@ describe("地面标定对话框（V-CAM10、FR-910）", () => {
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "清除" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith("cam-09", { area_id: "area-01", points: [] }));
+  });
+
+  it("检查失败后可重新检查同一组点，成功即可保存", async () => {
+    const check = vi
+      .spyOn(api, "checkCameraCalibration")
+      .mockRejectedValueOnce(new ApiError(503, "识别服务未响应，请稍后重试"))
+      .mockResolvedValue({ reproj_error_m: 0.2, residuals_m: [0.2, 0.2, 0.2, 0.2] });
+    const { pair } = open();
+    [0, 1, 2, 3].forEach(pair);
+    await waitFor(() => expect(status()).toContain("识别服务未响应"));
+
+    fireEvent.click(screen.getByRole("button", { name: "重新检查" }));
+    await waitFor(() => expect(saveButton().disabled).toBe(false));
+    expect(check.mock.calls[1]?.[1].points).toEqual(POINTS);
+  });
+
+  it("地面坐标可清空或先输入负号，不被改写成 0；非数字时不可保存", async () => {
+    vi.spyOn(api, "checkCameraCalibration").mockResolvedValue({ reproj_error_m: 0, residuals_m: [0, 0, 0, 0] });
+    const { pair } = open();
+    [0, 1, 2, 3].forEach(pair);
+    await waitFor(() => expect(saveButton().disabled).toBe(false));
+
+    const x = screen.getByLabelText("第 1 组地面 x") as HTMLInputElement;
+    fireEvent.change(x, { target: { value: "" } });
+    expect(x.value).toBe("");
+    expect(status()).toContain("地面坐标须为数字");
+    expect(saveButton().disabled).toBe(true);
+    fireEvent.change(x, { target: { value: "4" } });
+    await waitFor(() => expect(saveButton().disabled).toBe(false));
+  });
+
+  it("保存进行中不可取消或关闭：迟到的结果不会关掉之后打开的对话框", async () => {
+    vi.spyOn(api, "checkCameraCalibration").mockResolvedValue({ reproj_error_m: 0, residuals_m: [0, 0, 0, 0] });
+    vi.spyOn(api, "saveCameraCalibration").mockReturnValue(new Promise(() => {}));
+    const { pair } = open();
+    [0, 1, 2, 3].forEach(pair);
+    await waitFor(() => expect(saveButton().disabled).toBe(false));
+
+    fireEvent.click(saveButton());
+    expect((screen.getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "关闭" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("WS 尚未推送站点时读取站点，照常显示区域俯视图", async () => {
+    useLive.setState({ site: null });
+    vi.spyOn(api, "getSite").mockResolvedValue({ id: "demo", name: "演示", width_m: 20, height_m: 10, areas: [AREA], devices: [] });
+    render(<CalibrationDialog camera={CAM} areaId="area-01" snapshot={{ status: "ready", url: "blob:frame" }} onClose={() => {}} onSaved={() => {}} />);
+    expect(await screen.findByRole("img", { name: "区域俯视图" })).toBeTruthy();
   });
 });

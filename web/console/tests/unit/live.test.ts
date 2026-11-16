@@ -92,6 +92,15 @@ describe("devices 与 alerts", () => {
     expect(useLive.getState().behaviors).toEqual({ "cam-01": fall });
   });
 
+  it("疑似跌倒不进入物理告警，不作为事件卡记入（TK-160）", () => {
+    const suspected = { ...BASE, camera_id: "cam-01", track_id: 1, behavior: "fall", level: "suspected" };
+
+    receive(frame("alerts", suspected), 0);
+
+    expect(useLive.getState().behaviors).toEqual({});
+    expect(useLive.getState().alerts).toEqual([suspected]);
+  });
+
   it("设备退出物理告警即清除其行为事件：再次告警时不显示上一次的事件", () => {
     const fall = { ...BASE, camera_id: "cam-01", track_id: 1, behavior: "fall" };
     receive(frame("alerts", fall), 0);

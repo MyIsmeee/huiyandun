@@ -1,5 +1,5 @@
-import { type MouseEvent, useEffect, useRef } from "react";
-import { smoothed, smoothers } from "../../scene/smoothing";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { release, retain, smoothed } from "../../scene/smoothing";
 import { ACCENT, CLASS_LABEL } from "../../scene/targets";
 import { useConnection } from "../../store/connection";
 import { type Target, useLive } from "../../store/live";
@@ -25,12 +25,22 @@ export function DetectionOverlay({ cameraId, video }: { cameraId: string; video:
   // 设备离线或推送断开（V-U3）时不画：没有实时的跟踪数据
   const offline = useLive((s) => s.devices[cameraId]?.state === "offline");
   const disconnected = useConnection((s) => !s.open);
+  // 平滑状态与 3D 场景、其他叠加共用（smoothing.ts）：本叠加只声明本路的目标，卸载时撤销
+  const [owner] = useState(() => ({}));
+  useEffect(() => () => release(owner), [owner]);
 
   useEffect(() => {
     let frame = 0;
     let painted = true;
+    let claimed: object | null = null;
     const draw = () => {
       frame = requestAnimationFrame(draw);
+      // 目标集合变化时重新声明本路仍在跟踪的目标：已离开画面的随即释放，监控墙常开时不累积
+      const { targets } = useLive.getState();
+      if (targets !== claimed) {
+        claimed = targets;
+        retain(owner, new Set(mine(cameraId).map(([key]) => key)));
+      }
       const el = canvas.current;
       const ctx = el?.getContext("2d");
       if (!el || !ctx) return;
@@ -55,13 +65,8 @@ export function DetectionOverlay({ cameraId, video }: { cameraId: string; video:
       }
     };
     frame = requestAnimationFrame(draw);
-    return () => {
-      cancelAnimationFrame(frame);
-      // 释放本路已离开画面的目标的平滑状态；其他摄像头的由各自叠加或 3D 场景管理
-      const alive = new Set(mine(cameraId).map(([key]) => key));
-      for (const key of smoothers.keys()) if (key.startsWith(`${cameraId}/`) && !alive.has(key)) smoothers.delete(key);
-    };
-  }, [cameraId, video, offline, disconnected]);
+    return () => cancelAnimationFrame(frame);
+  }, [cameraId, video, offline, disconnected, owner]);
 
   const onClick = (e: MouseEvent<HTMLCanvasElement>) => {
     const box = e.currentTarget.getBoundingClientRect();

@@ -6,16 +6,18 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { type MouseEvent, useEffect, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { components } from "../../api/schema";
-import { ApiError, api } from "../../lib/api";
+import { ApiError, api, type Site } from "../../lib/api";
 import { mappingText } from "../../scene/devices";
+import { useLive } from "../../store/live";
 import { CalibrationDialog } from "./CalibrationDialog";
 
 type Schemas = components["schemas"];
 export type Camera = Schemas["Camera"];
 type Protocol = Schemas["CameraSource"]["protocol"];
 type Pose = Schemas["Pose"];
+type PoseCheck = NonNullable<Camera["pose_check"]>;
 
 const PROTOCOLS: Record<Protocol, [label: string, port: number]> = {
   rtsp: ["RTSP", 554],
@@ -57,7 +59,8 @@ const initialForm = (c: Camera | null): CameraForm => ({
   ip: c?.ip ?? "",
   ingest: c?.ingest ?? "pull",
   protocol: c?.source?.protocol ?? "rtsp",
-  host: c?.source?.host ?? "",
+  // 主机与设备 IP 相同即当初留空（或等价于留空）：回显为空，之后改了设备 IP 拉流地址随之改，不停在旧 IP
+  host: c?.source && c.source.host !== c.ip ? c.source.host : "",
   port: c?.source?.port ?? PROTOCOLS.rtsp[1],
   path: c?.source?.path ?? "",
   relay: c?.source?.relay ?? false,
@@ -92,6 +95,54 @@ export function body(form: CameraForm): Schemas["CameraCreate"] {
   };
 }
 
+/** 数字字段：编辑中的文本单独保存，清空或只输入负号时不被改写成 0（受控 number 输入框的值为空串） */
+type NumberField = keyof Pose | "port";
+
+/**
+ * 数字字段的取值范围（契约 Pose、CameraSource）：返回错误说明，合法时为 null。
+ * 位置只在摄像头已放入区域时按区域宽深校验：超出时场景页保存该区域会被拒绝（D-125）
+ */
+export function fieldError(key: NumberField, text: string, area: { width_m: number; depth_m: number } | null): string | null {
+  const v = Number(text);
+  if (text.trim() === "" || !Number.isFinite(v)) return "请填写数字";
+  switch (key) {
+    case "port":
+      return Number.isInteger(v) && v >= 1 && v <= 65535 ? null : "端口为 1～65535 的整数";
+    case "height_m":
+      return v > 0 && v <= 50 ? null : "安装高度须大于 0、不超过 50 m";
+    case "pitch_deg":
+      return v >= -90 && v < 0 ? null : "俯角须在 -90°～0° 之间（向下为负，不含 0°）";
+    case "hfov_deg":
+      return v > 0 && v < 180 ? null : "水平视场角须大于 0°、小于 180°";
+    case "range_m":
+      return v > 0 && v <= 200 ? null : "可视距离须大于 0、不超过 200 m";
+    case "x":
+      return !area || (v >= 0 && v <= area.width_m) ? null : `须在所在区域内（0～${area.width_m} m）`;
+    case "y":
+      return !area || (v >= 0 && v <= area.depth_m) ? null : `须在所在区域内（0～${area.depth_m} m）`;
+    default:
+      return null;
+  }
+}
+
+/** 摄像头登记表变化后推送的站点；尚未推送过（如 WS 未连上）时读一次 GET /api/site，不因此显示"区域未载入" */
+export function useSite(): Site | null {
+  const pushed = useLive((s) => s.site);
+  const [fetched, setFetched] = useState<Site | null>(null);
+  useEffect(() => {
+    if (pushed) return;
+    let current = true;
+    api.getSite().then(
+      (site) => current && setFetched(site),
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [pushed]);
+  return pushed ?? fetched;
+}
+
 /** 取一帧画面；失败时给出服务端的白话原因（V-CAM4） */
 const snapshotOf = (id: string): Promise<Snapshot> =>
   api.getCameraSnapshot(id).then(
@@ -114,30 +165,74 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
   const [point, setPoint] = useState<[number, number] | null>(null);
   const [pushPassword, setPushPassword] = useState<string | null>(null);
   const [calibrating, setCalibrating] = useState(false);
+  /** 数字字段编辑中的文本；未编辑过的字段显示表单中的数值 */
+  const [texts, setTexts] = useState<Partial<Record<NumberField, string>>>({});
+  /** 保存时改了安装参数：服务端丢弃按旧参数推算的自检，提示新结果要等视觉引擎重新推算 */
+  const [poseChanged, setPoseChanged] = useState(false);
   const set = (patch: Partial<CameraForm>) => setForm((f) => ({ ...f, ...patch }));
   const calibrated = (saved?.calibration.length ?? 0) >= 4;
+  const site = useSite();
+  const area = (saved?.area_id && site?.areas.find((a) => a.id === saved.area_id)) || null;
+  const textOf = (key: NumberField) => texts[key] ?? String(key === "port" ? form.port : form.pose[key]);
+  const errorOf = (key: NumberField) => (texts[key] === undefined && key !== "x" && key !== "y" ? null : fieldError(key, textOf(key), area));
+  /** 数字输入：保留原文；能解析为有限数时写入表单 */
+  const edit = (key: NumberField, text: string) => {
+    setTexts((t) => ({ ...t, [key]: text }));
+    const v = Number(text);
+    if (text.trim() === "" || !Number.isFinite(v)) return;
+    if (key === "port") set({ port: v });
+    else setForm((f) => ({ ...f, pose: { ...f.pose, [key]: v } }));
+  };
+  /** 整体改写数值（换协议的默认端口、填入建议值）：丢掉这些字段编辑中的文本 */
+  const reset = (keys: NumberField[]) =>
+    setTexts((t) => Object.fromEntries(Object.entries(t).filter(([k]) => !keys.includes(k as NumberField))));
 
-  async function preview(id: string) {
-    setSnapshot({ status: "loading" });
-    setSnapshot(await snapshotOf(id));
-  }
+  // 取帧只采用最近一次的结果：打开时与保存后的取帧互不取消，迟到的旧结果不覆盖新画面；被丢弃或卸载后到达的画面立即释放
+  const latest = useRef(0);
+  const alive = useRef(true);
   useEffect(() => {
-    if (!props.camera) return;
-    let current = true;
-    void snapshotOf(props.camera.id).then((s) => current && setSnapshot(s));
+    alive.current = true;
     return () => {
-      current = false;
+      alive.current = false;
     };
-  }, [props.camera]);
+  }, []);
+  const fetchSnapshot = useCallback(async (id: string) => {
+    const seq = ++latest.current;
+    const next = await snapshotOf(id);
+    if (seq !== latest.current || !alive.current) {
+      if (next.status === "ready") URL.revokeObjectURL(next.url);
+      return;
+    }
+    setSnapshot(next);
+  }, []);
+  // 打开时初始状态已是"正在取画面"
+  useEffect(() => {
+    if (props.camera) void fetchSnapshot(props.camera.id);
+  }, [props.camera, fetchSnapshot]);
+  function preview(id: string) {
+    setSnapshot({ status: "loading" });
+    return fetchSnapshot(id);
+  }
   useEffect(() => () => void (snapshot.status === "ready" && URL.revokeObjectURL(snapshot.url)), [snapshot]);
 
   async function save() {
+    const invalid = (["port", ...POSE_FIELDS.map(([key]) => key)] as NumberField[]).filter(
+      (key) => (key !== "port" || form.ingest === "pull") && fieldError(key, textOf(key), area),
+    );
+    if (invalid.length > 0) {
+      setTexts((t) => Object.fromEntries([...Object.entries(t), ...invalid.map((key) => [key, textOf(key)])]));
+      setMessage("请先改正标出的数值");
+      return;
+    }
     setPending(true);
     setMessage(null);
     try {
       const request = body(form);
       const camera = saved ? await api.updateCamera(saved.id, request) : await api.createCamera(request);
-      setSaved(camera);
+      // 保存的响应不含自检：安装参数未变时服务端保留原自检，照旧显示；变了则旧建议作废
+      const changed = !!saved && JSON.stringify(saved.pose) !== JSON.stringify(request.pose);
+      setSaved({ ...camera, pose_check: camera.pose_check ?? (changed ? null : (saved?.pose_check ?? null)) });
+      setPoseChanged(changed && !!saved?.pose_check);
       if (camera.push_password) setPushPassword(camera.push_password);
       set({ password: "" });
       props.onSaved();
@@ -213,6 +308,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             onValueChange={(value) => {
               const protocol = value as Protocol;
               set({ protocol, port: PROTOCOLS[protocol][1] });
+              reset(["port"]);
             }}
           >
             <SelectTrigger id="cam-protocol" className="w-full">
@@ -227,7 +323,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             </SelectContent>
           </Select>
           <Label htmlFor="cam-port">端口</Label>
-          <Input id="cam-port" type="number" min={1} max={65535} required value={form.port} onChange={(e) => set({ port: Number(e.target.value) })} />
+          <NumberInput id="cam-port" label="端口" value={textOf("port")} error={errorOf("port")} onChange={(text) => edit("port", text)} />
           <Label htmlFor="cam-host">主机</Label>
           <Input id="cam-host" placeholder="留空即设备 IP" value={form.host} onChange={(e) => set({ host: e.target.value })} />
           <Label htmlFor="cam-path">流路径</Label>
@@ -272,25 +368,39 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
         <fieldset className="flex flex-col gap-2 border-t border-border pt-3">
           <legend className="pr-2 font-medium">安装参数</legend>
           <p className="text-xs text-subtle-foreground">
-            朝向自平面 x 轴正方向逆时针计；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。
+            朝向自平面 +x 转向 +y 计（俯视场景时为顺时针）；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。
             {calibrated && "已标定：位置按标定换算，安装参数只用于画视场；摄像头转动过请重新标定。"}
           </p>
           <div className="grid grid-cols-4 gap-x-3 gap-y-2">
             {POSE_FIELDS.map(([key, label, unit]) => (
-              <Label key={key} className="flex items-center gap-2">
+              <Label key={key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="w-20 shrink-0">{label}</span>
-                <Input
-                  type="number"
-                  step="any"
-                  required
-                  aria-label={label}
-                  value={form.pose[key]}
-                  onChange={(e) => set({ pose: { ...form.pose, [key]: Number(e.target.value) } })}
-                />
+                <NumberInput label={label} value={textOf(key)} error={errorOf(key)} inline={false} onChange={(text) => edit(key, text)} className="min-w-0 flex-1" />
                 <span className="text-subtle-foreground">{unit}</span>
               </Label>
             ))}
           </div>
+          {/* 四列网格的格子太窄，错误说明放在网格下方整行显示，不挤压输入框 */}
+          {POSE_FIELDS.some(([key]) => errorOf(key)) && (
+            <ul aria-label="安装参数错误" className="flex flex-col gap-0.5 text-xs text-destructive">
+              {POSE_FIELDS.map(([key, label]) => {
+                const error = errorOf(key);
+                return error && <li key={key} id={`pose-error-${key}`}>{label}：{error}</li>;
+              })}
+            </ul>
+          )}
+          {!calibrated && saved?.pose_check && (
+            <PoseCheckNote
+              check={saved.pose_check}
+              onApply={(pose) => {
+                setForm((f) => ({ ...f, pose: { ...f.pose, ...pose } }));
+                reset(Object.keys(pose) as NumberField[]);
+              }}
+            />
+          )}
+          {!calibrated && poseChanged && !saved?.pose_check && (
+            <p className="text-xs text-subtle-foreground">安装参数已修改：自检将按新参数重新推算，需画面中出现足够的站立行人</p>
+          )}
         </fieldset>
 
         {saved && (
@@ -350,6 +460,31 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
   );
 }
 
+/** 数字输入：文本输入框配数字键盘，不用 type=number——其值在只输入负号或清空时为空串，受控时会被改写 */
+/** inline 为假时错误说明由调用方另行显示，输入框只标记 aria-invalid */
+function NumberInput(props: { id?: string; label: string; value: string; error: string | null; inline?: boolean; onChange: (text: string) => void; className?: string }) {
+  const { id, label, value, error, inline = true, onChange, className } = props;
+  const hint = useId();
+  return (
+    <span className={`flex flex-col gap-0.5 ${className ?? ""}`}>
+      <Input
+        id={id}
+        inputMode="decimal"
+        aria-label={label}
+        aria-invalid={error !== null}
+        aria-describedby={error && inline ? hint : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {error && inline && (
+        <span id={hint} className="text-xs text-destructive">
+          {error}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** 推流地址、用户名与口令（FR-907、V-CAM2）：口令只在保存为推流后显示一次 */
 function PushInfo({ id, password }: { id: string | null; password: string | null }) {
   return (
@@ -396,6 +531,53 @@ function SnapshotView(props: {
           ))}
           {point && <circle cx={point[0]} cy={point[1]} r={size[0] / 120} fill="#FFFFFF" />}
         </svg>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 安装参数自检（视觉引擎按画面中站立行人推算，只对按安装参数估算地面映射的摄像头）：可疑时列出依据与建议值，
+ * "填入建议值"只改表单，保存后才生效；样本不足时说明还缺什么
+ */
+export function PoseCheckNote({ check, onApply }: { check: PoseCheck; onApply: (pose: Partial<Pose>) => void }) {
+  if (check.status === "ok") {
+    return <p className="text-xs text-subtle-foreground">安装参数自检通过：{check.reasons[0] ?? "与画面中行人的尺度相符"}</p>;
+  }
+  if (check.status === "insufficient") {
+    return <p className="text-xs text-subtle-foreground">安装参数自检暂不能判断：{check.reasons.join("；")}</p>;
+  }
+  // 视觉引擎在 -85°～+10° 内搜索俯角：超出契约可填范围（-90°～0°，不含 0°）的建议不提供填入，保存会被拒绝
+  const { suggested_height_m: height, suggested_pitch_deg: pitch } = check;
+  const heightOk = height != null && fieldError("height_m", String(height), null) === null;
+  const pitchOk = pitch != null && fieldError("pitch_deg", String(pitch), null) === null;
+  const suggestion: Partial<Pose> = {
+    ...(heightOk ? { height_m: height } : {}),
+    ...(pitchOk ? { pitch_deg: pitch } : {}),
+  };
+  const parts = [heightOk && `高度 ${height} m`, pitchOk && `俯角 ${pitch}°`].filter(Boolean);
+  return (
+    <div role="status" aria-label="安装参数自检" className="flex flex-col gap-1.5 rounded-md border border-border p-2.5 text-xs">
+      <p className="flex items-center gap-1.5 font-medium">
+        <CircleAlert aria-hidden className="size-3.5 shrink-0" />
+        安装参数可能填错，人员位置与速度会明显偏离
+      </p>
+      <ul className="list-disc pl-5 text-subtle-foreground">
+        {check.reasons.map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
+      {pitch != null && !pitchOk && (
+        <p className="text-subtle-foreground">推算的俯角约 {pitch}°，超出可填范围（向下为负、不含 0°）：摄像头可能接近水平安装，请实地确认后手动填写</p>
+      )}
+      {height != null && !heightOk && <p className="text-subtle-foreground">推算的安装高度约 {height} m，超出可填范围（0～50 m），请实地确认</p>}
+      {parts.length > 0 && (
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => onApply(suggestion)} className={button}>
+            填入建议值（{parts.join("、")}）
+          </button>
+          <span className="text-subtle-foreground">填入后保存才生效；按 {check.samples} 个站立行人样本推算，仍建议实地量一下</span>
+        </div>
       )}
     </div>
   );

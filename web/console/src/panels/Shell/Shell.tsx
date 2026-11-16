@@ -46,6 +46,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
     [],
   );
   const admin = canManageProviders(useSession((s) => s.role));
+  const roleFailed = useSession((s) => s.roleFailed);
   const { open, connecting, lastFrameAt } = useConnection();
   const offline = !open && !connecting;
   useEffect(() => connect(onRejected), [onRejected]);
@@ -59,6 +60,12 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   useEffect(() => {
     if (targetKey && !target) deselect();
   }, [targetKey, target]);
+  // 选中的设备不在站点中（摄像头已删除，仍可从它的旧告警点选）：取消选中，不留下无详情可显示的高亮
+  const deviceId = useSelection((s) => s.deviceId);
+  const known = deviceId === null || site.devices.some((d) => d.id === deviceId);
+  useEffect(() => {
+    if (!known) deselect();
+  }, [known]);
 
   // 场景页有未保存的修改时，顶栏切页与退出先确认（设计 150 E-6）
   const leave = (action: () => void) => (page === "scene" ? guardLeave(action) : action());
@@ -72,18 +79,24 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   return (
     <div data-live={!offline} className="flex h-full flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-3">
-        <span className="flex items-center gap-2 text-[15px] font-semibold">
+        <span className="flex shrink-0 items-center gap-2 text-[15px] font-semibold whitespace-nowrap">
           <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
             <ShieldCheck aria-hidden className="size-4" />
           </span>
           慧眼盾
         </span>
         <NavBar page={page} admin={admin} onChange={(next) => leave(() => go(next))} />
-        <span className="flex items-center gap-1.5 text-meta text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-1.5 text-meta whitespace-nowrap text-muted-foreground">
           <MapPin aria-hidden className="size-3.5" />
           {site.name}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {roleFailed && (
+            <p role="status" className="flex items-center gap-1 text-meta text-muted-foreground">
+              <CircleAlert aria-hidden className="size-4" />
+              权限信息读取失败，正在重试
+            </p>
+          )}
           <LlmStatusBadge />
           <ConnectionStatus />
           {logout === "failed" && (
@@ -149,7 +162,7 @@ function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => v
           aria-current={item.current ? "page" : undefined}
           onClick={() => !item.current && onChange(item.page)}
           className={cn(
-            "h-7 rounded-sm px-3 text-sm transition-colors",
+            "h-7 rounded-sm px-3 text-sm whitespace-nowrap transition-colors",
             item.current ? "bg-card font-medium text-primary shadow-xs" : "text-muted-foreground hover:text-foreground",
           )}
         >

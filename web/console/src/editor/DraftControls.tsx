@@ -78,7 +78,7 @@ export function DraftBar() {
     // 生成之后又放下的物体可能与草稿重叠：重叠的不接受
     const accepted: SceneItem[] = [];
     for (const item of pending) if (!overlaps(item, [...items, ...accepted], catalog)) accepted.push(item);
-    acceptDraft(accepted);
+    if (!acceptDraft(accepted)) return;
     const skipped = pending.length - accepted.length;
     if (skipped > 0) toast.warning(`${skipped} 件与已有物体重叠，未接受`);
   };

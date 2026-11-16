@@ -13,16 +13,16 @@ import {
   useState,
 } from "react";
 import { Button } from "../components/ui/button";
-import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import type { Site } from "../lib/api";
 import type { Area } from "./areas";
 import { useConnection } from "../store/connection";
 import { useLive } from "../store/live";
+import { useNav } from "../store/nav";
 import { select, selectTarget, useSelection } from "../store/selection";
 import { focusOn, moveCamera, panned, useCamera, useFocusShot } from "./camera";
 import { CameraControls, useAnimate } from "./CameraControls";
 import { AttackLines } from "./AttackLines";
-import { CameraCallout } from "./CameraCallout";
+import { CALLOUT, CameraCallout } from "./CameraCallout";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import type { SceneItem } from "./assets";
@@ -36,6 +36,21 @@ import { pickTarget, visibleTargets } from "./targets";
 /** 还没有任何区域时的取景范围，单位米 */
 const NO_AREA = { width_m: 20, depth_m: 20 };
 const NO_ITEMS: SceneItem[] = [];
+
+/** 场景上自带交互的浮层：按钮、视角控件与画面引线卡。落在其上的指针事件不算作对场景的点选、跟随、悬停与拖拽 */
+const CHROME = `button, [role=toolbar], ${CALLOUT}`;
+/** 打开中的弹层（Radix 的对话框、菜单、下拉与浮层）：Esc 先由它们关闭 */
+const POPUPS = "[role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-radix-popper-content-wrapper]";
+const onChrome = (target: EventTarget | null) => target instanceof Element && target.closest(CHROME) !== null;
+
+/**
+ * Esc 是否由场景处理（回到总览）：有弹层打开时让弹层先关；被管理页盖住时场景不可见，同样不处理。
+ * 管理页盖在态势页之上而不卸载它（Shell），窗口级的监听仍会收到按键
+ */
+export function sceneHandlesEscape(): boolean {
+  const { page } = useNav.getState();
+  return (page === "overview" || page === "wall") && document.querySelector(POPUPS) === null;
+}
 
 // three 体积较大，单独分包按需加载，不拖慢登录页与首屏（C-FE-04）
 const Scene3D = lazy(() => import("./Scene3D"));
@@ -113,10 +128,11 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
     useCamera.setState(focus ? { flight: null } : { flight: null, shot: null });
   }, [offline]);
 
-  // Esc：处于跟随视角时先回到总览，详情保留；再按一次由详情面板收起（V-I2、D-048）。捕获阶段先于详情面板处理
+  // Esc：处于跟随视角时先回到总览，详情保留；再按一次由详情面板收起（V-I2、D-048）。捕获阶段先于详情面板处理；
+  // 有弹层打开或被管理页盖住时不处理，也不 preventDefault（Radix 弹层见到已阻止默认行为的 Esc 不会关闭）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !useCamera.getState().focus) return;
+      if (e.key !== "Escape" || !useCamera.getState().focus || !sceneHandlesEscape()) return;
       e.preventDefault();
       focusOn(null, animate());
     };
@@ -140,18 +156,20 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
 
   /** 指针下的人员或车辆：按渲染中的位置命中。2D 降级视图只显示目标位置，不支持点选 */
   const hit = (e: MouseEvent<HTMLDivElement>) => {
-    if (!view3d || (e.target as Element).closest("button")) return null;
+    if (!view3d || onChrome(e.target)) return null;
     const { targets, behaviors } = useLive.getState();
     const box = e.currentTarget.getBoundingClientRect();
     const point = [e.clientX - box.left, e.clientY - box.top] as const;
     const now = Date.now();
+    // 与 TargetModels 同一渲染时刻：降低动效时模型画在最新实测位置，命中也按最新位置
+    const motion = animate();
     return pickTarget(visibleTargets(targets, cameras, behaviors), view3d, point, (target) =>
-      renderedPosition(target.key, target, now, true),
+      renderedPosition(target.key, target, now, motion),
     );
   };
   // 单击：选中并展开详情，镜头不动（V-I2、D-054）；单击空白处取消选中并收起详情（D-058）。双击：飞入跟随视角（V-I1）
   const pick = (e: MouseEvent<HTMLDivElement>) => {
-    if (dragged.current || (e.target as Element).closest("button, [role=toolbar]")) return;
+    if (dragged.current || onChrome(e.target)) return;
     const key = hit(e);
     if (key) selectTarget(key);
     else select(null);
@@ -191,7 +209,7 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
       {plan && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene2D items={scene?.items ?? NO_ITEMS} cameras={cameras} view={plan} />
+            <Scene2D items={scene?.items ?? NO_ITEMS} cameras={cameras} view={plan} area={area} />
           </Suspense>
         </Boundary>
       )}
@@ -210,19 +228,16 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
         </>
       )}
       {(state === "ready" || state === "2d") && !scene?.items.length && (
-        // 不自动补全场景（设计 150 §4）：只显示摄像头与视场，并说明尚未搭建；浮在指标卡下方左侧，右侧留给画面引线卡
-        <Empty className="floating-card pointer-events-none absolute top-36 left-4 w-fit flex-none gap-3 border-solid p-4 md:p-4">
-          <EmptyHeader>
-            <EmptyTitle className="text-base">{scene ? "该区域还没有搭建场景" : "还没有场景区域"}</EmptyTitle>
-          </EmptyHeader>
+        // 不自动补全场景（设计 150 §4）：只显示摄像头与视场，并说明尚未搭建。一行小字提示，不做成醒目的大卡片：
+        // 区域边线已标出范围，这里只提醒并给 admin 入口（产品负责人 2026-11-15 要求收敛）
+        <p className="floating-card pointer-events-none absolute top-36 left-4 flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground">
+          {scene ? "该区域还没有搭建场景" : "还没有场景区域"}
           {onBuild && (
-            <EmptyContent>
-              <Button size="sm" className="pointer-events-auto" onClick={onBuild}>
-                去搭建
-              </Button>
-            </EmptyContent>
+            <Button size="sm" variant="outline" className="pointer-events-auto h-7" onClick={onBuild}>
+              去搭建
+            </Button>
           )}
-        </Empty>
+        </p>
       )}
       {(state === "ready" || state === "2d") && (
         <CameraControls />
@@ -266,7 +281,7 @@ function useDragPan(view: View | null) {
     className: zoomedIn ? "absolute inset-0 cursor-grab active:cursor-grabbing" : "absolute inset-0",
     onPointerDown: (e: PointerEvent) => {
       dragged.current = false;
-      if (!zoomedIn || e.button !== 0 || (e.target as Element).closest("button")) return;
+      if (!zoomedIn || e.button !== 0 || onChrome(e.target)) return;
       e.currentTarget.setPointerCapture(e.pointerId);
       last.current = [e.clientX, e.clientY];
     },

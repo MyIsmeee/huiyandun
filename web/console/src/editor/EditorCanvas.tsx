@@ -11,6 +11,7 @@ import { BACKGROUND, FirstFrame, Lights, ShadowCatcher } from "../scene/Scene3D"
 import { selectItem } from "./draft";
 import { DraftPreview } from "./DraftPreview";
 import { Placement } from "./Placement";
+import { RuleLayer } from "./RuleLayer";
 import { EditableScene } from "./Selection";
 import type { EditorView } from "./view";
 
@@ -59,6 +60,7 @@ export default function EditorCanvas(props: {
       <GridLines width={area.width_m} depth={area.depth_m} />
       <DeviceMarkers cameras={cameras} />
       <Placement size={[area.width_m, area.depth_m]} items={items} registry={registry} />
+      <RuleLayer size={[area.width_m, area.depth_m]} />
       <Controls width={area.width_m} depth={area.depth_m} onView={onView} />
       {import.meta.env.MODE === "e2e" && <GroundProbe />}
     </Canvas>

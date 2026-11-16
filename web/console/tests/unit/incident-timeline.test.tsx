@@ -2,7 +2,15 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../src/api/schema";
 import { api } from "../../src/lib/api";
-import { formatOffset, IncidentTimeline, readInvestigation, TimelineDots, timelineOf } from "../../src/panels/IncidentTimeline/IncidentTimeline";
+import {
+  awaitingInvestigation,
+  formatOffset,
+  IncidentTimeline,
+  readInvestigation,
+  TimelineDots,
+  timelineOf,
+} from "../../src/panels/IncidentTimeline/IncidentTimeline";
+import { useConnection } from "../../src/store/connection";
 import { type Alert, type Execution, type Incident, MAX_INCIDENTS, receive, useLive } from "../../src/store/live";
 
 const HIT = "00000000-0000-4000-8000-000000000001";
@@ -73,6 +81,34 @@ describe("处置时间线（FR-304、D-106）", () => {
       expect.objectContaining({ reached: false, note: "未处置" }),
     ]);
   });
+
+  it("处置生效时刻取 expires_at − ttl_s：之后的补注推送与刷新后的补推都不改变它", () => {
+    const contained = { ...execution("contained"), ttl_s: 1800, expires_at: "2026-11-08T02:30:31Z" } as Execution;
+    // 推送记下的是补注时刻（晚于生效），以执行本身推出的为准
+    const nodes = timelineOf(incident, alerts, contained, { contained: "2026-11-08T02:00:59Z" }, verdict);
+    expect(new Date(nodes[3]?.at ?? 0).toISOString()).toBe("2026-11-08T02:00:31.000Z");
+    const released = { ...contained, state: "rolled_back" } as Execution;
+    expect(new Date(timelineOf(incident, alerts, released, {}, verdict)[3]?.at ?? 0).toISOString()).toBe("2026-11-08T02:00:31.000Z");
+  });
+
+  it("尚无调查记录但仍在等待调查时说明等待调查", () => {
+    expect(timelineOf(incident, alerts, undefined, {}, null, true)[2]).toEqual(expect.objectContaining({ note: "等待调查" }));
+    const created = Date.parse(incident.created_at);
+    expect(awaitingInvestigation(incident, created + 60_000)).toBe(true);
+    expect(awaitingInvestigation(incident, created + 60 * 60_000)).toBe(false);
+    expect(awaitingInvestigation({ ...incident, severity: "medium" }, created + 60_000)).toBe(false);
+  });
+});
+
+describe("执行状态时刻", () => {
+  beforeEach(() => useLive.setState(useLive.getInitialState()));
+  it("同一状态只记首次的事件时刻", () => {
+    const push = (ts: string) =>
+      receive({ channel: "executions", data: { ...execution("contained"), ts } } as unknown as components["schemas"]["WsFrame"], 0);
+    push("2026-11-08T02:00:31Z");
+    push("2026-11-08T02:00:59Z");
+    expect(useLive.getState().executionTimes["exe-1"]?.contained).toBe("2026-11-08T02:00:31Z");
+  });
 });
 
 describe("formatOffset（ui.md §4 时长格式）", () => {
@@ -114,6 +150,30 @@ describe("调查记录的读取", () => {
     act(() => receive(ai(2, "verdict"), 0));
     await act(async () => undefined);
     expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it("重连（epoch 变化）后重读未结束的调查；已结束的记录不再重读", async () => {
+    const running = { ...verdict, verdict: null, finished_at: null, incident_id: "inc-epoch" };
+    const read = vi.spyOn(api, "getInvestigation").mockResolvedValueOnce(running).mockResolvedValue({ ...verdict, incident_id: "inc-epoch" });
+    await readInvestigation("inc-epoch", "unknown", 100);
+    await readInvestigation("inc-epoch", "unknown", 100);
+    expect(read).toHaveBeenCalledTimes(1);
+    await readInvestigation("inc-epoch", "unknown", 101);
+    expect(read).toHaveBeenCalledTimes(2);
+    await readInvestigation("inc-epoch", "unknown", 102); // 已结束
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("时间线在重连后重新读取调查记录", async () => {
+    const own = { ...incident, id: "inc-reconnect" } as Incident;
+    const read = vi.spyOn(api, "getInvestigation").mockResolvedValue({ ...verdict, finished_at: null, verdict: null, incident_id: "inc-reconnect" });
+    useLive.setState({ incidents: [own] });
+    render(<TimelineDots incident={own} />);
+    await act(async () => undefined);
+    expect(read).toHaveBeenCalledTimes(1);
+    act(() => useConnection.setState((s) => ({ epoch: s.epoch + 1 })));
+    await act(async () => undefined);
+    expect(read).toHaveBeenCalledTimes(2);
   });
 
   it("缓存只保留最近读取的 MAX_INCIDENTS 个事件", async () => {

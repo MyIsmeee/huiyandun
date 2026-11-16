@@ -4,14 +4,17 @@ import type { components } from "../api/schema";
 type Schemas = components["schemas"];
 export type Device = Schemas["Device"];
 export type Behavior = Schemas["VisionBehavior"];
+export type RuleEvent = Schemas["VisionRule"];
 type Track = Schemas["VisionTrack"];
 export type SecurityAlert = Schemas["SecurityAlert"];
 export type Incident = Schemas["incident.schema"];
 export type Execution = Schemas["playbook_execution.schema"];
 type AiFrame = Schemas["AiInvestigation"];
 export type Site = Schemas["Site"];
-/** 告警列表的单条告警：网络告警或行为事件（D-077） */
-export type Alert = SecurityAlert | Behavior;
+/** 告警列表的单条告警：网络告警、行为事件或轨迹规则事件（D-077） */
+export type Alert = SecurityAlert | Behavior | RuleEvent;
+/** 物理告警（行为事件与轨迹规则事件）带 camera_id，网络告警带 device_id */
+export const isPhysical = (alert: Alert): alert is Behavior | RuleEvent => "camera_id" in alert;
 type Frame = Schemas["WsFrame"];
 
 /** 告警列表与关联事件的保留条数，与连接补推的上限一致（D-077） */
@@ -33,7 +36,7 @@ export interface Target {
   x: number;
   y: number;
   uncertainty_m: number;
-  /** 运动方向，0 为平面 +x、逆时针为正；静止或起步不足 3 帧时为 null */
+  /** 运动方向，0 为平面 +x、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；静止或起步不足 3 帧时为 null */
   heading_deg: number | null;
   /** 平面速度（米每秒）；起步不足 3 帧时为 null */
   speed_mps: number | null;
@@ -52,7 +55,7 @@ interface LiveState {
   devices: Record<string, Device>;
   /** 键为 "摄像头/track_id"：track_id 只在单个摄像头内唯一 */
   targets: Record<string, Target>;
-  /** 每台摄像头最近一次行为事件，供事件卡显示 */
+  /** 每台摄像头最近一次进入物理告警的行为事件，供事件卡显示；疑似跌倒不进入物理告警，不记入 */
   behaviors: Record<string, Behavior>;
   /** 单条告警，新的在前，按 event_id 去重（连接补推与实时转发可能重复） */
   alerts: Alert[];
@@ -60,7 +63,7 @@ interface LiveState {
   incidents: Incident[];
   /** 处置执行的最新状态，键为执行 id；按最近更新排在最后 */
   executions: Record<string, Execution>;
-  /** 每个执行各状态的事件时刻（ISO），供处置时间线（FR-304）；连接补推只含最新状态 */
+  /** 每个执行各状态首次的事件时刻（ISO），供处置时间线（FR-304）；连接补推只含最新状态 */
   executionTimes: Record<string, Partial<Record<Execution["state"], string>>>;
   /** 每个关联事件最近一帧调查流的 seq：面板据此重新读取调查记录（调查记录先落库后推送） */
   aiSeq: Record<string, number>;
@@ -100,8 +103,10 @@ export function receive(frame: Frame, now: number): void {
     }));
   }
   if (frame.channel === "site") applySite(data as Site);
-  // alerts 频道同时承载行为事件（含 behavior 字段）与网络告警；场景只用行为事件，告警等级随设备推送
-  if (frame.channel === "alerts") {
+  // alerts 频道同时承载行为事件（含 behavior 字段）、轨迹规则事件（含 rule_type）与网络告警；场景只用行为事件，告警等级随设备推送。
+  // 区域告警的 update、end 只用于保持与解除物理告警，不另列为告警
+  const lifecycle = frame.channel === "alerts" && "rule_type" in (data as object) && ["update", "end"].includes((data as RuleEvent).phase);
+  if (frame.channel === "alerts" && !lifecycle) {
     const alert = data as Alert;
     useLive.setState((s) => ({
       alerts: s.alerts.some((a) => a.event_id === alert.event_id)
@@ -109,7 +114,7 @@ export function receive(frame: Frame, now: number): void {
         : [alert, ...s.alerts].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, MAX_ALERTS),
     }));
   }
-  if (frame.channel === "alerts" && "behavior" in (data as object)) {
+  if (frame.channel === "alerts" && "behavior" in (data as object) && (data as Behavior).level !== "suspected") {
     const behavior = data as Behavior;
     useLive.setState((s) => ({ behaviors: { ...s.behaviors, [behavior.camera_id]: behavior } }));
   }
@@ -128,7 +133,9 @@ export function receive(frame: Frame, now: number): void {
     // 移到最后：遍历顺序即更新先后，设备取最近更新的执行
     useLive.setState((s) => {
       const rest = Object.fromEntries(Object.entries(s.executions).filter(([id]) => id !== execution.id));
-      const times = ts ? { ...s.executionTimes[execution.id], [execution.state]: ts } : s.executionTimes[execution.id];
+      // 同一状态只记首次：执行器在已处置后还会推送拦截证据补注、解封失败等同状态更新，生效时刻不随之后移
+      const known = s.executionTimes[execution.id];
+      const times = ts && !known?.[execution.state] ? { ...known, [execution.state]: ts } : known;
       return {
         executions: { ...rest, [execution.id]: execution },
         executionTimes: times ? { ...s.executionTimes, [execution.id]: times } : s.executionTimes,

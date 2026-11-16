@@ -47,4 +47,16 @@ describe("摄像头缩略图按间隔取帧（设计 140 §9）", () => {
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     expect(snapshot).toHaveBeenCalledTimes(4); // 之后每 10 s 一次，只有一条循环
   });
+
+  it("换了摄像头即不再显示上一台的画面，等新摄像头的首帧", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockResolvedValueOnce(new Blob(["a"])).mockImplementation(() => new Promise(() => {}));
+    const { container, rerender } = render(<Thumbnail id="cam-01" offline={false} />);
+    await act(async () => intersect(true));
+    expect(container.querySelector("img")).not.toBeNull();
+
+    rerender(<Thumbnail id="cam-02" offline={false} />);
+    await act(async () => intersect(true));
+    expect(container.querySelector("img")).toBeNull();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:frame");
+  });
 });

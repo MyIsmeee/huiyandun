@@ -6,6 +6,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { useCatalog } from "../scene/assets";
 import { removeItem, replaceItem, useDraft } from "./draft";
 import { overlaps, rotated } from "./placement";
+import { useRules } from "./rules";
 
 /** 旋转选中的物体 90°；转后超出区域或与其他物体重叠时不转，并说明原因 */
 function rotateSelected(catalog: ReturnType<typeof useCatalog>, size: [number, number]) {
@@ -29,7 +30,8 @@ export function SelectionBar({ width, depth }: { width: number; depth: number })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const index = useDraft.getState().selected;
-      if (index === null || e.ctrlKey || e.metaKey || (e.target as Element).closest("input, textarea")) return;
+      // 绘制规则时 ⌫ 是撤销一点，不删物体
+      if (index === null || useRules.getState().drawing || e.ctrlKey || e.metaKey || (e.target as Element).closest("input, textarea")) return;
       if (e.key === "r" || e.key === "R") rotateSelected(catalog, [width, depth]);
       else if (e.key === "Delete" || e.key === "Backspace") removeItem(index);
     };

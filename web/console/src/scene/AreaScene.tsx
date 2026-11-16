@@ -1,8 +1,9 @@
 import { type ThreeEvent, useLoader, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import {
-  type BufferGeometry,
+  BufferGeometry,
   DataTexture,
+  Float32BufferAttribute,
   type InstancedMesh,
   LinearFilter,
   type Material,
@@ -13,7 +14,7 @@ import {
   type Object3D,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { footprints, instances, MATERIALS, type SceneItem, useCatalog } from "./assets";
+import { footprints, instances, MATERIALS, OUTLINE, type SceneItem, useCatalog } from "./assets";
 import type { Area } from "./layout";
 
 /** 地面在区域外渐隐到页面底色的距离，单位米：看不到地面的边（设计 150 §4） */
@@ -40,6 +41,7 @@ export function AreaScene({ area, items, onPick }: { area: Area; items: SceneIte
   return (
     <>
       <Ground area={area} />
+      <AreaOutline area={area} />
       <AssetModels items={items} onPick={onPick} />
     </>
   );
@@ -143,7 +145,34 @@ function Batch(props: { part: Part; matrices: Matrix4[]; shadow: boolean; onPoin
   );
 }
 
-/** 地面：不受光，区域内为地面色，区域外 FADE_M 内渐隐为透明、露出页面底色；不画边框与网格（设计 150 §4）。阴影由承接面绘制 */
+/**
+ * 区域边线：渐隐地面看不出区域的范围，物体少时整个画面像是空的（产品负责人 2026-11-15 要求画出边界）。
+ * 细实线贴地、不接收点选；网格只在场景页另画
+ */
+function AreaOutline({ area }: { area: Area }) {
+  const { x0, y0, width_m: w, height_m: d } = area;
+  const geometry = useMemo(() => {
+    const corners = [
+      [x0, y0],
+      [x0 + w, y0],
+      [x0 + w, y0 + d],
+      [x0, y0 + d],
+    ] as const;
+    const points = corners.flatMap(([x, y], i) => {
+      const [nx, ny] = corners[(i + 1) % corners.length] ?? corners[0];
+      return [x, 0, y, nx, 0, ny];
+    });
+    return new BufferGeometry().setAttribute("position", new Float32BufferAttribute(points, 3));
+  }, [x0, y0, w, d]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return (
+    <lineSegments geometry={geometry} position-y={0.006} renderOrder={-1} raycast={() => undefined}>
+      <lineBasicMaterial color={OUTLINE} />
+    </lineSegments>
+  );
+}
+
+/** 地面：不受光，区域内为地面色，区域外 FADE_M 内渐隐为透明、露出页面底色；边界另由 AreaOutline 画出。阴影由承接面绘制 */
 function Ground({ area }: { area: Area }) {
   const { width_m: w, height_m: d } = area;
   const fade = useMemo(() => fadeTexture(w, d), [w, d]);

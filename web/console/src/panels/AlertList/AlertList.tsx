@@ -6,12 +6,18 @@ import { Item } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
-import { type Alert, type Execution, type Incident, useLive } from "../../store/live";
+import { useConnection } from "../../store/connection";
+import { type Alert, type Execution, type Incident, isPhysical, useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
-import { formatTime } from "../ConnectionStatus/ConnectionStatus";
+import { formatStamp, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { TimelineDots } from "../IncidentTimeline/IncidentTimeline";
 
 const BEHAVIOR: Record<string, string> = { fall: "跌倒", climb: "攀爬越界" };
+/** 轨迹规则：类型与越线方向（forward 为沿线由起点走向终点时，从前进方向的右侧穿到左侧：平面俯视 y 向下，与箭头方向一致） */
+const RULE: Record<string, string> = { intrusion: "区域入侵", line_crossing: "越线" };
+const DIRECTION: Record<string, string> = { forward: "正向", backward: "反向" };
+/** 疑似跌倒只在告警栏提示，不进入物理告警（TK-160）；确认后同组标题随最新一条变为"跌倒" */
+const SUSPECTED: Record<string, string> = { fall: "疑似跌倒" };
 // 告警等级以图标形状 + 文字区分，不以颜色深浅区分（V-S4）
 export const SEVERITY: Record<Incident["severity"], string> = { critical: "严重", high: "高", medium: "中", low: "低" };
 /** 关联事件的处置状态（ui.md §5.1）；无执行记录时为"未处置" */
@@ -27,12 +33,28 @@ const EXECUTION: Record<Execution["state"], string> = {
   expired: "未确认 · 已过期",
 };
 
-/** 告警的设备、标题、来源与可信度：行为事件按模型证据显示（D-069） */
-function describe(alert: Alert) {
-  if ("behavior" in alert) {
-    return { device: alert.camera_id, title: BEHAVIOR[alert.behavior] ?? alert.behavior, model: true, confidence: alert.confidence_avg };
+/**
+ * 自研网络规则的分类（rules/suricata/hyd-net.rules 的 hyd_category）：签名描述是英文原文（Suricata 的 msg），
+ * 告警栏按分类给中文标题，原文放在悬停说明里；外部规则（ET Open 等）的分类不在其中，照原文显示
+ */
+const CATEGORY: Record<string, string> = { auth_bruteforce: "口令暴力破解" };
+
+/** 告警的设备、标题、原文、来源与可信度：行为事件按模型证据显示（D-069） */
+export function alertText(alert: Alert): { device: string | null; title: string; detail?: string; model: boolean; confidence: number } {
+  if ("rule_type" in alert) {
+    // 疑似：按安装参数估算的地面映射，或越线发生在遮挡中，只在告警栏提示
+    const prefix = alert.level === "suspected" ? "疑似" : "";
+    const direction = alert.direction ? `（${DIRECTION[alert.direction] ?? alert.direction}）` : "";
+    return { device: alert.camera_id, title: `${prefix}${RULE[alert.rule_type] ?? alert.rule_type} · ${alert.rule_name}${direction}`, model: false, confidence: 1 };
   }
-  return { device: alert.device_id, title: alert.summary, model: alert.source === "model", confidence: alert.confidence };
+  if ("behavior" in alert) {
+    const names = alert.level === "suspected" ? SUSPECTED : BEHAVIOR;
+    return { device: alert.camera_id, title: names[alert.behavior] ?? alert.behavior, model: true, confidence: alert.confidence_avg };
+  }
+  const category = alert.source === "rule" ? CATEGORY[alert.category] : undefined;
+  return category
+    ? { device: alert.device_id, title: category, detail: `${alert.rule_id} · ${alert.summary}`, model: false, confidence: alert.confidence }
+    : { device: alert.device_id, title: alert.summary, model: alert.source === "model", confidence: alert.confidence };
 }
 
 /** 同一设备、同一类告警的合并间隔（D-106）：比组内最早一条晚不超过 5 分钟的并入该组 */
@@ -40,13 +62,17 @@ export const GROUP_GAP_MS = 5 * 60_000;
 
 /** 合并后的一行：alerts 新的在前，至少一条 */
 export interface AlertGroup {
-  /** 组内最早一条的 event_id：新告警并入时不变，已展开的行不会自己收起 */
+  /**
+   * 行的稳定编号：沿用上一次分组时组内告警所属行的编号，没有时取组内最早一条的 event_id。新告警并入、
+   * 最早的告警被 200 条上限挤出时都不变，已展开的行不会自己收起
+   */
   id: string;
   alerts: [Alert, ...Alert[]];
 }
 
 /** 同类：行为事件按摄像头与行为，网络告警按设备、规则与来源 */
 function kindOf(alert: Alert): string {
+  if ("rule_type" in alert) return `r/${alert.camera_id}/${alert.rule_id}`;
   if ("behavior" in alert) return `b/${alert.camera_id}/${alert.behavior}`;
   return `s/${alert.device_id ?? ""}/${alert.rule_id}/${alert.source}`;
 }
@@ -54,8 +80,9 @@ function kindOf(alert: Alert): string {
 /**
  * 合并同类告警（D-106）：输入新的在前；某条与同类最近一组的最早一条相隔不超过 GROUP_GAP_MS 即并入，
  * 否则另起一组。各组按其最新一条排列；不丢弃任何告警。
+ * previous 为上一次分组时各告警（event_id）所属行的编号，行的编号据此沿用（见 AlertGroup.id）
  */
-export function groupAlerts(alerts: Alert[]): AlertGroup[] {
+export function groupAlerts(alerts: Alert[], previous: ReadonlyMap<string, string> = new Map()): AlertGroup[] {
   const groups: AlertGroup[] = [];
   const latest = new Map<string, AlertGroup>();
   for (const alert of alerts) {
@@ -64,13 +91,32 @@ export function groupAlerts(alerts: Alert[]): AlertGroup[] {
     const oldest = group?.alerts[group.alerts.length - 1];
     if (group && oldest && Date.parse(oldest.ts) - Date.parse(alert.ts) <= GROUP_GAP_MS) {
       group.alerts.push(alert);
-      group.id = alert.event_id;
       continue;
     }
     const created: AlertGroup = { id: alert.event_id, alerts: [alert] };
     groups.push(created);
     latest.set(kind, created);
   }
+  // 从最早的告警找起：乱序到达的告警把两行连成一行时，沿用较早那一行的编号；编号不重复
+  const used = new Set<string>();
+  for (const group of groups) {
+    const members = [...group.alerts].reverse();
+    const id =
+      members.map((a) => previous.get(a.event_id)).find((p) => p !== undefined && !used.has(p)) ??
+      members.map((a) => a.event_id).find((e) => !used.has(e)) ??
+      group.id;
+    group.id = id;
+    used.add(id);
+  }
+  return groups;
+}
+
+/** 上一次分组时各告警所属行的编号：告警栏各处共用，只与告警本身有关 */
+let rowOf = new Map<string, string>();
+/** 按上一次的分组沿用行编号地合并告警 */
+function stableGroups(alerts: Alert[]): AlertGroup[] {
+  const groups = groupAlerts(alerts, rowOf);
+  rowOf = new Map(groups.flatMap((g) => g.alerts.map((a) => [a.event_id, g.id] as const)));
   return groups;
 }
 
@@ -79,7 +125,8 @@ export function AlertList(props: { stale: boolean; lastFrameAt: number | null; o
   const alerts = useLive((s) => s.alerts);
   const incidents = useLive((s) => s.incidents);
   const executions = useLive((s) => s.executions);
-  return <AlertListView alerts={alerts} incidents={incidents} executions={executions} {...props} />;
+  const synced = useConnection((s) => s.synced);
+  return <AlertListView alerts={alerts} incidents={incidents} executions={executions} loading={!synced} {...props} />;
 }
 
 /** 告警栏视图筛选（D-112）：只过滤显示，不改变数据 */
@@ -102,14 +149,16 @@ export function AlertListView(props: {
   executions: Record<string, Execution>;
   stale: boolean;
   lastFrameAt: number | null;
+  /** 本次登录后尚未收到推送：连上后先补推近 24 小时的记录，此前为空不等于没有告警 */
+  loading?: boolean;
   /** 态势页可把告警卡收起为胶囊（设计 150 §3）；未传入时不显示收起按钮 */
   onCollapse?: () => void;
 }) {
-  const { alerts, incidents, executions, stale, lastFrameAt, onCollapse } = props;
+  const { alerts, incidents, executions, stale, lastFrameAt, loading = false, onCollapse } = props;
   const selected = useSelection((s) => s.deviceId);
   const [filter, setFilter] = useState<Filter>("all");
-  const groups = useMemo(() => groupAlerts(alerts), [alerts]);
-  const shownGroups = filter === "all" ? groups : groups.filter((g) => "behavior" in g.alerts[0] === (filter === "physical"));
+  const groups = useMemo(() => stableGroups(alerts), [alerts]);
+  const shownGroups = filter === "all" ? groups : groups.filter((g) => isPhysical(g.alerts[0]) === (filter === "physical"));
   const shownIncidents = filter === "physical" ? [] : incidents;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const toggle = (id: string) =>
@@ -162,8 +211,11 @@ export function AlertListView(props: {
       {empty || (shownIncidents.length === 0 && shownGroups.length === 0) ? (
         <Empty className="p-6">
           <EmptyHeader>
-            <EmptyTitle className="text-sm">{empty ? "暂无告警" : "该类暂无告警"}</EmptyTitle>
-            <EmptyDescription className="text-meta">最后更新 {formatTime(lastFrameAt)}</EmptyDescription>
+            <EmptyTitle className="text-sm">
+              {!empty ? "该类暂无告警" : !loading ? "暂无告警" : stale ? "未能载入告警" : "正在载入告警…"}
+            </EmptyTitle>
+            {/* 载入中还没有收到任何推送："最后更新"无从谈起 */}
+            {!(empty && loading && !stale) && <EmptyDescription className="text-meta">最后更新 {formatTime(lastFrameAt)}</EmptyDescription>}
           </EmptyHeader>
         </Empty>
       ) : (
@@ -180,7 +232,7 @@ export function AlertListView(props: {
                         <span className="block font-medium break-words">{incident.title}</span>
                         <span className="block text-meta text-subtle-foreground tabular-nums">
                           {SEVERITY[incident.severity]} · {incident.device_ids.join("、")} ·{" "}
-                          {formatTime(Date.parse(incident.created_at))}
+                          {formatStamp(Date.parse(incident.created_at))}
                         </span>
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-1.5">
@@ -240,23 +292,23 @@ export function AlertListView(props: {
 /** 一条告警或合并行；count > 1 时标出次数 */
 function AlertRow(props: { alert: Alert; selected: string | null; count: number }) {
   const { alert, selected, count } = props;
-  const { device, title, model, confidence } = describe(alert);
+  const { device, title, detail, model, confidence } = alertText(alert);
   const Source = model ? Cpu : Shield;
   return (
     <Row device={device} selected={device !== null && device === selected}>
-      {"behavior" in alert ? (
+      {isPhysical(alert) ? (
         <TriangleAlert aria-label="物理告警" className="size-5 shrink-0 fill-physical text-foreground" />
       ) : (
         <ShieldAlert aria-label="网络攻击" className="mx-0.5 mt-0.5 size-4 shrink-0 text-cyber" />
       )}
       <span className="min-w-0 flex-1">
-        <span className="block break-words">
+        <span className="block break-words" title={detail}>
           {title}
           {count > 1 && <span className="ml-1.5 text-xs font-medium text-muted-foreground tabular-nums">×{count}</span>}
         </span>
         <span className="block text-meta text-subtle-foreground tabular-nums">
           {device ?? "未登记设备"} · {count > 1 ? "最近 " : ""}
-          {formatTime(Date.parse(alert.ts))}
+          {formatStamp(Date.parse(alert.ts))}
         </span>
       </span>
       <span

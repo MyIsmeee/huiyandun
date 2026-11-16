@@ -1,4 +1,4 @@
-import { formatTime } from "../ConnectionStatus/ConnectionStatus";
+import { formatStamp } from "../ConnectionStatus/ConnectionStatus";
 import type { Device, Incident } from "../../store/live";
 import { formatOffset, nodeLook, pick, type TimelineNode, useTimeline } from "./IncidentTimeline";
 
@@ -57,7 +57,7 @@ function Node(props: { node: TimelineNode; origin: number; reachedNext: boolean 
       </span>
       <span className={`truncate text-sm ${node.reached ? "font-medium" : "text-subtle-foreground"}`}>{node.label}</span>
       <span className="truncate font-mono text-xs text-muted-foreground tabular-nums">
-        {node.at !== null ? formatTime(node.at) : "—"}
+        {formatStamp(node.at)}
         {offset && <span className="font-sans text-subtle-foreground"> {offset}</span>}
       </span>
       {node.note && (

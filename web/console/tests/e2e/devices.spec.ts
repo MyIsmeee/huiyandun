@@ -111,16 +111,14 @@ test("网络攻击视场呼吸；断线或降低动效时停止（V-A1、V-U3、
   await expect.poll(changes(page)).toBe(false);
 });
 
-test("空间态势中选中摄像头：引线连到画面小卡，可跳到监控墙放大该路（V-I6）", async ({ page }) => {
-  await page.route(/\/api\/cameras\/.+\/snapshot/, (route) =>
-    route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="9"><rect width="16" height="9" fill="#666"/></svg>' }),
-  );
+test("空间态势中选中摄像头：引线连到小卡，可跳到监控墙放大该路（V-I6）", async ({ page }) => {
   await open(page, [camera("normal")]);
   const callout = scene(page).getByRole("group", { name: "cam-01 画面" });
   await expect(callout).toHaveCount(0);
 
   await scene(page).getByRole("button", { name: "查看 cam-01 详情" }).click();
-  await expect(callout.locator("img")).toBeVisible();
+  await expect(callout).toContainText("cam-01");
+  await expect(callout.locator("img")).toHaveCount(0); // 画面在右侧详情中播放，小卡不再重复截帧
   await expect(scene(page).locator("polyline")).toHaveCount(1);
   await expect(scene(page)).toHaveScreenshot("device-callout.png");
 

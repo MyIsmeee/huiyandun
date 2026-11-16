@@ -32,7 +32,9 @@ async function send(
 ): Promise<Response> {
   const headers: Record<string, string> = { "X-Request-ID": crypto.randomUUID() };
   if (type) headers["Content-Type"] = type;
-  const res = await fetch(path, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
+  // 按表单中的超时算出的时限可能不是有限正数（如超时框被清空）：AbortSignal.timeout 会直接抛错，请求发不出去
+  const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : TIMEOUT_MS;
+  const res = await fetch(path, { method, headers, body, signal: AbortSignal.timeout(limit) });
   if (!res.ok) {
     const error = (await res.json().catch(() => null)) as Partial<Schemas["Error"]> | null;
     // 非契约格式的错误响应来自 api-server 之外（如其不可用时反向代理返回的 502 页面），按连接失败处理

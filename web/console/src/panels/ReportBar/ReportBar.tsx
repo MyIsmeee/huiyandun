@@ -2,6 +2,7 @@ import { ArrowLeft, CircleAlert, FileText } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { create } from "zustand";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
 import { type Incident, useLive } from "../../store/live";
@@ -14,6 +15,10 @@ export type ReportsLoad = { status: "loading" | "failed" } | { status: "ready"; 
 const exportUrl = (report: Report, format: "html" | "md") =>
   `/api/reports/${encodeURIComponent(report.id)}/export?format=${format}`;
 const failure = (e: unknown) => (e instanceof ApiError ? e.message : "无法连接服务器，请重试");
+/** AbortSignal.timeout 到时抛 TimeoutError（部分实现为 AbortError） */
+const timedOut = (e: unknown) => e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
+/** 客户端等不到结果时服务端可能仍在生成：到时与之后再隔这么久各重读一次列表 */
+const LATE_RELOAD_MS = 30_000;
 const source = (report: Report) => (report.source === "template" ? "模板生成" : "模型生成");
 const describe = (report: Report) =>
   `${source(report)} · ${report.reviewed_by ? `已复核：${report.reviewed_by}` : "未复核草稿"}`;
@@ -34,6 +39,39 @@ function save(blob: Blob, filename: string) {
   a.click();
   // 下载开始后再释放，立即释放在部分浏览器中会使下载失败
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+type Job = { status: "pending" } | { status: "failed"; message: string };
+
+/**
+ * 生成报告的请求按关联事件记在模块级（最长 70 s）：详情面板关闭再打开时仍显示生成中、不能再点，
+ * 结果回来时若该事件的报告栏正在显示即打开新报告。version 每次需要重读历史列表时递增
+ */
+export const useReports = create<{ jobs: Record<string, Job>; versions: Record<string, number> }>()(() => ({ jobs: {}, versions: {} }));
+/** 正在显示的报告栏打开报告的方法（按关联事件）：结果回来时没有报告栏在显示就不打开，只等下次打开时读列表 */
+const openers = new Map<string, Set<(report: Report) => void>>();
+
+const setJob = (id: string, job: Job | null) =>
+  useReports.setState((s) => ({
+    jobs: job ? { ...s.jobs, [id]: job } : Object.fromEntries(Object.entries(s.jobs).filter(([key]) => key !== id)),
+  }));
+const bump = (id: string) => useReports.setState((s) => ({ versions: { ...s.versions, [id]: (s.versions[id] ?? 0) + 1 } }));
+
+export async function generateReport(incidentId: string): Promise<void> {
+  if (useReports.getState().jobs[incidentId]?.status === "pending") return;
+  setJob(incidentId, { status: "pending" });
+  try {
+    const report = await api.createReport(incidentId);
+    setJob(incidentId, null);
+    for (const open of openers.get(incidentId) ?? []) open(report);
+    bump(incidentId); // 重新读取完整列表，不在可能读取失败或未读完的旧列表上拼接
+  } catch (e) {
+    if (timedOut(e)) {
+      setJob(incidentId, { status: "failed", message: "生成超时，报告可能仍在生成，稍后会出现在列表中" });
+      bump(incidentId);
+      setTimeout(() => bump(incidentId), LATE_RELOAD_MS);
+    } else setJob(incidentId, { status: "failed", message: failure(e) });
+  }
 }
 
 /**
@@ -59,38 +97,52 @@ export function ReportBar(props: { deviceId: string }) {
 function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (incidentId: string | null) => void }) {
   const { incident, canEdit, onPin } = props;
   const [load, setLoad] = useState<ReportsLoad>({ status: "loading" });
-  const [request, setRequest] = useState<ReportRequest>({ status: "idle" });
+  const job = useReports((s) => s.jobs[incident.id]);
+  const version = useReports((s) => s.versions[incident.id] ?? 0);
+  const request: ReportRequest = job ?? { status: "idle" };
   const [review, setReview] = useState<ReportRequest>({ status: "idle" });
   const [exporting, setExporting] = useState<ReportRequest>({ status: "idle" });
-  // 打开的报告单独保存，不随列表的读取结果变化
+  // 打开的报告单独保存，不随列表的读取结果变化；openId 供请求返回时核对打开的仍是同一份
   const [open, setOpen] = useState<Report | null>(null);
+  const openId = useRef<string | null>(null);
   // 只采用最近一次读取的结果：晚到的旧结果不覆盖生成后重新读取的列表
   const latest = useRef(0);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (): Promise<Report[] | null> => {
     const seq = ++latest.current;
     const next: ReportsLoad = await api.listReports(incident.id).then(
       ({ items }) => ({ status: "ready", reports: items }),
       () => ({ status: "failed" }),
     );
     if (seq === latest.current) setLoad(next);
+    return next.status === "ready" ? next.reports : null;
   }, [incident.id]);
 
-  useEffect(() => void reload(), [reload]);
+  useEffect(() => void reload(), [reload, version]);
   // 换了设备或关联事件而卸载时解除锁定
   useEffect(() => () => onPin(null), [onPin]);
-
-  async function generate() {
-    setRequest({ status: "pending" });
-    try {
-      const report = await api.createReport(incident.id);
-      setRequest({ status: "idle" });
-      openReport(report);
-      await reload(); // 重新读取完整列表，不在可能读取失败或未读完的旧列表上拼接
-    } catch (e) {
-      setRequest({ status: "failed", message: failure(e) });
-    }
-  }
+  const openReport = useCallback(
+    (report: Report | null) => {
+      setReview({ status: "idle" });
+      setOpen(report);
+      openId.current = report?.id ?? null;
+      onPin(report ? incident.id : null);
+    },
+    [incident.id, onPin],
+  );
+  // 生成的报告回来时本报告栏在显示：新报告直接打开（列表由 version 递增重读）
+  useEffect(() => {
+    const id = incident.id;
+    const set = openers.get(id) ?? new Set();
+    openers.set(id, set.add(openReport));
+    return () => {
+      set.delete(openReport);
+      if (set.size > 0) return;
+      openers.delete(id);
+      // 失败提示只对正在看的人有意义：关闭后不再带到下次打开
+      if (useReports.getState().jobs[id]?.status === "failed") setJob(id, null);
+    };
+  }, [incident.id, openReport]);
 
   async function exportEvidence() {
     setExporting({ status: "pending" });
@@ -106,18 +158,20 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (i
     setReview({ status: "pending" });
     try {
       const report = await api.reviewReport(id);
-      setOpen(report);
       setLoad((l) => (l.status === "ready" ? { ...l, reports: l.reports.map((r) => (r.id === id ? report : r)) } : l));
+      // 返回前已关闭或换看了另一份：不把这一份重新打开，也不改另一份的提示
+      if (openId.current !== id) return;
+      setOpen(report);
       setReview({ status: "idle" });
     } catch (e) {
-      setReview({ status: "failed", message: failure(e) });
+      if (openId.current === id) setReview({ status: "failed", message: failure(e) });
+      // 已被他人复核（409）：重读列表，打开的报告换成最新内容，不再显示复核按钮
+      if (e instanceof ApiError && e.status === 409) {
+        const reports = await reload();
+        const fresh = reports?.find((r) => r.id === id);
+        if (fresh && openId.current === id) setOpen(fresh);
+      }
     }
-  }
-
-  function openReport(report: Report | null) {
-    setReview({ status: "idle" });
-    setOpen(report);
-    onPin(report ? incident.id : null);
   }
 
   return (
@@ -128,14 +182,14 @@ function ReportBarState(props: { incident: Incident; canEdit: boolean; onPin: (i
         request={request}
         exporting={exporting}
         canEdit={canEdit}
-        onGenerate={() => void generate()}
+        onGenerate={() => void generateReport(incident.id)}
         onExport={() => void exportEvidence()}
         onOpen={openReport}
       />
       {/* 与供应商页相同，盖在主界面之上而不替换它；挂到 body 下，不受详情面板的布局约束 */}
       {open &&
         createPortal(
-          <div className="fixed inset-0 z-10 bg-background">
+          <div role="dialog" aria-modal="true" aria-label="溯源报告" className="fixed inset-0 z-10 bg-background">
             <ReportPage
               report={open}
               canReview={canEdit}
@@ -219,6 +273,16 @@ export function ReportPage(props: {
   onClose: () => void;
 }) {
   const { report, canReview, review, onReview, onClose } = props;
+  // Esc 返回：报告页盖住了详情面板，详情面板此时不处理 Esc（DetailPanel 的 Drawer）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
     <div className="mx-auto flex h-full max-w-5xl flex-col gap-3 p-4 text-sm">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2">

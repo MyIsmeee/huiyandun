@@ -132,7 +132,31 @@ describe("connect", () => {
     vi.advanceTimersByTime(60_000);
 
     expect(FakeSocket.all.length).toBe(1);
-    expect(useConnection.getState()).toEqual(useConnection.getInitialState());
+    expect(useConnection.getState()).toEqual({ ...useConnection.getInitialState(), epoch: expect.any(Number) });
+  });
+
+  it("每次连上 epoch 递增，停止后同样前进：重连与重新登录后不命中旧的调查记录缓存", () => {
+    const stop = connect(vi.fn());
+    latest().onopen?.();
+    const first = useConnection.getState().epoch;
+    latest().onclose?.({ code: 1006 });
+    vi.advanceTimersByTime(1000);
+    latest().onopen?.();
+    const second = useConnection.getState().epoch;
+    expect(second).toBeGreaterThan(first);
+
+    stop();
+    expect(useConnection.getState().epoch).toBeGreaterThan(second);
+  });
+
+  it("收到首帧前未同步：此前告警为空不等于没有告警", () => {
+    const stop = connect(vi.fn());
+    latest().onopen?.();
+    expect(useConnection.getState().synced).toBe(false);
+    latest().onmessage?.({ data: HEARTBEAT });
+    expect(useConnection.getState().synced).toBe(true);
+    stop();
+    expect(useConnection.getState().synced).toBe(false);
   });
 
   it("停止后清空场景数据：重新登录不沿用上次会话的实体", () => {

@@ -132,7 +132,8 @@ const sameShot = (a: Shot, b: Shot) => {
  * 当前机位（V-I1）：总览为 base；跟随目标时视点随目标插值位置移动（与 TargetModels 同一渲染时间轴），
  * 车辆在车尾一侧、人员在所属摄像头一侧（人形姿态与画面一致，D-058）；摄像头视角在摄像头位置沿其朝向看出去。
  * 飞行中由出发机位向目标机位插值。只在飞行、目标移动或机位转动未完成时逐帧更新，静止时等下一次推送（V-A3）；
- * 跟随的目标离开画面即飞回总览（D-058）。motion 为假时瞬时到位、停在最新实测位置
+ * 跟随的目标离开画面即飞回总览（D-058）；聚焦的摄像头、或跟随目标所属的摄像头不在当前区域（被移出区域或删除）时同样退出，
+ * 不留下"显示总览却禁用缩放旋转"的聚焦状态。motion 为假时瞬时到位、停在最新实测位置
  */
 export function useFocusShot(base: Shot | null, size: Size | null, cameras: Camera[], motion: boolean): Shot | null {
   const focus = useCamera((s) => s.focus);
@@ -140,6 +141,8 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
   const shot = useCamera((s) => s.shot);
   const bearing = useRef<{ key: string; angle: number; at: number } | null>(null);
   useEffect(() => {
+    // 回到总览后再次跟随同一目标：机位按当时的位置重新取，不从上一次跟随结束时的方位转起
+    if (!focus) bearing.current = null;
     if (!focus && !flight) return;
     let frame = 0;
     const step = () => {
@@ -148,7 +151,8 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
       let pending = false;
       if (size && focus?.kind === "camera") {
         const pose = cameras.find((c) => c.id === focus.id)?.pose;
-        if (pose) goal = cameraShot(pose, size);
+        if (!pose) return focusOn(null, motion);
+        goal = cameraShot(pose, size);
       }
       if (size && focus?.kind === "target") {
         const target = useLive.getState().targets[focus.key];
@@ -156,7 +160,8 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
         const t = renderTime(target, now, motion);
         const [x, y] = renderedPosition(focus.key, target, now, motion);
         const camera = cameras.find((c) => c.id === target.camera_id)?.pose;
-        const toCamera = camera && (camera.x !== x || camera.y !== y) ? Math.atan2(camera.y - y, camera.x - x) : 0;
+        if (!camera) return focusOn(null, motion);
+        const toCamera = camera.x !== x || camera.y !== y ? Math.atan2(camera.y - y, camera.x - x) : 0;
         const last = bearing.current?.key === focus.key ? bearing.current : null;
         // 车辆在车尾一侧（行进方向的反方向）；尚无朝向时保持上一帧，起始取摄像头一侧
         const desired =

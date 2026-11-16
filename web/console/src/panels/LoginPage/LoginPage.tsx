@@ -14,6 +14,7 @@ import { type FormEvent, type InputHTMLAttributes, type ReactNode, useState } fr
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { ApiError, api } from "../../lib/api";
+import type { Role } from "../../store/session";
 
 // 只列 M0 实际交付的能力（UP-4）；登录前没有真实数据，不放示意数据
 const CAPABILITIES: { icon: LucideIcon; title: string; text: string }[] = [
@@ -28,7 +29,7 @@ function reason(error: unknown): string {
 }
 
 /** onLogin 完成后若仍渲染登录页，说明登录未生效（如会话 Cookie 未被浏览器保存），不能一直停在提交中 */
-export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) {
+export function LoginPage({ onLogin }: { onLogin: (role?: Role) => Promise<void> | void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -40,8 +41,8 @@ export function LoginPage({ onLogin }: { onLogin: () => Promise<void> | void }) 
     setPending(true);
     setError(null);
     try {
-      await api.login({ username, password });
-      await onLogin();
+      const { role } = await api.login({ username, password });
+      await onLogin(role);
       setError("登录未生效，请刷新页面后重试");
     } catch (e) {
       setError(reason(e));
