@@ -1,8 +1,15 @@
 """场景资产库（设计 150 §8，REUSE-13）：从 Kenney 的 CC0 压缩包挑选模型，按 §4 材质色重新上色，
 按类别合并为 glb，写出目录 web/console/public/models/catalog.json。
 
-用法：uv run python tools/dev/assets.py <压缩包目录>
+用法：
+  uv run python tools/dev/assets.py <压缩包目录>   全部重建（Kenney 与自制模型）
+  uv run python tools/dev/assets.py --custom        只重建自制模型，目录中的 Kenney 条目保持不变
 压缩包为 Kenney 官网下载的 <包名>.zip（如 city-kit-roads.zip），不入库；只取出用到的模型与调色板贴图。
+
+自制模型（如 Blender 导出的 glb）：源文件与登记清单 models.yaml 放在 web/console/assets/custom/（随代码提交，
+不经前端发布），归中、上色方式与 Kenney 模型相同，合并为单独的 scene-custom.glb，类别取已有类别。
+只放团队自制的模型；第三方模型须挑选进 SELECTION 并登记 deploy/third-party.yaml（C-RU-01）。
+清单格式与导出要求见该目录的 README.md。
 glTF 的归中、合并、去重由 @gltf-transform/cli 完成（设计 150 §9A），本脚本只改颜色与写目录。
 最后打印 deploy/third-party.yaml 的登记条目（C-RU-01），核对后替换其中的 Kenney 条目。
 
@@ -15,16 +22,23 @@ import csv
 import hashlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import Any
 
+import yaml
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "web/console/public/models"
+CUSTOM_DIR = ROOT / "web/console/assets/custom"  # 自制模型源文件与清单 models.yaml
+CUSTOM_GLB = "scene-custom.glb"  # 自制模型合并后的文件，与 Kenney 的类别文件分开，单独重建不动后者
+ASSET_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")  # 契约 SceneItem.asset
+YAWS = (0, 90, 180, 270)
 TIMEOUT_S = 120  # 单次 gltf-transform 调用上限
 FIELDS = ("id", "category", "name", "file", "footprint", "scale", "yaw", "line")  # 目录每项的字段
 
@@ -223,6 +237,31 @@ def pack_version(archive: zipfile.ZipFile) -> str:
     return first.rsplit("(", 1)[1].rstrip(")")
 
 
+def stage(source: Path, work: Path, name: str, palette: str) -> Path:
+    """归中、底面贴地并重新上色，写成 work/staged/<编号>/<编号>.gltf（贴图与缓冲为同目录的外部文件）。"""
+    staged_file = work / "staged" / name / f"{name}.gltf"
+    staged_file.parent.mkdir(parents=True)
+    gltf_transform("center", str(source), str(staged_file), "--pivot", "below")
+    recolor_gltf(staged_file, name, palette)
+    return staged_file
+
+
+def merge(files: list[Path], glb: Path) -> dict[str, tuple[float, float]]:
+    """合并为一个 glb（每个模型一个场景）并去重、清理，返回各场景的 x、z 尺寸。"""
+    gltf_transform("merge", *map(str, files), str(glb))
+    gltf_transform("dedup", str(glb), str(glb))
+    gltf_transform("prune", str(glb), str(glb))
+    return scene_sizes(glb)
+
+
+def entry(
+    name: str, category: str, label: str, file: str, size: tuple[float, float], scale: float,
+    yaw: int, line: bool,
+) -> dict:  # fmt: skip
+    values = (name, category, label, file, footprint(size, scale, yaw), scale, yaw, line)
+    return dict(zip(FIELDS, values, strict=True))
+
+
 def build(archives: Path, work: Path) -> list[dict]:
     zips = {pack: zipfile.ZipFile(archives / f"{pack}.zip") for pack in PACKS}
     staged: dict[str, list[Path]] = {c: [] for c in CATEGORIES}
@@ -233,28 +272,81 @@ def build(archives: Path, work: Path) -> list[dict]:
             texture = f"{PACKS[pack]}/Textures/colormap.png"
             if texture in zips[pack].namelist():
                 extract(zips[pack], texture, source.parent / "Textures/colormap.png")
-        staged_file = work / "staged" / name / f"{name}.gltf"
-        staged_file.parent.mkdir(parents=True)
-        gltf_transform("center", str(source), str(staged_file), "--pivot", "below")
-        recolor_gltf(staged_file, name, palette)
-        staged[category].append(staged_file)
+        staged[category].append(stage(source, work, name, palette))
     catalog = []
     for category, files in staged.items():
         glb = OUT / f"scene-{category}.glb"
-        gltf_transform("merge", *map(str, files), str(glb))
-        gltf_transform("dedup", str(glb), str(glb))
-        gltf_transform("prune", str(glb), str(glb))
-        sizes = scene_sizes(glb)
+        sizes = merge(files, glb)
         for name, cat, label, _, _, _, scale, yaw, line in SELECTION:
             if cat == category:
-                size = footprint(sizes[name], scale, yaw)
-                values = (name, category, label, glb.name, size, scale, yaw, line)
-                catalog.append(dict(zip(FIELDS, values, strict=True)))
+                catalog.append(
+                    entry(name, category, label, glb.name, sizes[name], scale, yaw, line)
+                )
     versions = {pack: pack_version(z) for pack, z in zips.items()}
     for z in zips.values():
         z.close()
     print(registry(versions))
     return catalog
+
+
+def load_custom(directory: Path, taken: set[str]) -> list[dict[str, Any]]:
+    """读取并校验自制模型清单；taken 为 Kenney 资产已用的编号。出错时列出全部问题后退出。"""
+    manifest = directory / "models.yaml"
+    models = (yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}).get("models") or []
+    errors, seen = [], set(taken)
+    for i, model in enumerate(models, 1):
+        where = f"models.yaml 第 {i} 项"
+        name = model.get("id", "")
+        if not isinstance(name, str) or not ASSET_ID.match(name):
+            errors.append(f"{where}：id 须为小写字母、数字与连字符（契约 SceneItem.asset）")
+        elif name in seen:
+            errors.append(f"{where}：id {name} 已被占用")
+        seen.add(name)
+        if model.get("category") not in CATEGORIES:
+            errors.append(f"{where}：category 须为 {'、'.join(CATEGORIES)} 之一")
+        if model.get("palette") not in PALETTES:
+            errors.append(f"{where}：palette 须为 {'、'.join(PALETTES)} 之一")
+        if not model.get("name"):
+            errors.append(f"{where}：缺少中文名 name")
+        if not model.get("author"):
+            errors.append(f"{where}：缺少作者 author（只收团队自制模型）")
+        model.setdefault("scale", 1)
+        model.setdefault("yaw", 0)
+        model.setdefault("line", False)
+        if not isinstance(model["scale"], int | float) or model["scale"] <= 0:
+            errors.append(f"{where}：scale 须为正数")
+        if model["yaw"] not in YAWS:
+            errors.append(f"{where}：yaw 须为 0、90、180、270 之一")
+        if not isinstance(model["line"], bool):
+            errors.append(f"{where}：line 须为 true 或 false")
+        source = directory / model.setdefault("file", f"{name}.glb")
+        if source.suffix not in (".glb", ".gltf") or not source.is_file():
+            errors.append(f"{where}：找不到模型文件 {model['file']}（.glb 或 .gltf）")
+    if errors:
+        sys.exit("自制模型清单有误：\n" + "\n".join(errors))
+    return models
+
+
+def build_custom(directory: Path, out: Path, work: Path, taken: set[str]) -> list[dict]:
+    """自制模型合并为 out/scene-custom.glb，返回其目录条目；清单为空时不写文件。"""
+    models = load_custom(directory, taken)
+    if not models:
+        return []
+    staged = [stage(directory / m["file"], work, m["id"], m["palette"]) for m in models]
+    sizes = merge(staged, out / CUSTOM_GLB)
+    return [
+        entry(m["id"], m["category"], m["name"], CUSTOM_GLB, sizes[m["id"]], m["scale"],
+              m["yaw"], m["line"])
+        for m in models
+    ]  # fmt: skip
+
+
+def write_catalog(catalog: list[dict], out: Path) -> None:
+    categories = [{"id": c, "name": n} for c, n in CATEGORIES.items()]
+    rows = ",\n  ".join(json.dumps(a, ensure_ascii=False) for a in catalog)
+    head = json.dumps(categories, ensure_ascii=False)
+    text = f'{{\n "categories": {head},\n "assets": [\n  {rows}\n ]\n}}\n'
+    (out / "catalog.json").write_text(text, encoding="utf-8")
 
 
 def registry(versions: dict[str, str]) -> str:
@@ -283,15 +375,19 @@ def registry(versions: dict[str, str]) -> str:
 def main() -> None:
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    for old in OUT.glob("scene-*.glb"):
-        old.unlink()
+    kenney = {s[0] for s in SELECTION}
     with tempfile.TemporaryDirectory() as tmp:
-        catalog = build(Path(sys.argv[1]), Path(tmp))
-    categories = [{"id": c, "name": n} for c, n in CATEGORIES.items()]
-    rows = ",\n  ".join(json.dumps(a, ensure_ascii=False) for a in catalog)
-    head = json.dumps(categories, ensure_ascii=False)
-    text = f'{{\n "categories": {head},\n "assets": [\n  {rows}\n ]\n}}\n'
-    (OUT / "catalog.json").write_text(text, encoding="utf-8")
+        if sys.argv[1] == "--custom":
+            # 只重建自制模型：保留目录中 Kenney 的条目与类别文件，替换自制部分
+            old = json.loads((OUT / "catalog.json").read_text(encoding="utf-8"))["assets"]
+            catalog = [a for a in old if a["file"] != CUSTOM_GLB]
+            (OUT / CUSTOM_GLB).unlink(missing_ok=True)
+        else:
+            for old_glb in OUT.glob("scene-*.glb"):
+                old_glb.unlink()
+            catalog = build(Path(sys.argv[1]), Path(tmp) / "kenney")
+        catalog += build_custom(CUSTOM_DIR, OUT, Path(tmp) / "custom", kenney)
+    write_catalog(catalog, OUT)
 
 
 if __name__ == "__main__":
