@@ -29,6 +29,9 @@ EXECUTION_NAMESPACE = uuid.UUID("2c4b9e71-5a0d-4f3e-8b6a-9d1c7e2f4a03")
 # 到期等待按墙上时钟分段检查：WSL 等虚拟机里单调时钟可能落后于墙上时钟，一次长睡会晚醒数秒
 WAIT_STEP_S = 1.0
 
+# 适配器在执行原因中的名称
+ADAPTERS = {"nftables": "本机防火墙", "firewall": "外部防火墙联动"}
+
 type Network = IPv4Network | IPv6Network
 type Publish = Callable[[PlaybookExecutionV1], Awaitable[None]]
 
@@ -61,22 +64,30 @@ class Executor:
     async def on_incident(self, incident: Incident) -> None:
         if incident.mode != "enforce":  # monitor 只告警不触发处置（C-SEC-04、D-068）
             return
-        for playbook in self._playbooks.values():
-            trigger = playbook.trigger
-            if (
-                incident.rule_id not in trigger.rule_ids
-                or incident.severity not in trigger.severity
-            ):
-                continue
+        matched = [
+            p
+            for p in self._playbooks.values()
+            if incident.rule_id in p.trigger.rule_ids and incident.severity in p.trigger.severity
+        ]
+        runnable = [p for p in matched if self._unavailable(p) is None]
+        if matched and not runnable:
+            # 同一攻击可由多个 Playbook 处置（本机防火墙、外部防火墙联动），按部署模式与已配置的适配器取用；
+            # 一个都执行不了时只通知一次，原因取最具体的：部署模式相符、只缺联动配置的优先
+            playbook = min(matched, key=lambda p: self._mode not in p.requires_mode)
+            execution_id = str(uuid.uuid5(EXECUTION_NAMESPACE, playbook.id + incident.id))
+            if execution_id not in self._executions:
+                await self._update(
+                    self._new(playbook, incident, execution_id),
+                    state="notify_only",
+                    reason=self._unavailable(playbook),
+                )
+            return
+        for playbook in runnable:
             execution_id = str(uuid.uuid5(EXECUTION_NAMESPACE, playbook.id + incident.id))
             if execution_id in self._executions:
                 continue  # 重放的关联事件
             execution = self._new(playbook, incident, execution_id)
-            if self._mode not in playbook.requires_mode:
-                await self._update(
-                    execution, state="notify_only", reason="当前部署模式不支持执行，仅通知"
-                )
-            elif reason := self._skip_reason(incident):
+            if reason := self._skip_reason(incident):
                 await self._update(execution, state="skipped", reason=reason)
             elif incident.requires_confirmation:
                 pending = await self._update(execution, reason="含模型证据，等待人工确认")
@@ -155,6 +166,19 @@ class Executor:
             verify_result=None,
         )
 
+    def _unavailable(self, playbook: Playbook) -> str | None:
+        """Playbook 在本部署中执行不了的原因（FR-1001）；可执行时为 None。"""
+        if self._mode not in playbook.requires_mode:
+            return "当前部署模式不支持执行，仅通知"
+        missing = [
+            ADAPTERS.get(s.adapter, s.adapter)
+            for s in playbook.actions
+            if f"{s.adapter}.{s.action}" not in self._actions
+        ]
+        if missing:
+            return f"未配置{'、'.join(dict.fromkeys(missing))}，仅通知"
+        return None
+
     def _skip_reason(self, incident: Incident) -> str | None:
         """白名单（C-SEC-03、FR-403）：未配置时只告警；目标在其中时不处置。"""
         if incident.source_ip is None:
@@ -174,6 +198,12 @@ class Executor:
         if playbook is None:
             raise ActionError(f"Playbook {execution.playbook_id} 已不存在")
         target = ip_address(execution.target)
+        missing = [
+            s.adapter for s in playbook.actions if f"{s.adapter}.{s.action}" not in self._actions
+        ]
+        if missing:
+            # 执行后改了配置（如撤下联动网关）：按动作失败处理，不让 KeyError 穿过编排
+            raise ActionError(f"未配置{'、'.join(ADAPTERS.get(a, a) for a in missing)}")
         return [
             (
                 self._actions[f"{s.adapter}.{s.action}"],

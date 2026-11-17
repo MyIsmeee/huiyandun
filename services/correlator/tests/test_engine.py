@@ -53,6 +53,25 @@ def alert(t: float, **fields: Any) -> SecurityAlertV1:
     )
 
 
+def behavior(t: float, **fields: Any) -> VisionBehaviorV1:
+    return VisionBehaviorV1.model_validate(
+        {
+            "schema_version": "1.2.0",
+            "event_id": str(uuid.uuid4()),
+            "ts": (T0 + timedelta(seconds=t)).isoformat(),
+            "camera_id": "cam-02",
+            "track_id": 1,
+            "behavior": "fall",
+            "level": "confirmed",
+            "confidence_avg": 0.9,
+            "duration_s": 8.0,
+            "ts_start": (T0 + timedelta(seconds=t - 8)).isoformat(),
+            "ts_end": (T0 + timedelta(seconds=t)).isoformat(),
+        }
+        | fields
+    )
+
+
 def integrity(t: float, **fields: Any) -> VisionIntegrityV1:
     return VisionIntegrityV1.model_validate(
         {
@@ -188,6 +207,18 @@ def test_bruteforce_then_tamper_escalates() -> None:
     assert single.model_dump(mode="json")["techniques"] == ["T1110"]
     assert (str(single.source_ip), single.requires_confirmation) == ("172.30.0.100", False)
 
+    # 冻结同时命中单域的 HYD-VIS-0002：命中路径被跨域事件包含，只发布跨域事件
     (cross,) = engine.feed(INTEGRITY, integrity(120))
     assert (cross.rule_id, cross.severity) == ("HYD-X-0001", "critical")
     assert cross.source_ip == single.source_ip  # 同一攻击源：封禁已生效时后到的处置记为跳过
+
+
+def test_tamper_without_network_alert_stays_single_domain() -> None:
+    """全部规则同时加载：没有网络告警在先时，画面冻结只生成物理域事件（HYD-VIS-0002），没有攻击源、不触发封禁；
+    画面判定校准前为 medium，不交 AI 值班员研判。"""
+    (incident,) = Engine(ALL_RULES, ATTACK).feed(INTEGRITY, integrity(0))
+    assert (incident.rule_id, incident.severity, incident.source_ip) == (
+        "HYD-VIS-0002",
+        "medium",
+        None,
+    )

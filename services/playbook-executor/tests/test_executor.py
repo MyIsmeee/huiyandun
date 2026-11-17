@@ -202,10 +202,55 @@ def test_skipped_with_reason(kwargs: dict[str, Any], changes: dict[str, Any], re
 
 
 def test_bypass_mode_only_notifies() -> None:
-    """FR-1001：部署模式不在 requires_mode 内时只通知。"""
+    """FR-1001：旁路模式未配置外部防火墙联动时只通知一次，并写明缺什么。"""
     h = Harness(mode="bypass")
     run(h.executor.on_incident(incident()))
     assert h.states() == ["notify_only"] and h.action.calls == []
+    assert h.reasons() == ["未配置外部防火墙联动，仅通知"]
+    assert h.published[0].playbook_id == "isolate-attacker-linked"
+
+
+class LinkedHarness(Harness):
+    """同时注册本机防火墙与联动网关两个适配器。"""
+
+    def __init__(self, mode: str) -> None:
+        self.local, self.action = FakeAction(), FakeAction()  # action 为联动网关
+        self.published = []
+        self.executor = Executor(
+            PLAYBOOKS,
+            {"nftables.block_ip": self.local, "firewall.block_ip": self.action},
+            mode=mode,
+            whitelist=WHITELIST,
+            publish=self.publish,
+            ttl_override_s=1,
+        )
+
+
+def test_bypass_mode_blocks_through_linked_firewall() -> None:
+    """FR-1001：旁路模式经联动网关封禁，本机防火墙不动，也不再另记"仅通知"。"""
+    h = LinkedHarness("bypass")
+    run(h.executor.on_incident(incident()), settle=1.3)
+    assert h.states() == ["executing", "verifying", "contained", "contained", "rolled_back"]
+    assert {e.playbook_id for e in h.published} == {"isolate-attacker-linked"}
+    assert h.action.calls == ["precheck", "execute", "verify", "rollback"]
+    assert h.local.calls == []
+
+
+def test_host_probe_mode_ignores_linked_firewall() -> None:
+    """主机探针模式只用本机防火墙；配置了联动网关也不重复封禁。"""
+    h = LinkedHarness("host_probe")
+    run(h.executor.on_incident(incident()))
+    assert {e.playbook_id for e in h.published} == {"isolate-attacker"}
+    assert h.local.calls[:3] == ["precheck", "execute", "verify"]
+    assert h.action.calls == []
+
+
+def test_low_and_slow_bruteforce_waits_for_confirmation() -> None:
+    """低速爆破（HYD-NET-0103）由行为模型判定：等待人工确认后才封禁（FR-407）。"""
+    h = Harness()
+    slow = incident(rule_id="HYD-NET-0103", severity="high", requires_confirmation=True)
+    run(h.executor.on_incident(slow))
+    assert h.states() == ["pending"] and h.action.calls == []
 
 
 @pytest.mark.parametrize(

@@ -13,10 +13,11 @@ import nats
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from pydantic import Field
+from pydantic import Field, model_validator
 
+from playbook_executor.action import Action
 from playbook_executor.executor import CONFIRM_TIMEOUT, Executor
-from playbook_executor.nftables import BlockIp, Helper
+from playbook_executor.nftables import BlockIp, Helper, tls, unix
 from playbook_executor.playbooks import load_playbooks
 from py_common.bus import Bus
 from py_common.config import ServiceConfig, load_config
@@ -56,12 +57,26 @@ class ExecutorConfig(ServiceConfig):
         Path("/run/secrets/executor_signing_key"),
         description="向 privileged-helper 签名指令的 Ed25519 私钥（PEM，D-074）",
     )
+    firewall_address: str | None = Field(
+        None,
+        pattern=r"^[^\s:]+:[0-9]{1,5}$",
+        description="外部防火墙联动网关的地址 host:port（旁路模式，FR-1001）；不设则旁路模式只通知",
+    )
+    firewall_ca_file: Path | None = Field(
+        None, description="签发联动网关 TLS 证书的 CA（PEM）；设了 firewall_address 时必填"
+    )
     ttl_override_s: int | None = Field(
         None, ge=1, le=86400, description="覆盖全部 Playbook 的 TTL，如演示时缩短封禁时长（FR-404）"
     )
     heartbeat_file: Path = Field(
         Path("/tmp/hyd-playbook-alive"), description="事件循环每秒更新其修改时间，供健康检查判断"
     )
+
+    @model_validator(mode="after")
+    def _ca_required(self) -> "ExecutorConfig":
+        if self.firewall_address and self.firewall_ca_file is None:
+            raise ValueError("设了 firewall_address 时须配置 firewall_ca_file")
+        return self
 
 
 def load_key(path: Path) -> Ed25519PrivateKey:
@@ -87,10 +102,16 @@ def build(config: ExecutorConfig, bus: Bus) -> Executor:
                 )
                 await asyncio.sleep(PUBLISH_RETRY_S)
 
-    helper = Helper(config.helper_socket, load_key(config.signing_key_file))
+    key = load_key(config.signing_key_file)
+    actions: dict[str, Action] = {
+        "nftables.block_ip": BlockIp(Helper(unix(config.helper_socket), key))
+    }
+    if config.firewall_address and config.firewall_ca_file:
+        gateway = Helper(tls(config.firewall_address, config.firewall_ca_file), key, "联动网关")
+        actions["firewall.block_ip"] = BlockIp(gateway, "外部防火墙")
     return Executor(
         load_playbooks(config.playbooks_dir),
-        {"nftables.block_ip": BlockIp(helper)},
+        actions,
         mode=site.site.mode,
         whitelist=site.whitelist,
         publish=publish,

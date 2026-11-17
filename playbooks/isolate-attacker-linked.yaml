@@ -1,0 +1,16 @@
+# 旁路模式封禁攻击源（FR-401、FR-1001）：边缘主机只听不发、不在流量路径上，把签名的封禁指令经 TLS 下发给
+# 客户网关或防火墙上的联动网关（privileged-helper 以 HYD_TCP_LISTEN 运行），由流量路径上的设备执行，到期自动解除。
+# 触发条件、白名单、互斥、人工确认与 isolate-attacker 相同；未配置联动网关（HYD_FIREWALL_ADDRESS）时只通知
+id: isolate-attacker-linked
+version: 1.0.0
+trigger:
+  rule_ids: [HYD-NET-0101, HYD-NET-0102, HYD-NET-0103, HYD-X-0001]  # 只引用规则引擎输出（C-SEC-02）
+  severity: [critical, high]
+requires_mode: [bypass]
+target: incident.source_ip   # 只能引用 Incident 的结构化字段
+ttl_s: 1800                  # 30 分钟（FR-404、C-BE-05）；可由 HYD_TTL_OVERRIDE_S 统一覆盖
+actions:
+  - adapter: firewall
+    action: block_ip
+    params: { direction: inbound }
+on_failure: rollback_and_notify

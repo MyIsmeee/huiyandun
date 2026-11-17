@@ -12,18 +12,26 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_repository_playbooks_load() -> None:
-    (playbook,) = load_playbooks(ROOT / "playbooks")
-    assert (playbook.id, playbook.trigger.rule_ids, playbook.ttl_s) == (
+    local, linked = sorted(load_playbooks(ROOT / "playbooks"), key=lambda p: p.id)
+    assert (local.id, local.trigger.rule_ids, local.ttl_s) == (
         "isolate-attacker",
-        ["HYD-NET-0101", "HYD-NET-0102", "HYD-X-0001"],
+        ["HYD-NET-0101", "HYD-NET-0102", "HYD-NET-0103", "HYD-X-0001"],
         1800,
     )
-    assert playbook.trigger.severity == ["critical", "high"]
-    assert playbook.target == "incident.source_ip"
+    assert local.trigger.severity == ["critical", "high"]
+    assert local.target == "incident.source_ip"
+    # 旁路模式经联动网关封禁：触发条件与本机封禁一致，只换执行位置（FR-1001）
+    assert (linked.id, linked.requires_mode, linked.actions[0].adapter) == (
+        "isolate-attacker-linked",
+        ["bypass"],
+        "firewall",
+    )
+    assert (linked.trigger, linked.target, linked.ttl_s) == (local.trigger, local.target, 1800)
+    assert local.requires_mode == ["host_probe"]
 
 
 def write(directory: Path, name: str, **changes: Any) -> None:
-    (playbook,) = load_playbooks(ROOT / "playbooks")
+    playbook = next(p for p in load_playbooks(ROOT / "playbooks") if p.id == "isolate-attacker")
     data = playbook.model_dump(mode="json") | changes
     (directory / f"{name}.yaml").write_text(json.dumps(data), encoding="utf-8")
 

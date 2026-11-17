@@ -1,0 +1,29 @@
+# 关联规则样本（C-SEC-01）：按列表顺序送入引擎（即到达顺序），t 为事件发生时刻（秒）
+# 未写的字段由测试补默认值：告警为 enforce、rule 来源的 auth_bruteforce，画面事件为 rule 来源的 freeze
+cases:
+  - name: 行为模型判定认证爆破类偏离，含模型证据须确认
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: behavior_anomaly, source: model, rule_id: behavior-model, technique: T1110 }
+    incidents: [{ requires_confirmation: true }]
+
+  - name: 数据外传类偏离只告警，不封禁
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: behavior_anomaly, source: model, rule_id: behavior-model, technique: T1041 }
+    incidents: []
+
+  - name: 规则命中的认证爆破由 HYD-NET-0101 处理
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+    incidents: []
+
+  - name: 目标不是登记的设备
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: null, category: behavior_anomaly, source: model, technique: T1110 }
+    incidents: []
+
+  - name: 偏离持续时不重复生成，停止 5 分钟后再次出现才算新事件
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: behavior_anomaly, source: model, technique: T1110 }
+      - { t: 60, subject: hyd.security.alert.v1, device_id: cam-02, category: behavior_anomaly, source: model, technique: T1110 }
+      - { t: 500, subject: hyd.security.alert.v1, device_id: cam-02, category: behavior_anomaly, source: model, technique: T1110 }
+    incidents: [{ requires_confirmation: true }, { requires_confirmation: true }]

@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from playbook_executor.action import ActionContext, Result
-from playbook_executor.nftables import BlockIp, Helper, HelperError
+from playbook_executor.nftables import BlockIp, Helper, HelperError, tls, unix
 from privileged_helper.nft import Nft, NftError
 from privileged_helper.server import HelperConfig, start
 
@@ -48,9 +48,9 @@ def with_helper(tmp_path: Path, nft: Nft, scenario: Callable[[BlockIp], Awaitabl
     config = HelperConfig(socket_path=tmp_path / "helper.sock", public_key_file=key_file)
 
     async def main() -> None:
-        server = await start(config, nft)
+        (server,) = await start(config, nft)
         try:
-            await scenario(BlockIp(Helper(config.socket_path, KEY)))
+            await scenario(BlockIp(Helper(unix(config.socket_path), KEY)))
         finally:
             server.close()
 
@@ -93,7 +93,7 @@ def test_helper_failure_raised_with_reason(tmp_path: Path) -> None:
 def test_address_rejected_by_protocol_is_action_failure(tmp_path: Path, target: str) -> None:
     """指令协议拒绝的地址在客户端构造指令时即被拒：按动作失败（HelperError）处理，编排据此回滚并释放目标，
     不让校验异常穿过编排、重启恢复时把执行器带崩。"""
-    action = BlockIp(Helper(tmp_path / "unused.sock", KEY))
+    action = BlockIp(Helper(unix(tmp_path / "unused.sock"), KEY))
     ctx = ActionContext(target=ip_address(target), ttl_s=60, params={})
     for step in (action.execute, action.verify, action.rollback, action.intercepted):
         with pytest.raises(HelperError, match="不合 privileged-helper 协议"):
@@ -101,7 +101,7 @@ def test_address_rejected_by_protocol_is_action_failure(tmp_path: Path, target: 
 
 
 def test_helper_unreachable_raised(tmp_path: Path) -> None:
-    action = BlockIp(Helper(tmp_path / "missing.sock", KEY))
+    action = BlockIp(Helper(unix(tmp_path / "missing.sock"), KEY))
     with pytest.raises(HelperError, match="不可达"):
         asyncio.run(action.execute(CTX))
 
@@ -119,9 +119,50 @@ def test_helper_dropping_or_garbling_reply_is_failure(tmp_path: Path, reply: byt
     async def main() -> None:
         server = await asyncio.start_unix_server(drop, path=str(socket))
         try:
-            await BlockIp(Helper(socket, KEY)).execute(CTX)
+            await BlockIp(Helper(unix(socket), KEY)).execute(CTX)
         finally:
             server.close()
 
     with pytest.raises(HelperError, match="回复"):
         asyncio.run(main())
+
+
+def test_block_through_linked_gateway_over_tls(
+    tmp_path: Path, tls_files: Callable[[Path], tuple[Path, Path]]
+) -> None:
+    """旁路模式（FR-1001）：签名指令经 TLS 送达联动网关，结论写明封禁在外部防火墙中生效。"""
+    key_file = tmp_path / "helper.pub"
+    key_file.write_bytes(
+        KEY.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    )
+    cert_file, tls_key = tls_files(tmp_path)
+    config = HelperConfig(
+        socket_path=tmp_path / "helper.sock",
+        public_key_file=key_file,
+        tcp_listen="localhost:0",
+        tls_cert_file=cert_file,
+        tls_key_file=tls_key,
+    )
+    nft = FakeNft()
+    seen: list[object] = []
+
+    async def main() -> None:
+        servers = await start(config, nft)
+        port = servers[1].sockets[0].getsockname()[1]
+        action = BlockIp(Helper(tls(f"localhost:{port}", cert_file), KEY, "联动网关"), "外部防火墙")
+        try:
+            await action.execute(CTX)
+            seen.append(await action.verify(CTX))
+            await action.rollback(CTX)
+            # 不信任网关证书（换一张 CA）时按不可达失败，不会把伪造的回复当成已封禁
+            other, _ = tls_files(tmp_path / "other")
+            untrusted = BlockIp(Helper(tls(f"localhost:{port}", other), KEY, "联动网关"))
+            with pytest.raises(HelperError, match="联动网关 不可达"):
+                await untrusted.execute(CTX)
+        finally:
+            for server in servers:
+                server.close()
+
+    asyncio.run(main())
+    assert seen == [Result(True, "封禁规则已在外部防火墙中生效")]
+    assert nft.blocked == {}

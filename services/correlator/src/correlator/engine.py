@@ -125,7 +125,13 @@ class Engine:
             hits.clear()
             self._quiet_until[key] = chain[-1].event.ts + SUPPRESS
             incidents.append(self._incident(rule, device, chain))
-        return incidents
+        # 同一事件同时补全单域与跨域规则（如爆破后画面冻结）：命中路径被另一事件完整包含的不再发布，只留证据更全的
+        # 跨域事件，避免同一次攻击重复存证与研判；被包含的规则照常进入去重期
+        return [
+            i
+            for i in incidents
+            if not any(set(i.hit_path) < set(o.hit_path) for o in incidents if o is not i)
+        ]
 
     def _tactics(self, techniques: list[str]) -> list[str]:
         tactics: set[str] = set()

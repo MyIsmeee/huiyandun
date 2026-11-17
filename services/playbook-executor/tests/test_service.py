@@ -87,7 +87,7 @@ def test_incident_contained_and_not_repeated_after_restart(nats_url: str, tmp_pa
     nft = FakeNft()
 
     async def scenario() -> list[str]:
-        server = await start(helper_config, nft)
+        (server,) = await start(helper_config, nft)
         raw = await nats.connect(nats_url)
         for name in (
             "HYD_INCIDENT",
@@ -138,7 +138,7 @@ def test_confirmation_given_during_downtime_takes_effect(nats_url: str, tmp_path
     nft = FakeNft()
 
     async def scenario() -> list[str]:
-        server = await start(helper_config, nft)
+        (server,) = await start(helper_config, nft)
         raw = await nats.connect(nats_url)
         for name in ("HYD_INCIDENT", EXECUTION_STREAM, COMMAND_STREAM):
             try:
