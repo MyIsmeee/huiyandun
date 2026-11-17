@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from llm_gateway.connect import ProbeFailure, Target, list_models
+from llm_gateway.egress import Resolver, blocked_reason, resolve
 from llm_gateway.invoke import Chain, Invocation, InvokeResult, load_tasks
 from llm_gateway.probe import probe
 from py_common.config import ServiceConfig, load_config
@@ -39,14 +40,28 @@ class ProbeResponse(BaseModel):
 
 
 def create_app(
-    config: GatewayConfig, transport: httpx2.AsyncBaseTransport | None = None
+    config: GatewayConfig,
+    transport: httpx2.AsyncBaseTransport | None = None,
+    resolver: Resolver = resolve,
 ) -> FastAPI:
-    """transport 仅供测试注入录制响应。"""
+    """transport、resolver 仅供测试注入录制响应与假的域名解析。"""
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     attack = json.loads(config.attack_file.read_text(encoding="utf-8"))
     chain = Chain(
-        load_tasks(config.tasks_file), config.prompts_dir, set(attack["techniques"]), transport
+        load_tasks(config.tasks_file),
+        config.prompts_dir,
+        set(attack["techniques"]),
+        transport,
+        resolver,
     )
+
+    async def ensure_allowed(target: Target) -> None:
+        """全局禁止公网开启时，测试连接与获取模型列表同样不向公网地址发请求（G-02）。"""
+        reason = await blocked_reason(
+            target.base_url, target.network, target.block_public, resolver
+        )
+        if reason:
+            raise HTTPException(409, reason)
 
     @app.post("/internal/invoke")
     async def run_invoke(body: Invocation) -> InvokeResult:
@@ -56,11 +71,13 @@ def create_app(
 
     @app.post("/internal/probe")
     async def run_probe(target: Target) -> ProbeResponse:
+        await ensure_allowed(target)
         result, capability = await probe(target, config.prompts_dir, transport)
         return ProbeResponse(result=result, structured_output=capability)
 
     @app.post("/internal/models", response_model=ModelList)
     async def models(target: Target) -> ModelList | JSONResponse:
+        await ensure_allowed(target)
         try:
             return ModelList(models=await list_models(target, transport))
         except ProbeFailure as f:

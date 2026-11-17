@@ -24,7 +24,7 @@ from py_contracts.api import (
 SEVERITY = {"critical": "严重", "high": "高", "medium": "中", "low": "低"}
 MODE = {"enforce": "执行", "monitor": "仅监测"}
 SOURCE = {"rule": "规则", "model": "模型"}
-BEHAVIOR = {"fall": "跌倒", "climb": "攀爬越界"}
+BEHAVIOR = {"fall": "跌倒", "climb": "攀爬越界", "still": "长时间静止", "fight": "疑似打架"}
 INTEGRITY = {
     "freeze": "画面冻结",
     "replay": "画面重放",

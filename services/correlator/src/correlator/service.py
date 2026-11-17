@@ -1,6 +1,6 @@
 """correlator：归一化器（TK-032）与关联引擎（TK-041）。
 
-归一化器跟随 Suricata EVE，逐条归一化后发布 hyd.security.alert.v1；每条告警经 JetStream 确认后才记录
+归一化器跟随 Suricata EVE（以及主机探针输出的同格式告警），逐条归一化后发布 hyd.security.alert.v1；每条告警经 JetStream 确认后才记录
 读取位置，发布失败时保留该条，下个周期重试，不丢告警。
 
 关联引擎从 JetStream 订阅告警与视觉事件，生成的关联事件发布到 hyd.correlator.incident.v1。重启时先重放
@@ -55,6 +55,14 @@ class CorrelatorConfig(ServiceConfig):
     state_file: Path = Field(
         Path("/var/lib/correlator/eve-position.json"),
         description="EVE 已处理位置，须位于持久卷，重启后续读",
+    )
+    host_eve_file: Path | None = Field(
+        None,
+        description="主机探针（agents/sensor/host-probe）输出的告警，格式同 EVE，只读挂载；不设则不读",
+    )
+    host_state_file: Path = Field(
+        Path("/var/lib/correlator/host-position.json"),
+        description="主机探针告警已处理位置，须位于持久卷",
     )
     poll_s: float = Field(0.5, gt=0, le=10, description="读到文件末尾后再次检查的间隔，单位秒")
     heartbeat_file: Path = Field(
@@ -289,6 +297,11 @@ async def serve(config: CorrelatorConfig) -> None:
         correlate(engine, bus, window),
         run(EveTail(config.eve_file, config.state_file), devices, bus, config),
     ]
+    if config.host_eve_file is not None:
+        # 主机探针的告警与网络探针同格式，经同一归一化进入关联与处置
+        tasks.append(
+            run(EveTail(config.host_eve_file, config.host_state_file), devices, bus, config)
+        )
     if config.behavior_enabled:
         model.append(load_behavior(devices, config))
         tasks.append(

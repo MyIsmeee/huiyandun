@@ -85,25 +85,48 @@ def provider(pid: str, **fields: Any) -> dict[str, Any]:
 
 
 class Providers:
-    """按主机名分派到各自的处理函数；seen 为每家收到的请求体。"""
+    """按主机名分派到各自的处理函数；seen 为每家收到的请求体。addresses：主机名（不含 .lan）→ 解析出的地址，
+    未列出的解析为内网地址，值为 None 的解析不出。"""
 
-    def __init__(self, **handlers: Handler) -> None:
+    def __init__(self, addresses: dict[str, str | None] | None = None, **handlers: Handler) -> None:
         self.handlers = handlers
+        self.addresses = addresses or {}
         self.seen: dict[str, list[dict[str, Any]]] = {k: [] for k in handlers}
         self.chain = Chain(
             TASKS,
             ROOT / "prompts",
             {"T1110", "T0832"},
             httpx2.MockTransport(self),
+            self.resolve,
         )
+
+    async def resolve(self, host: str) -> list[str]:
+        address = self.addresses.get(host.removesuffix(".lan"), "192.168.1.50")
+        if address is None:
+            raise OSError("录制的解析失败")
+        return [address]
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response | Awaitable[httpx2.Response]:
         pid = request.url.host.removesuffix(".lan")
         self.seen[pid].append(json.loads(request.content))
         return self.handlers[pid](request)
 
-    def invoke(self, *providers: dict[str, Any], data: dict[str, Any] = EVIDENCE) -> Any:
-        req = Invocation(task="incident_report", data=data, providers=list(providers))
+    def invoke(
+        self,
+        *providers: dict[str, Any],
+        data: dict[str, Any] = EVIDENCE,
+        severity: str | None = None,
+        block_public: bool = False,
+    ) -> Any:
+        req = Invocation.model_validate(
+            {
+                "task": "incident_report",
+                "data": data,
+                "providers": list(providers),
+                "severity": severity,
+                "block_public": block_public,
+            }
+        )
         return asyncio.run(self.chain.invoke(req))
 
 
@@ -131,6 +154,120 @@ def test_failover_to_next_provider() -> None:
     assert reasons[2].startswith("无法连接到 c.lan:8080")
     assert result.attempts[3].tokens == 30
     assert KEY not in result.model_dump_json()
+
+
+LOCAL, CLOUD = provider("local"), provider("cloud", network="public")
+
+
+def tried(result: Any) -> list[tuple[str, str]]:
+    return [(a.provider_id, a.outcome) for a in result.attempts]
+
+
+def test_critical_incident_escalates_to_cloud_first() -> None:
+    """升阶：critical 事件公网（云端）优先，即使管理员把本地排在前面；送出的证据照常脱敏（C-LLM-03）。"""
+    p = Providers(local=ok(), cloud=ok(REPORT))
+    result = p.invoke(LOCAL, CLOUD, severity="critical")
+    assert (result.route, result.order, result.provider_id) == (
+        "escalated",
+        ["cloud", "local"],
+        "cloud",
+    )
+    assert tried(result) == [("cloud", "ok")] and p.seen["local"] == []
+    assert result.output == REAL and result.attempts[0].redacted
+
+
+def test_escalation_degrades_to_local_when_cloud_unreachable() -> None:
+    """降级：断网或云端超时，同一次调用内转回本地模型。"""
+    for failure in (httpx2.ConnectError, httpx2.ReadTimeout):
+        p = Providers(local=ok(), cloud=raises(failure))
+        result = p.invoke(LOCAL, CLOUD, severity="critical")
+        assert tried(result) == [("cloud", "failed"), ("local", "ok")]
+        assert result.route == "escalated" and result.output == REAL
+
+
+def test_everything_down_leaves_terminal_to_caller() -> None:
+    """云端与本地都不可用：无输出，由调用方落模板或规则结论（任务的 terminal）。"""
+    p = Providers(local=raises(httpx2.ConnectError), cloud=raises(httpx2.ConnectError))
+    result = p.invoke(LOCAL, CLOUD, severity="critical")
+    assert result.output is None and tried(result) == [("cloud", "failed"), ("local", "failed")]
+
+
+def test_lower_severity_stays_local_first() -> None:
+    """其余等级本地优先：即使管理员把云端排在前面，日常研判也不产生云端调用。"""
+    p = Providers(local=ok(), cloud=ok(REPORT))
+    result = p.invoke(CLOUD, LOCAL, severity="high")
+    assert (result.route, result.order) == ("local_first", ["local", "cloud"])
+    assert tried(result) == [("local", "ok")] and p.seen["cloud"] == []
+
+
+def test_routing_keeps_admin_order_within_same_network() -> None:
+    p = Providers(
+        a=raises(httpx2.ConnectError), b=ok(), x=raises(httpx2.ConnectError), y=ok(REPORT)
+    )
+    cloud = [provider("x", network="public"), provider("y", network="public")]
+    result = p.invoke(provider("a"), cloud[0], provider("b"), cloud[1], severity="critical")
+    assert result.order == ["x", "y", "a", "b"]
+    assert tried(result) == [("x", "failed"), ("y", "ok")]
+
+
+def test_no_severity_or_no_routing_keeps_admin_order() -> None:
+    p = Providers(local=ok(), cloud=ok(REPORT))
+    result = p.invoke(LOCAL, CLOUD)
+    assert (result.route, result.order, result.provider_id) == (
+        "manual",
+        ["local", "cloud"],
+        "local",
+    )
+
+    spec = TASKS["incident_report"].model_dump(by_alias=True) | {"routing": None}
+    p.chain.tasks = {"incident_report": Task.model_validate(spec)}
+    result = p.invoke(LOCAL, CLOUD, severity="critical")
+    assert (result.route, result.provider_id) == ("manual", "local")
+
+
+def test_repository_tasks_escalate_only_critical() -> None:
+    """随代码版本化的策略：只有跨域确认的入侵（critical）升阶到云端。"""
+    assert {name: t.routing.escalate for name, t in TASKS.items() if t.routing} == {
+        "incident_report": ["critical"],
+        "incident_investigation": ["critical"],
+    }
+
+
+def test_block_public_never_calls_addresses_outside_site() -> None:
+    """总开关在网关再把一道关：标为公网的、标为内网却指向公网的、解析不出的都不发请求；真正的内网照常调用。"""
+    p = Providers(
+        {"mislabeled": "203.0.113.7", "unknown": None},
+        cloud=ok(REPORT), mislabeled=ok(), unknown=ok(), local=ok(),
+    )  # fmt: skip
+    result = p.invoke(
+        CLOUD, provider("mislabeled"), provider("unknown"), LOCAL,
+        severity="critical", block_public=True,
+    )  # fmt: skip
+    assert tried(result) == [
+        ("cloud", "skipped"), ("mislabeled", "skipped"), ("unknown", "skipped"), ("local", "ok")
+    ]  # fmt: skip
+    assert p.seen["cloud"] == p.seen["mislabeled"] == p.seen["unknown"] == []
+    reasons = [a.reason for a in result.attempts[:3]]
+    assert all(r.startswith("已开启全局禁止公网") for r in reasons)
+    assert "203.0.113.7" in reasons[1] and "解析不出" in reasons[2]
+
+
+def test_block_public_with_literal_addresses() -> None:
+    """地址是 IP 时不查询域名：公网 IP 被拦，私有网段与回环放行。"""
+    p = Providers(a=ok())
+    outside = provider("a", base_url="http://203.0.113.9:8080/v1")
+    inside = provider("a", base_url="http://a.lan:8080/v1") | {"id": "b"}
+    result = p.invoke(outside, inside, block_public=True)
+    assert tried(result) == [("a", "skipped"), ("b", "ok")]
+
+
+def test_mislabeled_public_address_is_redacted_when_not_blocked() -> None:
+    """总开关未开：标为内网却指向公网地址的供应商照样按公网脱敏，输出再还原（C-LLM-03）。"""
+    p = Providers({"mislabeled": "203.0.113.7"}, mislabeled=ok(REPORT))
+    result = p.invoke(provider("mislabeled"))
+    sent = json.dumps(p.seen["mislabeled"][0]["messages"], ensure_ascii=False)
+    assert "172.30.0.100" not in sent and "HOST_001" in sent
+    assert result.output == REAL and result.attempts[0].redacted
 
 
 def test_all_failed_returns_every_reason() -> None:
@@ -345,3 +482,30 @@ def test_task_schema_must_have_generated_model() -> None:
         assert "没有对应的生成模型" in str(e)
     else:
         raise AssertionError("未知 Schema 应被拒绝")
+
+
+def test_probe_and_models_refuse_address_outside_site_when_blocked() -> None:
+    """测试连接与获取模型列表同样复核：总开关开启时，标为内网却指向公网的地址不发请求。"""
+    config = GatewayConfig(
+        prompts_dir=ROOT / "prompts",
+        tasks_file=ROOT / "deploy/configs/llm-tasks.yaml",
+        attack_file=ROOT / "rules/attack/techniques.json",
+    )
+    sent: list[httpx2.Request] = []
+
+    def upstream(request: httpx2.Request) -> httpx2.Response:
+        sent.append(request)
+        return httpx2.Response(200, json={"data": [{"id": "qwen3-8b"}]})
+
+    async def resolver(host: str) -> list[str]:
+        return ["203.0.113.7"] if host == "llm.example.com" else ["192.168.1.50"]
+
+    app = create_app(config, transport=httpx2.MockTransport(upstream), resolver=resolver)
+    with TestClient(app) as c:
+        target = {"base_url": "http://llm.example.com/v1", "timeout_s": 5, "block_public": True}
+        for path in ("/internal/probe", "/internal/models"):
+            r = c.post(path, json=target)
+            assert r.status_code == 409 and "203.0.113.7" in r.json()["detail"]
+        assert sent == []
+        inside = target | {"base_url": "http://llm.lan/v1"}
+        assert c.post("/internal/models", json=inside).json() == {"models": ["qwen3-8b"]}

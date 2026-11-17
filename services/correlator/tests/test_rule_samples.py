@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 import yaml
-from test_engine import ALERT, ATTACK, RULES, alert, integrity
+from test_engine import ALERT, ATTACK, alert, integrity
+from test_engine import ALL_RULES as RULES
 
 from correlator.engine import Engine
 from correlator.rules import MODELS

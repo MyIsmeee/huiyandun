@@ -10,3 +10,11 @@
 # rev 3 转 enforce：已经正反例回放（TK-030）与实时攻击实测（TK-031）验证，参与关联与处置（D-068）
 alert tcp any any -> any any (msg:"HYD-NET-0001 RTSP request with credentials"; flow:established,to_server,no_stream; content:" RTSP/1.0|0d 0a|"; content:"|0d 0a|Authorization|3a|"; nocase; flowbits:set,hyd.rtsp.auth; flowbits:noalert; sid:1100001; rev:1;)
 alert tcp any any -> any any (msg:"HYD-NET-0001 RTSP authentication brute force"; flow:established,to_client,no_stream; flowbits:isset,hyd.rtsp.auth; content:"RTSP/1.0 401"; startswith; threshold:type both, track by_both, count 5, seconds 60; target:src_ip; classtype:attempted-user; metadata:hyd_rule_id HYD-NET-0001, hyd_category auth_bruteforce, hyd_mode enforce, mitre_tactic_id TA0006, mitre_tactic_name Credential_Access, mitre_technique_id T1110, mitre_technique_name Brute_Force; sid:1000001; rev:3;)
+
+# HYD-NET-0002 RTSP 推流劫持：摄像头只对外提供码流，从不接收推流。向推流接收端以外的地址发 ANNOUNCE（声明要发布的
+# 码流）或 RECORD（开始发送），是企图以自己的码流顶替设备画面——观看方与录像随后拿到的是攻击方的画面
+# 无论设备是否拒绝都告警：请求本身即攻击行为，不必等它得手。同一来源对同一目标每 60 s 只告警一次
+# $HYD_PUSH_SERVERS：站点的推流接收端（边缘主机的 ingest，D-103），向它推流是正常接入；由探针启动参数给出
+# 请求行须在报文开头：正文里引用的请求行不算。同一报文内排在其他请求之后的推流请求不会命中（客户端不这样发）
+# 上线即 enforce（C-SEC-04 的例外）：特征是协议方法本身，没有阈值可调；正反例回放见 rules/tests/HYD-NET-0002
+alert tcp any any -> !$HYD_PUSH_SERVERS any (msg:"HYD-NET-0002 RTSP publish request to a camera"; flow:established,to_server,no_stream; content:" RTSP/1.0|0d 0a|"; pcre:"/^(?:ANNOUNCE|RECORD) \S+ RTSP\/1\.0\r\n/"; threshold:type limit, track by_both, count 1, seconds 60; classtype:attempted-admin; metadata:hyd_rule_id HYD-NET-0002, hyd_category stream_hijack, hyd_mode enforce, mitre_tactic_id TA0105, mitre_tactic_name Impact, mitre_technique_id T0832, mitre_technique_name Manipulation_of_View; sid:1000002; rev:1;)

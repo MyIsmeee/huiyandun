@@ -209,12 +209,20 @@ def test_bypass_mode_only_notifies() -> None:
 
 
 @pytest.mark.parametrize(
-    "changes", [{"mode": "monitor"}, {"rule_id": "HYD-X-0002"}, {"severity": "high"}]
+    "changes", [{"mode": "monitor"}, {"rule_id": "HYD-X-0002"}, {"severity": "medium"}]
 )
 def test_non_matching_incident_ignored(changes: dict[str, Any]) -> None:
     h = Harness()
     run(h.executor.on_incident(incident(**changes)))
     assert h.published == []
+
+
+def test_bruteforce_alone_is_contained() -> None:
+    """认证爆破的单域关联事件（HYD-NET-0101，high）本身即封禁攻击源，不必等到画面遭篡改。"""
+    h = Harness()
+    run(h.executor.on_incident(incident(rule_id="HYD-NET-0101", severity="high")))
+    assert h.states()[:3] == ["executing", "verifying", "contained"]
+    assert h.published[2].target == "172.30.0.100"
 
 
 def test_replayed_incident_not_executed_twice() -> None:

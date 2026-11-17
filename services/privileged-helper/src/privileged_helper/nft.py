@@ -1,7 +1,11 @@
 """nftables 固定模板（D-074）：只以参数列表调用 nft（GPL-2.0，独立进程，G-08），不拼接 shell。
 
-封禁表 inet hyd：集合 block4 / block6 带超时与逐元素计数，forward 与 input 链丢弃其中的源地址。
-到期由内核删除元素，helper 或 executor 重启都不影响到期解除。
+封禁表 inet hyd：集合 block4 / block6 带超时与逐元素计数。forward 链对往来于其中地址的 TCP 报文回复 RST、
+其余协议丢弃；input 链对来自其中地址的报文同样处理。到期由内核删除元素，helper 或 executor 重启都不影响到期解除。
+
+切断已建立的会话：只丢包时，封禁前已建立的连接仍留在两端，设备会继续重传、攻击方的套接字迟迟不关。对 TCP 回复
+RST 后，任一端再发出一个报文，发送方即收到复位并关闭连接——攻击方发往设备的报文复位攻击方一端（saddr 规则），
+设备发往攻击方的报文复位设备一端（forward 链的 daddr 规则，同时拦下仍在外发的码流）。
 """
 
 import asyncio
@@ -11,17 +15,32 @@ from ipaddress import IPv4Address, IPv6Address
 
 TABLE = "hyd"
 TIMEOUT_S = 5.0  # 每次调用 nft 的上限（CD-04）
+# 一次事务内完成，可重复执行：表、集合、链的声明是"不存在才创建"，已有集合里的封禁原样保留；规则先清空再写入，
+# 所以不会叠加，旧版本留下的表也随之升级到当前规则。
+# 每条规则先判协议再查集合：查集合即计数，TCP 报文在复位规则处终止、其余协议只在丢弃规则处查一次，各计一次。
 SETUP = """
 table inet hyd {
   set block4 { type ipv4_addr; flags timeout; counter; }
   set block6 { type ipv6_addr; flags timeout; counter; }
+  chain forward { type filter hook forward priority -10; policy accept; }
+  chain input { type filter hook input priority -10; policy accept; }
+}
+flush chain inet hyd forward
+flush chain inet hyd input
+table inet hyd {
   chain forward {
-    type filter hook forward priority -10; policy accept;
+    meta l4proto tcp ip saddr @block4 reject with tcp reset
+    meta l4proto tcp ip6 saddr @block6 reject with tcp reset
+    meta l4proto tcp ip daddr @block4 reject with tcp reset
+    meta l4proto tcp ip6 daddr @block6 reject with tcp reset
     ip saddr @block4 drop
     ip6 saddr @block6 drop
+    ip daddr @block4 drop
+    ip6 daddr @block6 drop
   }
   chain input {
-    type filter hook input priority -10; policy accept;
+    meta l4proto tcp ip saddr @block4 reject with tcp reset
+    meta l4proto tcp ip6 saddr @block6 reject with tcp reset
     ip saddr @block4 drop
     ip6 saddr @block6 drop
   }
@@ -70,10 +89,8 @@ class Nft:
         return out
 
     async def setup(self) -> None:
-        """表已存在则保留（其中的封禁照常到期），否则创建；重复创建会叠加丢弃规则。"""
-        code, _, _ = await self._run(["list", "table", "inet", TABLE], None)
-        if code:
-            await self._check(["-f", "-"], SETUP)
+        """写入封禁表（见 SETUP）：已有的封禁照常到期，规则更新为当前模板。"""
+        await self._check(["-f", "-"], SETUP)
 
     async def block(self, ip: Ip, ttl_s: int) -> None:
         await self._check(

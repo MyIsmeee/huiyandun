@@ -39,9 +39,10 @@ def test_service_has_healthcheck(name: str) -> None:
     assert SERVICES[name].get("healthcheck", {}).get("test")
 
 
-@pytest.mark.parametrize("name", ["vision-engine", "correlator"])
+@pytest.mark.parametrize("name", [n for n in SERVICES if n not in ONESHOT])
 def test_service_restarts_after_exit(name: str) -> None:
-    """#79、TK-041：检测与关联进程退出后自动拉起，演示中不因一次崩溃停止。"""
+    """#79、TK-041：常驻服务退出后自动拉起，演示与值守中不因一次崩溃停止；模型网关与 api-server 同样如此，
+    否则网关崩溃后研判与报告一直落模板，直到有人手动重启。"""
     assert SERVICES[name]["restart"] == "unless-stopped"
 
 
@@ -316,6 +317,10 @@ def test_attack_sim_behavior_registered_in_scenarios() -> None:
     assert 60 // slow["interval_s"] + 1 < 5
     assert (slow["attempts"] - 1) * slow["interval_s"] >= 60
     assert slow["interval_s"] < 30
+    # 推流劫持：一次即触发 HYD-NET-0002；脚本随镜像分发，由 make attack-hijack 以 --entrypoint 选用
+    assert params["hijack"]["attempts"] >= 1
+    dockerfile = (ROOT / "agents/sim/attack-sim/Dockerfile").read_text(encoding="utf-8")
+    assert "rtsp_hijack.py /usr/local/bin/rtsp-hijack" in dockerfile
 
 
 def test_nvr_sim_is_whitelisted_and_allowed_by_address() -> None:

@@ -586,6 +586,40 @@ def test_llm_status_follows_last_call(client: TestClient, password: str) -> None
     assert reason is not None and reason.startswith("全部模型供应商不可用：")
 
 
+def test_escalated_call_is_routed_by_severity_and_audited(
+    client: TestClient, password: str, db: tuple[ApiConfig, ApiConfig]
+) -> None:
+    """事件等级随调用交给网关；升阶到云端并成功是正常状态而非故障转移，路由记入审计。"""
+    a, b = add_provider(client, password), add_provider(client, password, "DeepSeek 备用")
+    body = {"output": AI, "unverified": [], "provider_id": b, "attempts": [attempt(b, "ok")],
+            "route": "escalated", "order": [b, a]}  # fmt: skip
+    seen = gateway(client, lambda _: httpx2.Response(200, json=body))
+    login(client, "operator", password)
+    headers = rid()
+    generate_with(client, headers)
+
+    assert seen[0]["severity"] == "critical"
+    assert [p["id"] for p in seen[0]["providers"]] == [a, b]  # 管理员排定的顺序，路由由网关决定
+    invoked = actions(db[1], headers["X-Request-ID"])["llm.invoked"]
+    assert invoked["route"] == "escalated"
+    assert [x["provider_id"] for x in invoked["attempts"]] == [b]
+    login(client, "viewer", password)
+    assert llm_status(client) == ("normal", "DeepSeek 备用", None)
+
+    # 云端不可用、降级回本地：路由后的首选未成功，显示为已切换
+    body = {"output": AI, "unverified": [], "provider_id": a,
+            "attempts": [attempt(b, "failed", "连接被拒绝"), attempt(a, "ok")],
+            "route": "escalated", "order": [b, a]}  # fmt: skip
+    gateway(client, lambda _: httpx2.Response(200, json=body))
+    login(client, "operator", password)
+    headers = rid()
+    generate_with(client, headers)
+    invoked = actions(db[1], headers["X-Request-ID"])["llm.invoked"]
+    assert [x["outcome"] for x in invoked["attempts"]] == ["failed", "ok"]  # 按实际尝试的先后
+    login(client, "viewer", password)
+    assert llm_status(client) == ("failover", "本地 llama.cpp", None)
+
+
 def test_llm_status_resets_when_providers_change(client: TestClient, password: str) -> None:
     """管理员改了启用或顺序后，不再沿用改动前那次调用的结果。"""
     a, b = add_provider(client, password), add_provider(client, password, "DeepSeek 备用")

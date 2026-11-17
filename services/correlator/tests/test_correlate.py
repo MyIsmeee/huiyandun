@@ -27,7 +27,8 @@ from py_common.bus import Bus
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 
 ROOT = Path(__file__).resolve().parents[3]
-RULES = load_rules(ROOT / "rules/correlator")
+# 以跨域规则验证订阅、重放与发布；单域规则对同一批事件另成一条关联事件，会干扰计数
+RULES = [r for r in load_rules(ROOT / "rules/correlator") if r.id == "HYD-X-0001"]
 ATTACK = json.loads((ROOT / "rules/attack/techniques.json").read_text(encoding="utf-8"))
 INTEGRITY = "hyd.vision.integrity.v1"
 VISION_SUBJECTS = ["hyd.vision.behavior.v1", INTEGRITY]

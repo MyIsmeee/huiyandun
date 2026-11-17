@@ -15,9 +15,10 @@ def test_repository_playbooks_load() -> None:
     (playbook,) = load_playbooks(ROOT / "playbooks")
     assert (playbook.id, playbook.trigger.rule_ids, playbook.ttl_s) == (
         "isolate-attacker",
-        ["HYD-X-0001"],
+        ["HYD-NET-0101", "HYD-NET-0102", "HYD-X-0001"],
         1800,
     )
+    assert playbook.trigger.severity == ["critical", "high"]
     assert playbook.target == "incident.source_ip"
 
 

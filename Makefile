@@ -1,5 +1,5 @@
 .PHONY: licenses lint lint-py lint-imports lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	console-ca fetch-models verify-models test-rules eval-behavior llm-check attack attack-slow tamper
+	console-ca fetch-models verify-models test-rules eval-behavior llm-check attack attack-slow attack-hijack tamper
 
 WEB = pnpm --dir web/console
 
@@ -127,7 +127,9 @@ llm-check: ; $(call todo,TK-060)
 # M0 只能攻击自建靶机 rtsp-target，它的地址即 cam-02 的设备 IP；攻击现场摄像头待 D-064 实现
 TARGET ?= cam-02
 CAMERA ?= cam-02
-attack attack-slow:
+# attack 认证爆破；attack-slow 低速爆破；attack-hijack 推流劫持（ANNOUNCE）。三者各自即触发封禁（HYD-NET-0101、
+# 行为模型须人工确认、HYD-NET-0102），不必再接 make tamper
+attack attack-slow attack-hijack:
 	$(if $(filter-out cam-02,$(TARGET)),$(error M0 只能攻击自建靶机 rtsp-target（cam-02）))
 	uv run python tools/dev/redteam.py $@ -- $(COMPOSE)
 

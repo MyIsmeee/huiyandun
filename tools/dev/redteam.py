@@ -3,6 +3,7 @@
 用法：python tools/dev/redteam.py <命令> [参数] -- <docker compose 命令及全局参数>
   attack                     attack-sim 对自建靶机 rtsp-target 连续认证尝试（触发 HYD-NET-0001）
   attack-slow                低速尝试，低于规则阈值，由设备行为模型发现（FR-205）
+  attack-hijack              attack-sim 对 rtsp-target 发推流声明，企图顶替设备画面（触发 HYD-NET-0002）
   tamper freeze <摄像头>      把该路调试素材的画面源切换为当前画面的定格帧（FR-301）
   tamper replay <摄像头>      切回约 2 分钟前的片段（FR-302）
   tamper restore <摄像头>     恢复为按原时间线继续播放
@@ -87,18 +88,28 @@ class Compose:
         return datetime.fromisoformat(out[:19] + "+00:00").timestamp()  # 精确到秒即可
 
 
-def attack(compose: Compose, slow: bool) -> int:
+def attack(compose: Compose, slow: bool = False, hijack: bool = False) -> int:
     """攻击方只在 attack-net 内打 rtsp-target（DP-09、C-SEC-11）；参数登记于 attack-sim.yaml。"""
-    env: list[str] = []
+    options: list[str] = []
     if slow:
         params = yaml.safe_load(ATTACK_PARAMS.read_text(encoding="utf-8"))["slow"]
-        env = [
+        options = [
             "-e",
             f"HYD_ATTEMPTS={params['attempts']}",
             "-e",
             f"HYD_INTERVAL_S={params['interval_s']}",
         ]
-    res = compose.call("run", "--rm", "--no-deps", "-T", *env, "attack-sim")
+    elif hijack:
+        params = yaml.safe_load(ATTACK_PARAMS.read_text(encoding="utf-8"))["hijack"]
+        options = [
+            "--entrypoint",
+            "rtsp-hijack",
+            "-e",
+            f"HYD_HIJACK_ATTEMPTS={params['attempts']}",
+            "-e",
+            f"HYD_HIJACK_INTERVAL_S={params['interval_s']}",
+        ]
+    res = compose.call("run", "--rm", "--no-deps", "-T", *options, "attack-sim")
     print(res.stdout, end="")
     if res.returncode != 0:
         # attack-sim 跑完总是返回 0（尝试被拒、连接被封禁都算跑完）：非零说明容器没能运行
@@ -148,6 +159,7 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("attack")
     commands.add_parser("attack-slow")
+    commands.add_parser("attack-hijack")
     t = commands.add_parser("tamper")
     t.add_argument("action", choices=["freeze", "replay", "restore"])
     t.add_argument("camera")
@@ -155,7 +167,9 @@ def main() -> int:
     compose = Compose(argv[split + 1 :])
     if args.command == "tamper":
         return tamper(compose, args.action, args.camera)
-    return attack(compose, slow=args.command == "attack-slow")
+    return attack(
+        compose, slow=args.command == "attack-slow", hijack=args.command == "attack-hijack"
+    )
 
 
 if __name__ == "__main__":

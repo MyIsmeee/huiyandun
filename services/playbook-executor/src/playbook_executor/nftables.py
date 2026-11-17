@@ -1,6 +1,7 @@
 """nftables 适配器的 block_ip 动作（TK-051、D-074）：经 privileged-helper 的签名指令封禁源地址。
 
-封禁写入内核集合并带超时，到期由内核解除；verify 列出集合确认元素已生效（D-072）。
+封禁写入内核集合并带超时，到期由内核解除；verify 列出集合确认元素已生效（D-072）。封禁生效后，攻击源与设备
+之间已建立的 TCP 会话由内核回复 RST 切断，其余协议丢弃（规则见 privileged_helper.nft）。
 """
 
 import asyncio

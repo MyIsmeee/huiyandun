@@ -1,0 +1,5 @@
+# 合成样本（R-02）：按 architecture.md §12 的事件契约手写的事件序列，services/correlator/tests/test_rule_samples.py 回放
+source: 合成
+license: 自研，无第三方内容
+anonymization: 不含真实数据；只用演示站点的设备 ID
+description: 规则告警命中、模型来源告警、monitor 告警、其他类别、未登记设备、持续攻击去重、不同设备各自成事件

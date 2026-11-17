@@ -6,7 +6,7 @@
 
 - 协议（`protocol.py`）：Unix 域套接字上一次连接一行 `{"payload", "signature"}`，Ed25519 签名覆盖 payload 原文；拒绝签名不符、时间偏差超过 30 s、随机数重复的指令；IP 须为合法单播地址，`ttl_s` 为 1～86400（C-BE-05）
 - 动作只有三种（`nft.py`）：`block` 把源地址加入集合并设超时、`unblock` 删除（已到期视为成功）、`counters` 读该元素拦截的数据包数与剩余秒数。以参数列表调用 `nft`，不经 shell（SD-04）
-- 启动时创建 `table inet hyd`：集合 `block4` / `block6`（`flags timeout; counter`），forward 与 input 链丢弃其中的源地址；表已存在则保留，其中的封禁照常到期
+- 启动时在一次事务内写入 `table inet hyd`：集合 `block4` / `block6`（`flags timeout; counter`）；forward 链对往来于其中地址的 TCP 报文回复 RST（切断已建立的会话）、其余协议丢弃，input 链对来自其中地址的报文同样处理。可重复执行：已有的封禁照常到期，规则先清空再写入，不会叠加
 - TTL 由内核到期删除元素实现：helper 或 executor 重启都不影响到期解除
 
 ## 运行

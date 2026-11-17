@@ -17,7 +17,9 @@ from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
 ROOT = Path(__file__).resolve().parents[3]
-RULES = load_rules(ROOT / "rules/correlator")
+ALL_RULES = load_rules(ROOT / "rules/correlator")
+# 引擎行为以跨域规则为例逐项验证；各规则自身的样本见 test_rule_samples
+RULES = [r for r in ALL_RULES if r.id == "HYD-X-0001"]
 ATTACK = json.loads((ROOT / "rules/attack/techniques.json").read_text(encoding="utf-8"))
 T0 = datetime(2026, 11, 8, 2, 0, tzinfo=UTC)
 ALERT, INTEGRITY, BEHAVIOR = (
@@ -175,3 +177,17 @@ def test_unknown_technique_logged_and_incident_still_published(
         (incident,) = feed(Engine([rule], ATTACK), (ALERT, alert(0)), (INTEGRITY, integrity(10)))
     assert incident.tactics == ["Credential Access"]
     assert [r.message for r in caplog.records] == ["correlator.technique_unknown"]
+
+
+def test_bruteforce_then_tamper_escalates() -> None:
+    """全部规则同时加载：认证爆破先生成 high 的单域事件（即可封禁），画面随后遭篡改再生成 critical 的跨域事件。"""
+    engine = Engine(ALL_RULES, ATTACK)
+
+    (single,) = engine.feed(ALERT, alert(0))
+    assert (single.rule_id, single.severity) == ("HYD-NET-0101", "high")
+    assert single.model_dump(mode="json")["techniques"] == ["T1110"]
+    assert (str(single.source_ip), single.requires_confirmation) == ("172.30.0.100", False)
+
+    (cross,) = engine.feed(INTEGRITY, integrity(120))
+    assert (cross.rule_id, cross.severity) == ("HYD-X-0001", "critical")
+    assert cross.source_ip == single.source_ip  # 同一攻击源：封禁已生效时后到的处置记为跳过

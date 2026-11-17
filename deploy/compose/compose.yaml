@@ -6,6 +6,7 @@ services:
   postgres:
     image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     profiles: [core]
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: hyd
@@ -25,6 +26,7 @@ services:
   nats:
     image: nats:2.15.1-alpine@sha256:7ae34c25dfd6fe2e01c6483eabef20d796690fdcac6c4d94ca780a6cf9877fde
     profiles: [core]
+    restart: unless-stopped
     # 不使用镜像自带配置：其中含集群示例口令
     command: ["nats-server", "--jetstream", "--store_dir", "/data", "--http_port", "8222"]
     volumes:
@@ -54,6 +56,7 @@ services:
     image: huiyandun/api-server:local
     build: { context: ../.., dockerfile: services/api-server/Dockerfile }
     profiles: [core]
+    restart: unless-stopped
     # 后两者分别加密供应商 API Key 与摄像头口令（C-ST-03、D-101）
     # push_password 只用于新增推流摄像头时显示一次（V-CAM2）
     secrets: [db_app_password, llm_key_secret, device_key_secret, push_password]
@@ -80,6 +83,7 @@ services:
     image: huiyandun/audit-service:local
     build: { context: ../.., dockerfile: services/audit-service/Dockerfile }
     profiles: [core]
+    restart: unless-stopped
     secrets: [db_audit_password]
     depends_on: { migrate: { condition: service_completed_successfully } }
     networks: [core-net]
@@ -97,6 +101,7 @@ services:
     image: huiyandun/llm-gateway:local
     build: { context: ../.., dockerfile: services/llm-gateway/Dockerfile }
     profiles: [core]
+    restart: unless-stopped
     extra_hosts: ["host.docker.internal:host-gateway"]  # 供应商在宿主上时填此名（DP-07）
     networks: [llm-net, llm-egress]
     volumes:
@@ -122,12 +127,14 @@ services:
       - suricata-logs:/var/log/suricata:ro
       - zeek-logs:/zeek/logs:ro
       - correlator-state:/var/lib/correlator
+      - host-probe-alerts:/var/log/host-probe:ro  # 主机探针的告警（格式同 EVE）
       - ../../rules/correlator:/etc/hyd/rules:ro  # 关联规则（architecture.md §12）
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro  # ATT&CK 精简查表（D-070）
       # 由 nvr-sim 正常流量学好的基线快照：没有存盘状态时加载
       - ../../demo/scenarios/behavior-baseline.json:/etc/hyd/behavior-baseline.json:ro
     environment:
       HYD_BEHAVIOR_BASELINE_FILE: /etc/hyd/behavior-baseline.json
+      HYD_HOST_EVE_FILE: /var/log/host-probe/alerts.json
     depends_on: { nats: { condition: service_healthy } }
     networks: [core-net]
     restart: unless-stopped  # 进程退出后自动拉起：告警归一化与关联不因一次错误停止
@@ -137,6 +144,35 @@ services:
     healthcheck:
       # 主循环每 0.5 s 更新心跳文件；10 s 未更新视为卡死
       test: ["CMD", "python3", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/hyd-correlator-alive') > 10)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
+  # 主机轻量探针（PPT"主机探针"模式）：跟随本机的登录日志、守护日志文件，输出与 EVE 同格式的告警交 correlator。
+  # 只读挂载宿主 /var/log，不接入任何网络；HYD_HOST_IP 为本机在被监测网络中的地址（告警的目标地址），
+  # HYD_HOST_LOGS 为要跟随的日志（容器内路径，空格分隔）。只用标准库，不含任何依赖
+  host-probe:
+    image: huiyandun/host-probe:local
+    build: { context: ../.., dockerfile: agents/sensor/host-probe/Dockerfile }
+    profiles: [security]
+    restart: unless-stopped
+    network_mode: none
+    entrypoint: ["sh", "-c", "exec host-probe /var/log/host-probe/alerts.json $$HYD_HOST_LOGS"]
+    environment:
+      HYD_HOST_IP: ${HYD_HOST_IP:-172.30.0.12}
+      HYD_HOST_LOGS: ${HYD_HOST_LOGS:-/host/log/auth.log /host/log/syslog}
+    volumes:
+      - /var/log:/host/log:ro
+      - host-probe-alerts:/var/log/host-probe
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    # 宿主日志多为 640 syslog:adm：只补"读任意文件"这一项能力，不给写与其他权限（挂载本身也是只读）
+    cap_add: [DAC_READ_SEARCH]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/hyd-host-probe-alive') > 10)"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -225,6 +261,7 @@ services:
     image: huiyandun/web-console:local
     build: { context: ../.., dockerfile: web/console/Dockerfile }
     profiles: [core]
+    restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data  # 本地 CA：重建容器后浏览器已导入的根证书仍有效
@@ -242,6 +279,7 @@ services:
   go2rtc:
     image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
     profiles: [vision]
+    restart: unless-stopped
     # 流由 api-server 按摄像头登记表经 API 增删（D-101）；go2rtc 每次增删都写回配置文件，
     # 故启动时把只读的基础配置复制到容器内的临时目录再运行，重启后由 api-server 补齐
     volumes: ["./go2rtc.yaml:/base/go2rtc.yaml:ro"]
@@ -306,6 +344,7 @@ services:
       HYD_VEHICLE_MODEL_FILE: /models/rfdetr_s_v142_512x512.onnx
       HYD_SCENE_MODEL_FILE: /models/efficientvit_seg_l1_ade20k_512.onnx
       HYD_INTEGRITY_MODEL_FILE: /models/dinov2_small.onnx
+      HYD_GEOMETRY_MODEL_FILE: /models/moge2_vits_normal.onnx  # 摄像头自动标定（monocular.py）
     volumes:
       - ../../models/weights:/models:ro  # 摄像头来自登记表 hyd.config.cameras.v1，不读 site.yaml（D-101）
     depends_on:
@@ -364,10 +403,15 @@ services:
     image: huiyandun/suricata:local
     build: { context: ../.., dockerfile: agents/sensor/suricata/Dockerfile }
     profiles: [security]
+    restart: unless-stopped
     # 不经镜像入口脚本（它会 chown 配置目录）。以 root 打开抓包与日志后切换为 suricata 用户，
     # 只保留 NET_RAW、NET_ADMIN、SYS_NICE 并清空能力边界集；NET_ADMIN 只作用于探针自己的网络命名空间
     entrypoint: ["suricata"]
+    # HYD_PUSH_SERVERS：站点的推流接收端（边缘主机上 ingest 对被监测网络的地址，D-103），向它推流是正常接入，
+    # 不按推流劫持（HYD-NET-0002）告警；默认取 ingest 在 ingest-net 的固定地址。以 --set 追加：写进 hyd.yaml 会替换
+    # 镜像自带的全部地址变量
     command: ["--user", "suricata", "--group", "suricata", "--include", "/etc/suricata/hyd.yaml",
+      "--set", "vars.address-groups.HYD_PUSH_SERVERS=${HYD_PUSH_SERVERS:-[172.30.10.10]}",
       "-i", "eth0", "-k", "none"]
     read_only: true
     cap_drop: [ALL]
@@ -393,6 +437,7 @@ services:
     image: huiyandun/zeek:local
     build: { context: ../.., dockerfile: agents/sensor/zeek/Dockerfile }
     profiles: [security]
+    restart: unless-stopped
     command: ["-C", "-i", "af_packet::eth0", "local", "LogAscii::use_json=T"]
     read_only: true
     cap_drop: [ALL]
@@ -411,6 +456,7 @@ services:
   mediamtx:
     image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
     profiles: [demo]
+    restart: unless-stopped
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
       - ../../demo/media:/media:ro
@@ -427,6 +473,7 @@ services:
   rtsp-target:
     image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
     profiles: [demo]
+    restart: unless-stopped
     volumes: ["./rtsp-target.yml:/mediamtx.yml:ro"]
     networks:
       attack-net:
@@ -437,8 +484,9 @@ services:
       timeout: 3s
       retries: 10
 
-  # 受控攻击模拟（DP-09、C-SEC-11）：只对 rtsp-target 发 RTSP 认证重试，触发 HYD-NET-0001。
-  # 一次性执行后退出（红方命令 make attack、make attack-slow 启动，D-105）；只接入 attack-net，网络层只够得到
+  # 受控攻击模拟（DP-09、C-SEC-11）：只对 rtsp-target 发 RTSP 认证重试（触发 HYD-NET-0001），或发推流声明
+  # （make attack-hijack 改用镜像内的 rtsp-hijack，触发 HYD-NET-0002）。
+  # 一次性执行后退出（红方命令 make attack、make attack-slow、make attack-hijack 启动，D-105）；只接入 attack-net，网络层只够得到
   # rtsp-target，碰不到 go2rtc 等。源地址在白名单（172.30.0.0/28）之外，后续处置才能真正封禁它。
   # 行为参数登记于 demo/scenarios/attack-sim.yaml
   attack-sim:
@@ -568,6 +616,7 @@ volumes:
   caddydata:
   suricata-logs:
   suricata-cache:
+  host-probe-alerts:
   correlator-state:
   zeek-logs:
   evidence-data:  # 存证（G-07），只有 evidence-service 挂载

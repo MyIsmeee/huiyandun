@@ -27,7 +27,7 @@ from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 MAX_ITEMS = 20
 TIMEOUT_S = 2.0  # 单次工具执行的上限（借鉴 DeepSeek Harness）
 TAIL_BYTES = 4 * 1024 * 1024  # conn.log 只读末尾，演示期间的会话足够覆盖 60 分钟
-BEHAVIOR = {"fall": "跌倒", "climb": "攀爬"}
+BEHAVIOR = {"fall": "跌倒", "climb": "攀爬", "still": "长时间静止", "fight": "疑似打架"}
 RULE = {"intrusion": "区域入侵", "line_crossing": "越线"}
 SOURCE = {"rule": "规则", "model": "模型"}
 

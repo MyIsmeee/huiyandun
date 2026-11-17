@@ -151,5 +151,9 @@ def test_recorded_clips_all_labeled_and_current_results() -> None:
     assert skipped == []
     summary = ev.summarize(results)
     for kind, s in summary.items():
-        assert s["recall"] == 1.0, (kind, s)
+        # 长时间静止与疑似打架还没有带真值的素材，只要求零误报；有了素材后同样要求全部检出
+        assert s["recall"] in ((1.0, None) if s["events"] == 0 else (1.0,)), (kind, s)
         assert s["false_alarms"] == 0, (kind, s)
+    assert all(
+        summary[k]["events"] > 0 for k in ("fall/suspected", "fall/confirmed", "climb/confirmed")
+    )

@@ -5,6 +5,7 @@
 """
 
 from ipaddress import ip_address
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx2
@@ -28,6 +29,10 @@ class Target(BaseModel):
     api_key: SecretStr | None = None
     model: str | None = None
     timeout_s: float
+    # 全局禁止公网（G-02）：为真时网关按地址实际指向复核，指向公网或无法确认的不发请求（llm_gateway.egress）
+    block_public: bool = False
+    # api-server 给的网络位置标签；测试连接、获取模型列表时用于复核，缺省按内网
+    network: Literal["internal", "public"] = "internal"
 
 
 class ProbeFailure(Exception):

@@ -39,6 +39,7 @@ class FakeCompose:
         self.res = subprocess.CompletedProcess(["docker"], returncode, stdout)
 
     def call(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.args = args
         return self.res
 
 
@@ -53,3 +54,15 @@ def test_attack_container_not_started_fails(capsys: pytest.CaptureFixture[str]) 
     """attack-sim 没能运行（如镜像未构建）时命令失败，提示没有发出攻击流量。"""
     assert redteam.attack(FakeCompose(1, "no such service\n"), slow=False) == 1
     assert "没有发出攻击流量" in capsys.readouterr().err
+
+
+def test_hijack_runs_announce_script_with_registered_params() -> None:
+    """推流劫持改用镜像内的 rtsp-hijack，次数与间隔取自 demo/scenarios/attack-sim.yaml；爆破不带这些参数。"""
+    compose = FakeCompose(0, "rtsp-hijack: 3/3 refused by rtsp://rtsp-target:8554/cam\n")
+    assert redteam.attack(compose, hijack=True) == 0
+    args = list(compose.args)
+    assert args[args.index("--entrypoint") + 1] == "rtsp-hijack" and args[-1] == "attack-sim"
+    assert {"HYD_HIJACK_ATTEMPTS=3", "HYD_HIJACK_INTERVAL_S=2"} <= set(args)
+
+    redteam.attack(compose)
+    assert "--entrypoint" not in compose.args

@@ -1,0 +1,29 @@
+# 关联规则样本（C-SEC-01）：按列表顺序送入引擎（即到达顺序），t 为事件发生时刻（秒）
+# 未写的字段由测试补默认值：告警为 enforce、rule 来源的 auth_bruteforce，画面事件为 rule 来源的 freeze
+cases:
+  - name: 摄像头收到推流请求
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: stream_hijack, rule_id: HYD-NET-0002, technique: T0832 }
+    incidents: [{ requires_confirmation: false }]
+
+  - name: 认证爆破不是推流劫持
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+    incidents: []
+
+  - name: 目标不是登记的摄像头（如未列入 HYD_PUSH_SERVERS 的接收端）
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: null, category: stream_hijack }
+    incidents: []
+
+  - name: monitor 告警不参与关联
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: stream_hijack, mode: monitor }
+    incidents: []
+
+  - name: 攻击持续时不重复生成，停止 5 分钟后再次出现才算新事件
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: stream_hijack }
+      - { t: 60, subject: hyd.security.alert.v1, device_id: cam-02, category: stream_hijack }
+      - { t: 500, subject: hyd.security.alert.v1, device_id: cam-02, category: stream_hijack }
+    incidents: [{ requires_confirmation: false }, { requires_confirmation: false }]

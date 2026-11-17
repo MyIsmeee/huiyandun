@@ -30,13 +30,17 @@ from vision_engine.behavior import Behavior, BehaviorDetector
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIPS = ROOT / "services/vision-engine/tests/clips"
-BEHAVIORS = ("fall", "climb")
+BEHAVIORS = ("fall", "climb", "still", "fight")
 # 计分的类：（行为, 级别）→ 真值开始后此时长内须告警，晚于此即漏检（i-LIDS 的 10 s 检出窗口；
 # 确认跌倒要求倒地不动满 8 s，放宽到 20 s）
 POST_S: dict[tuple[str, str], float] = {
     ("fall", "suspected"): 10.0,
     ("fall", "confirmed"): 20.0,
     ("climb", "confirmed"): 10.0,
+    # 长时间静止的真值起点即开始不动的时刻：门限 120 s、300 s 之后再留 10 s
+    ("still", "suspected"): 130.0,
+    ("still", "confirmed"): 310.0,
+    ("fight", "suspected"): 10.0,
 }
 KINDS = tuple(POST_S)
 PRE_S = 2.0  # 早于真值开始此时长内的告警仍算检出（真值起点的人工标注误差）

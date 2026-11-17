@@ -1,14 +1,20 @@
 # LLM 任务定义（architecture.md §5）：随代码版本化，不在界面开放
 # schema 对应 py-contracts 生成的 Pydantic 模型，本地校验（C-LLM-05、G-12）；prompt 为 prompts/ 下的模板（C-LLM-07）
+# routing.escalate：按事件等级路由。等级在其中的事件"升阶"，公网（云端）供应商优先，用于跨域确认的入侵
+# （critical）的深度研判；其余等级内网（本地）供应商优先，日常研判不产生云端调用。排在前面的一家不可达或超时，
+# 照常转下一家（云端不可用即降级回本地），全部不可用时落到 terminal。"全局禁止公网"开启时公网供应商一律停用，
+# 升阶无从发生。去掉 routing 即恢复为管理员排定的顺序
 incident_report:
   schema: contracts/llm/incident_report.v1.schema.json
   prompt: incident_report/v1.md
   temperature: 0.2
   deadline_s: 60             # 全部供应商尝试的总时限（SC-05）
   terminal: template-only    # 全部失败时由报告服务落模板报告，字段全部来自结构化事件（C-LLM-09）
+  routing: { escalate: [critical] }
 incident_investigation:      # AI 安全值班员（US-11）：每次调用为一轮，轮数上限 8 由 api-server 执行
   schema: contracts/llm/incident_investigation.v1.schema.json
   prompt: incident_investigation/v2.md  # v2：增加 get_baseline（TK-115）
   temperature: 0.1
   deadline_s: 60             # 单轮上限；调用方另传本次调查剩余时间，取较小者（SC-08）
   terminal: rule-only        # 全部失败时只显示规则结论，界面注明"AI 研判不可用"（FR-1105）
+  routing: { escalate: [critical] }

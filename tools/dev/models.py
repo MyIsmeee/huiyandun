@@ -37,7 +37,7 @@ FIELDS = (
 # pose：人体检测与骨骼关键点；detection：人员与车辆检测，只到类别（不识别车牌）；
 # segmentation：场景语义分割，只取地面、墙、树等环境类别（REUSE-25）；
 # embedding：整帧画面嵌入，只用于画面可信度（REUSE-23），不对人员单独取特征
-TASKS = {"pose", "detection", "segmentation", "embedding"}
+TASKS = {"pose", "detection", "segmentation", "embedding", "geometry"}
 # G-08 白名单中适用于模型权重的许可证（SPDX）
 LICENSES = {"Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0"}
 TIMEOUT_S = 300  # 单个压缩包下载上限
