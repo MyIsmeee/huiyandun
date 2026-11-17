@@ -190,3 +190,21 @@ def test_model_runs_one_inference_at_a_time() -> None:
         t.join()
 
     assert session.peak == 1
+
+
+def test_people_never_seen_standing_are_left_to_the_rules() -> None:
+    """坐在桌前、腿被挡的人：模型再认作跌倒或推人也不提示、不确认（现场：两人一前一后坐着被确认为打架）。"""
+    seated = SCORES.copy()
+    seated[13:17] = 0.0  # 膝、踝被桌子挡住
+    detector = BehaviorDetector([], ActionRecognizer(cast(ActionModel, Stub(fall=0.9))))
+    found = []
+    for now, points in hold(pose("stand"), 0, 6):
+        found += detector.update(np.array([7]), points[None], seated[None], now)
+    assert found == []
+
+    detector = BehaviorDetector([], ActionRecognizer(cast(ActionModel, Stub(fight=0.9))))
+    found = []
+    for i in range(round(5 * FPS)):
+        points = np.stack([person(300, i), person(380, i)])
+        found += detector.update(np.array([1, 2]), points, np.tile(seated, (2, 1)), i / FPS)
+    assert [b for b in found if b.level == "confirmed"] == []

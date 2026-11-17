@@ -25,6 +25,7 @@ CONFIRM_S 才"确认"，进入物理告警，此后每 REPEAT_S 重发。期间�
   FALL_MODEL_PROB），不必再等倒地不动满 CONFIRM_S 即确认。模型只认动作过程，倒下之后静躺时概率回落，
   所以只作提前确认的依据；没看到跌倒过程（被挡、一出现就躺着）时仍按原规则确认。规则没看到倒地（朝镜头倒、
   倒在桌后）而模型的跌倒概率不低于 FALL_MODEL_ALONE_PROB 时，单独发"疑似"，只在控制台提示
+- 前提：模型只对近期看到站着的人起作用（_stood）。坐在桌前的人腿被挡、关键点抖动，模型会误认作跌倒或推人
 - 打架：两人伸手可及、躯干长短相当（同一深度）、髋部没有重合（不是同一人被拆成的两条轨迹），近期有双方手腕
   快速运动的帧，且模型近 FIGHT_MODEL_WINDOW_S 内至少 FIGHT_MODEL_HITS 次认为在打人、踢人或推人（三类概率之和
   不低于 FIGHT_MODEL_PROB），即确认、进入物理告警；只有规则成立时仍为疑似
@@ -89,6 +90,13 @@ FIGHT_MIN_APART = 0.6
 # 近 FIGHT_MODEL_WINDOW_S 内满足几何条件（双方手腕都在快速运动、两人整体没有一起移动）的帧数下限：
 # 模型与规则同时成立才确认，只靠模型时坐着聊天、并排站着也会被认作推人
 FIGHT_MODEL_ACTIVE_FRAMES = 2
+# 模型参与判定前须近期看到站姿（躯干直立、腿伸出、髋部离地）不少于 STOOD_FRAMES 帧：
+# 坐在桌前的人腿被挡、关键点抖动，模型会把他们认作跌倒或推人（现场实测：两人一前一后坐着、画面上重叠，
+# 被确认为打架；坐着的人被提示跌倒）。跌倒、打架都发生在站着的人身上，从椅子上滑落交给几何规则
+FALL_MODEL_STOOD_S = 8.0  # 跌倒：模型峰值多在倒下后 1～3 s，再到发疑似约 2 s
+FIGHT_MODEL_STOOD_S = 5.0
+STOOD_FRAMES = 2
+STOOD_KEEP_S = 10.0
 VANISH_S = 3.0  # 轨迹消失满此时长、附近没有新轨迹出现，才判为原地消失
 VANISH_STAND_S = 3.0  # 消失前此时长内须看到站姿：坐着的人俯身到桌下不算
 VANISH_STAND_FRAMES = 3  # 上述时长内站姿帧数的下限
@@ -412,6 +420,11 @@ class _Pair:
     confirmed: float | None = None  # 上次按动作模型确认的时刻
 
 
+def _stood(track: "_Track", now: float, within: float) -> bool:
+    """近 within 秒内看到站姿不少于 STOOD_FRAMES 帧。"""
+    return sum(1 for t in track.stands if now - t <= within) >= STOOD_FRAMES
+
+
 def _lingered(trail: list[tuple[float, np.ndarray, float]]) -> bool:
     """消失前 VANISH_SPEED_S 内髋部移动不超过 VANISH_MAX_SPEED（躯干长度 / 秒）：站着或慢慢挪步，
     不是边走边消失。"""
@@ -427,6 +440,9 @@ class _Track:
     seen: float
     first: float = 0.0  # 首次出现的时刻
     stood: list[float] = field(default_factory=list)  # 近 VANISH_STAND_S 内站姿帧的时刻
+    stands: list[float] = field(
+        default_factory=list
+    )  # 近 STOOD_KEEP_S 内站姿帧的时刻：动作模型的前提
     stand_score: float = 0.0  # 最近一次站姿帧的关键点置信度
     hip: tuple[np.ndarray, float] | None = None  # 最近一次可见的（髋部, 躯干长度）
     box: tuple[float, float, float, float] | None = None  # 最近一次可见关键点的外框
@@ -534,7 +550,7 @@ class BehaviorDetector:
             hip = hip_and_torso(points, kp_scores)
             model = (
                 self._actions.fall_peak(int(track_id), now, FALL_MODEL_RECENT_S)
-                if self._actions is not None
+                if self._actions is not None and _stood(track, now, FALL_MODEL_STOOD_S)
                 else 0.0
             )
             for level, start, mean in track.fall.update(ok, score, hip, now, model):
@@ -583,8 +599,10 @@ class BehaviorDetector:
             and measure.hip_ratio >= VANISH_STAND_HIP
         ):
             track.stood.append(now)
+            track.stands.append(now)
             track.stand_score = measure.score
         track.stood = [t for t in track.stood if now - t <= VANISH_STAND_S]
+        track.stands = [t for t in track.stands if now - t <= STOOD_KEEP_S]
 
     def _vanishes(
         self, present: set[int], frame_size: tuple[int, int], now: float
@@ -678,6 +696,8 @@ class BehaviorDetector:
             return None
         active = sum(1 for t, ok, _ in pair.frames if ok and now - t <= FIGHT_MODEL_WINDOW_S)
         if active < FIGHT_MODEL_ACTIVE_FRAMES:
+            return None
+        if not all(_stood(self._tracks[i], now, FIGHT_MODEL_STOOD_S) for i in ids):
             return None
         hits = self._actions.fight_hits(ids, now, FIGHT_MODEL_WINDOW_S, FIGHT_MODEL_PROB)
         if hits < FIGHT_MODEL_HITS:
