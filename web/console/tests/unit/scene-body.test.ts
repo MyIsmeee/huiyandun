@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { body, seatedByScale } from "../../src/scene/body";
+import { body, isUpright, seatedByScale } from "../../src/scene/body";
 import { cameraShot, sceneView } from "../../src/scene/layout";
 import { facing, figure, type Figure, type Vec3 } from "../../src/scene/pose";
 
@@ -117,12 +117,15 @@ describe("body", () => {
     ["陡峭俯视下头朝远处躺倒（画面中肩在髋上方）", HIGH, NEAR, 0],
     ["俯拍下横向躺倒", HIGH, AT, Math.PI / 2],
   ] as const) {
-    it(`${name}：人形贴地，不被竖起来`, () => {
+    it(`${name}：有跌倒判定时人形贴地，不被竖起来；没有跌倒判定时按直立`, () => {
       const { keypoints, bbox } = view(pose, place(STANDING, at, front, true));
-      const f = body(keypoints, bbox, pose, at, null, null);
+      const f = body(keypoints, bbox, pose, at, null, null, true);
 
       expect(f).not.toBeNull();
       expect(Math.max(...heights(f))).toBeLessThan(0.5);
+      // 躺倒只跟随视觉引擎的跌倒判定：没有判定时不用三维重建，由调用方按画面绘制（关键点残缺时按误差取躺倒，
+      // 会把站着的人画倒，cam-05 实测）
+      expect(body(keypoints, bbox, pose, at, null, null)).toBeNull();
     });
   }
 
@@ -373,10 +376,22 @@ describe("body", () => {
     expect(body(keypoints, bbox, WALL, AT, null, null)?.head.at[1]).toBeGreaterThan(1.5);
   });
 
+  it("正对镜头站立（3 m 高、俯角 30°、5 m 外）：没有跌倒判定时按直立，不按误差取成躺倒（cam-05 实测的倒着站）", () => {
+    const { keypoints, bbox } = view(WALL, place(STANDING, AT, TOWARD_CAMERA));
+    const f = body(keypoints, bbox, WALL, AT, null, null);
+
+    expect(f !== null && isUpright(f)).toBe(true);
+    expect(Math.max(...heights(f))).toBeGreaterThan(1);
+  });
+
   it("贴近镜头、画面中显得过宽：肩宽不超过 1.5 倍标准", () => {
     const wide = STANDING.map(([l, u, f], i): Vec3 => (i === 5 || i === 6 ? [l * 4, u, f] : [l, u, f]));
     const { keypoints, bbox } = view(WALL, place(wide, AT, TOWARD_CAMERA));
-    const line = body(keypoints, bbox, WALL, AT, null, null)?.bones[2];
+    // 肩宽失真到 4 倍的画面在直立假设下重建不出直立人形：没有跌倒判定时不用三维重建（由画面平面人形兜底），
+    // 有跌倒判定时按误差取舍，肩宽同样截到 1.5 倍标准
+    const plain = body(keypoints, bbox, WALL, AT, null, null);
+    expect(plain === null || isUpright(plain)).toBe(true);
+    const line = body(keypoints, bbox, WALL, AT, null, null, true)?.bones[2];
 
     expect(line && length(line.from, line.to)).toBeLessThanOrEqual(0.38 * 1.5 + 1e-6);
   });

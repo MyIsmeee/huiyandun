@@ -11,7 +11,7 @@ const AREA = { id: "area-02", name: "办公室", width_m: 12, depth_m: 10, items
 const DEVICE = {
   id: "cam-05", name: "cam-05", type: "camera", ip: "192.168.5.229", mode: "host_probe", state: "normal", alert_severity: null,
   camera: { stream: "cam-05", area_id: "area-02", pose: { x: 0.5, y: 0.5, height_m: 1.8, yaw_deg: 45, pitch_deg: -10, hfov_deg: 75, range_m: 15 },
-    calibration: [], mapping: "estimated", homography: null, reproj_error_m: null },
+    calibration: [], mapping: "estimated", homography: null, reproj_error_m: null, climb_lines: [], rules: [] },
 } as never;
 const FRAMES = {
   frames: [{ schema_version: "1.1.0", event_id: "00000000-0000-4000-8000-000000000005", ts: "2026-11-16T08:00:00Z", camera_id: "cam-05", surfaces: [], walls: [], trees: [], markings: [],

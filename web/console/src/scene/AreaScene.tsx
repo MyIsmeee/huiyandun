@@ -66,6 +66,13 @@ export function AssetModels({ items, ghost = false, onPick }: { items: SceneItem
   return <Models files={files} groups={groups} ghost={ghost} onPick={pick} />;
 }
 
+/** 按给定矩阵摆放资产（自动识别场景中的电器、箱包与卫浴，measuredModels.ts）：与搭建场景共用一次加载的资产库 */
+export function PlacedModels({ groups }: { groups: Map<string, Matrix4[]> }) {
+  const catalog = useCatalog();
+  const files = useMemo(() => [...new Set([...catalog.values()].map((a) => `/models/${a.file}`))].sort(), [catalog]);
+  return <Models files={files} groups={groups} ghost={false} />;
+}
+
 function Models(props: {
   files: string[];
   groups: Map<string, Matrix4[]>;

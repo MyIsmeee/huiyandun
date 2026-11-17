@@ -12,13 +12,16 @@ export default defineConfig({
     timezoneId: "Asia/Shanghai",
     // 无 GPU 的环境以 SwiftShader 软件渲染 WebGL，场景截图需要
     launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] },
-    // 预置降低动效开关为关闭；主题只有浅色一套（D-121）
+    // 预置降低动效开关为关闭；主题只有浅色一套（D-121）。主视图预置为态势：多数用例看 3D 场景，监控墙用例自行切换
     storageState: {
       cookies: [],
       origins: [
         {
           origin: "http://localhost:4173",
-          localStorage: [{ name: "hyd-theme", value: JSON.stringify({ state: { reducedMotion: false }, version: 0 }) }],
+          localStorage: [
+            { name: "hyd-theme", value: JSON.stringify({ state: { reducedMotion: false }, version: 0 }) },
+            { name: "hyd.main", value: "overview" },
+          ],
         },
       ],
     },

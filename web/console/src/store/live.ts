@@ -11,10 +11,13 @@ export type Incident = Schemas["incident.schema"];
 export type Execution = Schemas["playbook_execution.schema"];
 type AiFrame = Schemas["AiInvestigation"];
 export type Site = Schemas["Site"];
+export type Disposition = Schemas["AlertDisposition"];
 /** 告警列表的单条告警：网络告警、行为事件或轨迹规则事件（D-077） */
 export type Alert = SecurityAlert | Behavior | RuleEvent;
 /** 物理告警（行为事件与轨迹规则事件）带 camera_id，网络告警带 device_id */
 export const isPhysical = (alert: Alert): alert is Behavior | RuleEvent => "camera_id" in alert;
+/** 物理域关联事件（rules/correlator/HYD-VIS-*）：只引用画面与行为事件，没有攻击源、不触发封禁 */
+export const isPhysicalIncident = (incident: Pick<Incident, "rule_id">) => incident.rule_id.startsWith("HYD-VIS-");
 type Frame = Schemas["WsFrame"];
 
 /** 告警列表与关联事件的保留条数，与连接补推的上限一致（D-077） */
@@ -27,6 +30,27 @@ export const TRAIL_MS = 10_000;
 export const TRACK_TTL_MS = 2_000;
 
 export type TargetClass = Track["object_class"];
+
+/** 疑似行为（倒地满 2 s 等）在画面上提示此时长；确认后改为持续标记 */
+export const SUSPECT_MARK_MS = 10_000;
+/** 越线是瞬时事件，画面上标记此时长 */
+export const PULSE_MARK_MS = 5_000;
+
+/** 画面告警标记：触发行为或规则告警的人在监控墙画面上加框闪烁，标出行为与持续时长 */
+export interface Mark {
+  camera_id: string;
+  track_id: number;
+  kind: Behavior["behavior"] | RuleEvent["rule_type"];
+  level: Behavior["level"];
+  /** 规则名称（区域入侵、越线）；行为事件为 null */
+  name: string | null;
+  /** 状态开始的时刻（毫秒）：行为取开始时刻，区域取确认进入时刻，越线取越线时刻 */
+  since: number;
+  /** 到此时刻（毫秒）不再标记；null 为持续到行为解除或离开区域 */
+  until: number | null;
+  /** 收到的本地时刻：目标暂未出现时据此宽限 */
+  seen: number;
+}
 
 /** 检出目标：人员或车辆（FR-102） */
 export interface Target {
@@ -57,6 +81,10 @@ interface LiveState {
   targets: Record<string, Target>;
   /** 每台摄像头最近一次进入物理告警的行为事件，供事件卡显示；疑似跌倒不进入物理告警，不记入 */
   behaviors: Record<string, Behavior>;
+  /** 画面告警标记，键同 targets（"摄像头/track_id"） */
+  marks: Record<string, Mark>;
+  /** 各告警最近一次处置，键为 event_id */
+  dispositions: Record<string, Disposition>;
   /** 单条告警，新的在前，按 event_id 去重（连接补推与实时转发可能重复） */
   alerts: Alert[];
   /** 关联事件，新的在前，按 id 去重 */
@@ -77,6 +105,8 @@ export const useLive = create<LiveState>()(() => ({
   devices: {},
   targets: {},
   behaviors: {},
+  marks: {},
+  dispositions: {},
   alerts: [],
   incidents: [],
   executions: {},
@@ -97,9 +127,14 @@ export function receive(frame: Frame, now: number): void {
     const device = data as Device;
     const { id, state } = device;
     // 退出物理告警即清除行为事件：再次告警时事件卡不显示上一次的行为、不按旧 track_id 标记人员
+    const alerting = state === "physical_alert" || state === "both";
     useLive.setState((s) => ({
       devices: { ...s.devices, [id]: device },
-      behaviors: drop(s.behaviors, id, state === "physical_alert" || state === "both"),
+      behaviors: drop(s.behaviors, id, alerting),
+      // 行为告警解除即撤下画面标记；区域标记随规则事件的 end 撤下
+      marks: alerting
+        ? s.marks
+        : Object.fromEntries(Object.entries(s.marks).filter(([, m]) => !(m.camera_id === id && m.until === null && !isRule(m.kind)))),
     }));
   }
   if (frame.channel === "site") applySite(data as Site);
@@ -117,6 +152,11 @@ export function receive(frame: Frame, now: number): void {
   if (frame.channel === "alerts" && "behavior" in (data as object) && (data as Behavior).level !== "suspected") {
     const behavior = data as Behavior;
     useLive.setState((s) => ({ behaviors: { ...s.behaviors, [behavior.camera_id]: behavior } }));
+  }
+  if (frame.channel === "alerts") mark(data as Alert, now);
+  if (frame.channel === "dispositions") {
+    const disposition = data as Disposition;
+    useLive.setState((s) => ({ dispositions: { ...s.dispositions, [disposition.event_id]: disposition } }));
   }
   if (frame.channel === "incidents") {
     const incident = data as Incident;
@@ -166,9 +206,50 @@ export function applySite(site: Site): void {
       }),
     ),
     behaviors: keep(s.behaviors),
+    marks: Object.fromEntries(Object.entries(s.marks).filter(([, m]) => ids.has(m.camera_id))),
     // 删除的摄像头的目标立即移除，不等 2 s 过期
     targets: Object.fromEntries(Object.entries(s.targets).filter(([, t]) => ids.has(t.camera_id))),
   }));
+}
+
+const isRule = (kind: Mark["kind"]) => kind === "intrusion" || kind === "line_crossing";
+
+/** 按行为事件与规则事件更新画面告警标记 */
+function mark(alert: Alert, now: number) {
+  if (!isPhysical(alert)) return;
+  const key = `${alert.camera_id}/${alert.track_id}`;
+  const { camera_id, track_id, level } = alert;
+  useLive.setState((s) => {
+    const prev = s.marks[key];
+    if ("rule_type" in alert && alert.phase === "end") {
+      return prev?.kind === alert.rule_type ? { marks: drop(s.marks, key, false) } : {};
+    }
+    // 已确认、仍在持续的标记不被同一人的疑似事件覆盖
+    if (level === "suspected" && prev?.level === "confirmed" && prev.until === null) return {};
+    const next: Mark =
+      "rule_type" in alert
+        ? {
+            camera_id,
+            track_id,
+            kind: alert.rule_type,
+            level,
+            name: alert.rule_name,
+            since: Date.parse(alert.since) || now,
+            until: alert.phase === "pulse" ? now + PULSE_MARK_MS : null,
+            seen: now,
+          }
+        : {
+            camera_id,
+            track_id,
+            kind: alert.behavior,
+            level,
+            name: null,
+            since: Date.parse(alert.ts_start) || now,
+            until: level === "suspected" ? now + SUSPECT_MARK_MS : null,
+            seen: now,
+          };
+    return { marks: { ...s.marks, [key]: next } };
+  });
 }
 
 function move(track: Track, now: number) {
@@ -197,4 +278,8 @@ export function prune(now: number): void {
     next[key] = trail.length === target.trail.length ? target : { ...target, trail };
   }
   if (changed) useLive.setState({ targets: next });
+  // 到期的标记与已离开画面的人的标记撤下；行为事件可能早于该人的位置推送到达，宽限 TRACK_TTL_MS
+  const { marks } = useLive.getState();
+  const live = Object.entries(marks).filter(([key, m]) => (m.until === null || m.until > now) && (key in next || now - m.seen <= TRACK_TTL_MS));
+  if (live.length !== Object.keys(marks).length) useLive.setState({ marks: Object.fromEntries(live) });
 }

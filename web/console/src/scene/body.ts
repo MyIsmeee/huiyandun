@@ -210,7 +210,6 @@ export function body(
   const turn = torsoPx > 0 ? Math.acos(Math.min(1, ratio / torsoPx)) : 0;
 
   // 坐姿：脚踝看不见时按两种假设的画面尺度判断（见 body 的说明）；大腿在画面中接近水平时直接按坐姿
-  const legsHidden = ![13, 14, 15, 16].some((i) => seen[i]);
   const kneePx = px([13, 14]);
   const thighFlat = kneePx !== null && !anklePx && Math.abs(kneePx[1] - hipPx[1]) < SEATED_THIGH_RATIO * (hipPx[1] - shoulderPx[1]);
   const hipRay = ray(hipPx);
@@ -236,11 +235,12 @@ export function body(
   const lying = build(rays, ray, cam.eye, foot, hipPx, shoulderPx, left, turn, scaleOf(rays, cam.eye, foot, false), false);
   // 画面中躯干直立（竖直分量大于水平分量）用于两种假设误差相近时取舍
   const gap = Math.abs(upright.error - lying.error);
-  // 腿全看不清而画面中躯干直立、画面尺度又不像坐着：多是矮墙、柜台后站着的人，按直立呈现（D-057）
-  const chosen =
-    legsHidden && looksUpright && !down
-      ? upright
-      : down && gap < DEGENERATE_M
+  // 躺倒只跟随视觉引擎的跌倒判定（down，疑似或确认）：没有判定时一律按直立假设重建。按误差在两种假设间取舍，
+  // 正对镜头站立（3 m 高、俯角 30°、5 m 外）就会取成躺倒，被画面边缘截断、关键点残缺的人更会重建成躺倒甚至头朝下
+  // （cam-05 实测，2026-11-17），人形与告警互相矛盾。有跌倒判定时仍按误差取舍，误差相近时按画面中躯干是否直立
+  const chosen = !down
+    ? upright
+    : gap < DEGENERATE_M
       ? lying
       : gap < TIE_M
         ? looksUpright
@@ -249,7 +249,22 @@ export function body(
         : upright.error < lying.error
           ? upright
           : lying;
-  return toFigure(chosen, anklePx !== null, front);
+  const result = toFigure(chosen, anklePx !== null, front);
+  // 直立假设下关键点仍残缺到重建出倾倒或倒立（躯干倾斜超过 UPRIGHT_MAX_TILT、头低于肩）时不用三维重建，
+  // 由调用方退回按画面绘制的人形（pose.figure）
+  return down || isUpright(result) ? result : null;
+}
+
+/** 躯干偏离竖直的上限（弧度）：超过即不算直立 */
+const UPRIGHT_MAX_TILT = Math.PI / 4;
+
+/** 人形是否直立：躯干（肩中 → 髋中）偏离竖直不超过 UPRIGHT_MAX_TILT，且头在肩之上 */
+export function isUpright(f: Figure): boolean {
+  const torso = f.bones.find((bone) => bone.part === "torso");
+  if (!torso) return true;
+  const rise = torso.from[1] - torso.to[1];
+  const across = Math.hypot(torso.from[0] - torso.to[0], torso.from[2] - torso.to[2]);
+  return rise > 0 && Math.atan2(across, rise) <= UPRIGHT_MAX_TILT && f.head.at[1] > torso.from[1];
 }
 
 function build(

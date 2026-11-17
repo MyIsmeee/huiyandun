@@ -1,7 +1,8 @@
-import { House, type LucideIcon, Minus, Plus, RotateCw } from "lucide-react";
+import { Box, House, Image as ImageIcon, type LucideIcon, Minus, Plus, RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useConnection } from "../store/connection";
 import { prefersReducedMotion } from "../theme/store";
+import { toggleSceneMode, useSceneMode } from "./Backdrop";
 import { focusOn, moveCamera, overview, rotated, useCamera, zoomed } from "./camera";
 import { type Pose, ZOOM_MAX, ZOOM_MIN } from "./layout";
 
@@ -21,8 +22,9 @@ export function useAnimate(): () => boolean {
  * 视角控件（V-I1、V-I5，设计 150 §3）：放大、缩小、旋转 90°、返回总览，竖排浮在场景右下、告警与详情卡左侧
  * （1366 宽下顶部一行已被指标卡与区域切换占满）
  */
-export function CameraControls() {
+export function CameraControls({ photo = false }: { photo?: boolean }) {
   const goal = useCamera((s) => s.goal);
+  const mode = useSceneMode((s) => s.mode);
   // 跟随视角下机位由目标或摄像头决定，只有"返回总览"可用（D-058）
   const focused = useCamera((s) => s.focus !== null);
   const animate = useAnimate();
@@ -47,6 +49,15 @@ export function CameraControls() {
       <ControlButton label="返回总览" disabled={false} onClick={() => (focused ? focusOn(null, animate()) : moveCamera(overview(goal), animate()))}>
         <House aria-hidden className="size-4" />
       </ControlButton>
+      {photo && (
+        <>
+          <span aria-hidden className="mx-1 my-1 h-px bg-border" />
+          {/* 实景底图与白模切换：只在自动识别的场景带有底图时出现 */}
+          <ControlButton label={mode === "photo" ? "切换为白模" : "切换为实景"} disabled={false} onClick={toggleSceneMode}>
+            {mode === "photo" ? <Box aria-hidden className="size-4" /> : <ImageIcon aria-hidden className="size-4" />}
+          </ControlButton>
+        </>
+      )}
     </div>
   );
 }

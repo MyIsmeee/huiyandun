@@ -1,7 +1,23 @@
-import { useMemo } from "react";
-import { BoxGeometry, type BufferGeometry, CylinderGeometry, DoubleSide, Shape, ShapeGeometry, SphereGeometry, TorusGeometry } from "three";
+import { useEffect, useMemo } from "react";
+import {
+  BoxGeometry,
+  type BufferGeometry,
+  CylinderGeometry,
+  DoubleSide,
+  Euler,
+  Matrix4,
+  Quaternion,
+  Shape,
+  ShapeGeometry,
+  SphereGeometry,
+  TorusGeometry,
+  Vector3,
+} from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { SceneFrame } from "../editor/recognition";
-import { MATERIALS } from "./assets";
+import { PlacedModels } from "./AreaScene";
+import { MATERIALS, useCatalog } from "./assets";
+import { measuredModels } from "./measuredModels";
 import type { Camera } from "./devices";
 import { furniture, type Piece, type Tone } from "./furniture";
 
@@ -49,11 +65,13 @@ export function objectParts(o: SceneFrame["objects"][number], camera?: Point): P
   const toward = camera ? (camera[0] - center[0]) * Math.sin(base) + (camera[1] - center[1]) * Math.cos(base) : 1;
   const angle = toward < 0 ? base + Math.PI : base;
   const [c, s] = [Math.cos(angle), Math.sin(angle)];
-  return furniture(o.class, o.kind, length, width, o.height_m).pieces.map((piece) => {
+  // 放在桌面、柜顶上的小件物品从 base_m 起画
+  const lift = o.base_m ?? 0;
+  return furniture(o.class, o.kind, length, width, Math.max(o.height_m - lift, 0.05)).pieces.map((piece) => {
     const [x, y, z] = piece.at;
     return {
       geometry: geometryOf(piece),
-      position: [center[0] + x * c + z * s, y, center[1] - x * s + z * c],
+      position: [center[0] + x * c + z * s, y + lift, center[1] - x * s + z * c],
       rotation: angle + (piece.yaw ?? 0),
       color: TONES[piece.tone],
     };
@@ -68,6 +86,9 @@ export function objectParts(o: SceneFrame["objects"][number], camera?: Point): P
 export function MeasuredScene({ frames, cameras = [] }: { frames: SceneFrame[]; cameras?: Camera[] }) {
   // 只按摄像头位置重建几何：cameras 随状态推送逐次换新数组
   const eyes = JSON.stringify(Object.fromEntries(cameras.map((c) => [c.id, [c.pose.x, c.pose.y]])));
+  const catalog = useCatalog();
+  // 电器、箱包与卫浴摆放模型库中的对应模型，其余物体按实测尺寸拼画
+  const models = useMemo(() => measuredModels(frames, catalog, JSON.parse(eyes) as Record<string, Point>), [frames, catalog, eyes]);
   const parts = useMemo(() => {
     const at = JSON.parse(eyes) as Record<string, Point>;
     const list: Part[] = [];
@@ -82,24 +103,29 @@ export function MeasuredScene({ frames, cameras = [] }: { frames: SceneFrame[]; 
           list.push(box(length, wall.height_m, WALL_T, [(ax + bx) / 2, (ay + by) / 2], wall.height_m / 2, -Math.atan2(by - ay, bx - ax), MATERIALS.wall));
         }
       }
-      for (const o of frame.objects) list.push(...objectParts(o, eye));
+      for (const o of frame.objects) if (!models.placed.has(o)) list.push(...objectParts(o, eye));
       for (const t of frame.trees) {
         list.push({ geometry: new CylinderGeometry(0.08, 0.1, t.height_m * 0.5, 8), position: [t.x, t.height_m * 0.25, t.y], rotation: 0, color: MATERIALS.furniture });
         list.push({ geometry: new SphereGeometry(Math.max(0.3, t.height_m * 0.25), 12, 8), position: [t.x, t.height_m * 0.7, t.y], rotation: 0, color: MATERIALS.canopy });
       }
     }
-    return list;
-  }, [frames, eyes]);
+    return byColor(list.map(({ geometry, position, rotation, color }) => ({ geometry: placed(geometry, position, rotation), color })));
+  }, [frames, eyes, models]);
   const floors = useMemo(
     () =>
-      frames.flatMap((f) =>
-        f.surfaces.map((s) => {
-          const shape = new Shape(s.polygon.map(([x = 0, y = 0]) => ({ x, y }) as never));
-          return { geometry: new ShapeGeometry(shape), color: s.class === "grass" ? MATERIALS.grass : MATERIALS.plaza };
-        }),
+      byColor(
+        frames.flatMap((f) =>
+          f.surfaces.map((s) => {
+            const shape = new Shape(s.polygon.map(([x = 0, y = 0]) => ({ x, y }) as never));
+            return { geometry: new ShapeGeometry(shape), color: s.class === "grass" ? MATERIALS.grass : MATERIALS.plaza };
+          }),
+        ),
       ),
     [frames],
   );
+  // 几何经 geometry 属性传入，R3F 卸载时不代为释放：识别结果每 10 分钟更新一次，换新时释放旧的，免得显存逐次累积
+  useEffect(() => () => parts.forEach(({ geometry }) => geometry.dispose()), [parts]);
+  useEffect(() => () => floors.forEach(({ geometry }) => geometry.dispose()), [floors]);
   return (
     <group raycast={() => undefined}>
       {floors.map(({ geometry, color }, i) => (
@@ -108,11 +134,39 @@ export function MeasuredScene({ frames, cameras = [] }: { frames: SceneFrame[]; 
           <meshLambertMaterial color={color} side={DoubleSide} />
         </mesh>
       ))}
-      {parts.map(({ geometry, position, rotation, color }, i) => (
-        <mesh key={i} geometry={geometry} position={position} rotation-y={rotation} castShadow receiveShadow raycast={() => undefined}>
+      {parts.map(({ geometry, color }, i) => (
+        <mesh key={i} geometry={geometry} castShadow receiveShadow raycast={() => undefined}>
           <meshLambertMaterial color={color} />
         </mesh>
       ))}
+      <PlacedModels groups={models.groups} />
     </group>
   );
+}
+
+const [offset, turn, unit] = [new Vector3(), new Quaternion(), new Vector3(1, 1, 1)];
+const yaw = new Euler();
+const matrix = new Matrix4();
+
+/** 零件几何烘焙到场景坐标：先绕竖直轴转 rotation，再平移到 position */
+function placed(geometry: BufferGeometry, position: [number, number, number], rotation: number): BufferGeometry {
+  return geometry.applyMatrix4(matrix.compose(offset.set(...position), turn.setFromEuler(yaw.set(0, rotation, 0)), unit));
+}
+
+/**
+ * 同色的几何合并为一个网格（V-P1）：白模的墙、家具零件可达数百件，逐件一个网格时绘制次数随之增长，阴影再翻一倍。
+ * 合并后绘制次数只与色调数有关；合并完的源几何即释放
+ */
+function byColor(list: { geometry: BufferGeometry; color: string }[]): { geometry: BufferGeometry; color: string }[] {
+  const groups = new Map<string, BufferGeometry[]>();
+  for (const { geometry, color } of list) {
+    const group = groups.get(color);
+    if (group) group.push(geometry);
+    else groups.set(color, [geometry]);
+  }
+  return [...groups].flatMap(([color, geometries]) => {
+    const merged = mergeGeometries(geometries);
+    geometries.forEach((g) => g.dispose());
+    return merged ? [{ geometry: merged, color }] : [];
+  });
 }

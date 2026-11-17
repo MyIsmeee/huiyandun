@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { components } from "../../api/schema";
 import { api, ApiError } from "../../lib/api";
 import { useConnection } from "../../store/connection";
-import { type Alert, type Execution, type Incident, MAX_INCIDENTS, useLive } from "../../store/live";
+import { type Alert, type Execution, type Incident, isPhysicalIncident, MAX_INCIDENTS, useLive } from "../../store/live";
 import { useSelection } from "../../store/selection";
 import { formatStamp } from "../ConnectionStatus/ConnectionStatus";
 
@@ -71,7 +71,10 @@ export function timelineOf(
 ): TimelineNode[] {
   const hits = new Set(incident.hit_path);
   const first = alerts.filter((a) => hits.has(a.event_id)).map((a) => Date.parse(a.ts));
-  const firstAt = first.length > 0 ? Math.min(...first) : null;
+  const physical = isPhysicalIncident(incident);
+  // 画面事件（冻结、遮挡等）不进告警栏：物理域事件找不到命中告警时，以关联事件生成时刻代替（引擎命中即生成）
+  const firstAt = first.length > 0 ? Math.min(...first) : physical ? Date.parse(incident.created_at) : null;
+  const unblocked = physical ? "不涉及封禁" : null;
 
   let ai: Pick<TimelineNode, "at" | "reached" | "note">;
   if (investigation?.verdict) {
@@ -107,9 +110,9 @@ export function timelineOf(
           : null
         : execution
           ? (EXECUTION_NOTE[execution.state] ?? null)
-          : "未处置",
+          : (unblocked ?? "未处置"),
     },
-    { key: "released", label: "解除", at: parse(times.rolled_back), reached: released, note: released ? null : "封禁中或未处置" },
+    { key: "released", label: "解除", at: parse(times.rolled_back), reached: released, note: released ? null : (unblocked ?? "封禁中或未处置") },
   ];
 }
 
@@ -122,8 +125,17 @@ export function formatOffset(ms: number): string {
 }
 
 /** 选中设备最近一个关联事件；未选中时为全站最近一个（incidents 新的在前） */
-export function pick(incidents: Incident[], deviceId: string | null): Incident | undefined {
-  return deviceId ? incidents.find((i) => i.device_ids.includes(deviceId)) : incidents[0];
+/** 设备的关联事件：点选的那一起（须涉及该设备），否则该设备最近的一起；未选设备时为最近的一起 */
+export function pick(incidents: Incident[], deviceId: string | null, incidentId: string | null = null): Incident | undefined {
+  if (!deviceId) return incidents[0];
+  const chosen = incidentId ? incidents.find((i) => i.id === incidentId && i.device_ids.includes(deviceId)) : undefined;
+  return chosen ?? incidents.find((i) => i.device_ids.includes(deviceId));
+}
+
+/** 详情面板各部分共用：所选设备当前显示的关联事件（告警栏点选的那一起，或最近的一起） */
+export function useDeviceIncident(deviceId: string | null): Incident | undefined {
+  const incidentId = useSelection((s) => s.incidentId);
+  return useLive((s) => pick(s.incidents, deviceId, incidentId));
 }
 
 export type Phase = "unknown" | "running" | "done";
@@ -204,10 +216,10 @@ export function useTimeline(incident: Incident | undefined): TimelineNode[] | nu
   }, [incident, alerts, executions, executionTimes, investigation, awaiting]);
 }
 
-/** 详情抽屉中的竖向处置时间线（ui.md §4、§8 IncidentTimeline）：选中设备最近一个关联事件 */
+/** 详情抽屉中的竖向处置时间线（ui.md §4、§8 IncidentTimeline）：告警栏点选的关联事件，否则选中设备最近的一起 */
 export function IncidentTimeline() {
   const deviceId = useSelection((s) => s.deviceId);
-  const incident = useLive((s) => pick(s.incidents, deviceId));
+  const incident = useDeviceIncident(deviceId);
   const nodes = useTimeline(incident);
 
   if (!incident || !nodes) return <p className="text-meta text-subtle-foreground">暂无关联事件</p>;
@@ -216,6 +228,7 @@ export function IncidentTimeline() {
     <div className="flex flex-col gap-3">
       <p className="text-meta text-muted-foreground">
         {incident.title}
+        <span className="tabular-nums"> · {formatStamp(Date.parse(incident.created_at))}</span>
         {incident.source_ip && <span className="font-mono"> · 来源 {incident.source_ip}</span>}
       </p>
       <ol aria-label="处置进程">

@@ -7,10 +7,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { useConnection } from "../../store/connection";
-import { type Alert, type Execution, type Incident, isPhysical, useLive } from "../../store/live";
-import { select, useSelection } from "../../store/selection";
+import { type Alert, type Execution, type Incident, isPhysical, isPhysicalIncident, useLive } from "../../store/live";
+import { select, selectIncident, useSelection } from "../../store/selection";
 import { formatStamp, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { TimelineDots } from "../IncidentTimeline/IncidentTimeline";
+import { DisposeBar } from "./Dispose";
 
 const BEHAVIOR: Record<string, string> = { fall: "跌倒", climb: "攀爬越界", still: "长时间静止", fight: "打架" };
 /** 轨迹规则：类型与越线方向（forward 为沿线由起点走向终点时，从前进方向的右侧穿到左侧：平面俯视 y 向下，与箭头方向一致） */
@@ -20,7 +21,7 @@ const DIRECTION: Record<string, string> = { forward: "正向", backward: "反向
 const SUSPECTED: Record<string, string> = { fall: "疑似跌倒", still: "疑似长时间静止", fight: "疑似打架" };
 // 告警等级以图标形状 + 文字区分，不以颜色深浅区分（V-S4）
 export const SEVERITY: Record<Incident["severity"], string> = { critical: "严重", high: "高", medium: "中", low: "低" };
-/** 关联事件的处置状态（ui.md §5.1）；无执行记录时为"未处置" */
+/** 关联事件的处置状态（ui.md §5.1）；无执行记录时为"未处置"，物理域事件不涉及封禁 */
 const EXECUTION: Record<Execution["state"], string> = {
   pending: "待确认",
   executing: "处置中",
@@ -156,10 +157,11 @@ export function AlertListView(props: {
 }) {
   const { alerts, incidents, executions, stale, lastFrameAt, loading = false, onCollapse } = props;
   const selected = useSelection((s) => s.deviceId);
+  const selectedIncident = useSelection((s) => s.incidentId);
   const [filter, setFilter] = useState<Filter>("all");
   const groups = useMemo(() => stableGroups(alerts), [alerts]);
   const shownGroups = filter === "all" ? groups : groups.filter((g) => isPhysical(g.alerts[0]) === (filter === "physical"));
-  const shownIncidents = filter === "physical" ? [] : incidents;
+  const shownIncidents = filter === "all" ? incidents : incidents.filter((i) => isPhysicalIncident(i) === (filter === "physical"));
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -167,12 +169,13 @@ export function AlertListView(props: {
       if (!next.delete(id)) next.add(id);
       return next;
     });
-  // M0 每个关联事件至多由一个 Playbook 处置（isolate-attacker）
+  // 每个关联事件至多由一个 Playbook 执行：本机防火墙与外部防火墙联动按部署模式二选一（FR-1001）
   const stateOf = useMemo(() => {
     const byIncident = new Map(Object.values(executions).map((e) => [e.incident_id, e]));
     return (incident: Incident) => {
       const execution = byIncident.get(incident.id);
-      return execution ? EXECUTION[execution.state] : "未处置";
+      if (execution) return EXECUTION[execution.state];
+      return isPhysicalIncident(incident) ? "无需封禁" : "未处置";
     };
   }, [executions]);
 
@@ -224,10 +227,19 @@ export function AlertListView(props: {
             <ul aria-label="关联事件" className="border-b pb-1">
               {shownIncidents.map((incident) => {
                 const device = incident.device_ids[0] ?? null;
+                // 点选的那一起高亮；只选了设备时高亮该设备最近的一起（详情面板显示的就是它）
+                const current =
+                  selectedIncident !== null
+                    ? selectedIncident === incident.id
+                    : device !== null && device === selected && incidents.find((i) => i.device_ids.includes(device)) === incident;
                 return (
                   <li key={incident.id}>
-                    <Row device={device} selected={device !== null && device === selected}>
-                      <ShieldAlert aria-label="网络攻击" className="mx-0.5 mt-0.5 size-4 shrink-0 text-cyber" />
+                    <Row device={device} selected={current} onSelect={() => selectIncident(incident)}>
+                      {isPhysicalIncident(incident) ? (
+                        <TriangleAlert aria-label="物理告警" className="size-5 shrink-0 fill-physical text-foreground" />
+                      ) : (
+                        <ShieldAlert aria-label="网络攻击" className="mx-0.5 mt-0.5 size-4 shrink-0 text-cyber" />
+                      )}
                       <span className="min-w-0 flex-1">
                         <span className="block font-medium break-words">{incident.title}</span>
                         <span className="block text-meta text-subtle-foreground tabular-nums">
@@ -270,6 +282,8 @@ export function AlertListView(props: {
                       </button>
                     )}
                   </div>
+                  {/* 物理告警与网络告警都可处置：已确认、误报、已处理（告警闭环） */}
+                  <DisposeBar alerts={group.alerts} className="mb-1.5 ml-12 mr-3" />
                   {open && (
                     <ul aria-label="合并的告警" className="ml-6 border-l animate-in fade-in">
                       {group.alerts.map((alert) => (
@@ -322,11 +336,11 @@ function AlertRow(props: { alert: Alert; selected: string | null; count: number 
   );
 }
 
-function Row(props: { device: string | null; selected: boolean; children: ReactNode }) {
-  const { device, selected, children } = props;
+function Row(props: { device: string | null; selected: boolean; onSelect?: () => void; children: ReactNode }) {
+  const { device, selected, onSelect, children } = props;
   return (
     <Item asChild size="sm" className={cn("mx-1 min-w-0 flex-1 flex-nowrap items-start px-3 py-2 text-left hover:bg-secondary disabled:cursor-default", selected && "bg-accent hover:bg-accent")}>
-      <button type="button" disabled={device === null} onClick={() => device && select(device)} aria-current={selected || undefined}>
+      <button type="button" disabled={device === null} onClick={() => device && (onSelect ? onSelect() : select(device))} aria-current={selected || undefined}>
         {children}
       </button>
     </Item>

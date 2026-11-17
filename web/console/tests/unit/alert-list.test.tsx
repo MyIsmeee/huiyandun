@@ -4,7 +4,7 @@ import type { components } from "../../src/api/schema";
 import { AlertList, alertText as describeAlert, groupAlerts } from "../../src/panels/AlertList/AlertList";
 import { useConnection } from "../../src/store/connection";
 import { MAX_ALERTS, receive, useLive } from "../../src/store/live";
-import { useSelection } from "../../src/store/selection";
+import { select, useSelection } from "../../src/store/selection";
 
 type Frame = components["schemas"]["WsFrame"];
 const frame = (channel: Frame["channel"], data: object) => ({ channel, data }) as unknown as Frame;
@@ -225,21 +225,47 @@ describe("AlertList", () => {
   });
 });
 
+describe("按关联事件选中", () => {
+  it("同一设备的两起关联事件：点哪起选中哪起；只选设备时高亮最近的一起，点设备重置为最近", () => {
+    const older = { ...incident, id: "inc-old", title: "较早的事件" };
+    const newer = { ...incident, id: "inc-new", title: "最近的事件" };
+    receive(frame("incidents", older), 0);
+    receive(frame("incidents", newer), 0);
+    render(<AlertList stale={false} lastFrameAt={0} />);
+    const current = () => screen.getAllByRole("button").filter((b) => b.getAttribute("aria-current")).map((b) => b.textContent);
+
+    fireEvent.click(screen.getByText("较早的事件"));
+    expect(useSelection.getState()).toMatchObject({ deviceId: "cam-02", incidentId: "inc-old" });
+    expect(current()).toEqual([expect.stringContaining("较早的事件")]);
+
+    act(() => select("cam-02"));
+    expect(useSelection.getState().incidentId).toBeNull();
+    expect(current()).toEqual([expect.stringContaining("最近的事件")]);
+  });
+});
+
 describe("告警栏筛选（D-112）", () => {
-  it("物理只显示行为告警并隐藏关联事件，网络只显示网络告警与关联事件；筛选后为空时提示", () => {
+  it("物理只显示行为告警与物理域关联事件，网络只显示网络告警与网络关联事件；筛选后为空时提示", () => {
+    const occluded = { ...incident, id: "inc-2", rule_id: "HYD-VIS-0001", title: "摄像头镜头遭遮挡或挪位", severity: "medium", device_ids: ["cam-01"], source_ip: null };
     receive(frame("alerts", alert(1)), 0);
     receive(frame("alerts", fall(2)), 0);
     receive(frame("incidents", incident), 0);
+    receive(frame("incidents", occluded), 0);
     render(<AlertList stale={false} lastFrameAt={0} />);
     const shown = () => within(screen.getByRole("list", { name: "单条告警" })).getAllByRole("listitem").map((li) => li.textContent);
+    const pinned = () => within(screen.getByRole("list", { name: "关联事件" })).getAllByRole("listitem").map((li) => li.textContent);
 
     fireEvent.click(screen.getByRole("radio", { name: "物理" }));
     expect(shown()).toEqual([expect.stringContaining("跌倒")]);
-    expect(screen.queryByRole("list", { name: "关联事件" })).toBeNull();
+    expect(pinned()).toEqual([expect.stringContaining("镜头遭遮挡")]);
+    // 物理域事件没有攻击源：标为物理告警，状态为无需封禁
+    const row = within(screen.getByRole("list", { name: "关联事件" }));
+    expect(row.getByLabelText("物理告警")).toBeTruthy();
+    expect(row.getByText("无需封禁")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("radio", { name: "网络" }));
     expect(shown()).toEqual([expect.stringContaining("告警 1")]);
-    expect(screen.getByRole("list", { name: "关联事件" })).toBeTruthy();
+    expect(pinned()).toEqual([expect.stringContaining("画面遭篡改")]);
   });
 
   it("该类没有告警时显示空态", () => {

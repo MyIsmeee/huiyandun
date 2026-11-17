@@ -6,11 +6,16 @@ import { formatOffset, nodeLook, pick, type TimelineNode, useTimeline } from "./
 const ONGOING: ReadonlySet<Device["state"]> = new Set(["cyber_alert", "both", "pending_action", "contained", "notify_only"]);
 
 /**
- * 底部进度条显示的关联事件（设计 150 §3）：选中设备最近一个关联事件；未选中或该设备没有关联事件时，
+ * 底部进度条显示的关联事件（设计 150 §3）：告警栏点选的关联事件，否则选中设备最近一个关联事件；未选中或该设备没有关联事件时，
  * 为最近一个进行中的（所涉设备仍处于网络攻击或封禁状态）；都没有时为 undefined，不显示
  */
-export function progressIncident(incidents: Incident[], deviceId: string | null, devices: Device[]): Incident | undefined {
-  const selected = deviceId ? pick(incidents, deviceId) : undefined;
+export function progressIncident(
+  incidents: Incident[],
+  deviceId: string | null,
+  devices: Device[],
+  incidentId: string | null = null,
+): Incident | undefined {
+  const selected = deviceId ? pick(incidents, deviceId, incidentId) : undefined;
   if (selected) return selected;
   const ongoing = new Set(devices.filter((d) => ONGOING.has(d.state)).map((d) => d.id));
   return incidents.find((i) => i.device_ids.some((id) => ongoing.has(id)));

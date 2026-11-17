@@ -24,7 +24,7 @@ import { type Execution, type Incident, useLive } from "../../store/live";
 import { canContain, useSession } from "../../store/session";
 import { RESULT_TIMEOUT_MS } from "../ActionBar/ActionBar";
 import { SEVERITY } from "../AlertList/AlertList";
-import { awaitingInvestigation, RETRY_MS } from "../IncidentTimeline/IncidentTimeline";
+import { awaitingInvestigation, RETRY_MS, useDeviceIncident } from "../IncidentTimeline/IncidentTimeline";
 
 export type Investigation = components["schemas"]["Investigation"];
 type Verdict = NonNullable<Investigation["verdict"]>;
@@ -52,16 +52,16 @@ const NO_RECORD = {
 /** 等待调查期间重读的间隔：调查记录在第一轮模型调用返回后才推送首帧 */
 const WAIT_POLL_MS = 5_000;
 /** 处置剧本的中文名（playbooks/*.yaml 首行注释）；未列出的显示编号 */
-const PLAYBOOK: Record<string, string> = { "isolate-attacker": "封禁攻击源" };
+const PLAYBOOK: Record<string, string> = { "isolate-attacker": "封禁攻击源", "isolate-attacker-linked": "经外部防火墙封禁攻击源" };
 
 /**
- * AI 安全值班员面板（ui.md §6.2 AiInvestigation）：所选设备最近一个关联事件的规则结论与 AI 研判，分区显示
+ * AI 安全值班员面板（ui.md §6.2 AiInvestigation）：告警栏点选的（否则所选设备最近一个）关联事件的规则结论与 AI 研判，分区显示
  * （V-AI1、V-AI8）。调查记录读 GET 接口，每收到该事件的 ai 推送或推送连接恢复时重新读取（FR-1102）；
  * 等待调查（尚无记录但仍在调查范围内）时每 5 s 重读，读取失败时 5 s 后重试。
  * 规则结论下方是"确认处置"：事件须人工确认、有待确认的执行且角色为 operator 及以上时渲染（V-AI9、C-FE-07）。
  */
 export function AiInvestigation(props: { deviceId: string; stale: boolean }) {
-  const incident = useLive((s) => s.incidents.find((i) => i.device_ids.includes(props.deviceId)));
+  const incident = useDeviceIncident(props.deviceId);
   if (!incident) return null;
   // key：换了关联事件即不再显示上一个事件的调查与确认结果
   return <AiInvestigationState key={incident.id} incident={incident} stale={props.stale} />;

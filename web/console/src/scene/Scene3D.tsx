@@ -6,10 +6,12 @@ import { TargetModels } from "./TargetModels";
 import type { Camera } from "./devices";
 import type { SceneFrame } from "../editor/recognition";
 import { AreaScene } from "./AreaScene";
+import { BackdropScene } from "./Backdrop";
 import { MeasuredScene } from "./MeasuredScene";
 import type { SceneItem } from "./assets";
 import type { Area, SceneView } from "./layout";
 import { DAY, type ScenePalette, useScenePalette } from "./palette";
+import { seatsFromFrames, seatsFromItems } from "./seating";
 
 /** 页面底色（ui.md §3），场景背景与远处渐隐取同色；夜间警戒的取值见 palette.ts */
 export const BACKGROUND = DAY.background;
@@ -37,13 +39,17 @@ export default function Scene3D(props: {
   onReady: () => void;
   /** 自动识别的场景：给出时按实测尺寸画白模（MeasuredScene），不画 items */
   measured?: SceneFrame[] | null;
+  /** 自动识别的场景改画实景底图（Backdrop.tsx），不画白模 */
+  photo?: boolean;
 }) {
-  const { area, items, cameras, view, onReady, measured } = props;
+  const { area, items, cameras, view, onReady, measured, photo = false } = props;
   // 远处渐隐为底色：区域在取景中心周围时始终不受影响，跟随视角下地平线柔和过渡
   const fogNear = Math.hypot(...view.shot.eye.map((v, i) => v - (view.shot.look[i] ?? 0))) + Math.hypot(area.width_m, area.height_m) / 2;
   const palette = useScenePalette();
+  // 可坐的位置：自动识别的场景取识别到的椅子与沙发，手工搭建的取椅子类资产（seating.ts）
+  const seats = useMemo(() => (measured ? seatsFromFrames(measured) : seatsFromItems(items)), [measured, items]);
   return (
-    <Canvas flat shadows="soft" frameloop="demand">
+    <Canvas flat shadows="percentage" frameloop="demand">
       <color attach="background" args={[palette.background]} />
       <fog attach="fog" args={[palette.background, fogNear, fogNear + FOG_M]} />
       <ViewCamera view={view} />
@@ -52,9 +58,9 @@ export default function Scene3D(props: {
       <Lights area={area} palette={palette} />
       <ShadowCatcher area={area} opacity={palette.shadow} />
       <AreaScene area={area} items={measured ? [] : items} />
-      {measured && <MeasuredScene frames={measured} cameras={cameras} />}
+      {measured && (photo ? <BackdropScene frames={measured} /> : <MeasuredScene frames={measured} cameras={cameras} />)}
       <DeviceMarkers cameras={cameras} />
-      <TargetModels cameras={cameras} />
+      <TargetModels cameras={cameras} seats={seats} />
     </Canvas>
   );
 }

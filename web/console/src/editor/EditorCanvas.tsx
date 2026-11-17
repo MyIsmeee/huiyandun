@@ -45,7 +45,7 @@ export default function EditorCanvas(props: {
   return (
     <Canvas
       flat
-      shadows="soft"
+      shadows="percentage"
       frameloop="demand"
       camera={{ fov: 35, near: 0.5, far: GROUND_M }}
       // 左键单击空白处取消选中；右键平移不影响选中

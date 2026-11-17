@@ -20,6 +20,7 @@ import { useLive } from "../store/live";
 import { useNav } from "../store/nav";
 import { select, selectTarget, useSelection } from "../store/selection";
 import { adjustOrbit, adjustZoom, focusOn, moveCamera, orbited, panned, useCamera, useFocusShot, wheelZoomed } from "./camera";
+import { useSceneMode } from "./Backdrop";
 import { CameraControls, useAnimate } from "./CameraControls";
 import { AttackLines } from "./AttackLines";
 import { CALLOUT, CameraCallout } from "./CameraCallout";
@@ -105,6 +106,10 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
   const auto = autoScene?.items ?? null;
   const items = scene?.items.length ? scene.items : (auto ?? NO_ITEMS);
   const measured = scene?.items.length ? null : (autoScene?.frames ?? null);
+  // 实景底图：自动识别的场景带有底图时可切换为实景，默认白模（Backdrop.tsx）
+  const hasBackdrop = measured?.some((f) => f.backdrop) ?? false;
+  const mode = useSceneMode((s) => s.mode);
+  const photo = hasBackdrop && mode === "photo";
   // 总览按区域尺寸取景（设计 150 §9）；目标与告警不影响取景
   const [width, depth] = [scene?.width_m ?? NO_AREA.width_m, scene?.depth_m ?? NO_AREA.depth_m];
   const area = useMemo(() => bounds({ width_m: width, depth_m: depth }), [width, depth]);
@@ -209,7 +214,7 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
       {view3d && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene3D area={area} items={items} measured={measured} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
+            <Scene3D area={area} items={items} measured={measured} photo={photo} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
           </Suspense>
         </Boundary>
       )}
@@ -252,7 +257,7 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
         </p>
       )}
       {(state === "ready" || state === "2d") && (
-        <CameraControls />
+        <CameraControls photo={hasBackdrop} />
       )}
       {state === "loading" && <Note>场景加载中…</Note>}
       {state === "error" && (

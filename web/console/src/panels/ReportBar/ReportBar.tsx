@@ -7,6 +7,7 @@ import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
 import { type Incident, useLive } from "../../store/live";
 import { canContain, useSession } from "../../store/session";
+import { useDeviceIncident } from "../IncidentTimeline/IncidentTimeline";
 
 export type Report = components["schemas"]["Report"];
 export type ReportRequest = { status: "idle" | "pending" } | { status: "failed"; message: string };
@@ -103,13 +104,11 @@ export async function generateReport(incidentId: string): Promise<void> {
  */
 export function ReportBar(props: { deviceId: string }) {
   const { deviceId } = props;
-  // 报告页打开期间锁定其关联事件：同一设备来了新事件也不换，否则报告栏重建、正在看的报告页随之关闭
+  // 报告页打开期间锁定其关联事件：同一设备来了新事件也不换，否则报告栏重建、正在看的报告页随之关闭。
+  // 未锁定时取告警栏点选的那一起，否则该设备最近的一起：生成报告、导出证据包都针对它
   const [pinned, setPinned] = useState<string | null>(null);
-  const incident = useLive(
-    (s) =>
-      s.incidents.find((i) => i.id === pinned && i.device_ids.includes(deviceId)) ??
-      s.incidents.find((i) => i.device_ids.includes(deviceId)),
-  );
+  const selected = useDeviceIncident(deviceId);
+  const incident = useLive((s) => s.incidents.find((i) => i.id === pinned && i.device_ids.includes(deviceId))) ?? selected;
   const canEdit = canContain(useSession((s) => s.role));
   if (!incident) return null;
   // key：换了关联事件即重新拉取，不再显示上一个事件的报告

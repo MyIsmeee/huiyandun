@@ -109,6 +109,8 @@ describe("地面映射（V-CAM9、FR-902、FR-910）", () => {
       mapping,
       homography: null,
       reproj_error_m,
+      climb_lines: [],
+      rules: [],
     },
   });
 
@@ -154,7 +156,7 @@ describe("详情被遮住时的 Esc 与画面保持", () => {
   });
 
   it("监控墙上（video 为假）不另开一路实时画面：画面已在墙上播放", () => {
-    const device = { ...DEVICE, id: "cam-01", type: "camera", state: "normal", camera: { stream: "cam-01", area_id: null, pose: { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 }, calibration: [], mapping: "estimated", homography: null, reproj_error_m: null } } as Device;
+    const device = { ...DEVICE, id: "cam-01", type: "camera", state: "normal", camera: { stream: "cam-01", area_id: null, pose: { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 }, calibration: [], mapping: "estimated", homography: null, reproj_error_m: null, climb_lines: [], rules: [] } } as Device;
     render(<Details device={device} target={undefined} stale={false} onClose={vi.fn()} video={false} />);
     expect(screen.queryByText("实时画面")).toBeNull();
     expect(screen.queryByText("播放 cam-01")).toBeNull();
@@ -174,6 +176,8 @@ describe("详情被遮住时的 Esc 与画面保持", () => {
         mapping: "estimated",
         homography: null,
         reproj_error_m: null,
+        climb_lines: [],
+        rules: [],
       },
     } as Device;
     const { rerender } = render(<Details device={device} target={undefined} stale={false} onClose={vi.fn()} />);

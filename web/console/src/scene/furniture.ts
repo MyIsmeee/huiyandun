@@ -94,6 +94,11 @@ export function styleOf(cls: SceneFrame["objects"][number]["class"], kind: Kind 
       if (kind === "ashcan") return "ashcan";
       if (kind === "pole" || kind === "streetlight" || kind === "traffic_light") return "pole";
       return "block";
+    case "appliance":
+    case "box":
+    case "fixture":
+      // 有对应模型的由 measuredModels 摆放模型；这里只画没有模型的（风扇、浴缸等）
+      return "block";
   }
 }
 

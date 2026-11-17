@@ -4,6 +4,7 @@ import type { components } from "../../src/api/schema";
 import { ApiError, api } from "../../src/lib/api";
 import { type Report, ReportBar, useReports } from "../../src/panels/ReportBar/ReportBar";
 import { receive, useLive } from "../../src/store/live";
+import { useSelection } from "../../src/store/selection";
 import { type Role, useSession } from "../../src/store/session";
 
 type Frame = components["schemas"]["WsFrame"];
@@ -50,6 +51,7 @@ function show(role: Role | null) {
 beforeEach(() => {
   useLive.setState(useLive.getInitialState());
   useReports.setState(useReports.getInitialState());
+  useSelection.setState(useSelection.getInitialState());
 });
 afterEach(() => {
   cleanup();
@@ -339,6 +341,35 @@ describe("ReportBar", () => {
     expect(createObjectURL).toHaveBeenCalledWith(blob);
     expect(click).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "导出证据包" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("告警栏点选同一设备较早的一起：报告与证据包都针对那一起，不是最近的一起", async () => {
+    push(incident("inc-1"));
+    push(incident("inc-2")); // 最近的一起
+    useSelection.setState({ deviceId: "cam-02", incidentId: "inc-1" });
+    const list = vi.spyOn(api, "listReports").mockResolvedValue({ items: [] });
+    const exportEvidence = vi.spyOn(api, "exportEvidence").mockResolvedValue(new Blob(["zip"]));
+    Object.assign(URL, { createObjectURL: vi.fn().mockReturnValue("blob:evidence"), revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.download).toBe("evidence-inc-1.zip");
+    });
+    show("operator");
+    await act(async () => {});
+
+    expect(list).toHaveBeenCalledWith("inc-1");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "导出证据包" })));
+    expect(exportEvidence).toHaveBeenCalledWith("inc-1");
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("点选的事件不属于该设备（如已切换设备）时取该设备最近的一起", async () => {
+    push(incident("inc-1"));
+    push(incident("inc-9", "cam-01"));
+    useSelection.setState({ deviceId: "cam-02", incidentId: "inc-9" });
+    const list = vi.spyOn(api, "listReports").mockResolvedValue({ items: [] });
+    show("viewer");
+    await act(async () => {});
+    expect(list).toHaveBeenCalledWith("inc-1");
   });
 
   it("导出期间不可再点，失败显示原因并可重试", async () => {

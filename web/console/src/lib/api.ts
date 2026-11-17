@@ -69,6 +69,12 @@ export const api = {
   /** AI 安全值班员的调查记录（FR-1102）；尚未开始调查时为 404 */
   getInvestigation: (incidentId: string) =>
     request<Schemas["Investigation"]>("GET", `/api/incidents/${encodeURIComponent(incidentId)}/investigation`),
+  /** 单条摄像头告警前后的录像（MP4）：经存证服务向录像服务取，告警刚发生时片段较短 */
+  getAlertClip: async (eventId: string) =>
+    (await send("GET", `/api/alerts/${encodeURIComponent(eventId)}/clip`, undefined, undefined, 40_000)).blob(),
+  /** 告警处置：已确认、误报、已处理；结果另经 dispositions 频道推送给所有控制台 */
+  disposeAlert: (eventId: string, action: Schemas["DispositionAction"], note?: string) =>
+    request<Schemas["AlertDisposition"]>("POST", `/api/alerts/${encodeURIComponent(eventId)}/disposition`, note ? { action, note } : { action }),
   /** 确认处置（FR-407）：只提交关联事件 ID，受理后执行结果经 executions 频道推送 */
   confirmContainment: async (incidentId: string) => {
     await send("POST", `/api/incidents/${encodeURIComponent(incidentId)}/confirm-containment`);

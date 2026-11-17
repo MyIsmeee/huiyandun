@@ -91,6 +91,19 @@ describe("处置时间线（FR-304、D-106）", () => {
     expect(new Date(timelineOf(incident, alerts, released, {}, verdict)[3]?.at ?? 0).toISOString()).toBe("2026-11-08T02:00:31.000Z");
   });
 
+  it("物理域事件（HYD-VIS-*）：画面事件不进告警栏，首次告警取生成时刻；处置与解除写明不涉及封禁", () => {
+    const occluded = { ...incident, rule_id: "HYD-VIS-0001", source_ip: null, hit_path: ["frame-event"] } as Incident;
+    const nodes = timelineOf(occluded, alerts, undefined, {}, null);
+    expect(nodes.map((n) => [n.key, n.reached, n.note])).toEqual([
+      ["first", true, null],
+      ["incident", true, null],
+      ["ai", false, "未调查"],
+      ["contained", false, "不涉及封禁"],
+      ["released", false, "不涉及封禁"],
+    ]);
+    expect(nodes[0]?.at).toBe(Date.parse(occluded.created_at));
+  });
+
   it("尚无调查记录但仍在等待调查时说明等待调查", () => {
     expect(timelineOf(incident, alerts, undefined, {}, null, true)[2]).toEqual(expect.objectContaining({ note: "等待调查" }));
     const created = Date.parse(incident.created_at);

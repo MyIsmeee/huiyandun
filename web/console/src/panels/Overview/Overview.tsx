@@ -25,7 +25,8 @@ export function Overview(props: { site: Site; stale: boolean; lastFrameAt: numbe
   const [collapsed, setCollapsed] = useState(false);
   const { selected, target } = useInspected(site.devices);
   const capsule = collapsed && !selected && !target;
-  const progress = useLive((s) => progressIncident(s.incidents, selected?.id ?? null, area.devices));
+  const incidentId = useSelection((s) => s.incidentId);
+  const progress = useLive((s) => progressIncident(s.incidents, selected?.id ?? null, area.devices, incidentId));
   const [webgl2] = useState(supportsWebGL2);
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">

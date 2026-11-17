@@ -13,6 +13,7 @@ import { type AdminPage, go, type Page, useNav } from "../../store/nav";
 import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AdminFrame } from "../Admin/AdminFrame";
+import { Alarm } from "../Alarm/Alarm";
 import { CameraPage } from "../CameraList/CameraList";
 import { ConnectionStatus } from "../ConnectionStatus/ConnectionStatus";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
@@ -26,7 +27,7 @@ const deselect = () => select(null);
 const home = () => go(useNav.getState().main);
 
 /**
- * 主界面（设计 150 §3）：顶栏导航 + 当前页面。态势为默认页（3D 铺满 + 浮动卡片），监控墙为独立视图，二者只挂载当前一个：
+ * 主界面（设计 150 §3）：顶栏导航 + 当前页面。监控墙为默认页，态势（3D 铺满 + 浮动卡片）为辅助总览，二者只挂载当前一个：
  * 监控墙下不占用 3D 渲染，态势页不保持多路实时画面连接。
  * onLogout 完成后若仍渲染本页，说明会话仍有效、退出未成功。
  * 进入即连接 WS；连接被拒时调用 onRejected 核对会话。
@@ -134,6 +135,8 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </AdminFrame>
         </div>
       )}
+      {/* 确认级物理告警：响铃并弹出带当时画面的处置卡片 */}
+      <Alarm />
       {/* 操作结果提示（设计 150 §9A）：保存、删除区域的成功与失败 */}
       <Toaster position="top-center" />
     </div>
@@ -149,8 +152,8 @@ const isAdminPage = (page: Page): page is AdminPage => page !== "overview" && pa
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
   const { page, admin, onChange } = props;
   const items: { page: Page; label: string; current: boolean }[] = [
-    { page: "overview", label: "态势", current: page === "overview" },
     { page: "wall", label: "监控墙", current: page === "wall" },
+    { page: "overview", label: "态势", current: page === "overview" },
   ];
   if (admin) items.push({ page: "cameras", label: "管理", current: isAdminPage(page) });
   return (
