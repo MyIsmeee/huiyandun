@@ -633,6 +633,37 @@ def test_persistently_failing_loop_does_not_exit_process(
     assert (tmp_path / "alive").exists()
 
 
+@pytest.mark.parametrize(
+    "message",
+    [  # 2026-11-17 实机日志中的三种报错（节选）
+        "CUDNN_FE failure 11: CUDNN_BACKEND_API_FAILED ; GPU=0 ; hostname=x ; "
+        "file=/onnxruntime_src/onnxruntime/core/providers/cuda/nn/conv.cc ; line=484",
+        "CUDA failure 700: an illegal memory access was encountered ; GPU=0 ; hostname=x ; "
+        "file=/onnxruntime_src/onnxruntime/core/providers/cuda/gpu_data_transfer.cc ; line=91",
+        "CUBLAS failure 1: the library was not initialized ; GPU=0 ; hostname=x ; "
+        "file=/onnxruntime_src/onnxruntime/core/providers/cuda/cuda_execution_provider.cc ; line=245",
+    ],
+)
+def test_cuda_fault_exits_process(
+    message: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CUDA 执行出错后进程内的上下文不可恢复，各路此后每次推理都失败：退出进程由 Compose 拉起，不原地重试。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.05)
+
+    def exit_(code: int) -> None:
+        raise SystemExit(code)
+
+    monkeypatch.setattr(pipeline_module.os, "_exit", exit_)
+
+    async def broken(beat: Callable[[], None]) -> None:
+        raise RuntimeError(f"[ONNXRuntimeError] : 1 : FAIL : {message}")
+
+    with pytest.raises(SystemExit) as exited:
+        asyncio.run(supervise("cam-01/detect", broken, Health(tmp_path / "alive")))
+
+    assert exited.value.code == 1
+
+
 def test_heartbeat_updated_while_all_loops_progress(tmp_path: Path) -> None:
     health = Health(tmp_path / "alive")
     health.beat("cam-01/detect")

@@ -14,6 +14,7 @@
 """
 
 import math
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -56,18 +57,21 @@ MAX_BATCH = 4  # 每次推理的片段数上限：显存上限 runtime.ACTION_ME
 
 
 class ActionModel:
-    """ONNX 会话：输入 (N, 2, 100, 17, 3)，输出 (N, 60) 两路融合的类别概率。各路摄像头共用；
+    """ONNX 会话：输入 (N, 2, 100, 17, 3)，输出 (N, 60) 两路融合的类别概率。各路摄像头共用，逐次推理
+    （同 scene.Segmenter）：两路并发超出 runtime.ACTION_MEM_MB，cuDNN 执行失败并损坏整个进程的 CUDA 上下文；
     超过 MAX_BATCH 个片段时分批推理。"""
 
     def __init__(self, session: ort.InferenceSession) -> None:
         self._session = session
         self._input = session.get_inputs()[0].name
+        self._lock = threading.Lock()
 
     def __call__(self, clips: np.ndarray) -> np.ndarray:
-        batches = [
-            np.asarray(self._session.run(None, {self._input: part.astype(np.float32)})[0])
-            for part in np.array_split(clips, max(1, math.ceil(len(clips) / MAX_BATCH)))
-        ]
+        with self._lock:
+            batches = [
+                np.asarray(self._session.run(None, {self._input: part.astype(np.float32)})[0])
+                for part in np.array_split(clips, max(1, math.ceil(len(clips) / MAX_BATCH)))
+            ]
         return np.concatenate(batches)
 
 

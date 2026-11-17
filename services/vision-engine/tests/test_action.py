@@ -154,3 +154,39 @@ def test_model_splits_large_batches() -> None:
     out = ActionModel(cast(object, session))(np.zeros((MAX_BATCH * 2 + 1, 2, CLIP_LEN, 17, 3)))  # type: ignore[arg-type]
     assert max(session.sizes) <= MAX_BATCH and sum(session.sizes) == MAX_BATCH * 2 + 1
     assert out.shape == (MAX_BATCH * 2 + 1, 60)
+
+
+def test_model_runs_one_inference_at_a_time() -> None:
+    """各路摄像头共用会话：同时推理时逐次进行。两路并发会超出 ACTION_MEM_MB，cuDNN 执行失败后显存访问越界，
+    整个进程的 CUDA 上下文随之损坏、各路识别全部失败（2026-11-17 实测）。"""
+    import threading
+    import time
+
+    class Session:
+        def __init__(self) -> None:
+            self.running = 0
+            self.peak = 0
+            self._count = threading.Lock()
+
+        def get_inputs(self) -> list:
+            return [type("Input", (), {"name": "keypoints"})()]
+
+        def run(self, _: object, feed: dict) -> list:
+            with self._count:
+                self.running += 1
+                self.peak = max(self.peak, self.running)
+            time.sleep(0.02)
+            with self._count:
+                self.running -= 1
+            return [np.zeros((len(feed["keypoints"]), 60))]
+
+    session = Session()
+    model = ActionModel(cast(object, session))  # type: ignore[arg-type]
+    clips = np.zeros((1, 2, CLIP_LEN, 17, 3))
+    threads = [threading.Thread(target=model, args=(clips,)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert session.peak == 1

@@ -132,6 +132,9 @@ STREAM_LOST_S = 5.0
 STARTUP_GRACE_S = 5.0
 STREAM_LOST_REPEAT_S = 30  # 断流期间每 30 s 重报 stream_lost，api-server 据此保持离线（D-092）
 STALL_S = 10.0  # 任一循环超过此时长未完成周期即视为停滞，与 compose 健康检查的阈值一致
+# ONNX Runtime 的 CUDA 执行出错（CUDA、cuBLAS、cuDNN）时，错误信息带出错位置所在的源码目录；显存不足的
+# 报错来自 core/framework，不在其中，可原地重试
+CUDA_FAULT = "onnxruntime/core/providers/cuda/"
 # 建连的额外宽限：OpenCV 的 FFmpeg 后端建连时持有全局锁，多路同时断流时各路建连排队、各等 TIMEOUT_MS，
 # 后排的一路会超过 STALL_S；读帧不排队，仍按 STALL_S 判定
 OPEN_GRACE_S = 30.0
@@ -749,13 +752,16 @@ class Health:
 async def supervise(
     name: str, run: Callable[[Callable[[], None]], Awaitable[None]], health: Health
 ) -> None:
-    """运行一路循环；异常时记录并在 RECONNECT_S 后重试，不影响其他路（#79）。"""
+    """运行一路循环；异常时记录并在 RECONNECT_S 后重试，不影响其他路（#79）。
+    CUDA 执行出错例外：进程内的 CUDA 上下文随之损坏、各路此后全部失败，退出进程由 Compose 拉起。"""
     health.beat(name)  # 从未完成周期的循环同样计入停滞判断
     while True:
         try:
             await run(partial(health.beat, name))
-        except Exception:
+        except Exception as e:
             log.exception("vision.loop_failed", extra={"loop": name})
+            if CUDA_FAULT in str(e):
+                os._exit(1)
             # 出错后仍在重试不算停滞：否则持续报错的一路会让整个进程退出，连累其他路
             health.beat(name)
             await asyncio.sleep(RECONNECT_S)
