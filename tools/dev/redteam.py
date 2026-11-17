@@ -9,7 +9,8 @@
   tamper restore <摄像头>     恢复为按原时间线继续播放
 
 画面篡改只作用于 mediamtx 推流的调试素材（路径名即摄像头编号）；素材的真实播放进度记在
-/tmp/hyd-tamper-<摄像头>.json，恢复时从原时间线的当前位置续播，不与看过的画面重复（否则被判为重放）。
+/tmp/hyd-tamper-<摄像头>.json，恢复时从原时间线的当前位置续播，不与看过的画面重复（否则被判为重放）；
+恢复后仍保留该记录（tampered 记为 false），mediamtx 重启后才重新起算。
 """
 
 import argparse
@@ -45,6 +46,17 @@ STREAM_CMD = (
 def position(state: dict[str, float], now: float, duration: float) -> float:
     """素材原时间线的当前播放秒数：篡改期间原时间线照常前进，循环播放。"""
     return (state["base"] + now - state["since"]) % duration
+
+
+def timeline(
+    state: dict[str, float] | None, now: float, ready: float, mediamtx_started: float
+) -> dict[str, float]:
+    """原时间线的记录。只有 mediamtx（重新）启动后的第一次篡改才从路径的推流时刻起算——那时推流从素材
+    第 0 秒开始；之后一直沿用，恢复也不清除：恢复后的推流从中途续播，其推流时刻不是素材的第 0 秒，若据此
+    重算，下一次"切回 2 分钟前"会切到识别引擎没看过的片段，重放无从识别。"""
+    if state is None or state["since"] < mediamtx_started:
+        return {"base": now - ready, "since": now}
+    return state
 
 
 def source_for(action: str, path: str, pos: float, duration: float) -> str:
@@ -128,13 +140,12 @@ def tamper(compose: Compose, action: str, camera: str) -> int:
     )  # fmt: skip
     now = time.time()
     state_file = STATE_DIR / f"hyd-tamper-{camera}.json"
-    state = json.loads(state_file.read_text()) if state_file.is_file() else None
-    if state is None or state["since"] < compose.started("mediamtx"):
-        # 首次篡改：原时间线从该路径开始推流算起
-        ready = datetime.fromisoformat(info["readyTime"]).timestamp()
-        state = {"base": now - ready, "since": now}
-        state_file.write_text(json.dumps(state))
+    saved = json.loads(state_file.read_text()) if state_file.is_file() else None
+    ready = datetime.fromisoformat(info["readyTime"]).timestamp()
+    state = timeline(saved, now, ready, compose.started("mediamtx"))
     pos = position(state, now, duration)
+    # tampered 供 make demo-reset 判断哪些路需要恢复
+    state_file.write_text(json.dumps(state | {"tampered": action != "restore"}))
     if action == "freeze":
         # 定格帧取自同一路当前画面（FR-307）
         compose.mediamtx(
@@ -146,8 +157,6 @@ def tamper(compose: Compose, action: str, camera: str) -> int:
         "wget", "-q", "-O", "-", "--header", "Content-Type: application/json",
         "--post-data", json.dumps(body), f"{MEDIAMTX_API}/config/paths/replace/{path}",
     )  # fmt: skip
-    if action == "restore":
-        state_file.unlink(missing_ok=True)
     print(f"{camera}：{DONE[action]}")
     return 0
 
