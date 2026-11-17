@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { body } from "../../src/scene/body";
+import { body, seatedByScale } from "../../src/scene/body";
 import { cameraShot, sceneView } from "../../src/scene/layout";
 import { facing, figure, type Figure, type Vec3 } from "../../src/scene/pose";
 
@@ -192,6 +192,38 @@ describe("body", () => {
     expect(wrist?.[1]).toBeGreaterThan((f?.head.at[1] ?? Number.POSITIVE_INFINITY) + 0.1);
   });
 
+  describe("手臂前后（视线上两个解按人体结构取舍）", () => {
+    const arms = (edit: Record<number, Vec3>) => STANDING.map((p, i): Vec3 => edit[i] ?? p);
+    const REACH = arms({ 7: [0.19, 1.42, 0.3], 8: [-0.19, 1.42, 0.3], 9: [0.19, 1.42, 0.56], 10: [-0.19, 1.42, 0.56] });
+    const PHONE = arms({ 9: [0.19, 1.12, 0.26], 10: [-0.19, 1.12, 0.26] });
+    const SWING = arms({ 7: [0.19, 1.14, -0.1], 8: [-0.19, 1.14, -0.1], 9: [0.19, 0.9, -0.19], 10: [-0.19, 0.9, -0.19] });
+    /** 左手腕（第 5 段终点）相对左肩沿身体朝向 front 的前后距离与高低 */
+    const wrist = (joints: Vec3[], front: number, heading: number | null = null) => {
+      const { keypoints, bbox } = view(WALL, place(joints, AT, front));
+      const f = body(keypoints, bbox, WALL, AT, heading, heading === null ? null : 1.2);
+      const [shoulder, hand]: [Vec3, Vec3] = [f?.bones[2]?.from ?? [0, 0, 0], f?.bones[5]?.to ?? [0, 0, 0]];
+      return { ahead: (hand[0] - shoulder[0]) * Math.cos(front) + (hand[2] - shoulder[2]) * Math.sin(front), height: hand[1] - shoulder[1] };
+    };
+
+    it("正对镜头向前平伸：手在身前、与肩同高（原先取离镜头更远的解，画成向身后下方）", () => {
+      const { ahead, height } = wrist(REACH, TOWARD_CAMERA);
+      expect(ahead).toBeCloseTo(0.56, 1);
+      expect(height).toBeCloseTo(0, 1);
+    });
+
+    it("背对镜头向前平伸、正对镜头端着手机：手都在身前", () => {
+      expect(wrist(REACH, 0).ahead).toBeCloseTo(0.56, 1);
+      expect(wrist(PHONE, TOWARD_CAMERA).ahead).toBeCloseTo(0.26, 1);
+      expect(wrist(PHONE, TOWARD_CAMERA, TOWARD_CAMERA).ahead).toBeCloseTo(0.26, 1); // 走动中看手机
+    });
+
+    it("走动时手臂向后摆：仍在身后，不被翻到身前", () => {
+      const { ahead, height } = wrist(SWING, TOWARD_CAMERA, TOWARD_CAMERA);
+      expect(ahead).toBeCloseTo(-0.19, 1);
+      expect(height).toBeCloseTo(0.9 - 1.42, 1);
+    });
+  });
+
   it("双脚：自脚踝沿身体朝向伸出 0.19 m，贴地；走动时随运动方向", () => {
     const { keypoints, bbox } = view(WALL, place(STANDING, AT, TOWARD_CAMERA));
     const facing = body(keypoints, bbox, WALL, AT, null, null);
@@ -270,6 +302,70 @@ describe("body", () => {
     const reported: [number, number] = [AT[0] * t, 0];
     expect(body(keypoints, bbox, WALL, reported, null, null)?.seated).toBeFalsy();
     expect(body(keypoints, bbox, WALL, reported, null, null, false, true)?.seated).toBe(true);
+  });
+
+  it("4 m 高的摄像头下坐在桌后：两种假设的尺度比较仍判为坐姿（固定门限 0.82 判不出）", () => {
+    const TALL: Pose = { ...WALL, height_m: 4, pitch_deg: -35 };
+    const seated = STANDING.map(([l, u, f]): Vec3 => [l, u - 0.47, f]);
+    const { keypoints, bbox } = view(TALL, place(seated, AT, TOWARD_CAMERA), [13, 14, 15, 16]);
+    const t = (0.92 - TALL.height_m) / (0.45 - TALL.height_m);
+    const f = body(keypoints, bbox, TALL, [AT[0] * t, 0], null, null);
+
+    expect(f?.seated).toBe(true);
+    expect(f?.bones[0]?.to[1]).toBeCloseTo(0.45, 1);
+  });
+
+  it("坐姿、膝部可见：大腿方向按膝部视线求得（不再按猜测的朝向折出），并给出身体朝向", () => {
+    // 背对镜头坐着（朝 +x），脸被挡、耳朵可见，膝部在髋前方 0.42 m 同高处，脚踝被挡
+    const seated: Vec3[] = STANDING.map(([l, u, f], i): Vec3 =>
+      i === 13 || i === 14 ? [l, 0.45, 0.42] : i === 15 || i === 16 ? [l, 0.03, 0.42] : [l, u - 0.47, f],
+    );
+    const { keypoints, bbox } = view(WALL, place(seated, AT, 0), [0, 1, 2, 15, 16]);
+    const t = (0.92 - WALL.height_m) / (0.45 - WALL.height_m);
+    const f = body(keypoints, bbox, WALL, [AT[0] * t, 0], null, null);
+    const thigh = f?.bones[LEFT_THIGH];
+    if (!f || !thigh) throw new Error("没有重建");
+
+    expect(f.seated).toBe(true);
+    expect(thigh.inferred).toBe(false);
+    expect(thigh.to[0] - thigh.from[0]).toBeGreaterThan(0.3); // 大腿朝远离镜头的 +x
+    expect(Math.abs(thigh.to[1] - thigh.from[1])).toBeLessThan(0.1);
+    expect(Math.cos(f.front ?? Math.PI)).toBeGreaterThan(0.9);
+  });
+
+  it("坐姿、腿被挡：沿用上一帧的朝向，不随关键点左右次序逐帧翻转", () => {
+    const seated = STANDING.map(([l, u, f]): Vec3 => [l, u - 0.47, f]);
+    const { keypoints, bbox } = view(WALL, place(seated, AT, TOWARD_CAMERA), [13, 14, 15, 16]);
+    const t = (0.92 - WALL.height_m) / (0.45 - WALL.height_m);
+    const reported: [number, number] = [AT[0] * t, 0];
+    const fresh = body(keypoints, bbox, WALL, reported, null, null);
+    const kept = body(keypoints, bbox, WALL, reported, null, null, false, true, 0);
+    const dx = (f: Figure | null) => (f?.bones[LEFT_THIGH]?.to[0] ?? 0) - (f?.bones[LEFT_THIGH]?.from[0] ?? 0);
+
+    expect(dx(fresh)).toBeLessThan(-0.3); // 正对镜头：大腿朝镜头（−x）
+    expect(dx(kept)).toBeGreaterThan(0.3); // 上一帧朝 +x：沿用
+    expect(kept?.front).toBeCloseTo(0, 5);
+  });
+
+  it("背面：脸部看不见而耳朵看得见，关键点左右次序给反也判为背对镜头", () => {
+    const seated = STANDING.map(([l, u, f]): Vec3 => [l, u - 0.47, f]);
+    const { keypoints, bbox } = view(WALL, place(seated, AT, 0), [0, 1, 2, 13, 14, 15, 16]);
+    // 左右互换：模拟关键点模型对背面给出正面的左右次序
+    const swapped = keypoints.map((_, i) => keypoints[i === 0 ? 0 : i % 2 === 1 ? i + 1 : i - 1] ?? [0, 0, 0]);
+    const t = (0.92 - WALL.height_m) / (0.45 - WALL.height_m);
+    const f = body(swapped, bbox, WALL, [AT[0] * t, 0], null, null);
+
+    expect(f?.seated).toBe(true);
+    expect(Math.cos(f?.front ?? Math.PI)).toBeGreaterThan(0.9);
+  });
+
+  it("seatedByScale：取更接近标准体型的假设，带回差；两者分不开时沿用上一帧", () => {
+    expect(seatedByScale(0.8, 1.0, false)).toBe(true);
+    expect(seatedByScale(1.0, 1.25, true)).toBe(false);
+    expect(seatedByScale(0.92, 1.13, false)).toBe(false); // 介于两者之间：没有上一帧按站姿
+    expect(seatedByScale(0.92, 1.13, true)).toBe(true); // 上一帧坐着：仍坐着
+    expect(seatedByScale(0.95, 1.02, true)).toBe(true); // 分不开（高位摄像头）
+    expect(seatedByScale(0.95, 1.02, false)).toBe(false);
   });
 
   it("站在矮墙后、腿被挡：画面尺度与站立相符，仍按站姿", () => {

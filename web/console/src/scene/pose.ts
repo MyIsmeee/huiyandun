@@ -68,6 +68,8 @@ export interface Bone {
 export interface Figure {
   /** body() 按坐姿重建（供下一帧的回差判定） */
   seated?: boolean;
+  /** 坐姿时采用的身体朝向（平面方向角，弧度，(cos, sin)）：供下一帧沿用，坐着的人不逐帧前后翻转 */
+  front?: number;
   bones: Bone[];
   head: { at: Vec3; inferred: boolean };
 }

@@ -127,6 +127,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
   const headings = useRef(new Map<string, number>());
   /** 上一帧按坐姿重建的目标：坐、站判定的回差（body.ts） */
   const seatedKeys = useRef(new Set<string>());
+  /** 坐着的目标上一帧的身体朝向（body.ts）：膝部看不见时沿用 */
+  const seatedFronts = useRef(new Map<string, number>());
   const last = useRef(0);
   // 轨迹点写入预分配的实例：推送频繁时不重建几何体，也不触发 React 重渲染
   const dots = useRef<InstancedMesh>(null);
@@ -255,10 +257,22 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         const f =
           pose &&
           shape &&
-          (body(shape.keypoints, shape.bbox, pose, [x, y], moving, target.speed_mps, fallen, seatedKeys.current.has(target.key)) ??
+          (body(
+            shape.keypoints,
+            shape.bbox,
+            pose,
+            [x, y],
+            moving,
+            target.speed_mps,
+            fallen,
+            seatedKeys.current.has(target.key),
+            seatedFronts.current.get(target.key) ?? null,
+          ) ??
             (truncated ? null : figure(shape.keypoints, shape.bbox, facing(pose, x, y))));
         if (f?.seated) seatedKeys.current.add(target.key);
         else seatedKeys.current.delete(target.key);
+        if (f?.seated && f.front !== undefined) seatedFronts.current.set(target.key, f.front);
+        else seatedFronts.current.delete(target.key);
         if (f) drawFigure(f, x, y, target.uncertain, base);
         if (f && target.key === selected) bounds = figureBounds(f, x, y);
         if (f && target.key === hoveredKey) hoverBounds = figureBounds(f, x, y);
@@ -289,6 +303,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       }
     }
     for (const key of headings.current.keys()) if (!seen.has(key)) headings.current.delete(key);
+    for (const key of seatedKeys.current) if (!seen.has(key)) seatedKeys.current.delete(key);
+    for (const key of seatedFronts.current.keys()) if (!seen.has(key)) seatedFronts.current.delete(key);
     retain(owner, seen);
     for (const { key } of layers) finish(meshes.current[key], counts[key] ?? 0);
     finish(discs.current, discCount);
