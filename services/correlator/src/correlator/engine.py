@@ -95,6 +95,12 @@ class Engine:
             key = (incident.rule_id, device)
             self._quiet_until[key] = max(until, self._quiet_until.get(key, until))
 
+    def reset(self) -> None:
+        """演示复位：清空去重期与未完成的命中序列，复位后的事件按全新攻击关联。
+        只在内存中生效：之后若重启，restore 仍按近期关联事件恢复去重期。"""
+        self._hits.clear()
+        self._quiet_until.clear()
+
     def feed(self, subject: str, event: Event) -> list[CorrelatorIncidentV1]:
         device = _key(event)
         # monitor 告警只显示，不参与关联（D-068）；疑似跌倒同样只在控制台提示（TK-160）

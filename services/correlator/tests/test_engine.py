@@ -198,6 +198,32 @@ def test_unknown_technique_logged_and_incident_still_published(
     assert [r.message for r in caplog.records] == ["correlator.technique_unknown"]
 
 
+def test_reset_allows_immediate_replay_of_attack() -> None:
+    """演示复位：去重期内重演同一攻击原本被压下；复位后按全新攻击生成单域与跨域事件。"""
+    engine = Engine(ALL_RULES, ATTACK)
+    assert [i.rule_id for i in feed(engine, (ALERT, alert(0)), (INTEGRITY, integrity(20)))] == [
+        "HYD-NET-0101",
+        "HYD-X-0001",
+    ]
+    assert feed(engine, (ALERT, alert(60))) == []  # 去重期内：只顺延，不生成
+
+    engine.reset()
+
+    assert [i.rule_id for i in feed(engine, (ALERT, alert(70)), (INTEGRITY, integrity(90)))] == [
+        "HYD-NET-0101",
+        "HYD-X-0001",
+    ]
+
+
+def test_reset_drops_partial_sequence() -> None:
+    """复位前的半截序列不与复位后的事件拼成跨域事件：复位前的爆破 + 复位后的冻结只算单域篡改。"""
+    engine = Engine(RULES, ATTACK)
+    feed(engine, (ALERT, alert(0)))  # 只走完第一步
+    engine.reset()
+
+    assert feed(engine, (INTEGRITY, integrity(10))) == []
+
+
 def test_bruteforce_then_tamper_escalates() -> None:
     """全部规则同时加载：认证爆破先生成 high 的单域事件（即可封禁），画面随后遭篡改再生成 critical 的跨域事件。"""
     engine = Engine(ALL_RULES, ATTACK)

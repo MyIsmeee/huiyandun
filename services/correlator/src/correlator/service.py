@@ -31,6 +31,7 @@ from py_common.config import ServiceConfig, load_config
 from py_common.log import configure_logging
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
+from py_contracts.events.hyd_demo_reset_v1_schema import DemoResetV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
 SUBJECT = "hyd.security.alert.v1"
@@ -88,6 +89,10 @@ class CorrelatorConfig(ServiceConfig):
     )
     behavior_baseline_file: Path | None = Field(
         None, description="预先学好的基线快照：没有可续用的状态时从它开始，免去 10 分钟学习期"
+    )
+    demo_reset: bool = Field(
+        False,
+        description="响应 hyd.demo.reset.v1，清空去重期以便重演攻击；只在演示环境开启，生产部署保持关闭",
     )
 
 
@@ -247,6 +252,21 @@ async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
     )
 
 
+RESET_SUBJECT = "hyd.demo.reset.v1"
+
+
+async def follow_reset(engine: Engine, bus: Bus) -> None:
+    """演示复位：普通订阅、不重放，复位只作用于此刻的去重状态（correlator 未运行时发出的复位不补做）。"""
+
+    async def on_reset(event: DemoResetV1) -> None:
+        engine.reset()
+        log.info(
+            "correlator.demo_reset", extra={"actor": event.actor, "request_id": event.request_id}
+        )
+
+    await bus.subscribe(RESET_SUBJECT, DemoResetV1, on_reset)
+
+
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
 REGISTRY_RETRY_S = 2
 
@@ -289,6 +309,8 @@ async def serve(config: CorrelatorConfig) -> None:
         "correlator.started",
         extra={"eve_file": str(config.eve_file), "rules": [r.id for r in rules]},
     )
+    if config.demo_reset:
+        await follow_reset(engine, bus)
     window = timedelta(seconds=max(r.window_s for r in rules))
     devices: dict[Ip, str] = {}
     model: list[BehaviorModel] = []  # 取到登记表后再加载：存盘状态按设备编号恢复

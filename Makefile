@@ -1,5 +1,5 @@
 .PHONY: licenses lint lint-py lint-imports lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper
+	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper demo-reset
 
 WEB = pnpm --dir web/console
 
@@ -184,3 +184,13 @@ attack attack-slow attack-hijack:
 # ACTION：freeze 定格、replay 切回约 2 分钟前、restore 恢复；只作用于调试素材（mediamtx 推流）
 tamper:
 	uv run python tools/dev/redteam.py tamper $(ACTION) $(CAMERA) -- $(COMPOSE)
+
+# 演示复位：回滚仍在生效的封禁、清空关联引擎的 5 分钟去重期，并恢复被篡改的调试画面，之后可立即重演。
+# 重放要被识别，恢复后的画面须先正常播放约 2.5 分钟，再执行 make tamper ACTION=replay
+demo-reset:
+	$(COMPOSE) exec -T api-server hyd-api demo-reset
+	@for f in /tmp/hyd-tamper-*.json; do \
+		grep -qs '"tampered": true' "$$f" || continue; \
+		cam=$$(basename "$$f" .json); \
+		uv run python tools/dev/redteam.py tamper restore "$${cam#hyd-tamper-}" -- $(COMPOSE) || exit 1; \
+	done
