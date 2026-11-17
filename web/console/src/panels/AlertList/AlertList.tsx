@@ -303,6 +303,11 @@ export function AlertListView(props: {
   );
 }
 
+/** 目标未登记为设备的网络告警（FR-203）：标出被攻击的地址，否则无从得知哪台主机遭攻击 */
+export function unregistered(alert: Alert): string {
+  return "dst_ip" in alert ? `未登记设备 ${alert.dst_ip}` : "未登记设备";
+}
+
 /** 一条告警或合并行；count > 1 时标出次数 */
 function AlertRow(props: { alert: Alert; selected: string | null; count: number }) {
   const { alert, selected, count } = props;
@@ -320,8 +325,11 @@ function AlertRow(props: { alert: Alert; selected: string | null; count: number 
           {title}
           {count > 1 && <span className="ml-1.5 text-xs font-medium text-muted-foreground tabular-nums">×{count}</span>}
         </span>
-        <span className="block text-meta text-subtle-foreground tabular-nums">
-          {device ?? "未登记设备"} · {count > 1 ? "最近 " : ""}
+        <span
+          className="block text-meta text-subtle-foreground tabular-nums"
+          title={device === null ? "目标地址未登记为摄像头：告警不关联成事件、不自动处置，登记后纳入防护" : undefined}
+        >
+          {device ?? unregistered(alert)} · {count > 1 ? "最近 " : ""}
           {formatStamp(Date.parse(alert.ts))}
         </span>
       </span>

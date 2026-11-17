@@ -223,6 +223,15 @@ describe("AlertList", () => {
     const current = screen.getAllByRole("button").filter((b) => b.getAttribute("aria-current"));
     expect(current.map((b) => b.textContent)).toEqual([expect.stringContaining("告警 1")]);
   });
+
+  it("目标未登记为设备的网络告警标出被攻击地址并说明不处置，不可选中（FR-203）", () => {
+    receive(frame("alerts", { ...alert(1), device_id: null }), 0);
+    render(<AlertList stale={false} lastFrameAt={0} />);
+
+    const label = screen.getByText(/未登记设备 172\.30\.0\.12/);
+    expect(label.getAttribute("title")).toContain("不自动处置");
+    expect(screen.getByText("告警 1").closest("button")).toHaveProperty("disabled", true);
+  });
 });
 
 describe("按关联事件选中", () => {
