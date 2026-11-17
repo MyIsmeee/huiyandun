@@ -84,18 +84,23 @@ async def push(websocket: WebSocket) -> None:
         return
     await websocket.accept()
     hub: Hub = websocket.app.state.hub
-    subscriber = hub.subscribe(principal.token_hash)
     # 先补推当前设备状态，再补推近 24 小时的告警、关联事件与处置执行（D-077）
     state = websocket.app.state
-    for frame in [
+    backlog = [
         *state.devices.snapshot(),
         *state.cleared.snapshot(),  # 先于告警：控制台据此过滤补推的告警与关联事件
         *state.history.snapshot(),
         *state.dispositions.snapshot(),
-    ]:
-        subscriber.queue.put_nowait(frame.model_dump_json())
+    ]
+    # 补推直接发送、不进队列：补推可达 300 帧以上（告警 200、关联事件 50、执行 50，另有设备、处置与删除记录），
+    # 超过 QUEUE_SIZE；放进队列时记录积满后每次建连都因队列已满而断开，控制台一直显示"数据非实时"。
+    # 队列只承载实时广播，仍按 QUEUE_SIZE 断开消费过慢的连接。取快照与订阅之间没有 await，期间的广播不会漏掉，
+    # 补推期间到达的广播在队列中等补推发完
+    subscriber = hub.subscribe(principal.token_hash)
 
     async def send() -> None:
+        for frame in backlog:
+            await websocket.send_text(frame.model_dump_json())
         while True:
             await websocket.send_text(await subscriber.queue.get())
 
