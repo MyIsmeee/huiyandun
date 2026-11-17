@@ -65,6 +65,11 @@ ADE20K = {
     "street_furniture": [43, 69, 87, 93, 136, 138],
     "tree": [4, 72],  # tree、palm
     "plant": [17],  # 盆栽等，以矮树呈现
+    # 2026-11-17 扩充：办公室、茶水间、卫生间常见物品，大屏按细分类别摆放对应模型（显示器放在桌面上）
+    # computer、crt screen、monitor、television、refrigerator、washer、microwave、oven、stove、dishwasher、lamp、fan
+    "appliance": [74, 141, 143, 89, 50, 107, 124, 118, 71, 129, 36, 139],
+    "box": [41, 115, 112],  # box、bag、basket
+    "fixture": [65, 47, 37, 145],  # toilet、sink、bathtub、shower
 }
 CLASSES = list(ADE20K)  # 格子取值 = 下标 + 1，0 为未识别
 # 物体的细分类别（契约 SceneFrame.objects[].kind）：ADE20K 编号 → 名称。渲染类别把它们合并了（桌子含书桌、茶几），
@@ -92,6 +97,25 @@ KINDS = {
     93: "pole",
     136: "traffic_light",
     138: "ashcan",
+    74: "computer",
+    141: "crt_screen",
+    143: "monitor",
+    89: "television",
+    50: "refrigerator",
+    107: "washer",
+    124: "microwave",
+    118: "oven",
+    71: "stove",
+    129: "dishwasher",
+    36: "lamp",
+    139: "fan",
+    41: "box",
+    115: "bag",
+    112: "basket",
+    65: "toilet",
+    47: "sink",
+    37: "bathtub",
+    145: "shower",
 }
 SURFACES = ["road", "sidewalk", "floor", "grass", "earth"]
 # 黑板取其下方的墙脚线，板高 1.2 m（离地 0.9 m 由大屏绘制）
@@ -105,7 +129,13 @@ OBJECT_SIZE_M = {
     "bed": (1.5, 0.6),
     "furniture": (0.6, 0.8),
     "street_furniture": (0.4, 0.8),
+    "appliance": (0.3, 0.5),
+    "box": (0.4, 0.4),
+    "fixture": (0.5, 0.8),
 }
+# 小件物品（电器、箱包）的底面面积下限：桌上的显示器底面约 0.1 m²，按 MIN_AREA_M2 会被滤掉
+SMALL_CLASSES = {"appliance", "box"}
+MIN_SMALL_AREA_M2 = 0.04
 TREE_HEIGHT_M = {"tree": 5.0, "plant": 1.0}
 
 LUT = np.zeros(150, np.uint8)

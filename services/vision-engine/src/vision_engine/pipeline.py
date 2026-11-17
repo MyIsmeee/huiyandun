@@ -52,8 +52,16 @@ from py_contracts.events.hyd_vision_scene_reply_v1_schema import VisionSceneRepl
 from py_contracts.events.hyd_vision_scene_request_v1_schema import VisionSceneRequestV1
 from py_contracts.events.hyd_vision_scene_v1_schema import VisionSceneV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
+from vision_engine.action import ActionModel, ActionRecognizer
+from vision_engine.backdrop import backdrop
 from vision_engine.behavior import BehaviorDetector
-from vision_engine.detector import VEHICLES, PoseDetector, VehicleDetector, pose_detector
+from vision_engine.detector import (
+    VEHICLES,
+    PoseDetector,
+    TopDownPose,
+    VehicleDetector,
+    pose_detector,
+)
 from vision_engine.footing import (
     FOOT_ERROR_RATIO,
     VEHICLE_ERROR_RATIO,
@@ -75,7 +83,14 @@ from vision_engine.monocular import Geometry, MonocularGeometry, combine
 from vision_engine.motion import MotionGate
 from vision_engine.pose_check import PoseChecker
 from vision_engine.rules import Observation, RuleEngine, RuleEvent
-from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
+from vision_engine.runtime import (
+    ACTION_MEM_MB,
+    TOPDOWN_MEM_MB,
+    DeviceError,
+    VisionConfig,
+    create_session,
+    model_files,
+)
 from vision_engine.scene import SCHEMA_VERSION as SCENE_SCHEMA_VERSION
 from vision_engine.scene import ScenePerception, Segmenter
 from vision_engine.scene3d import align, layout
@@ -325,6 +340,7 @@ class CameraPipeline:
         embedder: FrameEmbedder | None = None,
         pose: dict[str, Any] | None = None,
         rules: list[dict[str, Any]] | None = None,
+        actions: ActionModel | None = None,
     ) -> None:
         self._camera_id = camera_id
         self._mapping = mapping
@@ -339,7 +355,10 @@ class CameraPipeline:
         self._geometry: list[Geometry] = []  # 单目几何的近几次估计（monocular.py）
         self._detector = detector
         self._vehicles = vehicles  # None 时没有车辆，人员只有 RTMO 的正向检出
-        self._behaviors = BehaviorDetector(climb_lines or [])
+        # 配置了动作模型时，跌倒、打架由骨骼几何规则与模型联合判定（behavior.py）
+        self._behaviors = BehaviorDetector(
+            climb_lines or [], ActionRecognizer(actions) if actions is not None else None
+        )
         self._freeze = FreezeDetector()
         self._embedder = embedder  # None 时不判定重放、挪位与遮挡
         self._replay = ReplayDetector()
@@ -383,6 +402,32 @@ class CameraPipeline:
         self._boxes = np.concatenate([people.xyxy, vehicles.xyxy])
         return people, vehicles
 
+    def _behavior_events(
+        self,
+        ids: np.ndarray,
+        keypoints: np.ndarray,
+        scores: np.ndarray,
+        timestamp: float,
+        frame_size: tuple[int, int],
+    ) -> list[VisionEvent]:
+        now = datetime.now(UTC)
+        return [
+            VisionBehaviorV1(
+                schema_version=BEHAVIOR_SCHEMA_VERSION,
+                event_id=uuid.uuid4(),
+                ts=now,
+                camera_id=self._camera_id,
+                track_id=b.track_id,
+                behavior=b.behavior,
+                level=b.level,
+                confidence_avg=b.confidence_avg,
+                duration_s=b.end - b.start,
+                ts_start=now - timedelta(seconds=b.end - b.start),
+                ts_end=now,
+            )
+            for b in self._behaviors.update(ids, keypoints, scores, timestamp, frame_size)
+        ]
+
     def _vote(self, track_id: int, class_id: int) -> int:
         """轨迹内多数类别：两轮车常在自行车与摩托车之间逐帧跳变，按多数输出，大屏模型不闪烁。"""
         votes = self._votes.setdefault(int(track_id), Counter())
@@ -419,11 +464,17 @@ class CameraPipeline:
                     self._integrity(view.kind, VIEW_S, "model", view.confidence, detail)
                 )
         tracked, vehicles = self.track(frame, timestamp)
-        if not len(tracked) and not len(vehicles):
-            return integrity + self._rule_events(
-                [], timestamp
-            )  # 无目标时同样推进：消失的轨迹按时结束
         height, width = frame.shape[:2]
+        if not len(tracked) and not len(vehicles):
+            # 无目标时同样推进：消失的轨迹按时结束，原地消失按时判定
+            vanished = self._behavior_events(
+                np.array([], int),
+                np.empty((0, 17, 2)),
+                np.empty((0, 17)),
+                timestamp,
+                (width, height),
+            )
+            return integrity + vanished + self._rule_events([], timestamp)
         if self._mapping is None and self._pose is not None:
             self._mapping = GroundMapping.from_pose(self._pose, width, height)
             if self._mapping is not None:
@@ -462,32 +513,24 @@ class CameraPipeline:
             )
         )
         now = datetime.now(UTC)
-        # 未标定摄像头同样判定行为：只输出设备级告警（C-CV-05）
-        events: list[VisionEvent] = integrity + [
-            VisionBehaviorV1(
-                schema_version=BEHAVIOR_SCHEMA_VERSION,
-                event_id=uuid.uuid4(),
-                ts=now,
-                camera_id=self._camera_id,
-                track_id=b.track_id,
-                behavior=b.behavior,
-                level=b.level,
-                confidence_avg=b.confidence_avg,
-                duration_s=b.end - b.start,
-                ts_start=now - timedelta(seconds=b.end - b.start),
-                ts_end=now,
+        # 未标定摄像头同样判定行为：只输出设备级告警（C-CV-05）。画面中只有车辆时同样调用，原地消失按时判定
+        events: list[VisionEvent] = integrity + (
+            self._behavior_events(
+                np.array(ids),
+                tracked.data["keypoints"],
+                tracked.data["keypoint_scores"],
+                timestamp,
+                (width, height),
             )
-            for b in (
-                self._behaviors.update(
-                    np.array(ids),
-                    tracked.data["keypoints"],
-                    tracked.data["keypoint_scores"],
-                    timestamp,
-                )
-                if people
-                else []
+            if people
+            else self._behavior_events(
+                np.array([], int),
+                np.empty((0, 17, 2)),
+                np.empty((0, 17)),
+                timestamp,
+                (width, height),
             )
-        ]
+        )
         if mapping is None:
             return events  # 没有地面映射不输出坐标（FR-902）
         scale = np.array([width, height], dtype=np.float32)
@@ -832,8 +875,10 @@ class Cameras:
         bus: Bus,
         health: Health,
         monocular: MonocularGeometry | None = None,
+        actions: ActionModel | None = None,
     ) -> None:
         self._config, self._bus, self._health = config, bus, health
+        self._actions = actions
         self._detector, self._vehicles = detector, vehicles
         self._segmenter, self._embedder = segmenter, embedder
         self._monocular = monocular
@@ -869,6 +914,7 @@ class Cameras:
             self._embedder,
             camera["pose"],
             camera.get("rules") or [],
+            self._actions,
         )
         runs = [
             supervise(
@@ -936,9 +982,8 @@ class Cameras:
         """视角取安装参数（与人员定位一致），行人与车辆所在像素不计入，尺度与朝向对齐人员所用的地面映射。"""
         assert self._monocular is not None and self._segmenter is not None
         pose = camera["pose"]
-        rec = self._monocular.reconstruct(
-            frame, pose.get("hfov_deg"), _box_mask(frame.shape[:2], boxes)
-        )
+        exclude = _box_mask(frame.shape[:2], boxes)
+        rec = self._monocular.reconstruct(frame, pose.get("hfov_deg"), exclude)
         if rec is None:
             log.info("vision.scene3d_no_floor", extra={"camera_id": camera_id})
             return None
@@ -953,6 +998,12 @@ class Cameras:
         )
         if not any(scene.values()):
             return None
+        try:
+            # 实景底图（backdrop.py）：失败时只少底图，场景照常
+            if (extra := backdrop(rec, pose, frame, exclude, ade)) is not None:
+                scene = scene | {"backdrop": extra}
+        except (cv2.error, ValueError) as e:
+            log.warning("vision.backdrop_failed", extra={"camera_id": camera_id, "error": repr(e)})
         return VisionSceneV1.model_validate(
             {
                 "schema_version": SCENE_SCHEMA_VERSION,
@@ -1000,6 +1051,19 @@ async def serve(config: VisionConfig) -> None:
     detector = pose_detector(
         str(config.model_file), create_session(config, config.model_file, models)
     )
+    if config.topdown_model_file:
+        # 两阶段骨骼（detector.TopDownPose）：按人员框逐人重新估计
+        detector.topdown = TopDownPose(
+            str(config.topdown_model_file),
+            create_session(config, config.topdown_model_file, limit_mb=TOPDOWN_MEM_MB),
+        )
+    actions = (
+        ActionModel(create_session(config, config.action_model_file, limit_mb=ACTION_MEM_MB))
+        if config.action_model_file
+        else None
+    )
+    if actions is None:
+        log.warning("vision.actions_disabled")  # 未配置 HYD_ACTION_MODEL_FILE
     vehicles = (
         VehicleDetector(
             str(config.vehicle_model_file),
@@ -1037,7 +1101,9 @@ async def serve(config: VisionConfig) -> None:
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
     health = Health(config.heartbeat_file)
-    cameras = Cameras(config, detector, vehicles, segmenter, embedder, bus, health, monocular)
+    cameras = Cameras(
+        config, detector, vehicles, segmenter, embedder, bus, health, monocular, actions
+    )
     # 登记表的流由 api-server 创建；它尚未启动时重试
     while True:
         try:

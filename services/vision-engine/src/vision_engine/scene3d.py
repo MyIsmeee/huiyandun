@@ -32,7 +32,9 @@ from vision_engine.scene import (
     MAX_POLYGONS,
     MIN_AREA_M2,
     MIN_LENGTH_M,
+    MIN_SMALL_AREA_M2,
     OBJECT_SIZE_M,
+    SMALL_CLASSES,
     SURFACES,
     TREE_HEIGHT_M,
     WALL_HEIGHT_M,
@@ -55,6 +57,7 @@ LINE_GAP_M = 1.0  # 同一直线上的点间断超过此值即分成两段
 OBJECT_MIN_DEPTH_RATIO = 0.5  # 底面短边不足默认进深的一半：只看到正面，补足进深
 OBJECT_SIZE_LIMIT_M = 6.0  # 长边超过此值的簇多半是把整排桌子连在一起，仍保留，只截断尺寸异常的
 HEIGHT_RANGE_M = (0.3, 2.4)
+BASE_MIN_M = 0.3  # 底部离地低于此值视为落地，不给出 base_m
 FLYING_RATIO = 0.04  # 相邻像素深度相差超过自身深度的此比例即为边缘飞点
 ERODE_PX = 2
 WALL_NORMAL_MAX = 0.3  # 墙面法向与"上"的夹角余弦不超过此值：近乎竖直的面
@@ -210,7 +213,13 @@ def layout(
             item = {"class": name, "polygon": _round(footprint), "height_m": round(top, 2)}
             if name in kinds and (kind := _kind(kinds[name][keep][member])):
                 item["kind"] = kind
-            if (area := _area(footprint)) >= MIN_AREA_M2:
+            # 底部离地高度：放在桌面、柜顶上的小件物品（显示器、微波炉、纸箱）按它摆放，不落到地面。只给小件：
+            # 桌子的点集中在桌面，5 分位也在桌面高度，给出会让桌子悬空
+            base = float(np.percentile(heights, 5))
+            if name in SMALL_CLASSES and base >= BASE_MIN_M:
+                item["base_m"] = round(min(base, top - 0.05), 2)
+            least = MIN_SMALL_AREA_M2 if name in SMALL_CLASSES else MIN_AREA_M2
+            if (area := _area(footprint)) >= least:
                 polygons.append((area, "objects", item))
     trees = []
     for name, tree_h in TREE_HEIGHT_M.items():

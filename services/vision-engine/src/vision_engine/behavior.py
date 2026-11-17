@@ -12,9 +12,21 @@ CONFIRM_S 才"确认"，进入物理告警，此后每 REPEAT_S 重发。期间�
 长时间静止同样分两级：站着的人髋部停在原处满 STILL_SUSPECT_S 发"疑似"，满 STILL_CONFIRM_S "确认"；
 只对站姿计时（看得到伸直的腿）：坐在工位上不动是常态，办公室里会一直误提示；倒地的交给跌倒判定。
 
+原地消失是跌倒的补充线索，只有"疑似"一级：站着的人在画面中间（不贴边）突然没了轨迹，满 VANISH_S
+附近也没有新轨迹出现，多是倒下后被桌椅挡住、或横躺后检测器认不出（现场实测：倒地后整段检测不到）。
+走到柱子、他人身后同样会触发，所以只供值班员看画面确认，不进入物理告警、不参与关联。
+
 打架只有"疑似"一级：两人伸手可及、手腕相对身体快速运动、两人整体又没有一起移动（并肩跑步、同行不算），
 在 FIGHT_WINDOW_S 内过半的帧都如此才提示。这是骨骼几何的启发式判定，没有经真实打架素材校准，只供值班员留意，
 不进入物理告警、不参与关联。
+
+配置了骨骼动作模型（action.py，STGCN++）时，规则与模型同时成立可加快或升级判定：
+- 跌倒：已发疑似（倒地满 MIN_DURATION_S）、且模型近 FALL_MODEL_RECENT_S 内认为这条轨迹在跌倒（概率不低于
+  FALL_MODEL_PROB），不必再等倒地不动满 CONFIRM_S 即确认。模型只认动作过程，倒下之后静躺时概率回落，
+  所以只作提前确认的依据；没看到跌倒过程（被挡、一出现就躺着）时仍按原规则确认。规则没看到倒地（朝镜头倒、
+  倒在桌后）而模型的跌倒概率不低于 FALL_MODEL_ALONE_PROB 时，单独发"疑似"，只在控制台提示
+- 打架：两人伸手可及、躯干长短相当（同一深度），且模型近 FIGHT_MODEL_WINDOW_S 内至少 FIGHT_MODEL_HITS 次认为
+  在打人、踢人或推人（三类概率之和不低于 FIGHT_MODEL_PROB），即确认、进入物理告警；只有规则成立时仍为疑似
 """
 
 import math
@@ -22,6 +34,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+
+from vision_engine.action import ActionRecognizer
 
 MIN_DURATION_S = 2.0  # 持续时长门限（C-CV-04 默认 min_duration）
 MIN_CONFIDENCE = 0.5  # 判定所用关键点置信度的均值门限（C-CV-04）
@@ -59,6 +73,31 @@ FIGHT_DRIFT_SPEED = 1.5  # 两人中点的移动速度（躯干长度 / 秒）�
 FIGHT_WINDOW_S = 4.0  # 判定窗口
 FIGHT_MIN_SPAN_S = 3.0  # 窗口内样本须覆盖的时长
 FIGHT_ACTIVE_RATIO = 0.5  # 窗口内满足以上条件的帧占比
+# 原地消失：按"躯干长度"与画面尺寸归一，不依赖标定
+# 骨骼动作模型复核（action.py）：阈值在本地录制片段上核对（models/cards/stgcnpp-ntu60-2d.md）
+FALL_MODEL_PROB = 0.6  # 真实跌倒 0.63～1.0；5 分钟人流、跳跃、下蹲、攀爬最高 0.49
+FALL_MODEL_ALONE_PROB = 0.65  # 只有模型看到跌倒时发疑似的门限：本地片段中真实跌倒 0.65～0.95（随推理时刻浮动），人流最高 0.58
+FALL_MODEL_RECENT_S = (
+    6.0  # 跌倒动作在倒地前后约 1～3 s 内被认出，到发疑似（倒地满 2 s）时须仍在此时长内
+)
+FIGHT_MODEL_PROB = 0.6
+FIGHT_MODEL_WINDOW_S = 3.5  # 约 3 次推理
+FIGHT_MODEL_HITS = 2
+VANISH_S = 3.0  # 轨迹消失满此时长、附近没有新轨迹出现，才判为原地消失
+VANISH_STAND_S = 3.0  # 消失前此时长内须看到站姿：坐着的人俯身到桌下不算
+VANISH_STAND_FRAMES = 3  # 上述时长内站姿帧数的下限
+VANISH_STAND_HIP = 0.5  # 站姿：躯干直立，且髋部离地 / 躯干长度 不低于此值（坐着时多在 0.35 以下）
+VANISH_EDGE = 0.05  # 最后位置的关键点外框距画面边缘不足画面尺寸的此比例：多是走出画面，不算
+VANISH_NEAR = 2.0  # 消失后出现的新轨迹髋部距消失处不超过此倍躯干长度：同一人换了编号，不算
+VANISH_MIN_LIFE_S = 3.0  # 轨迹须存在满此时长：人流中一闪而过、频繁换编号的轨迹不算
+# 消失前 VANISH_SPEED_S 内髋部的移动速度（躯干长度 / 秒）上限：边走边消失的多是走远变小、走到他人身后。
+# 人流素材 crowd-1 中这类消失均不低于 1.0；现场实测倒地前站着、慢慢挪步为 0.25
+VANISH_SPEED_S = 2.0
+VANISH_MAX_SPEED = 0.6
+VANISH_MIN_HEIGHT = (
+    0.12  # 最后外框高度不足画面高度的此比例：远处的小人本就易漏检，不算（实测倒地者为 0.16）
+)
+VANISH_SPEED_SPAN_S = 0.4  # 上述时长内髋部样本须覆盖的时长：样本不足时无从判断是否在走，不发出
 
 SHOULDERS, HIPS, LEGS, ANKLES = (5, 6), (11, 12), (13, 14, 15, 16), (15, 16)
 WRISTS = (9, 10)
@@ -81,11 +120,17 @@ def _visible(scores: np.ndarray, idx: tuple[int, ...]) -> list[int]:
     return [i for i in idx if scores[i] >= KEYPOINT_MIN]
 
 
-def fall_frame(
-    points: np.ndarray, scores: np.ndarray, falling: bool = False
-) -> tuple[bool, float] | None:
-    """躯干倾角与髋部高度（FR-103）。返回（是否满足, 所用关键点置信度均值）；不可见为 None。
-    falling 为该轨迹已发出跌倒事件，按退出门限判定。"""
+@dataclass(frozen=True)
+class FallMeasure:
+    """一帧的倒地几何量（FR-103）：fall_frame 据此判定，诊断工具 tools/dev/explain_behavior.py 据此解释。"""
+
+    tilt_deg: float  # 躯干（髋→肩）与竖直向上方向的夹角：0° 为直立，180° 为倒立
+    hip_ratio: float  # 髋部高出腿部最低点的距离 / 躯干长度
+    score: float  # 所用关键点（肩、髋、腿）置信度的均值
+
+
+def fall_measure(points: np.ndarray, scores: np.ndarray) -> FallMeasure | None:
+    """肩、髋、腿（膝或踝）任一不可见，或躯干长度为 0 时为 None（无法判断）。"""
     shoulders, hips, legs = (_visible(scores, idx) for idx in (SHOULDERS, HIPS, LEGS))
     if not shoulders or not hips or not legs:
         return None
@@ -94,13 +139,30 @@ def fall_frame(
     torso = math.hypot(dx, dy)
     if torso == 0:
         return None
-    tilt = math.degrees(math.atan2(abs(dx), -dy))  # 0° 为直立，180° 为倒立
-    hip_height = (points[legs, 1].max() - hip[1]) / torso
-    score = float(scores[shoulders + hips + legs].mean())
-    tilt_min, hip_max = (
+    return FallMeasure(
+        tilt_deg=math.degrees(math.atan2(abs(dx), -dy)),
+        hip_ratio=float((points[legs, 1].max() - hip[1]) / torso),
+        score=float(scores[shoulders + hips + legs].mean()),
+    )
+
+
+def fall_thresholds(falling: bool) -> tuple[float, float]:
+    """（躯干倾角下限, 髋部高度上限）：已发出跌倒事件的轨迹按退出门限（回差，#134）。"""
+    return (
         (FALL_EXIT_TORSO_DEG, FALL_EXIT_HIP_RATIO) if falling else (FALL_TORSO_DEG, FALL_HIP_RATIO)
     )
-    return tilt > tilt_min and hip_height < hip_max, score
+
+
+def fall_frame(
+    points: np.ndarray, scores: np.ndarray, falling: bool = False
+) -> tuple[bool, float] | None:
+    """躯干倾角与髋部高度（FR-103）。返回（是否满足, 所用关键点置信度均值）；不可见为 None。
+    falling 为该轨迹已发出跌倒事件，按退出门限判定。"""
+    measure = fall_measure(points, scores)
+    if measure is None:
+        return None
+    tilt_min, hip_max = fall_thresholds(falling)
+    return measure.tilt_deg > tilt_min and measure.hip_ratio < hip_max, measure.score
 
 
 STAND_KNEE_DEG = 150.0  # 髋—膝—踝夹角不小于此值：腿伸直
@@ -221,9 +283,14 @@ class _Fall:
         return self.timer.emitted is not None
 
     def update(
-        self, ok: bool | None, score: float, hip: tuple[np.ndarray, float] | None, now: float
+        self,
+        ok: bool | None,
+        score: float,
+        hip: tuple[np.ndarray, float] | None,
+        now: float,
+        model: float = 0.0,
     ) -> list[tuple[Level, float, float]]:
-        """返回需发出的（级别, 开始时刻, 置信度均值）。"""
+        """返回需发出的（级别, 开始时刻, 置信度均值）。model 为动作模型近期的跌倒概率峰值（没有模型时为 0）。"""
         if ok is None:
             return []
         start = self.timer.start
@@ -246,7 +313,8 @@ class _Fall:
         seen_fall = self.lying - self.upright <= TRANSITION_S
         needed = CONFIRM_S if seen_fall else CONFIRM_UNSEEN_S
         due = self.confirmed is None or now - self.confirmed >= REPEAT_S
-        if self.suspected and due and now - start >= needed and self._still():
+        seen_by_model = self.confirmed is None and model >= FALL_MODEL_PROB
+        if self.suspected and due and (seen_by_model or (now - start >= needed and self._still())):
             self.confirmed = now
             found.append(("confirmed", start, mean))
         return found
@@ -335,12 +403,33 @@ class _Pair:
     )  # (时刻, 是否满足, 置信度)
     center: tuple[float, np.ndarray] | None = None  # 上一帧两人中点
     emitted: float | None = None
+    confirmed: float | None = None  # 上次按动作模型确认的时刻
+
+
+def _lingered(trail: list[tuple[float, np.ndarray, float]]) -> bool:
+    """消失前 VANISH_SPEED_S 内髋部移动不超过 VANISH_MAX_SPEED（躯干长度 / 秒）：站着或慢慢挪步，
+    不是边走边消失。"""
+    if len(trail) < 2 or trail[-1][0] - trail[0][0] < VANISH_SPEED_SPAN_S:
+        return False
+    torso = float(np.median([h[2] for h in trail]))
+    moved = float(np.linalg.norm(trail[-1][1] - trail[0][1]))
+    return moved / torso / (trail[-1][0] - trail[0][0]) <= VANISH_MAX_SPEED
 
 
 @dataclass
 class _Track:
     seen: float
+    first: float = 0.0  # 首次出现的时刻
+    stood: list[float] = field(default_factory=list)  # 近 VANISH_STAND_S 内站姿帧的时刻
+    stand_score: float = 0.0  # 最近一次站姿帧的关键点置信度
+    hip: tuple[np.ndarray, float] | None = None  # 最近一次可见的（髋部, 躯干长度）
+    box: tuple[float, float, float, float] | None = None  # 最近一次可见关键点的外框
+    trail: list[tuple[float, np.ndarray, float]] = field(
+        default_factory=list
+    )  # 近 VANISH_SPEED_S 内的（时刻, 髋部, 躯干长度）：判断消失前是否在走
+    vanished: bool = False  # 已判过原地消失（无论是否发出），不再重判
     fall: _Fall = field(default_factory=_Fall)
+    model_fall: float | None = None  # 只按动作模型发出疑似跌倒的时刻
     still: _Still = field(default_factory=_Still)
     body: _Body | None = None
     climbs: dict[int, _Timer] = field(default_factory=dict)
@@ -408,25 +497,50 @@ def _fight_frame(pair: _Pair, a: _Body, b: _Body, now: float) -> tuple[float, fl
 class BehaviorDetector:
     """单路摄像头的判定状态；只在该路串行调用的 update 中使用。"""
 
-    def __init__(self, climb_lines: list[list[float]]) -> None:
+    def __init__(
+        self, climb_lines: list[list[float]], actions: ActionRecognizer | None = None
+    ) -> None:
         self._lines = [ClimbLine(*line) for line in climb_lines]
+        self._actions = actions  # None 时只按骨骼几何规则判定
         self._tracks: dict[int, _Track] = {}
         self._pairs: dict[tuple[int, int], _Pair] = {}
 
     def update(
-        self, track_ids: np.ndarray, keypoints: np.ndarray, scores: np.ndarray, now: float
+        self,
+        track_ids: np.ndarray,
+        keypoints: np.ndarray,
+        scores: np.ndarray,
+        now: float,
+        frame_size: tuple[int, int] | None = None,
     ) -> list[Behavior]:
-        """track_ids (N,)、keypoints (N, 17, 2)、scores (N, 17) 为本帧已确认的轨迹。"""
+        """track_ids (N,)、keypoints (N, 17, 2)、scores (N, 17) 为本帧已确认的轨迹，可以为空：画面中没有人时
+        同样须调用，消失的轨迹才能按时判定原地消失。frame_size 为画面（宽, 高），不给时不判原地消失。"""
         found = []
         present: list[int] = []
+        if self._actions is not None:
+            self._actions.update(track_ids, keypoints, scores, now)
         for track_id, points, kp_scores in zip(track_ids, keypoints, scores, strict=True):
-            track = self._tracks.setdefault(int(track_id), _Track(seen=now))
+            track = self._tracks.setdefault(int(track_id), _Track(seen=now, first=now))
             track.seen = now
+            self._observe(track, points, kp_scores, now)
             fall = fall_frame(points, kp_scores, falling=track.fall.suspected)
             ok, score = fall if fall is not None else (None, 0.0)
             hip = hip_and_torso(points, kp_scores)
-            for level, start, mean in track.fall.update(ok, score, hip, now):
+            model = (
+                self._actions.fall_peak(int(track_id), now, FALL_MODEL_RECENT_S)
+                if self._actions is not None
+                else 0.0
+            )
+            for level, start, mean in track.fall.update(ok, score, hip, now, model):
                 found.append(Behavior(int(track_id), "fall", mean, start, now, level))
+            if (
+                model >= FALL_MODEL_ALONE_PROB
+                and not track.fall.suspected
+                and (track.model_fall is None or now - track.model_fall >= REPEAT_S)
+            ):
+                # 规则没看到倒地、模型认为在跌倒：只发疑似，置信度取模型概率
+                track.model_fall = now
+                found.append(Behavior(int(track_id), "fall", model, now, now, "suspected"))
             for hit in self._climb(track, points, kp_scores, now):
                 found.append(Behavior(int(track_id), "climb", hit[1], hit[0], now))
             trunk = float(kp_scores[list(SHOULDERS + HIPS)].mean())
@@ -437,10 +551,75 @@ class BehaviorDetector:
             if track.body is not None and not ok:  # 倒地的人不参与打架判定
                 present.append(int(track_id))
         found += self._fights(sorted(present), now)
+        if frame_size is not None:
+            found += self._vanishes({int(i) for i in track_ids}, frame_size, now)
         self._tracks = {k: t for k, t in self._tracks.items() if now - t.seen <= FORGET_S}
         self._pairs = {
             k: p for k, p in self._pairs.items() if k[0] in self._tracks and k[1] in self._tracks
         }
+        return found
+
+    @staticmethod
+    def _observe(track: _Track, points: np.ndarray, scores: np.ndarray, now: float) -> None:
+        """记下原地消失判定所需的最近状态：站姿时刻、髋部与可见关键点外框。"""
+        if (hip := hip_and_torso(points, scores)) is not None:
+            track.hip = hip
+            track.trail.append((now, *hip))
+        track.trail = [h for h in track.trail if now - h[0] <= VANISH_SPEED_S]
+        seen = points[scores >= KEYPOINT_MIN]
+        if len(seen) >= 2:
+            (x0, y0), (x1, y1) = seen.min(axis=0), seen.max(axis=0)
+            track.box = (float(x0), float(y0), float(x1), float(y1))
+        measure = fall_measure(points, scores)
+        if (
+            measure is not None
+            and measure.tilt_deg <= STAND_TORSO_DEG
+            and measure.hip_ratio >= VANISH_STAND_HIP
+        ):
+            track.stood.append(now)
+            track.stand_score = measure.score
+        track.stood = [t for t in track.stood if now - t <= VANISH_STAND_S]
+
+    def _vanishes(
+        self, present: set[int], frame_size: tuple[int, int], now: float
+    ) -> list[Behavior]:
+        """消失满 VANISH_S 的轨迹各判一次：消失前站着、最后位置不贴边、附近没有新轨迹出现。"""
+        width, height = frame_size
+        found = []
+        for track_id, track in self._tracks.items():
+            if track_id in present or track.vanished or now - track.seen < VANISH_S:
+                continue
+            track.vanished = True
+            stood = [t for t in track.stood if track.seen - t <= VANISH_STAND_S]
+            if (
+                track.fall.suspected
+                or len(stood) < VANISH_STAND_FRAMES
+                or track.stand_score < MIN_CONFIDENCE
+                or track.seen - track.first < VANISH_MIN_LIFE_S
+            ):
+                continue
+            if track.box is None or track.hip is None:
+                continue
+            x0, y0, x1, y1 = track.box
+            margin_x, margin_y = VANISH_EDGE * width, VANISH_EDGE * height
+            if x0 < margin_x or y0 < margin_y or x1 > width - margin_x or y1 > height - margin_y:
+                continue
+            if y1 - y0 < VANISH_MIN_HEIGHT * height:
+                continue
+            if not _lingered(track.trail):
+                continue
+            hip, torso = track.hip
+            if any(
+                other.first >= track.seen - GAP_S
+                and other.hip is not None
+                and float(np.linalg.norm(other.hip[0] - hip)) <= VANISH_NEAR * torso
+                for other_id, other in self._tracks.items()
+                if other_id != track_id
+            ):
+                continue  # 同一人换了编号：新轨迹自行判定，倒地时由跌倒判定接手
+            found.append(
+                Behavior(track_id, "fall", track.stand_score, track.seen, now, "suspected")
+            )
         return found
 
     def _fights(self, present: list[int], now: float) -> list[Behavior]:
@@ -452,6 +631,19 @@ class BehaviorDetector:
                 assert a is not None and b is not None
                 pair = self._pairs.setdefault((a_id, b_id), _Pair())
                 hit = _fight_frame(pair, a, b, now)
+                if (confirmed := self._fight_confirmed(pair, (a_id, b_id), a, b, now)) is not None:
+                    found += [
+                        Behavior(
+                            track_id,
+                            "fight",
+                            confirmed,
+                            now - FIGHT_MODEL_WINDOW_S,
+                            now,
+                            "confirmed",
+                        )
+                        for track_id in (a_id, b_id)
+                    ]
+                    continue
                 if hit is None:
                     continue
                 start, mean = hit
@@ -460,6 +652,25 @@ class BehaviorDetector:
                     for track_id in (a_id, b_id)
                 ]
         return found
+
+    def _fight_confirmed(
+        self, pair: _Pair, ids: tuple[int, int], a: _Body, b: _Body, now: float
+    ) -> float | None:
+        """两人伸手可及、同一深度，且动作模型近期多次认为在打人、踢人或推人：返回置信度（两人关键点置信度均值）。"""
+        if self._actions is None:
+            return None
+        if pair.confirmed is not None and now - pair.confirmed < REPEAT_S:
+            return None
+        torso = (a.torso + b.torso) / 2
+        if float(np.linalg.norm(a.hip - b.hip)) > FIGHT_REACH * torso or max(
+            a.torso, b.torso
+        ) > FIGHT_DEPTH_RATIO * min(a.torso, b.torso):
+            return None
+        hits = self._actions.fight_hits(ids, now, FIGHT_MODEL_WINDOW_S, FIGHT_MODEL_PROB)
+        if hits < FIGHT_MODEL_HITS:
+            return None
+        pair.confirmed = pair.emitted = now
+        return (a.score + b.score) / 2
 
     def _climb(
         self, track: _Track, points: np.ndarray, scores: np.ndarray, now: float

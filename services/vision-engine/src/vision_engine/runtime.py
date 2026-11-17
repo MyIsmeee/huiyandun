@@ -31,6 +31,16 @@ class VisionConfig(ServiceConfig):
         description="RF-DETR ONNX 模型文件的本地路径，检出车辆与人员框（REUSE-22、C-RU-06）；"
         "未配置时没有车辆，人员只有 RTMO 的正向检出",
     )
+    topdown_model_file: FilePath | None = Field(
+        None,
+        description="RTMPose ONNX 模型文件的本地路径：按人员框逐人裁剪放大后重新估计骨骼（两阶段），"
+        "远处、偏小的人关键点更准；未配置时骨骼只来自 RTMO",
+    )
+    action_model_file: FilePath | None = Field(
+        None,
+        description="STGCN++ ONNX 模型文件的本地路径：以骨骼序列复核跌倒与打架（action.py）；"
+        "未配置时跌倒、打架只按骨骼几何规则判定",
+    )
     scene_model_file: FilePath | None = Field(
         None,
         description="EfficientViT-Seg ONNX 模型文件的本地路径，生成场景初稿时识别摄像头画面中的环境"
@@ -66,20 +76,30 @@ class DeviceError(RuntimeError):
     """声明 cuda 但 CUDAExecutionProvider 未生效（C-CV-11）。"""
 
 
+# 逐人骨骼模型（RTMPose）单独的显存上限，不参与平分：它输入只有 192×256、逐人推理，所需远小于平分所得；
+# 计入平分会让 RF-DETR 等大模型的份额从 1/4 降到 1/5，两路画面同时识别时 RF-DETR 申请不到显存（2026-11-17 实测）
+TOPDOWN_MEM_MB = 256
+# 动作模型（STGCN++）同样单独设上限：每路每秒推理一次，每批至多 action.MAX_BATCH 个片段。
+# 2026-11-17 在 RTX 4060 上实测：128 MiB 时单个片段即申请不到（图卷积一次要约 40 MiB），192 MiB 批量 8 失败，
+# 256 MiB 批量 4 约 16 ms
+ACTION_MEM_MB = 256
+
+
 def model_files(config: VisionConfig) -> list[Path]:
-    """分显存的模型：RTMO，以及配置了的 RF-DETR、EfficientViT-Seg、DINOv2。"""
-    # MoGe-2 不在其中：每 10 分钟才跑一次，固定用 CPU，不分显存（pipeline.serve）
+    """平分显存的模型：RTMO，以及配置了的 RF-DETR、EfficientViT-Seg、DINOv2。"""
+    # MoGe-2 不在其中：每 10 分钟才跑一次，固定用 CPU，不分显存（pipeline.serve）；
+    # RTMPose、STGCN++ 也不在其中：单独上限 TOPDOWN_MEM_MB、ACTION_MEM_MB
     optional = [config.vehicle_model_file, config.scene_model_file, config.integrity_model_file]
     return [config.model_file] + [f for f in optional if f]
 
 
-def create_session(config: VisionConfig, model_file: Path, models: int = 1) -> ort.InferenceSession:
-    """models 为服务共加载的模型数：每个会话的显存上限取总上限的 1/models（C-HW-12）。"""
+def create_session(
+    config: VisionConfig, model_file: Path, models: int = 1, limit_mb: int | None = None
+) -> ort.InferenceSession:
+    """models 为平分显存的模型数：每个会话的显存上限取总上限的 1/models（C-HW-12）；limit_mb 给出时按它，不平分。"""
     if config.device == "cuda":
-        providers: list[str | tuple[str, dict[str, int]]] = [
-            (CUDA, {"gpu_mem_limit": config.gpu_mem_limit_mb * 2**20 // models}),
-            CPU,
-        ]
+        limit = (limit_mb * 2**20) if limit_mb else config.gpu_mem_limit_mb * 2**20 // models
+        providers: list[str | tuple[str, dict[str, int]]] = [(CUDA, {"gpu_mem_limit": limit}), CPU]
     else:
         providers = [CPU]
     session = ort.InferenceSession(str(model_file), providers=providers)
@@ -96,6 +116,14 @@ def gpu_check() -> None:
     try:
         files = model_files(config)
         sessions = [create_session(config, f, models=len(files)) for f in files]
+        if config.topdown_model_file:
+            sessions.append(
+                create_session(config, config.topdown_model_file, limit_mb=TOPDOWN_MEM_MB)
+            )
+        if config.action_model_file:
+            sessions.append(
+                create_session(config, config.action_model_file, limit_mb=ACTION_MEM_MB)
+            )
     except DeviceError as e:
         log.error("vision.device_unavailable", extra={"error": str(e)})
         sys.exit(1)

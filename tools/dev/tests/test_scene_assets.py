@@ -162,3 +162,21 @@ def test_custom_models_merged_like_kenney(tmp_path: Path) -> None:
         position = doc["meshes"][root["mesh"]]["primitives"][0]["attributes"]["POSITION"]
         bottom = doc["accessors"][position]["min"][1] + root.get("translation", [0, 0, 0])[1]
         assert abs(bottom) < 1e-6  # 底面贴地
+
+
+def test_only_rebuilds_categories_wholly_from_given_packs() -> None:
+    """--only：家具包只够重建全部来自它的家具、办公与电器；货架设备、绿化混有其他包，保持不变。"""
+    assert assets.rebuildable({"furniture-kit"}) == ["furniture", "appliance"]
+    assert set(assets.rebuildable(set(assets.PACKS))) == set(assets.CATEGORIES)
+
+
+def test_folder_pack_reads_known_members_only(tmp_path: Path) -> None:
+    """解压目录与压缩包一样只按已知成员名读取，成员名不得跳出包目录。"""
+    (tmp_path / "pack/Models").mkdir(parents=True)
+    (tmp_path / "pack/Models/a.glb").write_bytes(b"glb")
+    (tmp_path / "secret.txt").write_text("x")
+    pack = assets.open_pack(tmp_path / "pack")
+    assert pack.read("Models/a.glb") == b"glb"
+    assert pack.has("Models/a.glb") and not pack.has("Models/b.glb")
+    with pytest.raises(ValueError, match="不在包目录内"):
+        pack.read("../secret.txt")

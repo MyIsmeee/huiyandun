@@ -1,6 +1,8 @@
 """行为判定的事件级评测（TK-160）：回放录制的骨骼轨迹，按标注统计召回、误报与检出延迟。
 
-用法：uv run --all-packages python tools/dev/eval_behavior.py [片段目录] [--json 报告.json]
+用法：uv run --all-packages python tools/dev/eval_behavior.py [片段目录] [--json 报告.json] [--action 模型.onnx]
+--action 给出骨骼动作模型（models/weights/stgcnpp_ntu60_2d_jb.onnx）时按"规则 + 模型"联合判定（CPU 推理），
+与线上配置了 HYD_ACTION_MODEL_FILE 时相同；不给时只按骨骼几何规则
 片段目录默认 services/vision-engine/tests/clips。每段 <名>.npz（tools/dev/record_keypoints.py 录制）
 配一份同名标注 <名>.json，格式见 load_labels；没有标注的片段跳过并提示。
 
@@ -26,6 +28,7 @@ from typing import Any
 
 import numpy as np
 
+from vision_engine.action import ActionModel, ActionRecognizer
 from vision_engine.behavior import Behavior, BehaviorDetector
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +44,7 @@ POST_S: dict[tuple[str, str], float] = {
     ("still", "suspected"): 130.0,
     ("still", "confirmed"): 310.0,
     ("fight", "suspected"): 10.0,
+    ("fight", "confirmed"): 10.0,
 }
 KINDS = tuple(POST_S)
 PRE_S = 2.0  # 早于真值开始此时长内的告警仍算检出（真值起点的人工标注误差）
@@ -94,25 +98,33 @@ def load_labels(path: Path) -> Labels:
     return Labels(events, ambiguous, raw.get("climb_lines", []), bool(raw.get("report_only")))
 
 
-def replay(data: dict[str, np.ndarray], climb_lines: list[list[float]]) -> list[Behavior]:
+def replay(
+    data: dict[str, np.ndarray], climb_lines: list[list[float]], actions: ActionModel | None = None
+) -> list[Behavior]:
     """按录制时刻逐帧送入判定器，与检测链路的调用方式相同。"""
-    detector = BehaviorDetector(climb_lines)
+    detector = BehaviorDetector(climb_lines, ActionRecognizer(actions) if actions else None)
     found: list[Behavior] = []
-    for now in np.unique(data["t"]):
+    # 录制存了全部抽样帧与画面尺寸时同样回放没有人的帧并判定原地消失，与检测链路一致
+    times = np.unique(data["frame_t"]) if "frame_t" in data else np.unique(data["t"])
+    size = tuple(int(v) for v in data["frame_size"]) if "frame_size" in data else None
+    for now in times:
         at = data["t"] == now
         found += detector.update(
             data["track_id"][at],
-            data["keypoints"][at].astype(float),
-            data["keypoint_scores"][at].astype(float),
+            data["keypoints"][at].astype(float).reshape(-1, 17, 2),
+            data["keypoint_scores"][at].astype(float).reshape(-1, 17),
             float(now),
+            size,
         )
     return found
 
 
-def score_clip(name: str, data: dict[str, np.ndarray], labels: Labels) -> ClipResult:
+def score_clip(
+    name: str, data: dict[str, np.ndarray], labels: Labels, actions: ActionModel | None = None
+) -> ClipResult:
     t = data["t"]
     duration = float(t.max() - t.min()) if len(t) else 0.0
-    return judge(name, duration, labels, replay(data, labels.climb_lines))
+    return judge(name, duration, labels, replay(data, labels.climb_lines, actions))
 
 
 def judge(name: str, duration: float, labels: Labels, alerts: list[Behavior]) -> ClipResult:
@@ -206,7 +218,9 @@ def summarize(results: list[ClipResult]) -> dict[str, Any]:
     return summary
 
 
-def evaluate(directory: Path) -> tuple[list[ClipResult], list[str]]:
+def evaluate(
+    directory: Path, actions: ActionModel | None = None
+) -> tuple[list[ClipResult], list[str]]:
     results, skipped = [], []
     for npz in sorted(directory.glob("*.npz")):
         label_file = npz.with_suffix(".json")
@@ -215,7 +229,7 @@ def evaluate(directory: Path) -> tuple[list[ClipResult], list[str]]:
             continue
         with np.load(npz) as archive:
             data = {k: archive[k] for k in archive.files}
-        results.append(score_clip(npz.stem, data, load_labels(label_file)))
+        results.append(score_clip(npz.stem, data, load_labels(label_file), actions))
     return results, skipped
 
 
@@ -228,6 +242,10 @@ def render(results: list[ClipResult], skipped: list[str], summary: dict[str, Any
         "fall/suspected": "跌倒·疑似",
         "fall/confirmed": "跌倒·确认",
         "climb/confirmed": "攀爬",
+        "still/suspected": "长时间静止·疑似",
+        "still/confirmed": "长时间静止·确认",
+        "fight/suspected": "打架·疑似",
+        "fight/confirmed": "打架·确认",
     }
     lines = ["行为判定事件级评测", ""]
     for b, s in summary.items():
@@ -264,8 +282,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("clips", nargs="?", type=Path, default=CLIPS)
     parser.add_argument("--json", type=Path, help="另存机器可读的报告")
+    parser.add_argument("--action", type=Path, help="骨骼动作模型（ONNX）：按规则 + 模型联合判定")
     args = parser.parse_args()
-    results, skipped = evaluate(args.clips)
+    actions = None
+    if args.action:
+        import onnxruntime as ort
+
+        session = ort.InferenceSession(str(args.action), providers=["CPUExecutionProvider"])
+        actions = ActionModel(session)
+    results, skipped = evaluate(args.clips, actions)
     if not results:
         print(f"{args.clips} 中没有带标注的片段", file=sys.stderr)
         return 1

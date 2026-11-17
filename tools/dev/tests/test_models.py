@@ -162,6 +162,14 @@ def test_segmentation_task_allowed(models: Path) -> None:
     assert run("verify", models).returncode == 0
 
 
+def test_action_task_allowed(models: Path) -> None:
+    """骨骼动作分类：输入只有关键点，不看画面、不区分身份（G-04）。"""
+    run("fetch", models)
+    update(models, task="action")
+
+    assert run("verify", models).returncode == 0
+
+
 def test_embedding_task_allowed(models: Path) -> None:
     """整帧画面嵌入（画面可信度，REUSE-23）在白名单内。"""
     run("fetch", models)

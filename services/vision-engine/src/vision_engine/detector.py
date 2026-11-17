@@ -1,5 +1,10 @@
 """检测（REUSE-05、REUSE-22）：RF-DETR 检出车辆与人员框，rtmlib RTMO 单阶段输出人体框与 COCO 17 关键点；
-人员取两者的并集，同一人以 RF-DETR 的框为准、RTMO 提供骨骼（#287）。"""
+人员取两者的并集，同一人以 RF-DETR 的框为准、RTMO 提供骨骼（#287）。
+
+配置了 RTMPose 时为两阶段：按每个人员框从原画面裁剪、放大到 192×256 重新估计骨骼，取代 RTMO 的整帧结果。
+RTMO 把整帧缩到 640 宽，画面中 150～300 像素高的人只剩 50～100 像素；逐人裁剪后头、髋、膝、踝的可见比例明显
+提高（cam-05 实测 103 人次：踝 26%～51% → 63%，髋约 70% → 82%）。逐人模型会把桌后被挡的腿"猜"出来：膝、踝
+置信度低于 LOWER_BODY_MIN 的视为不可见。横躺者（框宽大于高）保留 RTMO 正向与旋转推理中骨骼更清楚的一方。"""
 
 import contextlib
 import io
@@ -8,7 +13,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 import supervision as sv
-from rtmlib import RFDETR, RTMO
+from rtmlib import RFDETR, RTMO, RTMPose
 from rtmlib.tools.object_detection.post_processings import multiclass_nms
 
 NMS_IOU = 0.45
@@ -21,7 +26,49 @@ MATCH_IOU = 0.3  # RTMO 的框比 RF-DETR 的松：IoU 达此值即视为同一�
 # RTMO 独有的框把某个 RF-DETR 人员覆盖达此比例时，是把旁人一并框住的松散框，不输出
 CONTAINED = 0.8
 
+LOWER_BODY = [13, 14, 15, 16]  # 左右膝、左右踝
+LOWER_BODY_MIN = 0.4  # 逐人模型膝、踝置信度低于此值视为不可见：多是被桌椅挡住后"猜"出的位置
+
 type Candidates = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+
+
+class TopDownPose:
+    """RTMPose 逐人骨骼：输入画面与人员框（画面坐标 xyxy），输出关键点 (N, 17, 2) 与置信度 (N, 17)。"""
+
+    def __init__(self, model_file: str, session: ort.InferenceSession) -> None:
+        # 同 PoseDetector：rtmlib 构造时自建会话，先以 CPU 构造，再换成 runtime.create_session 的会话
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._model = RTMPose(
+                model_file, model_input_size=(192, 256), backend="onnxruntime", device="cpu"
+            )
+        self._model.session = session
+
+    def __call__(self, image: np.ndarray, boxes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        if len(boxes) == 0:
+            return np.zeros((0, 17, 2)), np.zeros((0, 17))
+        points, scores = self._model(image, boxes.tolist())
+        scores = scores.astype(float).copy()
+        lower = scores[:, LOWER_BODY]
+        scores[:, LOWER_BODY] = np.where(lower >= LOWER_BODY_MIN, lower, 0.0)
+        return points.astype(float), scores
+
+
+def refine(
+    topdown: TopDownPose,
+    image: np.ndarray,
+    boxes: np.ndarray,
+    points: np.ndarray,
+    scores: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """两阶段：各人员框（image 中的坐标）的骨骼换成逐人模型的结果；横躺者（框宽大于高）保留骨骼更清楚的一方。"""
+    if len(boxes) == 0:
+        return points, scores
+    top_points, top_scores = topdown(image, boxes)
+    lying = (boxes[:, 2] - boxes[:, 0]) > (boxes[:, 3] - boxes[:, 1])
+    keep = lying & (scores.mean(axis=1) > top_scores.mean(axis=1))
+    return np.where(keep[:, None, None], points, top_points), np.where(
+        keep[:, None], scores, top_scores
+    )
 
 
 def _unrotate(points: np.ndarray, rotation: int, width: int, height: int) -> np.ndarray:
@@ -33,6 +80,8 @@ def _unrotate(points: np.ndarray, rotation: int, width: int, height: int) -> np.
 
 
 class PoseDetector:
+    topdown: TopDownPose | None = None  # 配置了 RTMPose 时为两阶段（模块说明）
+
     def __init__(self, model_file: str, session: ort.InferenceSession) -> None:
         # rtmlib 构造时自建会话且不支持显存上限：先以 CPU 构造，再换成 runtime.create_session
         # 的会话（C-HW-12、C-CV-11）。构造时向 stdout 打印的加载信息不进入结构化日志
@@ -63,7 +112,9 @@ class PoseDetector:
         _, keep = multiclass_nms(boxes, scores[:, None], nms_thr=NMS_IOU, score_thr=MIN_SCORE)
         own = np.array([] if keep is None else keep, dtype=int)
         if persons is None or len(persons) == 0:
-            return _people(boxes[own], scores[own], points[own], point_scores[own])
+            return self._refined(
+                image, offset, boxes[own], scores[own], points[own], point_scores[own]
+            )
         found = persons.xyxy
         keypoints, keypoint_scores = np.zeros((len(found), 17, 2)), np.zeros((len(found), 17))
         # 先在 NMS 保留的候选（≥ MIN_SCORE）中配对；没配上的人再用其余候选：RF-DETR 已确认是人，
@@ -96,12 +147,33 @@ class PoseDetector:
                         keypoint_scores[i] = turned_scores[j]
         extra = own[~np.isin(own, list(pairs.values()))]
         extra = extra[_alone(boxes[extra], found)]
-        return _people(
+        return self._refined(
+            image,
+            offset,
             np.concatenate([found, boxes[extra]]),
             np.concatenate([persons.confidence, scores[extra]]),
             np.concatenate([keypoints, points[extra]]),
             np.concatenate([keypoint_scores, point_scores[extra]]),
         )
+
+    def _refined(
+        self,
+        image: np.ndarray,
+        offset: tuple[int, int],
+        boxes: np.ndarray,
+        scores: np.ndarray,
+        points: np.ndarray,
+        point_scores: np.ndarray,
+    ) -> sv.Detections:
+        """配置了逐人模型时按人员框重新估计骨骼；boxes、points 为整帧坐标，image 为 offset 处的裁剪区域。"""
+        if self.topdown is not None and len(boxes):
+            dx, dy = offset
+            local, local_points = boxes - (dx, dy, dx, dy), points - (dx, dy)
+            local_points, point_scores = refine(
+                self.topdown, image, local, local_points, point_scores
+            )
+            points = local_points + (dx, dy)
+        return _people(boxes, scores, points, point_scores)
 
 
 YOLO_INPUT = 640  # tools/dev/export_yolo_pose.py 导出时的输入边长

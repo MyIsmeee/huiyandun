@@ -69,9 +69,15 @@ def blank(value: int = 100) -> np.ndarray:
 
 def snapshot(name: str) -> tuple[np.ndarray, tuple[int, int]]:
     data = np.load(SCENES / f"{name}.npz")
-    # 类别名或 ADE20K 编号映射任一变化，录制结果即失效
-    assert data["classes"].tolist() == CLASSES, "映射表已变化，须重新录制"
-    assert (data["lut"] == LUT).all(), "映射表已变化，须重新录制"
+    # 已有类别名或其 ADE20K 编号映射变化，录制结果即失效；只在末尾追加的新类别不影响：录制时它们记为未识别（0），
+    # 快照仍是旧映射下的正确结果（新类别的检出由 test_scene3d 等合成数据覆盖）
+    recorded = data["classes"].tolist()
+    assert CLASSES[: len(recorded)] == recorded, "映射表已变化，须重新录制"
+    lut = data["lut"]
+    assert (LUT[lut > 0] == lut[lut > 0]).all(), "映射表已变化，须重新录制"
+    assert ((LUT[lut == 0] == 0) | (LUT[lut == 0] > len(recorded))).all(), (
+        "映射表已变化，须重新录制"
+    )
     return data["labels"], tuple(data["shape"].tolist())
 
 

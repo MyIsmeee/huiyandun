@@ -89,6 +89,19 @@ def test_memory_limit_is_shared_by_loaded_models(fake_session: type[FakeSession]
     assert limits == [1024 * 2**20] * 4
 
 
+def test_topdown_model_has_own_limit_and_does_not_shrink_others(
+    fake_session: type[FakeSession],
+) -> None:
+    """逐人骨骼模型（RTMPose）单独 TOPDOWN_MEM_MB，不参与平分：计入平分会让 RF-DETR 的份额从 1/4 降到 1/5，
+    两路画面同时识别时 RF-DETR 申请不到显存（2026-11-17 实测）。"""
+    fake_session.active = [CUDA, CPU]
+    cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="2048", HYD_TOPDOWN_MODEL_FILE=MODEL)
+
+    assert len(model_files(cfg)) == 4
+    create_session(cfg, Path(MODEL), limit_mb=runtime.TOPDOWN_MEM_MB)
+    assert fake_session.requested[0] == (CUDA, {"gpu_mem_limit": runtime.TOPDOWN_MEM_MB * 2**20})
+
+
 def test_vehicle_and_scene_models_are_optional() -> None:
     """未配置车辆、场景与画面嵌入模型时只检测人员（如关键点录制工具），只加载一个模型、独占显存上限。"""
     cfg = load_config(VisionConfig, {"HYD_DEVICE": "cpu", "HYD_MODEL_FILE": MODEL})
@@ -133,3 +146,13 @@ def test_gpu_check_passes_in_declared_cpu_mode(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("HYD_VEHICLE_MODEL_FILE", MODEL)
 
     runtime.gpu_check()
+
+
+def test_action_model_has_own_limit(fake_session: type[FakeSession]) -> None:
+    """骨骼动作模型（STGCN++）同样单独 ACTION_MEM_MB，不参与平分。"""
+    fake_session.active = [CUDA, CPU]
+    cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="2048", HYD_ACTION_MODEL_FILE=MODEL)
+
+    assert len(model_files(cfg)) == 4
+    create_session(cfg, Path(MODEL), limit_mb=runtime.ACTION_MEM_MB)
+    assert fake_session.requested[0] == (CUDA, {"gpu_mem_limit": runtime.ACTION_MEM_MB * 2**20})

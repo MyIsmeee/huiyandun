@@ -4,7 +4,10 @@
 用法：
   uv run python tools/dev/assets.py <压缩包目录>   全部重建（Kenney 与自制模型）
   uv run python tools/dev/assets.py --custom        只重建自制模型，目录中的 Kenney 条目保持不变
+  uv run python tools/dev/assets.py --only <包名>=<压缩包或解压目录> ...
+                                                    只重建模型全部来自给出的包的类别，其余类别与自制模型保持不变
 压缩包为 Kenney 官网下载的 <包名>.zip（如 city-kit-roads.zip），不入库；只取出用到的模型与调色板贴图。
+也可给出解压后的目录（如 furniture-kit=~/Downloads/kenney_furniture-kit）：同样只按已知成员名读取。
 
 自制模型（如 Blender 导出的 glb）：源文件与登记清单 models.yaml 放在 web/console/assets/custom/（随代码提交，
 不经前端发布），归中、上色方式与 Kenney 模型相同，合并为单独的 scene-custom.glb，类别取已有类别。
@@ -49,6 +52,7 @@ CATEGORIES = {
     "wall": "墙与围栏",
     "opening": "门窗",
     "furniture": "家具",
+    "appliance": "办公与电器",
     "equipment": "货架设备",
     "greenery": "绿化",
 }
@@ -125,6 +129,50 @@ SELECTION = [
     ("bed", "furniture", "单人床", "furniture-kit", "bedSingle", "furniture", 1.2, 0, False),
     ("bed-double", "furniture", "双人床", "furniture-kit", "bedDouble", "furniture", 1.4, 0, False),
     ("trash-can", "furniture", "垃圾桶", "furniture-kit", "trashcan", "furniture", 2, 0, False),
+    # 2026-11-17 扩充：常见办公室、宿舍、茶水间家具（同一 furniture-kit 2.0）
+    ("bookcase", "furniture", "书柜", "furniture-kit", "bookcaseClosed", "furniture", 2, 0, False),
+    ("bookcase-low", "furniture", "矮书架", "furniture-kit", "bookcaseOpenLow", "furniture", 2, 0, False),
+    ("side-table", "furniture", "边桌", "furniture-kit", "sideTable", "furniture", 2, 0, False),
+    ("drawer-cabinet", "furniture", "抽屉柜", "furniture-kit", "sideTableDrawers", "furniture", 2, 0, False),
+    ("table-round", "furniture", "圆桌", "furniture-kit", "tableRound", "furniture", 2, 0, False),
+    ("table-glass", "furniture", "玻璃桌", "furniture-kit", "tableGlass", "furniture", 2, 0, False),
+    ("table-cloth", "furniture", "会议桌", "furniture-kit", "tableCloth", "furniture", 2, 0, False),
+    ("chair-rounded", "furniture", "圆背椅", "furniture-kit", "chairRounded", "furniture", 2, 0, False),
+    ("chair-cushion", "furniture", "软垫椅", "furniture-kit", "chairCushion", "furniture", 2, 0, False),
+    ("chair-modern", "furniture", "现代椅", "furniture-kit", "chairModernCushion", "furniture", 2, 0, False),
+    ("stool", "furniture", "吧凳", "furniture-kit", "stoolBar", "furniture", 2, 0, False),
+    ("bench", "furniture", "长凳", "furniture-kit", "bench", "furniture", 2, 0, False),
+    ("sofa-long", "furniture", "长沙发", "furniture-kit", "loungeSofaLong", "furniture", 2, 0, False),
+    ("sofa-design", "furniture", "布艺沙发", "furniture-kit", "loungeDesignSofa", "furniture", 2, 0, False),
+    ("lounge-chair", "furniture", "休闲椅", "furniture-kit", "loungeChairRelax", "furniture", 2, 0, False),
+    ("bed-bunk", "furniture", "上下铺", "furniture-kit", "bedBunk", "furniture", 2, 0, False),
+    ("coat-rack", "furniture", "衣帽架", "furniture-kit", "coatRackStanding", "furniture", 2, 0, False),
+    ("box", "furniture", "纸箱", "furniture-kit", "cardboardBoxClosed", "furniture", 2, 0, False),
+    ("box-open", "furniture", "开口纸箱", "furniture-kit", "cardboardBoxOpen", "furniture", 2, 0, False),
+    ("plant-small", "furniture", "小盆栽", "furniture-kit", "plantSmall1", "furniture", 2, 0, False),
+    ("rug", "furniture", "地毯", "furniture-kit", "rugRectangle", "furniture", 2, 0, False),
+    ("rug-round", "furniture", "圆地毯", "furniture-kit", "rugRound", "furniture", 2, 0, False),
+    ("kitchen-cabinet", "furniture", "橱柜", "furniture-kit", "kitchenCabinet", "furniture", 2, 0, False),
+    ("kitchen-bar", "furniture", "吧台", "furniture-kit", "kitchenBar", "furniture", 2, 0, False),
+    ("kitchen-sink", "furniture", "水槽", "furniture-kit", "kitchenSink", "furniture", 2, 0, False),
+    ("toilet", "furniture", "马桶", "furniture-kit", "toilet", "furniture", 2, 0, False),
+    ("bathroom-sink", "furniture", "洗手台", "furniture-kit", "bathroomSink", "furniture", 2, 0, False),
+    ("shower", "furniture", "淋浴间", "furniture-kit", "shower", "furniture", 2, 0, False),
+    # 办公与电器（同一 furniture-kit 2.0）
+    ("monitor", "appliance", "显示器", "furniture-kit", "computerScreen", "furniture", 2, 0, False),
+    ("laptop", "appliance", "笔记本电脑", "furniture-kit", "laptop", "furniture", 2, 0, False),
+    ("keyboard", "appliance", "键盘", "furniture-kit", "computerKeyboard", "furniture", 2, 0, False),
+    ("tv", "appliance", "电视", "furniture-kit", "televisionModern", "furniture", 2, 0, False),
+    ("tv-cabinet", "appliance", "电视柜", "furniture-kit", "cabinetTelevision", "furniture", 2, 0, False),
+    ("speaker", "appliance", "音箱", "furniture-kit", "speaker", "furniture", 2, 0, False),
+    ("fridge", "appliance", "冰箱", "furniture-kit", "kitchenFridge", "furniture", 2, 0, False),
+    ("fridge-small", "appliance", "小冰箱", "furniture-kit", "kitchenFridgeSmall", "furniture", 2, 0, False),
+    ("microwave", "appliance", "微波炉", "furniture-kit", "kitchenMicrowave", "furniture", 2, 0, False),
+    ("coffee-machine", "appliance", "咖啡机", "furniture-kit", "kitchenCoffeeMachine", "furniture", 2, 0, False),
+    ("washer", "appliance", "洗衣机", "furniture-kit", "washer", "furniture", 2, 0, False),
+    ("lamp-floor", "appliance", "落地灯", "furniture-kit", "lampSquareFloor", "furniture", 2, 0, False),
+    ("lamp-table", "appliance", "台灯", "furniture-kit", "lampRoundTable", "furniture", 2, 0, False),
+    ("ceiling-fan", "appliance", "吊扇", "furniture-kit", "ceilingFan", "furniture", 2, 0, False),
     ("shelf", "equipment", "货架", "furniture-kit", "bookcaseOpen", "furniture", 2.5, 0, False),
     ("rack", "equipment", "机柜", "factory-kit", "machine", "furniture", 1.25, 0, False),
     ("console", "equipment", "控制台", "factory-kit", "screen-panel-wide", "furniture", 1.25, 0, False),
@@ -182,7 +230,50 @@ def gltf_transform(*args: str) -> str:
     ).stdout
 
 
-def extract(archive: zipfile.ZipFile, member: str, target: Path) -> None:
+class FolderPack:
+    """已解压的 Kenney 包目录：与压缩包一样只按已知成员名读取，成员名不得跳出该目录。"""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root.resolve()
+
+    def _path(self, member: str) -> Path:
+        path = (self._root / member).resolve()
+        if self._root not in path.parents:
+            raise ValueError(f"成员 {member} 不在包目录内")
+        return path
+
+    def read(self, member: str) -> bytes:
+        return self._path(member).read_bytes()
+
+    def has(self, member: str) -> bool:
+        return self._path(member).is_file()
+
+    def close(self) -> None:
+        pass
+
+
+class ZipPack:
+    def __init__(self, path: Path) -> None:
+        self._zip = zipfile.ZipFile(path)
+
+    def read(self, member: str) -> bytes:
+        return self._zip.read(member)
+
+    def has(self, member: str) -> bool:
+        return member in self._zip.namelist()
+
+    def close(self) -> None:
+        self._zip.close()
+
+
+type Pack = FolderPack | ZipPack
+
+
+def open_pack(path: Path) -> Pack:
+    return FolderPack(path) if path.is_dir() else ZipPack(path)
+
+
+def extract(archive: Pack, member: str, target: Path) -> None:
     """只按已知成员名读出、写到指定路径，不按压缩包内路径解压。"""
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(archive.read(member))
@@ -231,7 +322,7 @@ def scene_sizes(glb: Path) -> dict[str, tuple[float, float]]:
     return sizes
 
 
-def pack_version(archive: zipfile.ZipFile) -> str:
+def pack_version(archive: Pack) -> str:
     """License.txt 首行形如 "Building Kit (1.0)"。"""
     first = archive.read("License.txt").decode("utf-8").strip().splitlines()[0]
     return first.rsplit("(", 1)[1].rstrip(")")
@@ -262,15 +353,24 @@ def entry(
     return dict(zip(FIELDS, values, strict=True))
 
 
-def build(archives: Path, work: Path) -> list[dict]:
-    zips = {pack: zipfile.ZipFile(archives / f"{pack}.zip") for pack in PACKS}
-    staged: dict[str, list[Path]] = {c: [] for c in CATEGORIES}
+def rebuildable(packs: set[str]) -> list[str]:
+    """模型全部来自给出的包的类别（按 CATEGORIES 顺序）。"""
+    return [c for c in CATEGORIES if {s[3] for s in SELECTION if s[1] == c} <= packs]
+
+
+def build(sources: dict[str, Path], work: Path) -> list[dict]:
+    """重建模型全部来自 sources（包名 → 压缩包或解压目录）的类别，返回这些类别的目录条目。"""
+    zips = {pack: open_pack(path) for pack, path in sources.items()}
+    categories = rebuildable(set(sources))
+    staged: dict[str, list[Path]] = {c: [] for c in categories}
     for name, category, _, pack, model, palette, *_ in SELECTION:
+        if category not in staged:
+            continue
         source = work / "src" / pack / f"{model}.glb"
         if not source.exists():
             extract(zips[pack], f"{PACKS[pack]}/{model}.glb", source)
             texture = f"{PACKS[pack]}/Textures/colormap.png"
-            if texture in zips[pack].namelist():
+            if zips[pack].has(texture):
                 extract(zips[pack], texture, source.parent / "Textures/colormap.png")
         staged[category].append(stage(source, work, name, palette))
     catalog = []
@@ -285,7 +385,7 @@ def build(archives: Path, work: Path) -> list[dict]:
     versions = {pack: pack_version(z) for pack, z in zips.items()}
     for z in zips.values():
         z.close()
-    print(registry(versions))
+    print(registry(versions, categories))
     return catalog
 
 
@@ -349,10 +449,11 @@ def write_catalog(catalog: list[dict], out: Path) -> None:
     (out / "catalog.json").write_text(text, encoding="utf-8")
 
 
-def registry(versions: dict[str, str]) -> str:
+def registry(versions: dict[str, str], categories: list[str]) -> str:
     """deploy/third-party.yaml 的登记条目：每个类别文件一条，models 逐个列出来源模型。"""
     lines = []
-    for category, label in CATEGORIES.items():
+    for category in categories:
+        label = CATEGORIES[category]
         glb = OUT / f"scene-{category}.glb"
         picked = [s for s in SELECTION if s[1] == category]
         packs = sorted({s[3] for s in picked})
@@ -372,11 +473,38 @@ def registry(versions: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def only(args: list[str], work: Path) -> list[dict]:
+    """--only：重建模型全部来自给出的包的类别；其余类别与自制模型的目录条目、文件原样保留。"""
+    sources = {}
+    for arg in args:
+        pack, _, path = arg.partition("=")
+        if pack not in PACKS or not path:
+            sys.exit(f"参数须为 <包名>=<压缩包或解压目录>，包名取 {', '.join(PACKS)}：{arg}")
+        sources[pack] = Path(path).expanduser()
+    categories = rebuildable(set(sources))
+    if not categories:
+        sys.exit("没有模型全部来自这些包的类别，无可重建")
+    old = json.loads((OUT / "catalog.json").read_text(encoding="utf-8"))["assets"]
+    for category in categories:
+        (OUT / f"scene-{category}.glb").unlink(missing_ok=True)
+    built = build(sources, work)
+    kept = [a for a in old if a["category"] not in categories or a["file"] == CUSTOM_GLB]
+    order = list(CATEGORIES)
+    catalog = sorted(
+        [a for a in kept if a["file"] != CUSTOM_GLB] + built,
+        key=lambda a: order.index(a["category"]),
+    )
+    return catalog + [a for a in kept if a["file"] == CUSTOM_GLB]
+
+
 def main() -> None:
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2 or (sys.argv[1] != "--only" and len(sys.argv) != 2):
         sys.exit(__doc__)
     kenney = {s[0] for s in SELECTION}
     with tempfile.TemporaryDirectory() as tmp:
+        if sys.argv[1] == "--only":
+            write_catalog(only(sys.argv[2:], Path(tmp) / "kenney"), OUT)
+            return
         if sys.argv[1] == "--custom":
             # 只重建自制模型：保留目录中 Kenney 的条目与类别文件，替换自制部分
             old = json.loads((OUT / "catalog.json").read_text(encoding="utf-8"))["assets"]
@@ -385,7 +513,8 @@ def main() -> None:
         else:
             for old_glb in OUT.glob("scene-*.glb"):
                 old_glb.unlink()
-            catalog = build(Path(sys.argv[1]), Path(tmp) / "kenney")
+            archives = Path(sys.argv[1])
+            catalog = build({p: archives / f"{p}.zip" for p in PACKS}, Path(tmp) / "kenney")
         catalog += build_custom(CUSTOM_DIR, OUT, Path(tmp) / "custom", kenney)
     write_catalog(catalog, OUT)
 

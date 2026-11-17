@@ -137,3 +137,23 @@ def test_object_kind_is_majority_ade20k_class_within_cluster() -> None:
     (without,) = [o for o in layout(labels, rec, POSE)["objects"] if o["class"] == "table"]
     assert with_kind["kind"] == "desk"
     assert "kind" not in without
+
+
+def test_small_items_on_table_carry_base_height() -> None:
+    """桌面上的显示器：归为电器（appliance）、细分类别为 monitor，带底部离地高度；桌子本身不带（会悬空）。"""
+    labels, rec = build()
+    h = rec.cloud @ rec.floor.up + rec.floor.d
+    top = rec.valid & (np.abs(h - 0.75) < 0.02)
+    cols = np.where(top.any(axis=0))[0]
+    screen = top.copy()
+    screen[:, cols[len(cols) // 2] :] = False  # 桌面左半边当作显示器
+    labels[screen] = label("appliance")
+    ade = np.zeros(labels.shape, np.uint8)
+    ade[screen] = 143  # ADE20K monitor
+
+    out = layout(labels, rec, POSE, ade)
+
+    (item,) = [o for o in out["objects"] if o["class"] == "appliance"]
+    assert item["kind"] == "monitor"
+    assert 0.6 <= item["base_m"] <= 0.75
+    assert all("base_m" not in o for o in out["objects"] if o["class"] == "table")

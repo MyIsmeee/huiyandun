@@ -15,6 +15,19 @@ models:
     card: cards/rtmo-s.md
     purpose: vision-engine 人体检测与骨骼估计（REUSE-05）
     owner: MyIsmeee
+  - name: rtmpose-m
+    version: rtmpose-m@e48f03d0_20230504+hyd.1
+    task: pose  # 两阶段：按人员框裁剪后估计 COCO 17 关键点，不检测
+    file: rtmpose-m_simcc-body7-256x192.onnx
+    sha256: 5c0a4bf67953e6d2ac43ce15e77dc9d5d354ae18430a47d2c5963a7bc5683e3c
+    # OpenMMLab 官方 ONNX 导出（MMDeploy），即 rtmlib 内置地址
+    source: https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip
+    source_sha256: f7fbb6c5c11a1bb70f3d445e4ddec5d144ea89ad5649c081ef976f9b24a0b741
+    source_member: 20230831/rtmpose_onnx/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504/end2end.onnx
+    license: Apache-2.0
+    card: cards/rtmpose-m.md
+    purpose: vision-engine 逐人骨骼估计（两阶段），提高远处与偏小人员的关键点质量
+    owner: MyIsmeee
   - name: rfdetr-s
     version: rfdetr-s@1.4.2+hyd.1
     task: detection  # COCO 多类别；vision-engine 只取车辆与人员框，人员骨骼由 rtmo-s 检出
@@ -64,4 +77,18 @@ models:
     license: MIT
     card: cards/moge2-vits.md
     purpose: vision-engine 摄像头自动标定：从画面拟合地面，建议安装高度、俯角与视角
+    owner: MyIsmeee
+  - name: stgcnpp-ntu60-2d
+    version: stgcnpp-ntu60-2d@86e1e77a.cd11a691+hyd.1
+    task: action  # 骨骼动作分类：只输入关键点（不看画面、不区分身份），NTU60 的 60 类动作
+    file: stgcnpp_ntu60_2d_jb.onnx
+    # 本仓库转换所得：joint 与 bone 两路合成一个 ONNX；导出可复现（固定上游代码、PyTorch 与依赖锁定，两次导出哈希一致）
+    sha256: e71bd1f9c42d39e9cac6fe0c55de131f1ce141945a98dc0b73f52ede33c832c1
+    # 上游 joint 路 PyTorch 权重（OpenMMLab 官方），为校验依据；bone 路权重由 convert 脚本按固定哈希另取
+    source: https://download.openmmlab.com/mmaction/v1.0/skeleton/stgcnpp/stgcnpp_8xb16-joint-u100-80e_ntu60-xsub-keypoint-2d/stgcnpp_8xb16-joint-u100-80e_ntu60-xsub-keypoint-2d_20221228-86e1e77a.pth
+    source_sha256: 86e1e77a7b27dd53c6ccc1600a4cc3c321ec8e04d17f25a41fbbb7896026945a
+    convert: tools/dev/export_stgcnpp.py
+    license: Apache-2.0
+    card: cards/stgcnpp-ntu60-2d.md
+    purpose: vision-engine 跌倒、打架的动作模型复核：与骨骼几何规则同时成立才确认
     owner: MyIsmeee
