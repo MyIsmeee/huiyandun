@@ -25,8 +25,9 @@ CONFIRM_S 才"确认"，进入物理告警，此后每 REPEAT_S 重发。期间�
   FALL_MODEL_PROB），不必再等倒地不动满 CONFIRM_S 即确认。模型只认动作过程，倒下之后静躺时概率回落，
   所以只作提前确认的依据；没看到跌倒过程（被挡、一出现就躺着）时仍按原规则确认。规则没看到倒地（朝镜头倒、
   倒在桌后）而模型的跌倒概率不低于 FALL_MODEL_ALONE_PROB 时，单独发"疑似"，只在控制台提示
-- 打架：两人伸手可及、躯干长短相当（同一深度），且模型近 FIGHT_MODEL_WINDOW_S 内至少 FIGHT_MODEL_HITS 次认为
-  在打人、踢人或推人（三类概率之和不低于 FIGHT_MODEL_PROB），即确认、进入物理告警；只有规则成立时仍为疑似
+- 打架：两人伸手可及、躯干长短相当（同一深度）、髋部没有重合（不是同一人被拆成的两条轨迹），近期有双方手腕
+  快速运动的帧，且模型近 FIGHT_MODEL_WINDOW_S 内至少 FIGHT_MODEL_HITS 次认为在打人、踢人或推人（三类概率之和
+  不低于 FIGHT_MODEL_PROB），即确认、进入物理告警；只有规则成立时仍为疑似
 """
 
 import math
@@ -80,9 +81,14 @@ FALL_MODEL_ALONE_PROB = 0.65  # 只有模型看到跌倒时发疑似的门限：
 FALL_MODEL_RECENT_S = (
     6.0  # 跌倒动作在倒地前后约 1～3 s 内被认出，到发疑似（倒地满 2 s）时须仍在此时长内
 )
-FIGHT_MODEL_PROB = 0.6
+FIGHT_MODEL_PROB = 0.7
 FIGHT_MODEL_WINDOW_S = 3.5  # 约 3 次推理
 FIGHT_MODEL_HITS = 2
+# 两人髋部距离 / 躯干长度 的下限：同一人被拆成两条重叠轨迹时两"人"几乎重合，模型会把它当成推搡（现场实测）
+FIGHT_MIN_APART = 0.6
+# 近 FIGHT_MODEL_WINDOW_S 内满足几何条件（双方手腕都在快速运动、两人整体没有一起移动）的帧数下限：
+# 模型与规则同时成立才确认，只靠模型时坐着聊天、并排站着也会被认作推人
+FIGHT_MODEL_ACTIVE_FRAMES = 2
 VANISH_S = 3.0  # 轨迹消失满此时长、附近没有新轨迹出现，才判为原地消失
 VANISH_STAND_S = 3.0  # 消失前此时长内须看到站姿：坐着的人俯身到桌下不算
 VANISH_STAND_FRAMES = 3  # 上述时长内站姿帧数的下限
@@ -656,15 +662,22 @@ class BehaviorDetector:
     def _fight_confirmed(
         self, pair: _Pair, ids: tuple[int, int], a: _Body, b: _Body, now: float
     ) -> float | None:
-        """两人伸手可及、同一深度，且动作模型近期多次认为在打人、踢人或推人：返回置信度（两人关键点置信度均值）。"""
+        """两人伸手可及、同一深度、不是同一人的重叠轨迹，近期有手腕快速运动的帧，且动作模型近期多次认为在
+        打人、踢人或推人：返回置信度（两人关键点置信度均值）。"""
         if self._actions is None:
             return None
         if pair.confirmed is not None and now - pair.confirmed < REPEAT_S:
             return None
         torso = (a.torso + b.torso) / 2
-        if float(np.linalg.norm(a.hip - b.hip)) > FIGHT_REACH * torso or max(
-            a.torso, b.torso
-        ) > FIGHT_DEPTH_RATIO * min(a.torso, b.torso):
+        apart = float(np.linalg.norm(a.hip - b.hip))
+        if (
+            apart > FIGHT_REACH * torso
+            or apart < FIGHT_MIN_APART * torso
+            or max(a.torso, b.torso) > FIGHT_DEPTH_RATIO * min(a.torso, b.torso)
+        ):
+            return None
+        active = sum(1 for t, ok, _ in pair.frames if ok and now - t <= FIGHT_MODEL_WINDOW_S)
+        if active < FIGHT_MODEL_ACTIVE_FRAMES:
             return None
         hits = self._actions.fight_hits(ids, now, FIGHT_MODEL_WINDOW_S, FIGHT_MODEL_PROB)
         if hits < FIGHT_MODEL_HITS:

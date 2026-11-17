@@ -108,21 +108,30 @@ def test_model_alone_raises_only_a_suspected_fall() -> None:
     assert detect(Stub(fall=0.5), hold(pose("stand"), 0, 6)) == []
 
 
-def fighting(model: Stub, gap: float) -> list[Behavior]:
+def fighting(model: Stub, gap: float, swing: float = 40) -> list[Behavior]:
     detector = BehaviorDetector([], ActionRecognizer(cast(ActionModel, model)))
     found = []
     for i in range(round(5 * FPS)):
-        points = np.stack([person(300, i, swing=0), person(300 + gap, i, swing=0)])
+        points = np.stack([person(300, i, swing=swing), person(300 + gap, i, swing=swing)])
         found += detector.update(np.array([1, 2]), points, np.tile(SCORES, (2, 1)), i / FPS)
     return [b for b in found if b.behavior == "fight"]
 
 
-def test_model_and_proximity_confirm_a_fight_for_both() -> None:
-    """两人伸手可及且模型多次认为在打人：双方各发一条确认；离得远或模型不认，不发。"""
-    found = fighting(Stub(fight=0.9), gap=80)
-    assert sorted((b.track_id, b.level) for b in found) == [(1, "confirmed"), (2, "confirmed")]
-    assert fighting(Stub(fight=0.9), gap=400) == []
-    assert fighting(Stub(fight=0.3), gap=80) == []
+def test_model_and_rule_together_confirm_a_fight_for_both() -> None:
+    """两人伸手可及、双方手腕快速运动，且模型多次认为在打人：双方各发一条确认。"""
+    found = [b for b in fighting(Stub(fight=0.9), gap=80) if b.level == "confirmed"]
+    assert sorted(b.track_id for b in found) == [1, 2]
+
+
+def test_model_alone_or_overlapping_tracks_do_not_confirm_a_fight() -> None:
+    """离得远、模型不认、手腕不动（坐着聊天、并排站），或同一人被拆成两条重叠轨迹：都不确认。"""
+    for found in (
+        fighting(Stub(fight=0.9), gap=400),
+        fighting(Stub(fight=0.5), gap=80),
+        fighting(Stub(fight=0.9), gap=80, swing=0),
+        fighting(Stub(fight=0.9), gap=10),
+    ):
+        assert [b for b in found if b.level == "confirmed"] == []
 
 
 def test_model_splits_large_batches() -> None:
