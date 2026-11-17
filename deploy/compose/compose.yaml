@@ -135,7 +135,8 @@ services:
     environment:
       HYD_BEHAVIOR_BASELINE_FILE: /etc/hyd/behavior-baseline.json
       HYD_HOST_EVE_FILE: /var/log/host-probe/alerts.json
-      HYD_DEMO_RESET: "true"  # 演示栈响应 make demo-reset 清空去重期；生产部署去掉此行
+      # 响应 make demo-reset 清空去重期：默认关闭，只有经 Makefile 启动的演示栈打开
+      HYD_DEMO_RESET: "${HYD_DEMO_RESET:-false}"
     depends_on: { nats: { condition: service_healthy } }
     networks: [core-net]
     restart: unless-stopped  # 进程退出后自动拉起：告警归一化与关联不因一次错误停止

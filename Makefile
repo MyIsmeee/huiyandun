@@ -37,7 +37,9 @@ GPU ?= 1
 LINKAGE ?= 0
 # NOTIFY=1：告警推送到企业微信、钉钉群机器人（compose.notify.yaml）；机器人地址写在 .secrets/notify_targets
 NOTIFY ?= 0
-COMPOSE = docker compose -f deploy/compose/compose.yaml \
+# 演示栈的 correlator 响应 make demo-reset（compose.yaml 中默认关闭，直接用 docker compose 部署时不生效）
+export HYD_DEMO_RESET = true
+COMPOSE =docker compose -f deploy/compose/compose.yaml \
 	$(if $(filter 0,$(GPU)),,-f deploy/compose/compose.gpu.yaml) \
 	$(if $(filter 1,$(LINKAGE)),-f deploy/compose/compose.linkage.yaml --profile linkage) \
 	$(if $(filter 1,$(NOTIFY)),-f deploy/compose/compose.notify.yaml --profile notify) \

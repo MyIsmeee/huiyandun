@@ -153,6 +153,14 @@ def test_lan_ip_defaults_to_loopback(name: str) -> None:
     assert SERVICES[name]["environment"]["HYD_LAN_IP"] == "${HYD_LAN_IP:-127.0.0.1}"
 
 
+def test_demo_reset_off_unless_makefile() -> None:
+    """演示复位会清空去重期：直接用 docker compose 部署时默认关闭，只有经 Makefile 启动的演示栈打开。"""
+    env = SERVICES["correlator"]["environment"]
+    assert env["HYD_DEMO_RESET"] == "${HYD_DEMO_RESET:-false}"
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "export HYD_DEMO_RESET = true" in makefile
+
+
 @pytest.mark.parametrize(("module", "network"), [("api", "video-net"), ("rtsp", "demo-net")])
 def test_go2rtc_listens_only_on_internal_network(module: str, network: str) -> None:
     """#97：edge-net、camera-net 有宿主网关，宿主进程经它们可访问 go2rtc。API（信令、取帧、增删流）
