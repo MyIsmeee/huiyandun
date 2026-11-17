@@ -23,6 +23,7 @@ from api_server import (
     auth,
     cameras,
     containment,
+    dispositions,
     evidence,
     executions,
     investigator,
@@ -135,6 +136,8 @@ def create_app(config: ApiConfig) -> FastAPI:
         )
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
+            # 告警处置记录在审计日志中：后台读回，数据库暂不可达时重试，不推迟服务就绪
+            asyncio.create_task(app.state.dispositions.restore(app.state.engine)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices, app.state.kpis)),
             asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
             asyncio.create_task(app.state.investigator.run()),  # TK-116
@@ -188,6 +191,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.pose_checks = PoseChecks()
     app.state.auto_scenes = scene.AutoScenes()
     app.state.history = History()
+    app.state.dispositions = dispositions.Dispositions()
     app.state.kpis = kpis.KpiTracker(app.state.devices, app.state.history, datetime.now(UTC))
     app.state.llm_last = None  # 最近一次模型调用的结果（llm_chain.invoke），供顶栏模型状态
     attack = json.loads(config.attack_file.read_text(encoding="utf-8"))
@@ -205,6 +209,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(cameras.router)
     app.include_router(audit.router)
     app.include_router(containment.router)
+    app.include_router(dispositions.router)
     app.include_router(evidence.router)
     app.include_router(investigator.router)
     app.include_router(kpis.router)

@@ -87,7 +87,11 @@ async def push(websocket: WebSocket) -> None:
     subscriber = hub.subscribe(principal.token_hash)
     # 先补推当前设备状态，再补推近 24 小时的告警、关联事件与处置执行（D-077）
     state = websocket.app.state
-    for frame in [*state.devices.snapshot(), *state.history.snapshot()]:
+    for frame in [
+        *state.devices.snapshot(),
+        *state.history.snapshot(),
+        *state.dispositions.snapshot(),
+    ]:
         subscriber.queue.put_nowait(frame.model_dump_json())
 
     async def send() -> None:

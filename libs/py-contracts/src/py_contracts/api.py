@@ -738,20 +738,67 @@ class AuditLogList(ContractModel):
     items: list[AuditLog]
 
 
+class DispositionAction(RootModel[Literal["acknowledged", "false_positive", "resolved"]]):
+    model_config = {"allow_inf_nan": False}
+    root: Literal["acknowledged", "false_positive", "resolved"]
+    """
+    acknowledged 已确认（看到了、正在处理）；false_positive 误报；resolved 已处理关闭
+    """
+
+
+class AlertDispositionRequest(ContractModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    action: DispositionAction
+    note: str | None = Field(None, max_length=200)
+    """
+    处置说明，可选
+    """
+
+
+class Note(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
+    root: str = Field(..., max_length=200)
+
+
+class AlertDisposition(ContractModel):
+    """
+    告警的处置记录；同一告警以最近一次为准
+    """
+
+    event_id: UUID
+    action: DispositionAction
+    note: Note | None
+    actor: str
+    """
+    处置人用户名
+    """
+    ts: AwareDatetime
+
+
 class WsFrame(ContractModel):
     """
     WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
     alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
-    变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
+    变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；system 为系统消息（如心跳）。
     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
-    各自的最新状态），按发生先后排列（D-077）
+    各自的最新状态）与 dispositions（各告警最近一次处置），按发生先后排列（D-077）
 
     """
 
     channel: Literal[
-        "tracks", "devices", "alerts", "incidents", "executions", "ai", "site", "system"
+        "tracks",
+        "devices",
+        "alerts",
+        "incidents",
+        "executions",
+        "ai",
+        "site",
+        "dispositions",
+        "system",
     ]
     data: dict[str, Any]
 
@@ -886,6 +933,29 @@ class Tree(ContractModel):
     x: float
     y: float
     height_m: float = Field(..., gt=0.0)
+
+
+class Backdrop(ContractModel):
+    """
+    实景底图（可选）：画面按 cols × rows 网格取点的三维位置与去除人员后的画面，网格点 (i, j) 对应画面归一化坐标 ((j + 0.5) / cols, (i + 0.5) / rows)。只在内存中随识别结果传递，不持久化
+    """
+
+    cols: int = Field(..., ge=2, le=256)
+    rows: int = Field(..., ge=2, le=256)
+    points: list[float]
+    """
+    rows × cols × 3 个数：每点平面 x、离地高度、平面 y（米），行优先
+    """
+    quads: str = Field(..., json_schema_extra={"contentEncoding": "base64"})
+    """
+    (rows−1)×(cols−1) 位的位图，行优先、每字节高位在前：相邻四点围成的格子是否保留（深度突变、超出范围、行人车辆所在处不保留）；不保留的格子用到的点坐标为 0
+    """
+    image: str = Field(
+        ..., json_schema_extra={"contentEncoding": "base64", "contentMediaType": "image/jpeg"}
+    )
+    """
+    去除行人与车辆（按检测框与分割遮去后修补）的画面
+    """
 
 
 class PointModel(RootModel[list[float]]):
@@ -1142,6 +1212,14 @@ class CameraInfo(ContractModel):
     """
     homography: Homography | None
     reproj_error_m: ReprojErrorM | None
+    climb_lines: list[ClimbLine] | None = Field([], validate_default=True)
+    """
+    禁止攀爬警戒线（像素坐标），供监控墙画到画面上
+    """
+    rules: list[CameraRule] | None = Field([], validate_default=True)
+    """
+    轨迹规则（区域入侵、有向越线，平面坐标），供监控墙按地面映射画到画面上
+    """
 
 
 class IncidentList(ContractModel):
@@ -1382,11 +1460,24 @@ class Wall(ContractModel):
 
 
 class Object(ContractModel):
-    class_: Literal["table", "chair", "cabinet", "sofa", "bed", "furniture", "street_furniture"] = (
-        Field(..., alias="class")
-    )
+    class_: Literal[
+        "table",
+        "chair",
+        "cabinet",
+        "sofa",
+        "bed",
+        "furniture",
+        "street_furniture",
+        "appliance",
+        "box",
+        "fixture",
+    ] = Field(..., alias="class")
     polygon: Polygon
     height_m: float = Field(..., gt=0.0)
+    base_m: float | None = Field(None, ge=0.0)
+    """
+    底部离地高度（米）：放在桌面、柜顶上的小件物品（appliance、box）才有，大屏据此摆放；缺省为落地
+    """
     kind: (
         Literal[
             "table",
@@ -1411,6 +1502,25 @@ class Object(ContractModel):
             "pole",
             "traffic_light",
             "ashcan",
+            "computer",
+            "crt_screen",
+            "monitor",
+            "television",
+            "refrigerator",
+            "washer",
+            "microwave",
+            "oven",
+            "stove",
+            "dishwasher",
+            "lamp",
+            "fan",
+            "box",
+            "bag",
+            "basket",
+            "toilet",
+            "sink",
+            "bathtub",
+            "shower",
         ]
         | None
     ) = None
@@ -1426,7 +1536,7 @@ class Marking(ContractModel):
 
 class SceneFrame(ContractModel):
     """
-    摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：只含平面坐标（米）的多边形与线段，不含图像；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
+    摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：平面坐标（米）的多边形与线段，另可附去除人员后的实景底图（backdrop）；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
     """
 
     camera_id: str
@@ -1440,7 +1550,7 @@ class SceneFrame(ContractModel):
     """
     objects: list[Object]
     """
-    物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块。自动场景按 kind 与实测长宽高选择画法（书桌、茶几、圆桌、转椅、凳子、书架、衣柜等）
+    物体的底面轮廓：电器（appliance）、箱包（box）、卫浴（fixture）按细分类别摆放模型库中的对应模型；桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块。自动场景按 kind 与实测长宽高选择画法（书桌、茶几、圆桌、转椅、凳子、书架、衣柜等）
     """
     trees: list[Tree]
     """
@@ -1449,6 +1559,10 @@ class SceneFrame(ContractModel):
     markings: list[Marking]
     """
     路面区域内的白色标线
+    """
+    backdrop: Backdrop | None = None
+    """
+    实景底图（可选）：画面按 cols × rows 网格取点的三维位置与去除人员后的画面，网格点 (i, j) 对应画面归一化坐标 ((j + 0.5) / cols, (i + 0.5) / rows)。只在内存中随识别结果传递，不持久化
     """
 
 

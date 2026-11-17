@@ -158,6 +158,26 @@ class Evidence:
             clips.append(Entry("video", incident_id, span, clip.content, "mp4"))
         return clips
 
+    async def clip(self, device_id: str, start: datetime, end: datetime) -> bytes | None:
+        """单条告警前后的录像（控制台回放用，不写入存证）：未登记、该时段无录像时为 None。
+        recorder 不可达时抛出 httpx2.HTTPError，由调用方转为 502。"""
+        stream = self._cameras.get(device_id)
+        if stream is None:
+            return None
+        res = await self._recorder.get(
+            "/get",
+            params={
+                "path": stream,
+                "start": _iso(start),
+                "duration": (end - start).total_seconds(),
+                "format": "mp4",
+            },
+        )
+        if res.status_code == 404:
+            return None
+        res.raise_for_status()
+        return res.content
+
     async def package(self, incident_id: str) -> bytes | None:
         async with self._lock:
             return await asyncio.to_thread(self._chain.package, incident_id)

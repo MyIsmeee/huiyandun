@@ -214,6 +214,8 @@ def device(row: Any, mode: str) -> Device:
                 "mapping": "calibrated" if calibrated else "estimated",
                 "homography": None,
                 "reproj_error_m": row["calibration_error_m"] if calibrated else None,
+                "climb_lines": row["climb_lines"] or [],
+                "rules": row.get("rules") or [],
             },
         }
     )

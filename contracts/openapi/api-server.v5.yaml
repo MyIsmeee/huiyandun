@@ -414,6 +414,62 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/alerts/{id}/disposition:
+    post:
+      operationId: disposeAlert
+      description: |
+        告警处置：值班员对单条告警（行为事件、轨迹规则事件或网络告警）标记已确认、误报或已处理，写审计日志，
+        经 WS dispositions 频道推送给所有控制台。误报与已处理会解除该摄像头的物理告警态（行为与规则事件）；
+        已确认只停止响铃与弹窗。告警须在近 24 小时的记录中，否则 404
+      x-min-role: operator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 告警的 event_id
+          schema: { type: string, format: uuid }
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AlertDispositionRequest" }
+      responses:
+        "200":
+          description: 处置记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertDisposition" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/alerts/{id}/clip:
+    get:
+      operationId: getAlertClip
+      description: |
+        单条摄像头告警前后的录像（MP4），供控制台直接回放：行为事件从开始前 10 s 到确认后 10 s，区域与越线从发生前 10 s 起，
+        不超过 45 秒、截止于 2 s 前。经 evidence-service 向 recorder 取，不落盘、不写审计；viewer 本就可观看同一路实时画面
+      x-min-role: viewer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 告警的 event_id
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 录像片段
+          content:
+            video/mp4:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: 存证或录像服务暂不可达
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/incidents/{id}/investigation:
     get:
       operationId: getInvestigation
@@ -1115,6 +1171,16 @@ components:
               items: { type: array, items: { type: number }, minItems: 3, maxItems: 3 }
             - type: "null"
         reproj_error_m: { anyOf: [{ type: number, minimum: 0 }, { type: "null" }] }
+        climb_lines:
+          type: array
+          default: []
+          description: 禁止攀爬警戒线（像素坐标），供监控墙画到画面上
+          items: { $ref: "#/components/schemas/ClimbLine" }
+        rules:
+          type: array
+          default: []
+          description: 轨迹规则（区域入侵、有向越线，平面坐标），供监控墙按地面映射画到画面上
+          items: { $ref: "#/components/schemas/CameraRule" }
     Pose:
       type: object
       required: [x, y, height_m, yaw_deg, pitch_deg, hfov_deg, range_m]
@@ -1409,6 +1475,26 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/AuditLog" } }
+    DispositionAction:
+      enum: [acknowledged, false_positive, resolved]
+      description: acknowledged 已确认（看到了、正在处理）；false_positive 误报；resolved 已处理关闭
+    AlertDispositionRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: { $ref: "#/components/schemas/DispositionAction" }
+        note: { type: string, maxLength: 200, description: 处置说明，可选 }
+    AlertDisposition:
+      type: object
+      description: 告警的处置记录；同一告警以最近一次为准
+      required: [event_id, action, note, actor, ts]
+      properties:
+        event_id: { type: string, format: uuid }
+        action: { $ref: "#/components/schemas/DispositionAction" }
+        note: { anyOf: [{ type: string, maxLength: 200 }, { type: "null" }] }
+        actor: { type: string, description: 处置人用户名 }
+        ts: { type: string, format: date-time }
     WsFrame:
       type: object
       description: |
@@ -1416,12 +1502,12 @@ components:
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
         alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
         （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
-        变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
+        变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；system 为系统消息（如心跳）。
         连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
-        各自的最新状态），按发生先后排列（D-077）
+        各自的最新状态）与 dispositions（各告警最近一次处置），按发生先后排列（D-077）
       required: [channel, data]
       properties:
-        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, site, system] }
+        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, site, dispositions, system] }
         data: { type: object }
     AiInvestigation: { $ref: "../events/hyd.ai.investigation.v1.schema.json" }
     Investigation:

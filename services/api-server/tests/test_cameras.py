@@ -948,6 +948,9 @@ def test_rules_saved_with_defaults_and_sent_in_registry(client: TestClient) -> N
     event = cameras.registry([r | {"ip": r["ip"]} for r in rows])
     [sent] = [c for c in event.model_dump(mode="json")["cameras"] if c["id"] == "cam-03"]
     assert [rule["id"] for rule in sent["rules"]] == ["yard", "gate"]
+    # 站点中的摄像头信息带规则与警戒线，供监控墙画到画面上
+    shown = site_camera(client, "cam-03")
+    assert ([rule["id"] for rule in shown["rules"]], shown["climb_lines"]) == (["yard", "gate"], [])
 
     # 省略 rules 不修改；给出空列表即清空
     assert client.patch("/api/cameras/cam-03", json={"name": "后门"}, headers=headers()).json()[

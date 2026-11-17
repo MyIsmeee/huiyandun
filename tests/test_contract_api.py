@@ -58,6 +58,8 @@ ENDPOINTS = [
     ("post", "/api/reports/{id}/review", "operator"),
     ("get", "/api/reports/{id}/export", "viewer"),
     ("post", "/api/executions/{id}/rollback", "operator"),
+    ("post", "/api/alerts/{id}/disposition", "operator"),  # 告警处置：确认、误报、已处理
+    ("get", "/api/alerts/{id}/clip", "viewer"),  # 单条告警前后的录像回放
     ("post", "/api/incidents/{id}/evidence/export", "operator"),
     ("get", "/api/llm/providers", "admin"),
     ("post", "/api/llm/providers", "admin"),

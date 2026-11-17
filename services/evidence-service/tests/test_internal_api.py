@@ -28,3 +28,37 @@ def test_package_is_served_as_zip_and_unknown_incident_is_404(tmp_path: Path) ->
     with zipfile.ZipFile(io.BytesIO(res.content)) as z:
         assert json.loads(z.read("manifest.json"))["incident_id"] == "inc-ev"
     assert missing.status_code == 404
+
+
+def test_clip_of_a_registered_camera_is_cut_from_recorder(tmp_path: Path) -> None:
+    """控制台回放单条告警：按时段向 recorder 取 MP4；未登记、无录像为 404，时段过长为 400。"""
+    seen: list[httpx2.Request] = []
+
+    def recorder(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        if request.url.params["path"] == "cam-09":
+            return httpx2.Response(404)
+        return httpx2.Response(200, content=b"mp4")
+
+    client_ = httpx2.AsyncClient(
+        base_url="http://recorder:9996", transport=httpx2.MockTransport(recorder)
+    )
+    evidence = Evidence(
+        Chain(tmp_path, Ed25519PrivateKey.generate()),
+        {"cam-05": "cam-05", "cam-09": "cam-09"},
+        client_,
+    )
+    window = {"start": "2026-11-17T08:00:00+00:00", "end": "2026-11-17T08:00:20+00:00"}
+
+    with TestClient(create_app(evidence)) as client:
+        ok = client.get("/internal/clips/cam-05", params=window)
+        empty = client.get("/internal/clips/cam-09", params=window)
+        unknown = client.get("/internal/clips/cam-01", params=window)
+        long = client.get(
+            "/internal/clips/cam-05", params=window | {"end": "2026-11-17T08:05:00+00:00"}
+        )
+
+    assert (ok.status_code, ok.headers["content-type"], ok.content) == (200, "video/mp4", b"mp4")
+    assert seen[0].url.params["duration"] == "20.0"
+    assert seen[0].url.params["format"] == "mp4"
+    assert (empty.status_code, unknown.status_code, long.status_code) == (404, 404, 400)

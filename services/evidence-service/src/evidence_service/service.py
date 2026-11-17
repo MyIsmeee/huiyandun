@@ -66,6 +66,7 @@ class EvidenceConfig(ServiceConfig):
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
 # recorder 可能晚于登记表启动，重启会丢掉经接口添加的录像路径：定期比对补齐
 RECORDER_SYNC_S = 30
+MAX_CLIP = timedelta(minutes=2)  # 控制台回放单条告警的录像，时段上限
 
 
 async def follow_registry(
@@ -140,6 +141,19 @@ def create_app(evidence: Evidence) -> FastAPI:
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/internal/clips/{device_id}")
+    async def clip(device_id: str, start: datetime, end: datetime) -> Response:
+        if not timedelta(0) < end - start <= MAX_CLIP:
+            raise HTTPException(400, "时段须为正且不超过 2 分钟")
+        try:
+            data = await evidence.clip(device_id, start, end)
+        except httpx2.HTTPError as e:
+            log.warning("evidence.clip_failed", extra={"device_id": device_id, "error": repr(e)})
+            raise HTTPException(502, "录像服务暂不可达") from e
+        if data is None:
+            raise HTTPException(404, "该时段没有录像")
+        return Response(data, media_type="video/mp4")
 
     @app.get("/internal/incidents/{incident_id}/package")
     async def package(incident_id: str) -> Response:

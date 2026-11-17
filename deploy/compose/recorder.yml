@@ -29,4 +29,4 @@ pathDefaults:
   recordFormat: fmp4
   recordPartDuration: 1s
   recordSegmentDuration: 60s
-  recordDeleteAfter: 20m
+  recordDeleteAfter: 1h

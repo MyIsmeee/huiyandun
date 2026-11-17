@@ -69,6 +69,14 @@ class Devices:
         entry.behavior = event
         return self._update(entry, now)
 
+    def release_physical(self, camera_id: str, now: float) -> Device | None:
+        """值班员将物理告警标为误报或已处理：立即解除物理告警态，之后的新事件照常重新进入。"""
+        entry = self._entries.get(camera_id)
+        if entry is None:
+            return None
+        entry.physical_until = float("-inf")
+        return self._update(entry, now)
+
     def on_alert(self, event: SecurityAlertV1, now: float) -> Device | None:
         """告警等级在网络攻击期间取最高值，解除后重新累计。目标未登记为设备时返回 None（FR-203）。"""
         entry = self._entries.get(event.device_id) if event.device_id is not None else None
