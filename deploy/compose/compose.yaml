@@ -342,6 +342,8 @@ services:
       HYD_DEVICE: cpu  # 显式 CPU 模式（DP-06）；compose.gpu.yaml 改为 cuda
       HYD_MODEL_FILE: /models/rtmo-s_body7-640x640.onnx
       HYD_VEHICLE_MODEL_FILE: /models/rfdetr_s_v142_512x512.onnx
+      HYD_TOPDOWN_MODEL_FILE: /models/rtmpose-m_simcc-body7-256x192.onnx  # 两阶段骨骼：按人员框逐人估计
+      HYD_ACTION_MODEL_FILE: /models/stgcnpp_ntu60_2d_jb.onnx  # 骨骼动作模型：复核跌倒与打架
       HYD_SCENE_MODEL_FILE: /models/efficientvit_seg_l1_ade20k_512.onnx
       HYD_INTEGRITY_MODEL_FILE: /models/dinov2_small.onnx
       HYD_GEOMETRY_MODEL_FILE: /models/moge2_vits_normal.onnx  # 摄像头自动标定（monocular.py）

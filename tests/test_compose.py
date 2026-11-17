@@ -371,3 +371,73 @@ def test_recorder_playback_reachable_only_by_evidence_service() -> None:
 def test_init_script_executable(script: Path) -> None:
     """不可执行的 .sh 会被 postgres 镜像 source 进自身启动流程，脚本的 set -eu 随之生效。"""
     assert os.access(script, os.X_OK)
+
+
+LINKAGE = yaml.safe_load((ROOT / "deploy/compose/compose.linkage.yaml").read_text(encoding="utf-8"))
+GATEWAY = "firewall-gateway"
+
+
+def test_linkage_gateway_least_privilege() -> None:
+    """旁路部署演示（FR-1001）：联动网关与 privileged-helper 同样只有 NET_ADMIN、根文件系统只读；本机套接字
+    不与任何容器共享，只在 linkage-net 的宿主地址上监听，且必须启用 TLS。"""
+    gateway = LINKAGE["services"][GATEWAY]
+    assert gateway["network_mode"] == "host" and gateway["profiles"] == ["linkage"]
+    assert gateway["read_only"] is True
+    assert gateway["cap_drop"] == ["ALL"] and gateway["cap_add"] == ["NET_ADMIN"]
+    assert "volumes" not in gateway and "ports" not in gateway
+    assert "/run/hyd-helper" in gateway["tmpfs"]
+    assert "executor_signing_key" not in gateway["secrets"]
+    env = gateway["environment"]
+    assert env["HYD_TLS_CERT_FILE"] and env["HYD_TLS_KEY_FILE"]
+    (config,) = LINKAGE["networks"]["linkage-net"]["ipam"]["config"]
+    host, _ = env["HYD_TCP_LISTEN"].rsplit(":", 1)
+    assert host == config["gateway"]
+
+
+def test_only_executor_reaches_linkage_gateway() -> None:
+    """linkage-net 无出站，只有 playbook-executor 接入；执行器连接的地址即网关监听的地址，证书对该地址有效。"""
+    network = LINKAGE["networks"]["linkage-net"]
+    assert network["internal"] is True
+    joined = {n for n, s in LINKAGE["services"].items() if "linkage-net" in s.get("networks", [])}
+    assert joined == {"playbook-executor"}
+    executor = LINKAGE["services"]["playbook-executor"]["environment"]
+    listen = LINKAGE["services"][GATEWAY]["environment"]["HYD_TCP_LISTEN"]
+    assert executor["HYD_FIREWALL_ADDRESS"] == listen
+    host = listen.rsplit(":", 1)[0]
+    assert f"subjectAltName=IP:{host}" in (ROOT / "Makefile").read_text(encoding="utf-8")
+
+
+def test_linkage_overlay_keeps_executor_mounts() -> None:
+    """叠加文件只换站点配置：执行器的套接字卷与 Playbook 目录与 compose.yaml 一致，api-server 读同一站点。"""
+    base = set(SERVICES["playbook-executor"]["volumes"])
+    overlay = set(LINKAGE["services"]["playbook-executor"]["volumes"])
+    site = "../../demo/scenarios/site-bypass.yaml:/etc/hyd/site.yaml:ro"
+    assert {v.split(":")[1] for v in base} == {v.split(":")[1] for v in overlay}
+    assert site in overlay and LINKAGE["services"]["api-server"]["volumes"] == [site]
+
+
+def test_bypass_site_differs_only_in_mode() -> None:
+    """site-bypass.yaml 只改部署模式：摄像头、白名单与 site.yaml 保持一致，不随演示切换漂移。"""
+    scenarios = ROOT / "demo/scenarios"
+    base = yaml.safe_load((scenarios / "site.yaml").read_text(encoding="utf-8"))
+    bypass = yaml.safe_load((scenarios / "site-bypass.yaml").read_text(encoding="utf-8"))
+    assert (base["site"]["mode"], bypass["site"]["mode"]) == ("host_probe", "bypass")
+    bypass["site"]["mode"] = "host_probe"
+    assert bypass == base
+
+
+NOTIFY = yaml.safe_load((ROOT / "deploy/compose/compose.notify.yaml").read_text(encoding="utf-8"))
+
+
+def test_notifier_is_opt_in_and_only_it_reaches_notify_egress() -> None:
+    """告警通知是可选叠加（DP-05 例外）：默认部署中没有 notifier；出站网络只有它接入，它不接入数据库、视频与
+    处置网络，不开放端口，根文件系统只读、去掉全部能力。"""
+    assert "notifier" not in SERVICES
+    notifier = NOTIFY["services"]["notifier"]
+    assert notifier["profiles"] == ["notify"]
+    assert set(notifier["networks"]) == {"core-net", "notify-egress"}
+    joined = {n for n, s in NOTIFY["services"].items() if "notify-egress" in s.get("networks", [])}
+    assert joined == {"notifier"}
+    assert notifier["read_only"] is True and notifier["cap_drop"] == ["ALL"]
+    assert "ports" not in notifier and "volumes" not in notifier
+    assert notifier["secrets"] == ["notify_targets"]

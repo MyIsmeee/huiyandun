@@ -274,7 +274,7 @@ assets:
       - { id: wall-window-wide, source: building-kit/wall-window-wide-square }
   - name: Kenney 场景资产 · 家具
     file: web/console/public/models/scene-furniture.glb
-    sha256: 129a40770cd774627fc471c42e90fd4024f84fdd6cffed7060b8cd19cecd852a
+    sha256: 387d982857710d34088583b2161dc3042269d0d352495859c332427ee9cac833
     license: CC0-1.0
     source: Kenney 官网 furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
     purpose: 场景搭建模型库 · 家具（设计 150 §8）
@@ -294,6 +294,56 @@ assets:
       - { id: bed, source: furniture-kit/bedSingle }
       - { id: bed-double, source: furniture-kit/bedDouble }
       - { id: trash-can, source: furniture-kit/trashcan }
+      - { id: bookcase, source: furniture-kit/bookcaseClosed }
+      - { id: bookcase-low, source: furniture-kit/bookcaseOpenLow }
+      - { id: side-table, source: furniture-kit/sideTable }
+      - { id: drawer-cabinet, source: furniture-kit/sideTableDrawers }
+      - { id: table-round, source: furniture-kit/tableRound }
+      - { id: table-glass, source: furniture-kit/tableGlass }
+      - { id: table-cloth, source: furniture-kit/tableCloth }
+      - { id: chair-rounded, source: furniture-kit/chairRounded }
+      - { id: chair-cushion, source: furniture-kit/chairCushion }
+      - { id: chair-modern, source: furniture-kit/chairModernCushion }
+      - { id: stool, source: furniture-kit/stoolBar }
+      - { id: bench, source: furniture-kit/bench }
+      - { id: sofa-long, source: furniture-kit/loungeSofaLong }
+      - { id: sofa-design, source: furniture-kit/loungeDesignSofa }
+      - { id: lounge-chair, source: furniture-kit/loungeChairRelax }
+      - { id: bed-bunk, source: furniture-kit/bedBunk }
+      - { id: coat-rack, source: furniture-kit/coatRackStanding }
+      - { id: box, source: furniture-kit/cardboardBoxClosed }
+      - { id: box-open, source: furniture-kit/cardboardBoxOpen }
+      - { id: plant-small, source: furniture-kit/plantSmall1 }
+      - { id: rug, source: furniture-kit/rugRectangle }
+      - { id: rug-round, source: furniture-kit/rugRound }
+      - { id: kitchen-cabinet, source: furniture-kit/kitchenCabinet }
+      - { id: kitchen-bar, source: furniture-kit/kitchenBar }
+      - { id: kitchen-sink, source: furniture-kit/kitchenSink }
+      - { id: toilet, source: furniture-kit/toilet }
+      - { id: bathroom-sink, source: furniture-kit/bathroomSink }
+      - { id: shower, source: furniture-kit/shower }
+  - name: Kenney 场景资产 · 办公与电器
+    file: web/console/public/models/scene-appliance.glb
+    sha256: 09cbdfb2a234c7f96616e0cc4b7c7a4ba87aa6eded3cb49a72b016288978d302
+    license: CC0-1.0
+    source: Kenney 官网 furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 办公与电器（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: monitor, source: furniture-kit/computerScreen }
+      - { id: laptop, source: furniture-kit/laptop }
+      - { id: keyboard, source: furniture-kit/computerKeyboard }
+      - { id: tv, source: furniture-kit/televisionModern }
+      - { id: tv-cabinet, source: furniture-kit/cabinetTelevision }
+      - { id: speaker, source: furniture-kit/speaker }
+      - { id: fridge, source: furniture-kit/kitchenFridge }
+      - { id: fridge-small, source: furniture-kit/kitchenFridgeSmall }
+      - { id: microwave, source: furniture-kit/kitchenMicrowave }
+      - { id: coffee-machine, source: furniture-kit/kitchenCoffeeMachine }
+      - { id: washer, source: furniture-kit/washer }
+      - { id: lamp-floor, source: furniture-kit/lampSquareFloor }
+      - { id: lamp-table, source: furniture-kit/lampRoundTable }
+      - { id: ceiling-fan, source: furniture-kit/ceilingFan }
   - name: Kenney 场景资产 · 货架设备
     file: web/console/public/models/scene-equipment.glb
     sha256: 5f37d037eb68b6e2bd6ffb7d1b9731efb038330180f48c66aa15dd59cdf343ab
@@ -364,13 +414,24 @@ textures:
     purpose: 登录页地球地形凹凸
     owner: MyIsmeee
 
+# 由公开数据集抽取、随前端打包的查表（运行时不联网，G-05）。tzdata 升级时用对应工具重新生成并更新哈希
+datasets:
+  - name: IANA 时区数据库（tzdata）代表城市坐标
+    version: "2026e"  # tzdata.zi 首行
+    file: web/console/src/panels/LoginPage/globe/zones.json
+    sha256: fe6813e8d817e348462c5502cdcdb53c537b31fda7f5c2d54c8f443ad6eaf950
+    license: LicenseRef-Public-Domain  # tzdata 由作者置于公有领域（其 LICENSE 文件）
+    # 由 tools/dev/tz_coordinates.py 从 zone.tab、zone1970.tab 与 tzdata.zi 的 Link 行抽取
+    purpose: 登录页俯冲按浏览器时区定位本地（时区 → 代表城市经纬度）
+    owner: MyIsmeee
+
 # 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
-# 依赖由 tools/dev/export_efficientvit_seg.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
+# 依赖由 tools/dev/export_efficientvit_seg.py.lock、export_stgcnpp.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
 build_tools:
   - name: PyTorch（CPU）
     version: 2.8.0+cpu
     license: BSD-3-Clause
-    purpose: EfficientViT-Seg 权重转为 ONNX（REUSE-25）
+    purpose: EfficientViT-Seg、STGCN++ 权重转为 ONNX（REUSE-25）
     owner: MyIsmeee
   - name: ONNX
     version: 1.23.2
@@ -381,4 +442,9 @@ build_tools:
     version: de7d7733cc0329f391b33f1f459271562ec27bd5  # git 提交，导出时校验
     license: Apache-2.0
     purpose: 构建 EfficientViT-Seg 网络结构以加载权重；导出时拉取，不入库
+    owner: MyIsmeee
+  - name: mmaction2 模型代码（STGCN++ 主干与图定义）
+    version: 4d6c93474730cad2f25e51109adcf96824efc7a3  # v1.2.0 的 git 提交，导出时校验
+    license: Apache-2.0
+    purpose: 构建 STGCN++ 网络结构以加载权重（tools/dev/export_stgcnpp.py）；导出时拉取，不入库
     owner: MyIsmeee

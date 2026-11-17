@@ -121,3 +121,15 @@ def test_earth_textures_registered() -> None:
     assert files == registered
     assert {t["license"] for t in REGISTRY["textures"]} == {"LicenseRef-NASA-Public-Domain"}
     assert sum(p.stat().st_size for p in TEXTURES.iterdir()) <= MAX_BYTES
+
+
+def test_timezone_table_registered() -> None:
+    """C-RU-01：登录页俯冲用的时区坐标表（tzdata 抽取）登记于 datasets，哈希与版本一致。"""
+    (entry,) = (d for d in REGISTRY["datasets"] if d["file"].endswith("globe/zones.json"))
+    path = ROOT / entry["file"]
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == entry["sha256"]
+    table = json.loads(path.read_text(encoding="utf-8"))
+    assert table["version"] == entry["version"]
+    assert table["zones"]["Asia/Shanghai"] == [31.2333, 121.4667]
+    # 别名只指向表中有坐标的时区
+    assert set(table["links"].values()) <= set(table["zones"])
