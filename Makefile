@@ -1,5 +1,5 @@
 .PHONY: licenses lint lint-py lint-imports lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper demo-reset
+	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper demo-reset demo-story
 
 WEB = pnpm --dir web/console
 
@@ -188,7 +188,7 @@ tamper:
 	uv run python tools/dev/redteam.py tamper $(ACTION) $(CAMERA) -- $(COMPOSE)
 
 # 演示复位：回滚仍在生效的封禁、清空关联引擎的 5 分钟去重期，并恢复被篡改的调试画面，之后可立即重演。
-# 重放要被识别，恢复后的画面须先正常播放约 2.5 分钟，再执行 make tamper ACTION=replay
+# 重放要被识别，恢复后的画面须先正常播放约 1 分钟（回退 45 s + 比较窗口 10 s），再执行 make tamper ACTION=replay
 demo-reset:
 	$(COMPOSE) exec -T api-server hyd-api demo-reset
 	@for f in /tmp/hyd-tamper-*.json; do \
@@ -196,3 +196,16 @@ demo-reset:
 		cam=$$(basename "$$f" .json); \
 		uv run python tools/dev/redteam.py tamper restore "$${cam#hyd-tamper-}" -- $(COMPOSE) || exit 1; \
 	done
+
+# 一键演示：复位 → 画面预热 → 再清一次去重期 → 认证爆破 → 画面重放，约 2 分钟。
+# 预热期间上一轮的余波（如行为模型按 30 s 窗口晚到的低速爆破告警）可能先拼出一起跨域事件并进入去重期，
+# 压下本轮的跨域事件（实测 10 轮中 1 轮），故攻击前再复位一次
+WARMUP ?= 60
+demo-story: demo-reset
+	@echo "画面预热 $(WARMUP) s：重放须切回识别引擎看过的片段"
+	@sleep $(WARMUP)
+	$(COMPOSE) exec -T api-server hyd-api demo-reset
+	$(MAKE) --no-print-directory attack
+	@sleep 20
+	$(MAKE) --no-print-directory tamper ACTION=replay CAMERA=cam-02
+	@echo "约 15 s 后识别出画面重放，生成跨域事件 HYD-X-0001；结束后执行 make demo-reset"
