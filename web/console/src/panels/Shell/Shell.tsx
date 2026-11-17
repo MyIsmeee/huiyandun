@@ -1,4 +1,4 @@
-import { CircleAlert, LogOut, MapPin, ShieldCheck } from "lucide-react";
+import { CircleAlert, ListChecks, LogOut, MapPin, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -15,6 +15,8 @@ import { canManageProviders, useSession } from "../../store/session";
 import { AdminFrame } from "../Admin/AdminFrame";
 import { Alarm } from "../Alarm/Alarm";
 import { CameraPage } from "../CameraList/CameraList";
+import { InvestigationSheet, InvestigationWatcher } from "../InvestigationSheet/InvestigationSheet";
+import { INVESTIGATED, openInvestigation, useSheet } from "../InvestigationSheet/sheet";
 import { ConnectionStatus } from "../ConnectionStatus/ConnectionStatus";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { Overview } from "../Overview/Overview";
@@ -98,6 +100,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
               权限信息读取失败，正在重试
             </p>
           )}
+          <InvestigationButton />
           <LlmStatusBadge />
           <ConnectionStatus />
           {logout === "failed" && (
@@ -135,11 +138,32 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </AdminFrame>
         </div>
       )}
+      {/* 研判面板：高危关联事件实时到达时自动打开，逐步展示 AI 调查过程 */}
+      <InvestigationWatcher />
+      <InvestigationSheet stale={offline} />
       {/* 确认级物理告警：响铃并弹出带当时画面的处置卡片 */}
       <Alarm />
       {/* 操作结果提示（设计 150 §9A）：保存、删除区域的成功与失败 */}
       <Toaster position="top-center" />
     </div>
+  );
+}
+
+/** 顶栏"研判"：打开最近一起在 AI 调查范围内的关联事件；面板已打开时再点收起 */
+function InvestigationButton() {
+  const latest = useLive((s) => s.incidents.find((i) => INVESTIGATED.has(i.severity)));
+  const open = useSheet((s) => s.incidentId !== null);
+  return (
+    <Button
+      variant={open ? "secondary" : "ghost"}
+      size="sm"
+      disabled={!latest && !open}
+      aria-pressed={open}
+      onClick={() => (open ? useSheet.setState({ incidentId: null }) : latest && openInvestigation(latest.id))}
+    >
+      <ListChecks aria-hidden />
+      研判
+    </Button>
   );
 }
 

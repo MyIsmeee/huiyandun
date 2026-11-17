@@ -25,6 +25,7 @@ import { canContain, useSession } from "../../store/session";
 import { RESULT_TIMEOUT_MS } from "../ActionBar/ActionBar";
 import { SEVERITY } from "../AlertList/AlertList";
 import { awaitingInvestigation, RETRY_MS, useDeviceIncident } from "../IncidentTimeline/IncidentTimeline";
+import { openInvestigation } from "../InvestigationSheet/sheet";
 
 export type Investigation = components["schemas"]["Investigation"];
 type Verdict = NonNullable<Investigation["verdict"]>;
@@ -34,7 +35,7 @@ export type InvestigationLoad =
 export type ConfirmRequest = { status: "idle" | "pending" } | { status: "failed"; message: string };
 
 /** 工具类型图标（V-AI6）；未知工具（已被拒绝的调用）用通用图标 */
-const TOOL_ICON: Record<string, typeof Wrench> = {
+export const TOOL_ICON: Record<string, typeof Wrench> = {
   list_alerts: BellRing,
   list_frame_events: Film,
   get_device: Cctv,
@@ -67,21 +68,17 @@ export function AiInvestigation(props: { deviceId: string; stale: boolean }) {
   return <AiInvestigationState key={incident.id} incident={incident} stale={props.stale} />;
 }
 
-function AiInvestigationState(props: { incident: Incident; stale: boolean }) {
-  const { incident, stale } = props;
+/**
+ * 关联事件的调查记录：读 GET 接口，每收到该事件的 ai 推送或推送连接恢复时重新读取（FR-1102）；等待调查时每 5 s
+ * 重读，读取失败时重试。调查进行中每秒更新 now，供显示已用时长。研判面板与详情面板共用
+ */
+export function useInvestigation(incident: Incident, stale: boolean) {
   const seq = useLive((s) => s.aiSeq[incident.id]);
   const epoch = useConnection((s) => s.epoch);
-  const pending = useLive((s) =>
-    Object.values(s.executions).find((e) => e.incident_id === incident.id && e.state === "pending"),
-  );
-  const role = useSession((s) => s.role);
   const [load, setLoad] = useState<InvestigationLoad>({ status: "loading" });
   /** 已读到记录后的重读失败：保留记录，但不再按它显示仍在计时的"调查中"（记录可能早已结束） */
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  // 请求记在发起时的执行 id 上：同一执行的重复推送（重连补推、拦截证据补注）不清掉请求状态；执行器推送新状态
-  // （开始执行）后它不再是待确认的执行，按钮消失；换了执行即不再显示上一次的结果
-  const [confirming, setConfirming] = useState<{ executionId: string; request: ConfirmRequest } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const { id, severity, created_at } = incident;
@@ -130,6 +127,20 @@ function AiInvestigationState(props: { incident: Incident; stale: boolean }) {
       clearInterval(timer);
     };
   }, [running, stale]);
+
+  return { load, refreshFailed, now };
+}
+
+function AiInvestigationState(props: { incident: Incident; stale: boolean }) {
+  const { incident, stale } = props;
+  const pending = useLive((s) =>
+    Object.values(s.executions).find((e) => e.incident_id === incident.id && e.state === "pending"),
+  );
+  const role = useSession((s) => s.role);
+  const { load, refreshFailed, now } = useInvestigation(incident, stale);
+  // 请求记在发起时的执行 id 上：同一执行的重复推送（重连补推、拦截证据补注）不清掉请求状态；执行器推送新状态
+  // （开始执行）后它不再是待确认的执行，按钮消失；换了执行即不再显示上一次的结果
+  const [confirming, setConfirming] = useState<{ executionId: string; request: ConfirmRequest } | null>(null);
 
   async function confirm(execution: Execution) {
     const executionId = execution.id;
@@ -225,6 +236,9 @@ export function AiInvestigationView(props: {
           )}
         </header>
         <InvestigationBody load={load} refreshFailed={refreshFailed} now={now} />
+        <Button variant="outline" size="sm" className="self-start" onClick={() => openInvestigation(incident.id)}>
+          查看完整研判过程
+        </Button>
       </section>
     </section>
   );
@@ -290,7 +304,7 @@ function InvestigationBody(props: { load: InvestigationLoad; refreshFailed: bool
 }
 
 /** 判定卡（V-AI7）：是否攻击以图标形状 + 文字区分，可信度为百分比 + 环形刻度；只展示，不进入任何操作（G-03） */
-function VerdictCard({ verdict }: { verdict: Verdict }) {
+export function VerdictCard({ verdict }: { verdict: Verdict }) {
   const percent = Math.round(verdict.confidence * 100);
   const Icon = verdict.is_attack ? ShieldAlert : ShieldCheck;
   return (
