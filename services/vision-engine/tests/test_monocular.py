@@ -10,6 +10,7 @@ from vision_engine.monocular import (
     Geometry,
     combine,
     floor_geometry,
+    focal_of,
     point_cloud,
     recover_focal_shift,
     view_plane_uv,
@@ -110,6 +111,20 @@ def test_focal_and_shift_recovered_from_affine_point_map() -> None:
     assert hfov == pytest.approx(75.0, abs=0.5)
     assert np.allclose(rebuilt[ok & valid], cloud[ok & valid], atol=0.05)
     assert view_plane_uv(W, H).shape == (H, W, 2)
+
+
+def test_known_view_angle_fixes_focal_and_only_shift_is_solved() -> None:
+    """视角已知（安装参数）时焦距固定为它，只求深度偏移；结果与自估一致，视角原样返回。"""
+    cloud, _, valid = room(2.0, -15.0, 75.0)
+    cloud[~valid] = 0
+    raw = cloud / 4.0 - np.array([0, 0, 0.3])
+    focal = focal_of(75.0, W, H)
+    estimated, _ = recover_focal_shift(raw, valid) or (math.nan, math.nan)
+    assert focal == pytest.approx(estimated, rel=0.01)
+    found, shift = recover_focal_shift(raw, valid, focal) or (math.nan, math.nan)
+    assert found == focal and shift == pytest.approx(0.3, abs=0.01)
+    built = point_cloud(raw, valid, 4.0, focal_of(70.0, W, H))
+    assert built is not None and built[2] == pytest.approx(70.0, abs=0.01)
 
 
 def test_combine_takes_median_and_needs_half_of_runs() -> None:

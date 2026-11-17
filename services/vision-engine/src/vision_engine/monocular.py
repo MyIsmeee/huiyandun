@@ -67,18 +67,30 @@ def view_plane_uv(width: int, height: int) -> np.ndarray:
     return np.stack(np.meshgrid(u, v), -1)
 
 
-def _focal_residual(uv: np.ndarray, xyz: np.ndarray, shift: float) -> tuple[float, float]:
-    """给定偏移时的最优焦距（闭式解）与残差平方和。"""
+def _focal_residual(
+    uv: np.ndarray, xyz: np.ndarray, shift: float, fixed: float | None = None
+) -> tuple[float, float]:
+    """给定偏移时的最优焦距（闭式解；fixed 给出时即用它）与残差平方和。"""
     z = xyz[:, 2] + shift
     if np.any(z <= 1e-6):
         return math.nan, math.inf
     xy = xyz[:, :2] / z[:, None]
-    focal = float((xy * uv).sum() / np.square(xy).sum())
+    focal = fixed if fixed is not None else float((xy * uv).sum() / np.square(xy).sum())
     return focal, float(np.square(focal * xy - uv).sum())
 
 
-def recover_focal_shift(points: np.ndarray, mask: np.ndarray) -> tuple[float, float] | None:
-    """仿射点图 (H, W, 3) → (焦距, 深度偏移)；焦距以画面对角线的一半为单位。有效点不足时为 None。"""
+def focal_of(hfov_deg: float, width: int, height: int) -> float:
+    """水平视角 → 焦距（以画面对角线的一半为单位，与 recover_focal_shift 一致）。"""
+    aspect = width / height
+    fx = 0.5 / math.tan(math.radians(hfov_deg) / 2)  # 以画面宽为单位
+    return 2 * fx * aspect / math.hypot(aspect, 1)
+
+
+def recover_focal_shift(
+    points: np.ndarray, mask: np.ndarray, focal: float | None = None
+) -> tuple[float, float] | None:
+    """仿射点图 (H, W, 3) → (焦距, 深度偏移)；焦距以画面对角线的一半为单位。有效点不足时为 None。
+    focal 给出时（已知视角）只求偏移：焦距每帧自估会同时扭曲尺度与形状，已知时固定下来更稳。"""
     height, width = points.shape[:2]
     idx = np.argwhere(mask)
     if len(idx) < 16:
@@ -88,28 +100,28 @@ def recover_focal_shift(points: np.ndarray, mask: np.ndarray) -> tuple[float, fl
     xyz = points[idx[:, 0], idx[:, 1]].astype(np.float64)
     # 先在网格上粗找，再黄金分割细化；残差对偏移是单峰的
     grid = np.linspace(*SHIFT_RANGE, 80)
-    costs = [_focal_residual(uv, xyz, s)[1] for s in grid]
+    costs = [_focal_residual(uv, xyz, s, focal)[1] for s in grid]
     i = int(np.argmin(costs))
     lo, hi = grid[max(i - 1, 0)], grid[min(i + 1, len(grid) - 1)]
     ratio = (math.sqrt(5) - 1) / 2
     for _ in range(40):
         a, b = hi - ratio * (hi - lo), lo + ratio * (hi - lo)
-        if _focal_residual(uv, xyz, a)[1] < _focal_residual(uv, xyz, b)[1]:
+        if _focal_residual(uv, xyz, a, focal)[1] < _focal_residual(uv, xyz, b, focal)[1]:
             hi = b
         else:
             lo = a
     shift = (lo + hi) / 2
-    focal, cost = _focal_residual(uv, xyz, shift)
-    if not math.isfinite(cost) or focal <= 0:
+    found, cost = _focal_residual(uv, xyz, shift, focal)
+    if not math.isfinite(cost) or found <= 0:
         return None
-    return focal, shift
+    return found, shift
 
 
 def point_cloud(
-    points: np.ndarray, mask: np.ndarray, scale: float
+    points: np.ndarray, mask: np.ndarray, scale: float, focal: float | None = None
 ) -> tuple[np.ndarray, np.ndarray, float] | None:
-    """仿射点图 → (度量点云 (H, W, 3), 有效掩码, 水平视角度数)。"""
-    recovered = recover_focal_shift(points, mask)
+    """仿射点图 → (度量点云 (H, W, 3), 有效掩码, 水平视角度数)；focal 见 recover_focal_shift。"""
+    recovered = recover_focal_shift(points, mask, focal)
     if recovered is None:
         return None
     focal, shift = recovered
@@ -167,6 +179,12 @@ class Reconstruction:
     normals: np.ndarray
     valid: np.ndarray
     floor: Floor
+
+    def scaled(self, factor: float, scale_ref: str) -> "Reconstruction":
+        """整体缩放（以镜头为中心）：点云、地面距离与地面点同乘 factor，尺度来源记为 scale_ref。"""
+        f = self.floor
+        floor = Floor(f.up, f.d * factor, f.scale * factor, scale_ref, f.points * factor)
+        return Reconstruction(self.cloud * factor, self.normals, self.valid, floor)
 
 
 def floor_plane(cloud: np.ndarray, normals: np.ndarray, valid: np.ndarray) -> Floor | None:
@@ -296,22 +314,35 @@ class MonocularGeometry:
         results = [r for tokens, flip in RUNS if (r := self._once(rgb, tokens, flip)) is not None]
         return combine(results)
 
-    def reconstruct(self, frame: np.ndarray) -> Reconstruction | None:
-        """场景生成用：一次推理的度量点云（已按桌面校正尺度）、有效掩码与地面；看不到地面时为 None。"""
+    def reconstruct(
+        self,
+        frame: np.ndarray,
+        hfov_deg: float | None = None,
+        exclude: np.ndarray | None = None,
+    ) -> Reconstruction | None:
+        """场景生成用：一次推理的度量点云（已按桌面校正尺度）、有效掩码与地面；看不到地面时为 None。
+        hfov_deg 为已知水平视角（安装参数，与人员定位所用一致），给出时焦距固定为它；
+        exclude 为画面尺寸的布尔掩码，其中的像素（行人、车辆）不计入点云。"""
         height, width = frame.shape[:2]
         size = (INPUT_WIDTH, round(INPUT_WIDTH * height / width))
         rgb = cv2.cvtColor(cv2.resize(frame, size, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
-        built = self._infer(rgb, RUNS[1][0])
+        focal = focal_of(hfov_deg, *size) if hfov_deg is not None and 0 < hfov_deg < 180 else None
+        built = self._infer(rgb, RUNS[1][0], focal)
         if built is None:
             return None
         cloud, normals, valid, _ = built
+        if exclude is not None:
+            hidden = cv2.resize(
+                exclude.astype(np.uint8), valid.shape[::-1], interpolation=cv2.INTER_NEAREST
+            )
+            valid = valid & ~hidden.astype(bool)
         floor = floor_plane(cloud, normals, valid)
         if floor is None:
             return None
         return Reconstruction(cloud * floor.scale, normals, valid, floor)
 
     def _infer(
-        self, rgb: np.ndarray, tokens: int
+        self, rgb: np.ndarray, tokens: int, focal: float | None = None
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
         image = rgb.astype(np.float32) / 255
         with self._lock:
@@ -322,7 +353,7 @@ class MonocularGeometry:
                     "num_tokens": np.array(tokens, np.int64),
                 },
             )
-        built = point_cloud(points[0], mask[0] > MASK_MIN, float(scale[0]))
+        built = point_cloud(points[0], mask[0] > MASK_MIN, float(scale[0]), focal)
         if built is None:
             return None
         cloud, valid, hfov = built

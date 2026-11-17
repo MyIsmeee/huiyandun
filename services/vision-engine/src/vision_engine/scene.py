@@ -67,6 +67,32 @@ ADE20K = {
     "plant": [17],  # 盆栽等，以矮树呈现
 }
 CLASSES = list(ADE20K)  # 格子取值 = 下标 + 1，0 为未识别
+# 物体的细分类别（契约 SceneFrame.objects[].kind）：ADE20K 编号 → 名称。渲染类别把它们合并了（桌子含书桌、茶几），
+# 前端按细分类别与实测尺寸选择画法
+KINDS = {
+    15: "table",
+    33: "desk",
+    64: "coffee_table",
+    19: "chair",
+    30: "armchair",
+    31: "seat",
+    75: "swivel_chair",
+    110: "stool",
+    10: "cabinet",
+    24: "shelf",
+    35: "wardrobe",
+    44: "chest_of_drawers",
+    62: "bookcase",
+    23: "sofa",
+    7: "bed",
+    45: "counter",
+    43: "signboard",
+    69: "bench",
+    87: "streetlight",
+    93: "pole",
+    136: "traffic_light",
+    138: "ashcan",
+}
 SURFACES = ["road", "sidewalk", "floor", "grass", "earth"]
 # 黑板取其下方的墙脚线，板高 1.2 m（离地 0.9 m 由大屏绘制）
 WALL_HEIGHT_M = {"wall": 2.8, "building": 6.0, "fence": 1.2, "railing": 1.0, "board": 1.2}
@@ -101,17 +127,22 @@ class Segmenter:
         self._lock = threading.Lock()
 
     def __call__(self, frame: np.ndarray) -> np.ndarray:
+        return self.segment(frame)[0]
+
+    def segment(self, frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """(渲染类别网格, ADE20K 原始类别编号网格)；后者供物体的细分类别（KINDS）。"""
         rgb = cv2.cvtColor(cv2.resize(frame, (INPUT, INPUT)), cv2.COLOR_BGR2RGB)
         x = ((rgb - MEAN) / STD).transpose(2, 0, 1)[None].astype(np.float32)
         with self._lock:
             logits = self._session.run(None, {self._input: x})[0][0]
         confidence = 1 / np.exp(logits - logits.max(0)).sum(0)  # softmax 的最大值
-        labels = LUT[logits.argmax(0)]
+        ade = logits.argmax(0).astype(np.uint8)
+        labels = LUT[ade]
         gray = cv2.resize(
             cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (GRID, GRID), interpolation=cv2.INTER_AREA
         )
         labels[(confidence < MIN_CONFIDENCE) | (gray < DARK) | (gray > BRIGHT)] = 0
-        return labels
+        return labels, ade
 
 
 class ScenePerception:

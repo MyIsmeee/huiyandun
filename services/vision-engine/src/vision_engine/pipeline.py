@@ -78,7 +78,7 @@ from vision_engine.rules import Observation, RuleEngine, RuleEvent
 from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
 from vision_engine.scene import SCHEMA_VERSION as SCENE_SCHEMA_VERSION
 from vision_engine.scene import ScenePerception, Segmenter
-from vision_engine.scene3d import layout
+from vision_engine.scene3d import align, layout
 from vision_engine.steady import Steady
 
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
@@ -591,6 +591,11 @@ class CameraPipeline:
         )
 
     @property
+    def moving_boxes(self) -> np.ndarray:
+        """最近一次检出的人员与车辆框（原画面像素 xyxy）：场景生成时这些像素不计入环境。"""
+        return self._boxes.copy()
+
+    @property
     def needs_geometry(self) -> bool:
         """只有按安装参数估算地面映射的摄像头需要自动标定。"""
         return self._estimated
@@ -780,6 +785,23 @@ async def run_geometry(
         await asyncio.sleep(GEOMETRY_S)
 
 
+BOX_MARGIN = 0.1  # 人员、车辆框向四周外扩框宽高的此比例：关键点框常比实际人体略小
+
+
+def _box_mask(shape: tuple[int, int], boxes: np.ndarray | None) -> np.ndarray | None:
+    """画面尺寸的布尔掩码：框（外扩 BOX_MARGIN）内为 True；没有框时为 None。"""
+    if boxes is None or len(boxes) == 0:
+        return None
+    height, width = shape
+    mask = np.zeros((height, width), bool)
+    for x1, y1, x2, y2 in boxes:
+        mx, my = (x2 - x1) * BOX_MARGIN, (y2 - y1) * BOX_MARGIN
+        c1, r1 = max(int(x1 - mx), 0), max(int(y1 - my), 0)
+        c2, r2 = min(int(np.ceil(x2 + mx)), width), min(int(np.ceil(y2 + my)), height)
+        mask[r1:r2, c1:c2] = True
+    return mask
+
+
 def mapping_of(camera: dict[str, Any], frame: np.ndarray) -> GroundMapping | None:
     """按标定点拟合；不足 4 组时按安装参数与画面尺寸估算（D-102）。"""
     mapping = GroundMapping.fit(camera["calibration"])
@@ -794,6 +816,7 @@ class _Running:
     camera: dict[str, Any]
     reader: FrameReader
     tasks: list[asyncio.Task[None]]
+    detection: CameraPipeline | None = None
 
 
 class Cameras:
@@ -859,7 +882,7 @@ class Cameras:
             tasks.append(
                 asyncio.create_task(run_geometry(detection, reader, self._monocular, camera_id))
             )
-        self._running[camera_id] = _Running(camera, reader, tasks)
+        self._running[camera_id] = _Running(camera, reader, tasks, detection)
 
     async def recognize(self, request: VisionSceneRequestV1) -> VisionSceneReplyV1:
         """对请求中各摄像头的当前画面识别一次环境，供场景初稿（D-133、FR-909）；识别不了的给出原因。"""
@@ -893,7 +916,8 @@ class Cameras:
         frame = latest[1]
         if self._monocular is not None:
             # 三维版：按点云测量，不依赖安装高度与俯角（scene3d.py）；看不到地面时退回平面投影
-            scene = await asyncio.to_thread(self._scene3d, camera_id, running.camera, frame)
+            boxes = running.detection.moving_boxes if running.detection else np.empty((0, 4))
+            scene = await asyncio.to_thread(self._scene3d, camera_id, running.camera, frame, boxes)
             if scene is not None:
                 return scene
         mapping = mapping_of(running.camera, frame)
@@ -903,17 +927,29 @@ class Cameras:
         return await asyncio.to_thread(perception.process, frame) or "empty"
 
     def _scene3d(
-        self, camera_id: str, camera: dict[str, Any], frame: np.ndarray
+        self,
+        camera_id: str,
+        camera: dict[str, Any],
+        frame: np.ndarray,
+        boxes: np.ndarray | None = None,
     ) -> VisionSceneV1 | None:
+        """视角取安装参数（与人员定位一致），行人与车辆所在像素不计入，尺度与朝向对齐人员所用的地面映射。"""
         assert self._monocular is not None and self._segmenter is not None
-        rec = self._monocular.reconstruct(frame)
+        pose = camera["pose"]
+        rec = self._monocular.reconstruct(
+            frame, pose.get("hfov_deg"), _box_mask(frame.shape[:2], boxes)
+        )
         if rec is None:
             log.info("vision.scene3d_no_floor", extra={"camera_id": camera_id})
             return None
-        scene = layout(self._segmenter(frame), rec, camera["pose"])
+        height, width = frame.shape[:2]
+        rec, pose, factor = align(rec, mapping_of(camera, frame), pose, (width, height))
+        labels, ade = self._segmenter.segment(frame)
+        scene = layout(labels, rec, pose, ade)
         log.info(
             "vision.scene3d",
-            extra={"camera_id": camera_id} | {k: len(v) for k, v in scene.items()},
+            extra={"camera_id": camera_id, "scale_ref": rec.floor.scale_ref, "align": factor}
+            | {k: len(v) for k, v in scene.items()},
         )
         if not any(scene.values()):
             return None

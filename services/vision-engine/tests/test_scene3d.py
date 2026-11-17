@@ -4,14 +4,17 @@ import numpy as np
 import pytest
 from test_monocular import room
 
+from vision_engine.geometry import GroundMapping
 from vision_engine.monocular import Reconstruction, floor_plane
+from vision_engine.pipeline import _box_mask
 from vision_engine.scene import label
-from vision_engine.scene3d import _dominant, _merge, _snap, layout
+from vision_engine.scene3d import _dominant, _merge, _snap, align, layout
 
 POSE = {"x": 0.0, "y": 0.0, "yaw_deg": 0.0, "range_m": 15.0, "height_m": 9.0, "pitch_deg": -60.0}
 
 
-def scene(height: float = 2.0, pitch: float = -25.0, pose: dict = POSE) -> dict:
+def build(height: float = 2.0, pitch: float = -25.0, wall_up_to: float = 9.0):
+    """合成房间的重建与分割；wall_up_to 以上的墙面不标为墙（模拟墙被遮挡、只看得到墙脚一条）。"""
     cloud, normals, valid = room(height, pitch, 90.0)
     floor = floor_plane(cloud, normals, valid)
     assert floor is not None
@@ -20,9 +23,21 @@ def scene(height: float = 2.0, pitch: float = -25.0, pose: dict = POSE) -> dict:
     labels = np.zeros(valid.shape, np.uint8)
     labels[valid & (np.abs(h) < 0.02)] = label("floor")
     labels[valid & (np.abs(h - 0.75) < 0.02)] = label("table")
-    labels[valid & (np.abs(normals @ up) < 0.1)] = label("wall")
-    rec = Reconstruction(cloud, normals, valid, floor)
+    labels[valid & (np.abs(normals @ up) < 0.1) & (h < wall_up_to)] = label("wall")
+    return labels, Reconstruction(cloud, normals, valid, floor)
+
+
+def scene(height: float = 2.0, pitch: float = -25.0, pose: dict = POSE) -> dict:
+    labels, rec = build(height, pitch)
     return layout(labels, rec, pose)
+
+
+def table_center(out: dict) -> np.ndarray:
+    (table,) = [o for o in out["objects"] if o["class"] == "table"]
+    return np.array(table["polygon"]).mean(axis=0)
+
+
+TRUE_POSE = POSE | {"height_m": 2.0, "pitch_deg": -25.0, "hfov_deg": 90.0}
 
 
 def test_table_measured_from_points_not_default_size() -> None:
@@ -65,3 +80,60 @@ def test_walls_snap_to_dominant_direction_and_merge() -> None:
     long = max(merged, key=lambda m: np.linalg.norm(m[1][1] - m[1][0]))
     assert np.linalg.norm(long[1][1] - long[1][0]) == pytest.approx(8.0, abs=0.3)
     assert long[2] == 3.0
+
+
+def test_align_rescales_cloud_to_people_mapping() -> None:
+    """模型尺度偏小 20%：按人员所用的地面映射（安装参数正确）整体放大，桌子回到 (2.5, 0)、后墙回到 7 m。"""
+    labels, rec = build()
+    small = rec.scaled(0.8, "model")
+    assert table_center(layout(labels, small, POSE))[0] == pytest.approx(2.0, abs=0.25)
+    mapping = GroundMapping.from_pose(TRUE_POSE, 320, 180)
+    fixed, pose, factor = align(small, mapping, POSE, (320, 180))
+    assert factor == pytest.approx(1.25, abs=0.03)
+    assert fixed.floor.scale_ref == "mapping" and fixed.floor.d == pytest.approx(2.0, abs=0.05)
+    out = layout(labels, fixed, pose)
+    assert table_center(out) == pytest.approx([2.5, 0.0], abs=0.25)
+    (wall,) = out["walls"]
+    assert np.array(wall["line"])[:, 0] == pytest.approx([7.0, 7.0], abs=0.25)
+
+
+def test_align_corrects_small_yaw_error_and_skips_absurd_mapping() -> None:
+    """登记朝向偏了 10°：按地面映射转回；映射与点云差出数倍（多半映射本身不成立）时不对齐。"""
+    labels, rec = build()
+    mapping = GroundMapping.from_pose(TRUE_POSE, 320, 180)
+    _, pose, _ = align(rec, mapping, POSE | {"yaw_deg": 10.0}, (320, 180))
+    assert pose["yaw_deg"] == pytest.approx(0.0, abs=1.0)
+    far = GroundMapping.from_pose(TRUE_POSE | {"height_m": 8.0}, 320, 180)
+    same, kept, factor = align(rec, far, POSE, (320, 180))
+    assert factor is None and same is rec and kept is POSE
+    assert align(rec, None, POSE, (320, 180))[2] is None
+
+
+def test_wall_base_from_floor_boundary_when_wall_mostly_hidden() -> None:
+    """墙只看得到离地 0.15 m 以下的一条（上方被柜子、隔板挡住）：墙面点不够，按其下方的地面像素仍量出墙脚在 7 m。"""
+    labels, rec = build(wall_up_to=0.15)
+    (wall,) = layout(labels, rec, POSE)["walls"]
+    assert np.array(wall["line"])[:, 0] == pytest.approx([7.0, 7.0], abs=0.2)
+    assert wall["height_m"] == pytest.approx(2.8)  # 看不到上沿：类别默认值
+
+
+def test_box_mask_expands_boxes_and_clips_to_frame() -> None:
+    assert _box_mask((100, 200), np.empty((0, 4))) is None
+    mask = _box_mask((100, 200), np.array([[10.0, 20.0, 30.0, 60.0], [190.0, 90.0, 210.0, 120.0]]))
+    assert mask is not None and mask.shape == (100, 200)
+    assert mask[16, 8] and mask[63, 31] and not mask[10, 40]  # 外扩 10%：宽 20 → 2 px、高 40 → 4 px
+    assert mask[99, 199]
+
+
+def test_object_kind_is_majority_ade20k_class_within_cluster() -> None:
+    """桌面像素多数为 desk（33）、少数为 table（15）：物体带细分类别 desk；不给原始类别时不带 kind。"""
+    labels, rec = build()
+    ade = np.zeros(labels.shape, np.uint8)
+    table = labels == label("table")
+    ade[table] = 33
+    rows = np.argwhere(table)
+    ade[tuple(rows[: len(rows) // 4].T)] = 15
+    (with_kind,) = [o for o in layout(labels, rec, POSE, ade)["objects"] if o["class"] == "table"]
+    (without,) = [o for o in layout(labels, rec, POSE)["objects"] if o["class"] == "table"]
+    assert with_kind["kind"] == "desk"
+    assert "kind" not in without
