@@ -3,6 +3,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ApiError, api } from "../../lib/api";
+import { usePoster } from "../../store/snapshots";
 import { DetectionOverlay } from "../DetectionOverlay/DetectionOverlay";
 
 /** 连接中 / 播放 / 媒体中断（保留最后画面，等待恢复）/ 不可用 / 设备没有视频流（ui.md） */
@@ -32,12 +33,13 @@ const LOST = "连接中断，正在自动重连";
  */
 export function LiveVideo({ deviceId }: { deviceId: string }) {
   const [status, retry] = useLiveVideo(deviceId);
+  const poster = usePoster(deviceId);
   const root = useRef<HTMLDivElement>(null);
   const video = useCallback(() => root.current?.querySelector("video") ?? null, []);
   // 画面上叠加该路的检测框与骨骼（FR-107）；无跟踪数据的摄像头叠加层不画任何东西
   return (
     <div ref={root}>
-      <LiveVideoView status={status} onRetry={retry}>
+      <LiveVideoView status={status} onRetry={retry} poster={poster}>
         {status.kind === "playing" && <DetectionOverlay cameraId={deviceId} video={video} />}
       </LiveVideoView>
     </div>
@@ -159,13 +161,24 @@ function gathered(pc: RTCPeerConnection): Promise<void> {
 
 /** 按状态呈现；与连接逻辑分开，供组件展示页截图（V-G3） */
 /** dark：画面底色为黑（监控墙瓦片），状态文字改用浅色，否则深色字落在黑底上看不清 */
-export function LiveVideoView(props: { status: VideoStatus; onRetry?: () => void; className?: string; dark?: boolean; children?: ReactNode }) {
-  const { status, onRetry, className, dark = false, children } = props;
+export function LiveVideoView(props: {
+  status: VideoStatus;
+  onRetry?: () => void;
+  className?: string;
+  dark?: boolean;
+  /** 最近一次抓到的画面：连接中与第一帧到达前垫底（store/snapshots.ts） */
+  poster?: string | null;
+  children?: ReactNode;
+}) {
+  const { status, onRetry, className, dark = false, poster = null, children } = props;
   return (
     <div data-video={status.kind} className={cn("relative aspect-video overflow-hidden rounded-md border border-border bg-secondary", className)}>
-      {"stream" in status && <Stream stream={status.stream} />}
+      {"stream" in status && <Stream stream={status.stream} poster={poster} />}
+      {status.kind === "connecting" && poster && (
+        <img src={poster} alt="" className="absolute inset-0 size-full object-contain opacity-60" />
+      )}
       {status.kind === "connecting" && (
-        <Center dark={dark}>
+        <Center dark={dark || poster !== null}>
           <Video aria-hidden className="size-5" />
           正在连接实时画面…
         </Center>
@@ -197,12 +210,13 @@ export function LiveVideoView(props: { status: VideoStatus; onRetry?: () => void
   );
 }
 
-function Stream({ stream }: { stream: MediaStream }) {
+function Stream({ stream, poster }: { stream: MediaStream; poster: string | null }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
-  return <video ref={ref} autoPlay muted playsInline aria-label="实时画面" className="size-full bg-black object-contain" />;
+  // poster 显示到第一帧解码出来为止
+  return <video ref={ref} autoPlay muted playsInline poster={poster ?? undefined} aria-label="实时画面" className="size-full bg-black object-contain" />;
 }
 
 function Center({ children, dark }: { children: ReactNode; dark: boolean }) {

@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { BEHAVIOR, ICONS } from "../../scene/DeviceTags";
 import { deviceLook } from "../../scene/devices";
 import { type Device, useLive } from "../../store/live";
+import { usePoster } from "../../store/snapshots";
 import { DetectionOverlay } from "../DetectionOverlay/DetectionOverlay";
 import { LiveVideoView, useLiveVideo, type VideoStatus } from "../LiveVideo/LiveVideo";
 
@@ -29,6 +30,7 @@ export interface TileProps {
 /** 监控墙中的一路（V-W2～V-W4）：连接实时画面，只在当前页渲染（V-W3） */
 export function VideoTile(props: Omit<TileProps, "persons" | "vehicles" | "behavior">) {
   const [status, retry] = useLiveVideo(props.device.id);
+  const poster = usePoster(props.device.id);
   const [persons, vehicles] = useLive(
     useShallow((s) => {
       const mine = Object.values(s.targets).filter((t) => t.camera_id === props.device.id);
@@ -46,6 +48,7 @@ export function VideoTile(props: Omit<TileProps, "persons" | "vehicles" | "behav
       overlay={!props.unmapped && <DetectionOverlay cameraId={props.device.id} video={video} />}
       status={status}
       onRetry={retry}
+      poster={poster}
       behavior={behavior && BEHAVIOR[behavior]}
       persons={persons}
       vehicles={vehicles}
@@ -53,8 +56,10 @@ export function VideoTile(props: Omit<TileProps, "persons" | "vehicles" | "behav
   );
 }
 
-export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?: () => void; rootRef?: Ref<HTMLDivElement> }) {
-  const { device, selected, behavior, persons, vehicles, unmapped, onSelect, onZoom, style, status, onRetry, overlay, rootRef } = props;
+export function VideoTileView(
+  props: TileProps & { status: VideoStatus; onRetry?: () => void; rootRef?: Ref<HTMLDivElement>; poster?: string | null },
+) {
+  const { device, selected, behavior, persons, vehicles, unmapped, onSelect, onZoom, style, status, onRetry, overlay, rootRef, poster } = props;
   const look = deviceLook(device.state);
   const offline = device.state === "offline";
   // 告警与处置状态：状态色内描边 + 药丸（V-W2）；离线、未标定不算告警，用文字表达
@@ -74,7 +79,7 @@ export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?
       style={style}
       className="group relative cursor-pointer overflow-hidden rounded-lg bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <LiveVideoView status={status} onRetry={onRetry} dark className={cn("size-full rounded-none border-0 bg-black", offline && "grayscale")} />
+      <LiveVideoView status={status} onRetry={onRetry} poster={poster} dark className={cn("size-full rounded-none border-0 bg-black", offline && "grayscale")} />
       {status.kind === "playing" && overlay}
       {/* 底部渐隐遮罩保证白字对比度（V-W2） */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />

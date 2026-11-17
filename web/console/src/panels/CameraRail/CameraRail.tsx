@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { api } from "../../lib/api";
+import { putSnapshot } from "../../store/snapshots";
 import { ICONS } from "../../scene/DeviceTags";
 import { deviceLook } from "../../scene/devices";
 import { type Device, useLive } from "../../store/live";
@@ -146,6 +147,7 @@ export function Thumbnail({ id, offline, refreshMs = REFRESH_MS }: { id: string;
       loading = false;
       if (!active) return;
       if (blob) {
+        putSnapshot(id, blob); // 实时画面连接期间垫底用（store/snapshots.ts）
         const next = URL.createObjectURL(blob);
         setShot({ id, url: next });
         if (current) URL.revokeObjectURL(current);
