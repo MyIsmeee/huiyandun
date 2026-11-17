@@ -14,8 +14,9 @@ import {
   type Object3D,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { footprints, instances, MATERIALS, OUTLINE, type SceneItem, useCatalog } from "./assets";
+import { footprints, instances, type SceneItem, useCatalog } from "./assets";
 import type { Area } from "./layout";
+import { useScenePalette } from "./palette";
 
 /** 地面在区域外渐隐到页面底色的距离，单位米：看不到地面的边（设计 150 §4） */
 const FADE_M = 15;
@@ -165,9 +166,10 @@ function AreaOutline({ area }: { area: Area }) {
     return new BufferGeometry().setAttribute("position", new Float32BufferAttribute(points, 3));
   }, [x0, y0, w, d]);
   useEffect(() => () => geometry.dispose(), [geometry]);
+  const { outline } = useScenePalette();
   return (
     <lineSegments geometry={geometry} position-y={0.006} renderOrder={-1} raycast={() => undefined}>
-      <lineBasicMaterial color={OUTLINE} />
+      <lineBasicMaterial color={outline} />
     </lineSegments>
   );
 }
@@ -177,10 +179,11 @@ function Ground({ area }: { area: Area }) {
   const { width_m: w, height_m: d } = area;
   const fade = useMemo(() => fadeTexture(w, d), [w, d]);
   useEffect(() => () => fade.dispose(), [fade]);
+  const { ground } = useScenePalette();
   return (
     <mesh rotation-x={-Math.PI / 2} position={[area.x0 + w / 2, -0.004, area.y0 + d / 2]} renderOrder={-2} raycast={() => undefined}>
       <planeGeometry args={[w + FADE_M * 2, d + FADE_M * 2]} />
-      <meshBasicMaterial color={MATERIALS.ground} alphaMap={fade} transparent depthWrite={false} />
+      <meshBasicMaterial color={ground} alphaMap={fade} transparent depthWrite={false} />
     </mesh>
   );
 }

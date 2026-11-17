@@ -2,7 +2,7 @@ import { ShieldAlert } from "lucide-react";
 import { useMemo } from "react";
 import { StatusPill } from "@/components/StatusPill";
 import { useLive } from "../store/live";
-import { ATTACKED, attackerAnchor, attackSources, FADE_MS, fadeElapsed } from "./attack";
+import { ATTACKED, attackerAnchor, attackSources, DASH, FADE_MS, fadeElapsed } from "./attack";
 import { type Camera, STATUS } from "./devices";
 import type { Area, View } from "./layout";
 
@@ -13,7 +13,8 @@ const EDGE_PX = 8;
 
 /**
  * 攻击连线（ui.md §5.1、D-076）：设备处于网络攻击、处置中或只通知时，从区域边缘外的"外部攻击源"（标出 IP，取该设备
- * 最近一条网络告警的源地址，见 attackSources）画红色虚线到设备；已处置时虚线断开并淡出（降低动效或断线时瞬时消失，V-A4、V-U3）。
+ * 最近一条网络告警的源地址，见 attackSources）画红色虚线到设备，虚线沿攻击方向流动（降低动效或断线时静止）；
+ * 已处置时虚线停止流动、断开并淡出（降低动效或断线时瞬时消失，V-A4、V-U3）。
  * 淡出按进入已处置的时刻计进度：重新挂载时接着播放剩余部分，播完后不再画。
  * 以视口像素绘制，3D 与 2D 降级视图共用；状态色同时配图标与文字（V-S3）。
  */
@@ -44,8 +45,8 @@ export function AttackLines({ area, cameras, view }: { area: Area; cameras: Came
         {lines.map(({ id, from, to, contained, fade }) => {
           const [x1, y1] = from;
           const [x2, y2] = to;
-          const dash = { stroke: STATUS.cyber, strokeWidth: 2, strokeDasharray: "6 4" };
-          if (!contained) return <line key={id} x1={x1} y1={y1} x2={x2} y2={y2} {...dash} />;
+          const dash = { stroke: STATUS.cyber, strokeWidth: 2, strokeDasharray: DASH.join(" ") };
+          if (!contained) return <line key={id} data-attack-line={id} className="animate-dash-flow" x1={x1} y1={y1} x2={x2} y2={y2} {...dash} />;
           // 断开：去掉中段，两端各留一截后淡出
           const at = (t: number) => [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t] as const;
           const [m1, m2] = [at((1 - GAP) / 2), at((1 + GAP) / 2)];

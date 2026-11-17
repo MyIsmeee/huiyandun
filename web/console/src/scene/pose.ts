@@ -66,6 +66,8 @@ export interface Bone {
 }
 /** 姿态人形：以脚点为原点的场景坐标（x、高度、平面 y），平面坐标与场景一致 */
 export interface Figure {
+  /** body() 按坐姿重建（供下一帧的回差判定） */
+  seated?: boolean;
   bones: Bone[];
   head: { at: Vec3; inferred: boolean };
 }

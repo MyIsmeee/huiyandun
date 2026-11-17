@@ -243,6 +243,40 @@ describe("body", () => {
     expect(f?.head.at[1]).toBeGreaterThan(1);
   });
 
+  it("坐在桌后、腿被挡：按视觉引擎推算的脚点（按站立髋高）判为坐姿，髋高约 0.45 m、大腿水平，人形落在实际位置", () => {
+    // 实际：坐在 AT 处，髋高 0.45 m，上半身直立；视觉引擎按站立髋高 0.92 m 推算脚点，落在更靠近镜头处
+    const seated = STANDING.map(([l, u, f]): Vec3 => [l, u - 0.47, f]);
+    const { keypoints, bbox } = view(WALL, place(seated, AT, TOWARD_CAMERA), [13, 14, 15, 16]);
+    const t = (0.92 - WALL.height_m) / (0.45 - WALL.height_m);
+    const reported: [number, number] = [AT[0] * t, 0];
+    const f = body(keypoints, bbox, WALL, reported, null, null);
+    if (!f) throw new Error("没有重建");
+
+    const hip = f.bones[0]?.to ?? [0, 0, 0];
+    expect(hip[1]).toBeCloseTo(0.45, 1);
+    expect(f.head.at[1]).toBeLessThan(1.4); // 坐着：头约 1.2 m
+    const thigh = f.bones[LEFT_THIGH];
+    expect(thigh && Math.abs(thigh.from[1] - thigh.to[1])).toBeLessThan(0.05); // 大腿水平
+    expect(thigh?.inferred).toBe(true);
+    // 人形相对脚点向远离镜头一侧偏移：髋部落在实际的 AT 处
+    expect(reported[0] + hip[0]).toBeCloseTo(AT[0], 0);
+  });
+
+  it("坐、站判定有回差：尺度在两个门限之间时沿用上一帧的姿态", () => {
+    // 髋高 0.75 m（介于坐、站之间）：没有上一帧时按站姿；上一帧是坐姿时仍按坐姿
+    const between = STANDING.map(([l, u, f]): Vec3 => [l, u - 0.17, f]);
+    const { keypoints, bbox } = view(WALL, place(between, AT, TOWARD_CAMERA), [13, 14, 15, 16]);
+    const t = (0.92 - WALL.height_m) / (0.75 - WALL.height_m);
+    const reported: [number, number] = [AT[0] * t, 0];
+    expect(body(keypoints, bbox, WALL, reported, null, null)?.seated).toBeFalsy();
+    expect(body(keypoints, bbox, WALL, reported, null, null, false, true)?.seated).toBe(true);
+  });
+
+  it("站在矮墙后、腿被挡：画面尺度与站立相符，仍按站姿", () => {
+    const { keypoints, bbox } = view(WALL, place(STANDING, AT, TOWARD_CAMERA), [13, 14, 15, 16]);
+    expect(body(keypoints, bbox, WALL, AT, null, null)?.head.at[1]).toBeGreaterThan(1.5);
+  });
+
   it("贴近镜头、画面中显得过宽：肩宽不超过 1.5 倍标准", () => {
     const wide = STANDING.map(([l, u, f], i): Vec3 => (i === 5 || i === 6 ? [l * 4, u, f] : [l, u, f]));
     const { keypoints, bbox } = view(WALL, place(wide, AT, TOWARD_CAMERA));

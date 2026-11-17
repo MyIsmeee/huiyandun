@@ -14,7 +14,7 @@ export const ICONS: Record<TagIcon, LucideIcon> = {
   contained: Lock,
   notified: BellRing,
 };
-export const BEHAVIOR: Record<Behavior["behavior"], string> = { fall: "跌倒", climb: "攀爬" };
+export const BEHAVIOR: Record<Behavior["behavior"], string> = { fall: "跌倒", climb: "攀爬", still: "长时间静止", fight: "打架" };
 /** 标签底边距机头的高度，单位米 */
 const ABOVE_M = 0.5;
 

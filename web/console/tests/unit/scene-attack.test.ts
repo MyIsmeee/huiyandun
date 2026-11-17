@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { attackerAnchor, attackSources, containedSince, fadeElapsed, OUTSIDE_M } from "../../src/scene/attack";
+import { attackerAnchor, attackSources, containedSince, DASH, fadeElapsed, OUTSIDE_M } from "../../src/scene/attack";
+import css from "../../src/theme/theme.css?raw";
 import type { Alert, Execution, Incident } from "../../src/store/live";
 
 describe("attackerAnchor（D-076）", () => {
@@ -58,5 +59,12 @@ describe("fadeElapsed", () => {
     expect(fadeElapsed("cam-07", true, {}, 10_000)).toBe(0);
     expect(fadeElapsed("cam-07", true, {}, 10_600)).toBe(600);
     expect(fadeElapsed("cam-07", false, {}, 11_000)).toBeNull();
+  });
+});
+
+describe("连线流动（ui.md §5.1）", () => {
+  it("dash-flow 每周期前移恰好一个虚线周期，循环处不跳变；朝设备方向流动", () => {
+    const offset = /@keyframes dash-flow \{\s*to \{\s*stroke-dashoffset: (-?\d+);/.exec(css)?.[1];
+    expect(Number(offset)).toBe(-(DASH[0] + DASH[1]));
   });
 });

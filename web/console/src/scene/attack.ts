@@ -26,6 +26,9 @@ export function attackerAnchor([x, y]: Point, area: Area): Point {
 /** 设备处于这些状态时画攻击连线：网络攻击、处置中、只通知（ui.md §5.1） */
 export const ATTACKED = new Set(["cyber_alert", "both", "pending_action", "notify_only"]);
 
+/** 连线虚线的线段与间隔长度，单位像素；两者之和须等于 theme.css 中 dash-flow 的位移，流动才能首尾相接 */
+export const DASH = [6, 4] as const;
+
 /** 断开连线的淡出时长，与 theme.css 的 animate-fade-out 一致 */
 export const FADE_MS = 1500;
 

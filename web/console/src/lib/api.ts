@@ -131,6 +131,9 @@ export const api = {
       undefined,
       RECOGNIZE_TIMEOUT_MS,
     ),
+  /** 场景自动识别的最近结果（后台每 10 分钟识别一次）；尚未识别过时 frames 为空 */
+  getSceneAreaAuto: (id: string) =>
+    request<Schemas["SceneAreaFrames"]>("GET", `/api/scene/areas/${encodeURIComponent(id)}/auto`),
   /** 经 go2rtc 取一帧（V-CAM4）；首帧须等关键帧，api-server 等 8 s，这里再加余量 */
   getCameraSnapshot: async (id: string) =>
     (await send("GET", `/api/cameras/${encodeURIComponent(id)}/snapshot`, undefined, undefined, 12_000)).blob(),

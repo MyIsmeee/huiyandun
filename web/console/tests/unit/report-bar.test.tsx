@@ -111,6 +111,28 @@ describe("ReportBar", () => {
     expect(page()).toBeNull();
   });
 
+  it("导出 PDF：另开一个可打印、不放行脚本的 iframe 载入导出网页，载入后打印，结束后移除", async () => {
+    push(incident("inc-1"));
+    vi.spyOn(api, "listReports").mockResolvedValue({ items: [report()] });
+    show("viewer");
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("list", { name: "历史报告" })).getAllByRole("button")[0] as HTMLElement);
+
+    fireEvent.click(screen.getByRole("button", { name: "导出 PDF" }));
+    const printer = document.querySelector<HTMLIFrameElement>("iframe[title=报告打印]");
+    if (!printer?.contentWindow) throw new Error("没有打印用的 iframe");
+    expect(printer.getAttribute("src")).toBe("/api/reports/rep-1/export?format=html");
+    expect(printer.getAttribute("sandbox")).toBe("allow-same-origin allow-modals"); // 不含 allow-scripts
+    expect(frame().getAttribute("sandbox")).toBe(""); // 正文的 iframe 仍完全沙箱化
+    const print = vi.fn();
+    printer.contentWindow.print = print;
+    fireEvent.load(printer);
+    expect(print).toHaveBeenCalledOnce();
+
+    printer.contentWindow.dispatchEvent(new Event("afterprint"));
+    expect(document.querySelector("iframe[title=报告打印]")).toBeNull();
+  });
+
   it("历史报告读取失败时提示，仍可生成", async () => {
     push(incident("inc-1"));
     vi.spyOn(api, "listReports").mockRejectedValue(new Error("HTTP 502"));

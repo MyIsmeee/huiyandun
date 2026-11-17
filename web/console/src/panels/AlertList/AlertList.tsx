@@ -12,12 +12,12 @@ import { select, useSelection } from "../../store/selection";
 import { formatStamp, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { TimelineDots } from "../IncidentTimeline/IncidentTimeline";
 
-const BEHAVIOR: Record<string, string> = { fall: "跌倒", climb: "攀爬越界" };
+const BEHAVIOR: Record<string, string> = { fall: "跌倒", climb: "攀爬越界", still: "长时间静止", fight: "打架" };
 /** 轨迹规则：类型与越线方向（forward 为沿线由起点走向终点时，从前进方向的右侧穿到左侧：平面俯视 y 向下，与箭头方向一致） */
 const RULE: Record<string, string> = { intrusion: "区域入侵", line_crossing: "越线" };
 const DIRECTION: Record<string, string> = { forward: "正向", backward: "反向" };
 /** 疑似跌倒只在告警栏提示，不进入物理告警（TK-160）；确认后同组标题随最新一条变为"跌倒" */
-const SUSPECTED: Record<string, string> = { fall: "疑似跌倒" };
+const SUSPECTED: Record<string, string> = { fall: "疑似跌倒", still: "疑似长时间静止", fight: "疑似打架" };
 // 告警等级以图标形状 + 文字区分，不以颜色深浅区分（V-S4）
 export const SEVERITY: Record<Incident["severity"], string> = { critical: "严重", high: "高", medium: "中", low: "低" };
 /** 关联事件的处置状态（ui.md §5.1）；无执行记录时为"未处置" */
@@ -37,7 +37,7 @@ const EXECUTION: Record<Execution["state"], string> = {
  * 自研网络规则的分类（rules/suricata/hyd-net.rules 的 hyd_category）：签名描述是英文原文（Suricata 的 msg），
  * 告警栏按分类给中文标题，原文放在悬停说明里；外部规则（ET Open 等）的分类不在其中，照原文显示
  */
-const CATEGORY: Record<string, string> = { auth_bruteforce: "口令暴力破解" };
+const CATEGORY: Record<string, string> = { auth_bruteforce: "口令暴力破解", stream_hijack: "RTSP 推流劫持", log_tamper: "日志篡改" };
 
 /** 告警的设备、标题、原文、来源与可信度：行为事件按模型证据显示（D-069） */
 export function alertText(alert: Alert): { device: string | null; title: string; detail?: string; model: boolean; confidence: number } {

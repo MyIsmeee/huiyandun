@@ -399,7 +399,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             />
           )}
           {!calibrated && poseChanged && !saved?.pose_check && (
-            <p className="text-xs text-subtle-foreground">安装参数已修改：自检将按新参数重新推算，需画面中出现足够的站立行人</p>
+            <p className="text-xs text-subtle-foreground">安装参数已修改：自检将按新参数重新推算，需画面中出现足够的站立行人；画面几何估计约 1 分钟后给出</p>
           )}
         </fieldset>
 
@@ -541,6 +541,51 @@ function SnapshotView(props: {
  * "填入建议值"只改表单，保存后才生效；样本不足时说明还缺什么
  */
 export function PoseCheckNote({ check, onApply }: { check: PoseCheck; onApply: (pose: Partial<Pose>) => void }) {
+  return (
+    <>
+      <PeopleCheck check={check} onApply={onApply} />
+      {check.geometry && <GeometryNote geometry={check.geometry} onApply={onApply} />}
+    </>
+  );
+}
+
+/** 侧倾超过此值时提示：地面映射不含侧倾 */
+const ROLL_HINT_DEG = 3;
+
+/**
+ * 画面几何估计（视觉引擎用单目几何模型从画面拟合地面，不依赖行人）：给出安装高度、俯角、视角的估计值，
+ * "填入估计值"只改表单，保存后才生效
+ */
+function GeometryNote({ geometry, onApply }: { geometry: NonNullable<PoseCheck["geometry"]>; onApply: (pose: Partial<Pose>) => void }) {
+  const { height_m: height, pitch_deg: pitch, hfov_deg: hfov, roll_deg: roll } = geometry;
+  const fields: [keyof Pose & NumberField, number, string][] = [
+    ["height_m", height, `高度 ${height} m`],
+    ["pitch_deg", pitch, `俯角 ${pitch}°`],
+    ["hfov_deg", hfov, `视角 ${hfov}°`],
+  ];
+  const usable = fields.filter(([key, value]) => fieldError(key, String(value), null) === null);
+  const suggestion = Object.fromEntries(usable.map(([key, value]) => [key, value])) as Partial<Pose>;
+  return (
+    <div role="status" aria-label="画面几何估计" className="flex flex-col gap-1.5 rounded-md border border-border p-2.5 text-xs">
+      <p className="font-medium">按画面自动估计的安装参数</p>
+      <p className="text-subtle-foreground">
+        安装高度约 {height} m、俯角 {pitch}°、水平视角 {hfov}°；画面中可见地面约 {geometry.floor_width_m} × {geometry.floor_depth_m} m
+        {geometry.scale_ref === "desk" ? "（尺度按画面中桌面的标准高度校正）" : "（尺度为模型估计，误差可能较大）"}
+      </p>
+      {Math.abs(roll) > ROLL_HINT_DEG && <p className="text-subtle-foreground">摄像头约侧倾 {roll}°，地面映射不含侧倾，远处位置会有偏差，建议把画面调正</p>}
+      {usable.length > 0 && (
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => onApply(suggestion)} className={button}>
+            填入估计值（{usable.map(([, , text]) => text).join("、")}）
+          </button>
+          <span className="text-subtle-foreground">填入后保存才生效，之后重新生成场景初稿</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PeopleCheck({ check, onApply }: { check: PoseCheck; onApply: (pose: Partial<Pose>) => void }) {
   if (check.status === "ok") {
     return <p className="text-xs text-subtle-foreground">安装参数自检通过：{check.reasons[0] ?? "与画面中行人的尺度相符"}</p>;
   }

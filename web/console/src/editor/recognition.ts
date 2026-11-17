@@ -22,6 +22,10 @@ const SAMPLE_M = 0.5;
 /** 墙脚线外接矩形长边不小于短边的 1.5 倍即视为一段直墙，否则在离两端连线最远处折开 */
 const STRAIGHT = 1.5;
 
+/** 一个方向上排开的件数：实测长度能放下几件（四舍五入），至少 1 件、至多 MAX_REPEAT 件 */
+const MAX_REPEAT = 4;
+const count = (length: number, size: number) => Math.min(MAX_REPEAT, Math.max(1, Math.round(length / size)));
+
 const points = (list: number[][]): Point[] => list.map(([x = 0, y = 0]) => [x, y]);
 
 /**
@@ -59,8 +63,15 @@ export function draftFromFrames(
       const [x0, y0, x1, y1] = bounds(points(object.polygon));
       const center: Point = [(x0 + x1) / 2, (y0 + y1) / 2];
       if (!asset || !within(center)) continue;
-      // 长边顺着识别出的底面
-      add(snap(asset, y1 - y0 > x1 - x0 && asset.footprint[0] !== asset.footprint[1] ? 90 : 0, center, size));
+      // 长边顺着识别出的底面；底面量得比一件大时（如几张拼在一起的桌子）按实测长宽排开几件
+      const rot = y1 - y0 > x1 - x0 && asset.footprint[0] !== asset.footprint[1] ? 90 : 0;
+      const [sx, sy] = span(asset, rot);
+      const [nx, ny] = [count(x1 - x0, sx), count(y1 - y0, sy)];
+      for (let i = 0; i < nx; i += 1)
+        for (let j = 0; j < ny; j += 1) {
+          const at: Point = [x0 + ((i + 0.5) * (x1 - x0)) / nx, y0 + ((j + 0.5) * (y1 - y0)) / ny];
+          add(snap(asset, rot, nx * ny === 1 ? center : at, size));
+        }
     }
     for (const { x, y, height_m } of frame.trees) {
       const asset = catalog.get(height_m >= TREE_MIN_M ? "tree" : "potted-plant");

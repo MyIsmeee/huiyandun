@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
+  AdditiveBlending,
   BoxGeometry,
   BufferGeometry,
   CylinderGeometry,
@@ -10,6 +11,7 @@ import {
   type LineBasicMaterial,
   type LineSegments,
   type MeshBasicMaterial,
+  NormalBlending,
 } from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
@@ -20,6 +22,7 @@ import { useTheme } from "../theme/store";
 import { useViewpointCamera } from "./camera";
 import { BEAM, BODY, type Camera, CONE_LAYERS as LAYERS, deviceLook, type Look, POLE_COLOR } from "./devices";
 import { type Instance, Instanced } from "./Instanced";
+import { useScenePalette } from "./palette";
 import { coneOpacity, detectingByCamera } from "./targets";
 
 /**
@@ -177,7 +180,13 @@ function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullabl
   const ground = useRef<MeshBasicMaterial>(null);
   const edges = useRef<LineBasicMaterial>(null);
   const invalidate = useThree((s) => s.invalidate);
-  const opacity = cone.color === BEAM ? coneOpacity(cone.opacity, detecting) : cone.opacity;
+  // 常态视场的颜色、各状态视场的浓度与混合方式随主题变化（夜间警戒为发光的光束，palette.ts）
+  const palette = useScenePalette();
+  const normal = cone.color === BEAM;
+  const opacity = Math.min(
+    1,
+    normal ? coneOpacity(cone.opacity, detecting) * palette.coneGain : cone.opacity * palette.statusGain,
+  );
   const breathing = useMotion() && cone.breathe && severe;
   const set = (value: number) => {
     if (faces.current) faces.current.opacity = value * LAYERS.faces;
@@ -196,8 +205,14 @@ function Cone(props: { detecting: number; pose: Camera["pose"]; cone: NonNullabl
   });
   const geometry = useMemo(() => coneGeometry(pose), [pose]);
   useEffect(() => () => Object.values(geometry).forEach((g) => g.dispose()), [geometry]);
-  // 普通混合、不发光（D-111）；不写深度，不遮挡其后的目标
-  const common = { color: cone.color, transparent: true, depthWrite: false } as const;
+  // 日间普通混合、不发光（D-111）；夜间警戒的常态视场叠加混合，在深色背景上呈现为光束。状态视场始终普通混合：
+  // 叠加会把红色冲成粉白，状态色须保持本色（V-S2）。不写深度，不遮挡其后的目标
+  const common = {
+    color: normal ? palette.beam : cone.color,
+    transparent: true,
+    depthWrite: false,
+    blending: normal && palette.glow ? AdditiveBlending : NormalBlending,
+  } as const;
   return (
     <>
       <mesh geometry={geometry.faces}>

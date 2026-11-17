@@ -41,6 +41,28 @@ function save(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/**
+ * 导出 PDF：把导出网页装进一个临时的 iframe，由浏览器打印（目标选"另存为 PDF"），版式、水印与导出网页一致（V-AI4）。
+ * 报告页里显示正文的 iframe 完全沙箱化，父页面不能对它调用打印，所以另开一个：只放行同源与打印对话框，不放行脚本
+ * （报告本身也不含脚本，导出接口另有 CSP）。打印结束或取消后移除
+ */
+export function printReport(report: Report) {
+  const frame = document.createElement("iframe");
+  frame.setAttribute("sandbox", "allow-same-origin allow-modals");
+  frame.setAttribute("aria-hidden", "true");
+  frame.title = "报告打印";
+  frame.style.display = "none";
+  frame.addEventListener("load", () => {
+    const view = frame.contentWindow;
+    if (!view) return frame.remove();
+    view.addEventListener("afterprint", () => frame.remove(), { once: true });
+    view.focus();
+    view.print();
+  });
+  frame.src = exportUrl(report, "html");
+  document.body.append(frame);
+}
+
 type Job = { status: "pending" } | { status: "failed"; message: string };
 
 /**
@@ -299,6 +321,9 @@ export function ReportPage(props: {
             {review.status === "pending" ? "提交中…" : "标记已复核"}
           </button>
         )}
+        <button type="button" onClick={() => printReport(report)} className={button}>
+          导出 PDF
+        </button>
         <a href={exportUrl(report, "md")} download className={`${link} text-muted-foreground`}>
           下载 Markdown
         </a>

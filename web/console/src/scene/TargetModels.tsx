@@ -22,11 +22,12 @@ import { useSelection } from "../store/selection";
 import { body } from "./body";
 import { useMotion } from "./DeviceMarkers";
 import { type Camera, STATUS } from "./devices";
+import { useScenePalette } from "./palette";
 import { FIGURE_PARTS, type FigurePart, PARTS, placePart, useFigureParts } from "./parts";
 import { facing, type Figure, figure, HEAD_R, type Vec3 } from "./pose";
 import { hoverMarker, marker } from "./TargetMarker";
 import { release, renderTime, retain, smoothed } from "./smoothing";
-import { ACCENT, FILL, LOCK_RING_MS, MARK_OPACITY, turnToward, type Visible, visibleTargets } from "./targets";
+import { ACCENT, LOCK_RING_MS, MARK_OPACITY, turnToward, type Visible, visibleTargets } from "./targets";
 import { useVehicleModels, type Vehicle } from "./vehicles";
 
 /** 每个图层的实例上限：C-FE-04 的 200 个目标，固定容量免得目标数变化时重建网格 */
@@ -80,7 +81,11 @@ const RING = new RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2).translate(0, 0.
 /** 锁定环的基准半径：人员 0.6 m，车辆按车长 */
 const RING_RADIUS: Record<TargetClass, number> = { person: 0.6, bicycle: 1.1, motorcycle: 1.2, car: 2.6, bus: 6, truck: 4 };
 
-const colorOf = (t: Visible) => (t.alert ? STATUS.physical : FILL);
+/** 检测框底边低于画面高度的此比例即视为被画面底边截断 */
+const TRUNCATED_V = 0.97;
+
+/** 告警中的目标取物理告警色（两套主题相同，V-S2）；常态取主题的常态目标色（日间即 FILL） */
+const colorOf = (t: Visible, normal: string) => (t.alert ? STATUS.physical : normal);
 
 /**
  * 检出目标：人员的姿态人形、车辆的 3D 模型、不确定圆、锁定环与轨迹（§5.1 L4、L5；V-U1；FR-102）。
@@ -120,6 +125,8 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
   const rings = useRef<InstancedMesh>(null);
   const dashes = useRef<InstancedMesh>(null);
   const headings = useRef(new Map<string, number>());
+  /** 上一帧按坐姿重建的目标：坐、站判定的回差（body.ts） */
+  const seatedKeys = useRef(new Set<string>());
   const last = useRef(0);
   // 轨迹点写入预分配的实例：推送频繁时不重建几何体，也不触发 React 重渲染
   const dots = useRef<InstancedMesh>(null);
@@ -129,11 +136,12 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
   const [owner] = useState(() => ({}));
   useEffect(() => () => release(owner), [owner]);
   const motion = useMotion();
+  const palette = useScenePalette();
   const invalidate = useThree((s) => s.invalidate);
   // 新推送到达时请求一帧；逐帧插值由 useFrame 自行续帧
   useEffect(() => useLive.subscribe(() => invalidate()), [invalidate]);
   useEffect(() => useSelection.subscribe(() => invalidate()), [invalidate]);
-  useEffect(() => invalidate(), [motion, cameras, invalidate]);
+  useEffect(() => invalidate(), [motion, cameras, palette, invalidate]);
 
   useFrame(({ camera, size }) => {
     // 只在仍有运动时续帧（见 pending）：静止时不占用 GPU，也不构成常驻动画（V-A3）
@@ -234,7 +242,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
       headings.current.set(target.key, angle);
       pending ||= t < (smoother.trail.at(-1)?.[2] ?? 0) || (desired !== undefined && Math.abs(angle - desired) > 1e-3);
       const kind = target.uncertain ? "ghost" : "solid";
-      const base = new Color(colorOf(target));
+      const base = new Color(colorOf(target, palette.target));
       const pose = poses.get(target.camera_id);
       const { object_class } = target;
       if (object_class === "person") {
@@ -242,11 +250,15 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         // 按摄像头位姿重建三维人形；肩或髋全看不清等无法重建时退回画面平面人形。跌倒告警中的轨迹提示躺倒
         const fallen = behaviors[target.camera_id]?.behavior === "fall" && behaviors[target.camera_id]?.track_id === target.track_id;
         const moving = desired === undefined ? null : -desired; // smoother.angle 为绕竖直轴的转角，运动方向为其相反数
+        // 贴近画面底边、只露出上半身的人（髋部被截断）：画面平面人形会按标准体型补出整个人，近处显得巨大且多半不对，不画
+        const truncated = (shape?.bbox[3] ?? 0) >= TRUNCATED_V;
         const f =
           pose &&
           shape &&
-          (body(shape.keypoints, shape.bbox, pose, [x, y], moving, target.speed_mps, fallen) ??
-            figure(shape.keypoints, shape.bbox, facing(pose, x, y)));
+          (body(shape.keypoints, shape.bbox, pose, [x, y], moving, target.speed_mps, fallen, seatedKeys.current.has(target.key)) ??
+            (truncated ? null : figure(shape.keypoints, shape.bbox, facing(pose, x, y))));
+        if (f?.seated) seatedKeys.current.add(target.key);
+        else seatedKeys.current.delete(target.key);
         if (f) drawFigure(f, x, y, target.uncertain, base);
         if (f && target.key === selected) bounds = figureBounds(f, x, y);
         if (f && target.key === hoveredKey) hoverBounds = figureBounds(f, x, y);
@@ -307,7 +319,7 @@ export function TargetModels({ cameras }: { cameras: Camera[] }) {
         </instancedMesh>
       ))}
       <instancedMesh ref={discs} args={[DISC, undefined, CAPACITY]} frustumCulled={false}>
-        <meshBasicMaterial color={FILL} vertexColors transparent opacity={MARK_OPACITY.disc} depthWrite={false} />
+        <meshBasicMaterial color={palette.target} vertexColors transparent opacity={MARK_OPACITY.disc} depthWrite={false} />
       </instancedMesh>
       <instancedMesh ref={dashes} args={[DASHED, undefined, CAPACITY]} frustumCulled={false}>
         <meshBasicMaterial color={STATUS.uncertain} transparent opacity={0.8} depthWrite={false} />

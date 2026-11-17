@@ -319,6 +319,31 @@ describe("安装参数自检（D-102 估算映射）", () => {
     expect(note.getByText(/推算的俯角约 4°，超出可填范围/)).toBeTruthy();
   });
 
+  it("画面几何估计：没有行人样本也给出高度、俯角、视角，填入后保存提交", async () => {
+    const update = vi.spyOn(api, "updateCamera").mockResolvedValue({ ...CAM, pose_check: null });
+    const geometry = { height_m: 1.81, pitch_deg: -10.1, roll_deg: -0.6, hfov_deg: 74.7, floor_width_m: 4.7, floor_depth_m: 2.7, scale_ref: "desk" as const };
+    const insufficient = { ...SUSPECT, status: "insufficient" as const, suggested_height_m: null, suggested_pitch_deg: null, reasons: ["站立行人样本 0 个，至少需要 15 个"], geometry };
+    await open({ ...CAM, pose_check: insufficient });
+
+    const note = within(screen.getByRole("status", { name: "画面几何估计" }));
+    expect(note.getByText(/安装高度约 1.81 m、俯角 -10.1°、水平视角 74.7°/)).toBeTruthy();
+    expect(note.getByText(/尺度按画面中桌面的标准高度校正/)).toBeTruthy();
+    expect(note.queryByText(/侧倾/)).toBeNull();
+    fireEvent.click(note.getByRole("button", { name: "填入估计值（高度 1.81 m、俯角 -10.1°、视角 74.7°）" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await flush();
+    expect(update.mock.calls[0]?.[1]).toMatchObject({ pose: { ...POSE, height_m: 1.81, pitch_deg: -10.1, hfov_deg: 74.7 } });
+  });
+
+  it("画面几何估计的俯角朝上时不填俯角；侧倾明显时提示", async () => {
+    const geometry = { height_m: 1.2, pitch_deg: 3, roll_deg: 6.5, hfov_deg: 90, floor_width_m: 3, floor_depth_m: 2, scale_ref: "model" as const };
+    await open({ ...CAM, pose_check: { ...SUSPECT, geometry } });
+    const note = within(screen.getByRole("status", { name: "画面几何估计" }));
+    expect(note.getByRole("button", { name: "填入估计值（高度 1.2 m、视角 90°）" })).toBeTruthy();
+    expect(note.getByText(/约侧倾 6.5°/)).toBeTruthy();
+    expect(note.getByText(/误差可能较大/)).toBeTruthy();
+  });
+
   it("样本不足时说明还缺什么；已标定时不显示", async () => {
     const insufficient = { ...SUSPECT, status: "insufficient" as const, suggested_height_m: null, suggested_pitch_deg: null, reasons: ["站立行人样本 3 个，至少需要 15 个"] };
     await open({ ...CAM, pose_check: insufficient });

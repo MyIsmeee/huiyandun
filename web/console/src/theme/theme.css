@@ -1,7 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* 只有一套浅色主题（D-121）：shadcn 组件的 dark: 变体永不生效（不设 .dark 类） */
+/* 浅色为默认主题（D-121）；夜间警戒（[data-theme="night"]）只替换下面的颜色变量，组件一律取语义令牌，
+   不走 shadcn 的 dark: 变体（不设 .dark 类） */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ui.md §3：浅灰白底 + 白色卡片 + 单一纯蓝强调，不用渐变（D-121），变量名沿用 shadcn/ui */
@@ -28,6 +29,24 @@
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-slow: 300ms;
+}
+
+/* 夜间警戒：深蓝黑底 + 深色卡片，文字与边框相应反转；强调色与状态色不变（状态色语义固定，V-S2）。
+   --background 与场景背景一致（src/scene/palette.ts 的 NIGHT.background）；配色校验见 tests/unit/palette.test.ts */
+[data-theme="night"] {
+  color-scheme: dark;
+  --background: #0b1220;
+  --foreground: #e6ebf5;
+  --card: #131c2e;
+  --popover: #131c2e;
+  --secondary: #1c2740;
+  --accent: #1c2740;
+  --border: #2a3754;
+  --input: #2a3754;
+  --ring: rgb(96 165 250 / 0.5);
+  --muted-foreground: #a9b6cc;
+  --subtle-foreground: #93a1ba;
+  --destructive: #e6ebf5;
 }
 
 @theme inline {
@@ -110,7 +129,7 @@
 
 /* 静态点阵底纹（登录页），不动 */
 @utility bg-dots {
-  background-image: radial-gradient(rgb(15 23 42 / 0.06) 1px, transparent 1px);
+  background-image: radial-gradient(color-mix(in srgb, var(--color-foreground) 6%, transparent) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
@@ -144,6 +163,18 @@
 @utility animate-fade-out {
   opacity: 0;
   animation: fade-out 1500ms ease-out both;
+}
+
+/* 攻击连线流动（ui.md §5.1）：虚线沿攻击方向（攻击源 → 设备）每周期前移一个虚线间隔，位移须等于 AttackLines 的
+   DASH_PERIOD。只在连线存在、即对应真实告警期间播放（V-A3）；降低动效或断线时静止（下方 V-A4 规则） */
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+@utility animate-dash-flow {
+  animation: dash-flow 600ms linear infinite;
 }
 
 /* V-A4：用户开关或系统偏好开启后，动效退化为瞬时切换；断线期间同样停止（C-FE-05、V-U3） */

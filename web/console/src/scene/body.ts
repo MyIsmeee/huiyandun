@@ -16,6 +16,11 @@ import { type Bone, feet, type Figure, KEYPOINT_MIN, LIMBS, type Vec3 } from "./
  * （该轨迹正处于跌倒告警）取躺倒，否则按画面中躯干是否直立取舍。跌倒告警在站起后仍保持约 60 s，
  * 这段时间里落在这一视角的站立者仍会画成躺倒。
  *
+ * 坐姿：腿被挡而躯干直立时，视觉引擎按站立髋高推算脚点（footing.py）。人若坐着，髋部其实低得多、离镜头更远，
+ * 按这个脚点估出的画面尺度倍数明显小于 1（髋高 0.45 m 对 0.92 m，约 0.65 倍），站着则接近 1：倍数低于 SEATED_SCALE
+ * 即按坐姿重建——髋部沿视线落到 SEATED_HIP_M 高处，大腿沿身体朝向水平伸出、小腿垂到地面。这一判据依赖安装高度大致正确
+ * （未标定的摄像头由自动标定写回，auto_pose.py）。
+ *
  * 摄像头位姿是人工摆放的近似值，与地面标定得到的脚点可能不一致：先把脚点像素的视线转到恰好指向脚点，
  * 其余视线一并旋转，局部抵消朝向与俯角误差。结果以脚点为原点，与 figure 相同的场景坐标（x、高度、平面 y）。
  * 肩或髋全看不清、镜头在地面以下或脚点视线朝上时返回 null，由调用方退回画面平面人形。
@@ -51,6 +56,14 @@ const TILT_FREE = (35 * Math.PI) / 180;
 const OVER_FEET_M = 0.25;
 /** 躺倒时肩中离双脚的最小水平距离（米）：屈膝侧卧约 1 m，伸直约 1.3 m */
 const LYING_SPAN_M = 0.9;
+/** 坐姿髋部离地高度（米）：常见办公椅座高 0.42～0.48 */
+const SEATED_HIP_M = 0.45;
+/** 腿被挡、躯干直立时，画面尺度倍数低于此值按坐姿：站立约 1，坐姿约 0.65（见 body 的说明），取两者之间 */
+const SEATED_SCALE = 0.82;
+/** 回差：上一帧已是坐姿时，尺度倍数要超过此值才改回站姿；关键点逐帧抖动不至于让人形在坐、站之间来回翻 */
+const STAND_SCALE = 0.95;
+/** 腿可见时判定坐姿：大腿在画面中的竖直落差不到躯干画面长度的此比例（大腿接近水平） */
+const SEATED_THIGH_RATIO = 0.35;
 /** 躯干与颈部半径（米）：与 pose.ts 一致 */
 const R = { torso: 0.13, neck: 0.045 };
 const HEAD = [0, 1, 2, 3, 4];
@@ -119,6 +132,7 @@ export function body(
   heading: number | null,
   speed: number | null,
   down = false,
+  wasSeated = false,
 ): Figure | null {
   if (!keypoints || pose.height_m <= 0) return null;
   const seen = keypoints.map(([, , score = 0]) => score >= KEYPOINT_MIN);
@@ -171,13 +185,26 @@ export function body(
     shoulderSpread !== null ? shoulderSpread / FRONT_RATIO.shoulder : hipSpread !== null ? hipSpread / FRONT_RATIO.hip : torsoPx;
   const turn = torsoPx > 0 ? Math.acos(Math.min(1, ratio / torsoPx)) : 0;
 
+  // 坐姿：腿被挡时按画面尺度判断（见 body 的说明）；大腿可见且接近水平、脚踝看不见时同样按坐姿
+  const legsHidden = ![13, 14, 15, 16].some((i) => seen[i]);
+  const kneePx = px([13, 14]);
+  const thighFlat = kneePx !== null && !anklePx && Math.abs(kneePx[1] - hipPx[1]) < SEATED_THIGH_RATIO * (hipPx[1] - shoulderPx[1]);
+  if (looksUpright && !down && !anklePx && (thighFlat || (legsHidden && scaleOf(rays, cam.eye, foot, true) < (wasSeated ? STAND_SCALE : SEATED_SCALE)))) {
+    const hipRay = ray(hipPx);
+    if (hipRay[1] < 0 && cam.eye[1] > SEATED_HIP_M) {
+      const hip = addk(cam.eye, hipRay, (SEATED_HIP_M - cam.eye[1]) / hipRay[1]);
+      const ground: Vec3 = [hip[0], 0, hip[2]];
+      const seat = build(rays, ray, cam.eye, ground, hipPx, shoulderPx, left, turn, scaleOf(rays, cam.eye, ground, true), true);
+      fold(seat, front);
+      return { ...toFigure(seat, false, front, foot), seated: true };
+    }
+  }
+
   const upright = build(rays, ray, cam.eye, foot, hipPx, shoulderPx, left, turn, scaleOf(rays, cam.eye, foot, true), true);
   const lying = build(rays, ray, cam.eye, foot, hipPx, shoulderPx, left, turn, scaleOf(rays, cam.eye, foot, false), false);
   // 画面中躯干直立（竖直分量大于水平分量）用于两种假设误差相近时取舍
   const gap = Math.abs(upright.error - lying.error);
-  // 腿全看不清而画面中躯干直立：多是桌后、椅上只见上半身的人，按直立呈现（D-057）。坐着时髋部低于站立，
-  // 按站立髋高对准脚点后直立假设吻合得差，不能交给两种假设去比
-  const legsHidden = ![13, 14, 15, 16].some((i) => seen[i]);
+  // 腿全看不清而画面中躯干直立、画面尺度又不像坐着：多是矮墙、柜台后站着的人，按直立呈现（D-057）
   const chosen =
     legsHidden && looksUpright && !down
       ? upright
@@ -362,13 +389,38 @@ function scaleOf(rays: (Vec3 | null)[], eye: Vec3, foot: Vec3, upright: boolean)
   return best > 0 ? Math.min(SCALE_RANGE[1], Math.max(SCALE_RANGE[0], best)) : 1;
 }
 
-/** 平移到脚点为原点（脚踝可见时为脚踝中点，否则为髋中正下方）并落地：最低关节贴地；front 为身体朝向，定脚尖方向 */
-function toFigure({ joints, inferred, scale }: Build, ankles: boolean, front: Vec3): Figure {
+/** 坐姿的腿：自双髋沿身体朝向水平伸出大腿，小腿垂直落地；都是推测（画面中被挡或只见大腿） */
+function fold(seat: Build, front: Vec3) {
+  const forward = unit([front[0], 0, front[2]]);
+  for (const [h, k, a] of [
+    [11, 13, 15],
+    [12, 14, 16],
+  ] as const) {
+    const hip = seat.joints[h];
+    if (!hip) continue;
+    const knee = addk(hip, forward, L.thigh * seat.scale);
+    seat.joints[k] = knee;
+    seat.joints[a] = addk(knee, [0, -1, 0], L.shin * seat.scale);
+    seat.inferred[k] = seat.inferred[a] = true;
+  }
+}
+
+/**
+ * 平移到脚点为原点（脚踝可见时为脚踝中点，否则为髋中正下方）并落地：最低关节贴地；front 为身体朝向，定脚尖方向。
+ * origin 给出时以它为原点：坐姿的髋部比视觉引擎推算的脚点更远，人形按实际位置相对脚点偏移
+ */
+function toFigure({ joints, inferred, scale }: Build, ankles: boolean, front: Vec3, origin?: Vec3): Figure {
   const get = (i: number) => joints[i] as Vec3;
-  const anchor = ankles ? addk(get(15), sub(get(16), get(15)), 0.5) : get(18);
+  const anchor = origin ?? (ankles ? addk(get(15), sub(get(16), get(15)), 0.5) : get(18));
   const lowest = Math.min(...joints.flatMap((p) => (p ? [p[1]] : [])));
   const shift: Vec3 = [-anchor[0], -lowest, -anchor[2]];
-  const place = (p: Vec3): Vec3 => addk([0, 0, 0], addk(p, shift), 1 / scale); // 缩回标准体型
+  // 缩回标准体型；按 origin 平移的人形，水平偏移保持实际距离（不随体型缩放）
+  const place = (p: Vec3): Vec3 => {
+    const q = addk(p, shift);
+    if (!origin) return addk([0, 0, 0], q, 1 / scale);
+    const center: Vec3 = [get(18)[0] + shift[0], 0, get(18)[2] + shift[2]];
+    return addk(center, sub(q, center), 1 / scale);
+  };
   const shoulders = place(get(17));
   const head = place(get(0));
   const bones: Bone[] = [

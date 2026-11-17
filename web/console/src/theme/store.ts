@@ -1,11 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-/** 只有浅色一套主题（ui.md §3、D-121） */
-export type Theme = "light";
+/** 浅色为默认主题（ui.md §3、D-121）；夜间警戒是值班员手动切换的深色主题，大屏与界面一并变暗 */
+export type Theme = "light" | "night";
 
 interface ThemeState {
-  theme: Theme;
+  /** 夜间警戒模式；主题由它决定（themeOf） */
+  night: boolean;
+  setNight: (night: boolean) => void;
   /** 用户开关；系统 prefers-reduced-motion 由 theme.css 另行响应（V-A4） */
   reducedMotion: boolean;
   setReducedMotion: (reducedMotion: boolean) => void;
@@ -14,22 +16,26 @@ interface ThemeState {
 export const useTheme = create<ThemeState>()(
   persist(
     (set) => ({
-      theme: "light",
+      night: false,
+      setNight: (night) => set({ night }),
       reducedMotion: false,
       setReducedMotion: (reducedMotion) => set({ reducedMotion }),
     }),
-    { name: "hyd-theme", partialize: ({ reducedMotion }) => ({ reducedMotion }) },
+    { name: "hyd-theme", partialize: ({ reducedMotion, night }) => ({ reducedMotion, night }) },
   ),
 );
+
+export const themeOf = ({ night }: Pick<ThemeState, "night">): Theme => (night ? "night" : "light");
 
 /** JS 驱动的动效是否退化为瞬时切换：用户开关或系统 prefers-reduced-motion（V-A4） */
 export function prefersReducedMotion(): boolean {
   return useTheme.getState().reducedMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-function apply({ reducedMotion }: ThemeState): void {
+function apply(state: ThemeState): void {
+  const { reducedMotion } = state;
   const root = document.documentElement;
-  root.dataset.theme = "light";
+  root.dataset.theme = themeOf(state);
   root.dataset.motion = reducedMotion ? "reduced" : "full";
 }
 

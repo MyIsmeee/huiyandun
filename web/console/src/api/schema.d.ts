@@ -129,6 +129,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scene/areas/{id}/auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description 场景自动识别的最近结果：api-server 后台每 10 分钟对每个区域识别一次（只缓存在内存中）。区域没有手工搭建的
+         *     物体时，态势页按它显示场景。尚未识别过时 frames 为空
+         */
+        get: operations["getSceneAreaAuto"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cameras": {
         parameters: {
             query?: never;
@@ -1210,6 +1230,25 @@ export interface components {
             suggested_pitch_deg: number | null;
             /** @description 给值守人员看的白话说明 */
             reasons: string[];
+            geometry?: {
+                /** @description 离地高度（米） */
+                height_m: number;
+                /** @description 俯角（度，向下为负） */
+                pitch_deg: number;
+                /** @description 侧倾（度）；地面映射不含侧倾，只用于提示 */
+                roll_deg: number;
+                /** @description 水平视角（度） */
+                hfov_deg: number;
+                /** @description 画面中可见地面的横向范围（米） */
+                floor_width_m: number;
+                /** @description 画面中可见地面的纵深范围（米） */
+                floor_depth_m: number;
+                /**
+                 * @description 尺度来源：model 为模型估计；desk 为按画面中桌面的标准高度校正
+                 * @enum {unknown}
+                 */
+                scale_ref: "model" | "desk";
+            } | null;
         };
         /**
          * CameraRule
@@ -1344,10 +1383,13 @@ export interface components {
         "hyd.vision.behavior.v1.schema": {
             camera_id: string;
             track_id: number;
-            /** @enum {unknown} */
-            behavior: "fall" | "climb";
             /**
-             * @description 1.1 起。suspected 为疑似跌倒（倒地满 2 s），只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认（倒地且基本不动满 8 s），进入物理告警。攀爬只有 confirmed；1.0 的事件没有此字段，按 confirmed
+             * @description 1.2 起增加 still（长时间静止：未倒地的人原地不动）与 fight（疑似打架：两人伸手可及、手腕快速运动且整体未移动）
+             * @enum {unknown}
+             */
+            behavior: "fall" | "climb" | "still" | "fight";
+            /**
+             * @description 1.1 起。suspected 为疑似，只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认，进入物理告警。跌倒：倒地满 2 s 为疑似，倒地且基本不动满 8 s 确认。长时间静止：原地不动满 120 s 为疑似，满 300 s 确认。攀爬只有 confirmed；打架只有 suspected（骨骼几何的启发式判定）。1.0 的事件没有此字段，按 confirmed
              * @default confirmed
              * @enum {unknown}
              */
@@ -1927,6 +1969,29 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getSceneAreaAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 识别帧与没有识别结果的摄像头及原因 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneAreaFrames"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listCameras: {

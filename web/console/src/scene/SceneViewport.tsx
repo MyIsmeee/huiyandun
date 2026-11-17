@@ -26,6 +26,7 @@ import { CALLOUT, CameraCallout } from "./CameraCallout";
 import { DevicePicker } from "./DevicePicker";
 import { DeviceTags } from "./DeviceTags";
 import type { SceneItem } from "./assets";
+import { useAutoScene } from "./autoScene";
 import { useCameras } from "./devices";
 import { bounds, OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
 import { Scene2D } from "./Scene2D";
@@ -99,6 +100,11 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
   const [failed, setFailed] = useState(false);
   const pose = useCamera((s) => s.pose);
   const cameras = useCameras(site.devices, scene?.id ?? null);
+  // 区域没有手工搭建的物体时，按画面自动识别的结果显示（autoScene.ts）
+  const autoScene = useAutoScene(scene, site.devices);
+  const auto = autoScene?.items ?? null;
+  const items = scene?.items.length ? scene.items : (auto ?? NO_ITEMS);
+  const measured = scene?.items.length ? null : (autoScene?.frames ?? null);
   // 总览按区域尺寸取景（设计 150 §9）；目标与告警不影响取景
   const [width, depth] = [scene?.width_m ?? NO_AREA.width_m, scene?.depth_m ?? NO_AREA.depth_m];
   const area = useMemo(() => bounds({ width_m: width, depth_m: depth }), [width, depth]);
@@ -202,14 +208,14 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
       {view3d && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene3D area={area} items={scene?.items ?? NO_ITEMS} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
+            <Scene3D area={area} items={items} measured={measured} cameras={cameras} view={view3d} onReady={() => setReady(true)} />
           </Suspense>
         </Boundary>
       )}
       {plan && (
         <Boundary onError={() => setFailed(true)}>
           <Suspense fallback={null}>
-            <Scene2D items={scene?.items ?? NO_ITEMS} cameras={cameras} view={plan} area={area} />
+            <Scene2D items={items} cameras={cameras} view={plan} area={area} />
           </Suspense>
         </Boundary>
       )}
@@ -227,7 +233,12 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
           {view3d && <CameraCallout cameras={cameras} view={view3d} />}
         </>
       )}
-      {(state === "ready" || state === "2d") && !scene?.items.length && (
+      {(state === "ready" || state === "2d") && measured !== null && measured.length > 0 && (
+        <p className="floating-card pointer-events-none absolute top-36 left-4 px-3 py-2 text-xs text-muted-foreground">
+          场景由画面自动识别，每 10 分钟更新
+        </p>
+      )}
+      {(state === "ready" || state === "2d") && !items.length && !measured?.length && (
         // 不自动补全场景（设计 150 §4）：只显示摄像头与视场，并说明尚未搭建。一行小字提示，不做成醒目的大卡片：
         // 区域边线已标出范围，这里只提醒并给 admin 入口（产品负责人 2026-11-15 要求收敛）
         <p className="floating-card pointer-events-none absolute top-36 left-4 flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground">
