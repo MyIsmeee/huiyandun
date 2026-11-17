@@ -97,6 +97,7 @@ from vision_engine.scene3d import align, layout
 from vision_engine.steady import Steady
 
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
+GEOMETRY_THREADS = 2  # MoGe-2 的 CPU 线程上限，见 serve
 TRACK_SUBJECT = "hyd.vision.track.v1"
 BEHAVIOR_SUBJECT = "hyd.vision.behavior.v1"
 SCENE_REQUEST_SUBJECT = "hyd.vision.scene_request.v1"  # 核心 NATS 请求/应答，不持久化
@@ -1093,9 +1094,14 @@ async def serve(config: VisionConfig) -> None:
     if segmenter is None:
         log.warning("vision.scene_disabled")  # 未配置 HYD_SCENE_MODEL_FILE
     monocular = (
-        # 低频（每 10 分钟）运行，固定用 CPU：显存上限由检测模型平分，MoGe-2 推理需数百 MiB，挤占会让检测失败
+        # 低频（每 10 分钟）运行，固定用 CPU：显存上限由检测模型平分，MoGe-2 推理需数百 MiB，挤占会让检测失败。
+        # 限制线程数：开满全部核心时取流与检测被挤占数秒，期间画面重放漏检（2026-11-17 实测）；慢一些无妨
         MonocularGeometry(
-            create_session(config.model_copy(update={"device": "cpu"}), config.geometry_model_file)
+            create_session(
+                config.model_copy(update={"device": "cpu"}),
+                config.geometry_model_file,
+                threads=GEOMETRY_THREADS,
+            )
         )
         if config.geometry_model_file
         else None

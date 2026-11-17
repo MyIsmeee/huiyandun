@@ -94,15 +94,24 @@ def model_files(config: VisionConfig) -> list[Path]:
 
 
 def create_session(
-    config: VisionConfig, model_file: Path, models: int = 1, limit_mb: int | None = None
+    config: VisionConfig,
+    model_file: Path,
+    models: int = 1,
+    limit_mb: int | None = None,
+    threads: int | None = None,
 ) -> ort.InferenceSession:
-    """models 为平分显存的模型数：每个会话的显存上限取总上限的 1/models（C-HW-12）；limit_mb 给出时按它，不平分。"""
+    """models 为平分显存的模型数：每个会话的显存上限取总上限的 1/models（C-HW-12）；limit_mb 给出时按它，不平分。
+    threads 限制 CPU 推理的线程数；不给时 ONNX Runtime 按物理核数开满。"""
     if config.device == "cuda":
         limit = (limit_mb * 2**20) if limit_mb else config.gpu_mem_limit_mb * 2**20 // models
         providers: list[str | tuple[str, dict[str, int]]] = [(CUDA, {"gpu_mem_limit": limit}), CPU]
     else:
         providers = [CPU]
-    session = ort.InferenceSession(str(model_file), providers=providers)
+    options = ort.SessionOptions()
+    if threads is not None:
+        options.intra_op_num_threads = threads
+        options.inter_op_num_threads = 1
+    session = ort.InferenceSession(str(model_file), sess_options=options, providers=providers)
     active = session.get_providers()
     if config.device == "cuda" and active[0] != CUDA:
         raise DeviceError(f"HYD_DEVICE=cuda，但 ONNX Runtime 回退到 {active}，拒绝以 CPU 运行")

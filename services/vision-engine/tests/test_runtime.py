@@ -42,7 +42,7 @@ class FakeSession:
     active: list[str] = []
     requested: list[Any] = []
 
-    def __init__(self, path: str, providers: list[Any]) -> None:
+    def __init__(self, path: str, providers: list[Any], sess_options: Any = None) -> None:
         FakeSession.requested = providers
 
     def get_providers(self) -> list[str]:
@@ -66,6 +66,13 @@ def test_cpu_mode_uses_only_cpu() -> None:
     session = create_session(config(HYD_DEVICE="cpu"), Path(MODEL))
 
     assert session.get_providers() == [CPU]
+
+
+def test_cpu_threads_capped() -> None:
+    """低频 CPU 模型（MoGe-2）限制线程数，不挤占取流与检测。"""
+    session = create_session(config(HYD_DEVICE="cpu"), Path(MODEL), threads=2)
+
+    assert session.get_session_options().intra_op_num_threads == 2
 
 
 def test_cuda_active(fake_session: type[FakeSession]) -> None:
