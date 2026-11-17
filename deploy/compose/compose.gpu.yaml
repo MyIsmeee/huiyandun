@@ -4,6 +4,8 @@ services:
   vision-engine:
     environment:
       HYD_DEVICE: cuda
+      # 默认 2048 MiB 由 4 个模型平分，3 路摄像头时 RF-DETR 的 512 MiB 不够，显存耗尽后 CUDA 上下文损坏、全部检测停摆
+      HYD_GPU_MEM_LIMIT_MB: "5120"
     deploy:
       resources:
         reservations:
