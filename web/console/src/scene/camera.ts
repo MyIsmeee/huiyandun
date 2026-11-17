@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { create } from "zustand";
 import { useLive } from "../store/live";
 import type { Camera } from "./devices";
-import { blendShot, cameraShot, followShot, OVERVIEW, type Pose, type Shot, type Size, ZOOM_MAX, ZOOM_MIN } from "./layout";
+import { blendShot, cameraShot, FOLLOW_BASE_ELEVATION, FOLLOW_ELEVATION, followShot, OVERVIEW, type Pose, type Shot, type Size, ZOOM_MAX, ZOOM_MIN } from "./layout";
 import { renderedPosition, renderTime } from "./smoothing";
 import { turnToward } from "./targets";
 
@@ -29,9 +29,29 @@ interface CameraState {
   flight: { from: Shot; start: number } | null;
   /** 跟随视角或飞行中的当前机位；null 为按总览姿态取景 */
   shot: Shot | null;
+  /** 跟随视角下用户的调整（滚轮、拖拽）；每次进入或退出跟随都复位 */
+  adjust: Adjust;
 }
 
-export const useCamera = create<CameraState>()(() => ({ pose: OVERVIEW, goal: OVERVIEW, focus: null, flight: null, shot: null }));
+/**
+ * 跟随视角的调整：turn 为绕目标转过的角度（弧度），distance 为距离倍数（摄像头视角下为视场倍数），
+ * lift 为仰角增量（弧度）
+ */
+export interface Adjust {
+  turn: number;
+  distance: number;
+  lift: number;
+}
+export const NO_ADJUST: Adjust = { turn: 0, distance: 1, lift: 0 };
+
+export const useCamera = create<CameraState>()(() => ({
+  pose: OVERVIEW,
+  goal: OVERVIEW,
+  focus: null,
+  flight: null,
+  shot: null,
+  adjust: NO_ADJUST,
+}));
 
 /** 最近一次渲染的机位：飞行从这里出发，转场中被打断时不跳变（V-A2） */
 let shown: Shot | null = null;
@@ -43,12 +63,12 @@ let shown: Shot | null = null;
 export function focusOn(focus: Focus, animate: boolean): void {
   const flight = animate && shown ? { from: shown, start: performance.now() } : null;
   if (focus) {
-    useCamera.setState({ focus, flight });
+    useCamera.setState({ focus, flight, adjust: NO_ADJUST });
     return;
   }
   cancelAnimationFrame(frame);
   const home = overview(useCamera.getState().goal);
-  useCamera.setState({ focus: null, flight, pose: home, goal: home, ...(flight ? {} : { shot: null }) });
+  useCamera.setState({ focus: null, flight, pose: home, goal: home, adjust: NO_ADJUST, ...(flight ? {} : { shot: null }) });
 }
 
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
@@ -103,6 +123,51 @@ export function overview(goal: Pose): Pose {
   return { ...OVERVIEW, azimuth: Math.round(goal.azimuth / (2 * Math.PI)) * 2 * Math.PI };
 }
 
+/** 滚轮每像素（deltaY）的缩放指数：一格滚轮（约 100）缩放约 1.16 倍 */
+const WHEEL_RATE = 0.0015;
+/** 拖拽旋转：每像素转过的弧度 */
+const DRAG_RATE = 0.006;
+/** 总览俯角范围：不低到平视（看不见地面），不高到正上方（与 2D 俯视重复，且方位不定） */
+export const TILT_RANGE = [(15 * Math.PI) / 180, (80 * Math.PI) / 180] as const;
+/** 跟随距离倍数与摄像头视角的视场倍数范围 */
+const ADJUST_DISTANCE = [0.35, 3] as const;
+const clamp = (v: number, [lo, hi]: readonly [number, number]) => Math.min(hi, Math.max(lo, v));
+
+/**
+ * 滚轮缩放（总览）：deltaY 向下为正、缩小；以光标为中心——光标下的内容缩放前后不动。offset 为光标相对取景中心的像素，
+ * pixelsPerMeter 为当前取景中心处每米像素数，limit 为平移上限；缩到最小时平移归零（与缩小按钮一致）
+ */
+export function wheelZoomed(
+  goal: Pose,
+  deltaY: number,
+  offset: readonly [number, number],
+  pixelsPerMeter: number,
+  limit: readonly [number, number],
+): Pose {
+  const zoom = clamp(goal.zoom * Math.exp(-deltaY * WHEEL_RATE), [ZOOM_MIN, ZOOM_MAX]);
+  if (zoom <= ZOOM_MIN) return { ...goal, zoom: ZOOM_MIN, pan: [0, 0] };
+  const keep = 1 - goal.zoom / zoom; // 光标处的场景点：缩放前距取景中心 offset/ppm 米，缩放后要仍在光标下
+  const shift = (i: 0 | 1) => clamp(goal.pan[i] + (offset[i] / pixelsPerMeter) * keep, [-limit[i], limit[i]]);
+  return { ...goal, zoom, pan: [shift(0), shift(1)] };
+}
+
+/** 拖拽旋转（总览）：横向拖动改方位（向右拖时场景随手逆时针转），纵向拖动改俯角（向下拖时更接近俯视） */
+export function orbited(goal: Pose, [dx, dy]: readonly [number, number]): Pose {
+  return { ...goal, azimuth: goal.azimuth - dx * DRAG_RATE, tilt: clamp(goal.tilt + dy * DRAG_RATE, TILT_RANGE) };
+}
+
+/** 跟随视角下的滚轮：拉近、推远（摄像头视角下为收窄、放宽视场） */
+export function adjustZoom(adjust: Adjust, deltaY: number): Adjust {
+  return { ...adjust, distance: clamp(adjust.distance * Math.exp(deltaY * WHEEL_RATE), ADJUST_DISTANCE) };
+}
+
+/** 跟随视角下的拖拽：横向绕目标转动，纵向改仰角（向下拖时视点抬高） */
+export function adjustOrbit(adjust: Adjust, [dx, dy]: readonly [number, number]): Adjust {
+  const range = [FOLLOW_ELEVATION[0] - FOLLOW_BASE_ELEVATION, FOLLOW_ELEVATION[1] - FOLLOW_BASE_ELEVATION] as const;
+  const lift = clamp(adjust.lift + dy * DRAG_RATE, range);
+  return { ...adjust, turn: adjust.turn - dx * DRAG_RATE, lift };
+}
+
 /** 拖拽平移：画面移动 (dx, dy) 像素，取景中心反向移动；不超出站点范围 */
 export function panned(goal: Pose, [dx, dy]: readonly [number, number], zoom: number, limit: readonly [number, number]): Pose {
   const clamp = (v: number, max: number) => Math.min(max, Math.max(-max, v));
@@ -139,6 +204,7 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
   const focus = useCamera((s) => s.focus);
   const flight = useCamera((s) => s.flight);
   const shot = useCamera((s) => s.shot);
+  const adjust = useCamera((s) => s.adjust);
   const bearing = useRef<{ key: string; angle: number; at: number } | null>(null);
   useEffect(() => {
     // 回到总览后再次跟随同一目标：机位按当时的位置重新取，不从上一次跟随结束时的方位转起
@@ -153,6 +219,7 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
         const pose = cameras.find((c) => c.id === focus.id)?.pose;
         if (!pose) return focusOn(null, motion);
         goal = cameraShot(pose, size);
+        goal = { ...goal, fov: Math.min((150 * Math.PI) / 180, goal.fov * adjust.distance) };
       }
       if (size && focus?.kind === "target") {
         const target = useLive.getState().targets[focus.key];
@@ -174,7 +241,7 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
         const angle = last && motion ? turnToward(last.angle, desired, FOLLOW_TURN_RATE * dt) : desired;
         bearing.current = { key: focus.key, angle, at: now };
         pending = motion && (t < (target.trail.at(-1)?.[2] ?? 0) || Math.abs(Math.sin((angle - desired) / 2)) > 1e-4);
-        goal = followShot([x, y], angle, size);
+        goal = followShot([x, y], angle + adjust.turn, size, adjust.distance, adjust.lift);
       }
       const progress = flight ? Math.min(1, (performance.now() - flight.start) / FLIGHT_MS) : 1;
       const next = flight && goal && progress < 1 ? blendShot(flight.from, goal, easeOut(progress)) : goal;
@@ -194,7 +261,7 @@ export function useFocusShot(base: Shot | null, size: Size | null, cameras: Came
       cancelAnimationFrame(frame);
       unsubscribe();
     };
-  }, [base, size, cameras, focus, flight, motion]);
+  }, [base, size, cameras, focus, flight, motion, adjust]);
   const result = shot ?? base;
   useLayoutEffect(() => {
     shown = result;

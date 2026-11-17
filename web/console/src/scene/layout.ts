@@ -165,11 +165,27 @@ export function overviewShot(area: Area, size: Size, pose: Pose = OVERVIEW): { s
 /** 跟随视角（设计 §3.5）：视点距目标水平 8 m、高 4 m，俯角 25°；视场比总览宽，近似车机跟车 */
 const FOLLOW = { back: 8, height: 4, pitch: (25 * Math.PI) / 180, fov: (45 * Math.PI) / 180 };
 
-/** 跟随机位：视点在目标 (x, y) 沿平面方向 bearing（弧度，由 +x 转向 +y）一侧，朝目标看去，取景中心为视口中心 */
-export function followShot([x, y]: Point, bearing: number, size: Size): Shot {
+/** 跟随机位的仰角调整范围（弧度）：不低到贴地平视，不高到正上方 */
+export const FOLLOW_ELEVATION = [(8 * Math.PI) / 180, (80 * Math.PI) / 180] as const;
+/** 跟随机位的默认仰角（视点相对目标） */
+export const FOLLOW_BASE_ELEVATION = Math.atan2(FOLLOW.height, FOLLOW.back);
+
+/**
+ * 跟随机位：视点在目标 (x, y) 沿平面方向 bearing（弧度，由 +x 转向 +y）一侧，朝目标看去，取景中心为视口中心。
+ * distance 为距离倍数（滚轮），lift 为仰角增量（弧度，拖拽）；取默认值时即设计 §3.5 的机位
+ */
+export function followShot([x, y]: Point, bearing: number, size: Size, distance = 1, lift = 0): Shot {
   const [dx, dy] = [Math.cos(bearing), Math.sin(bearing)];
-  const eye: Vec3 = [x + dx * FOLLOW.back, FOLLOW.height, y + dy * FOLLOW.back];
-  const reach = FOLLOW.height / Math.tan(FOLLOW.pitch); // 视线落地处距视点的水平距离
+  const elevation = Math.min(FOLLOW_ELEVATION[1], Math.max(FOLLOW_ELEVATION[0], FOLLOW_BASE_ELEVATION + lift));
+  const range = Math.hypot(FOLLOW.back, FOLLOW.height) * distance;
+  // 未调仰角时直接按默认的水平距离与高度缩放，免得三角函数往返引入舍入
+  const [back, height] =
+    elevation === FOLLOW_BASE_ELEVATION
+      ? [FOLLOW.back * distance, FOLLOW.height * distance]
+      : [range * Math.cos(elevation), range * Math.sin(elevation)];
+  const eye: Vec3 = [x + dx * back, height, y + dy * back];
+  const pitch = Math.min((89 * Math.PI) / 180, FOLLOW.pitch + elevation - FOLLOW_BASE_ELEVATION);
+  const reach = height / Math.tan(pitch); // 视线落地处距视点的水平距离
   return { eye, look: [eye[0] - dx * reach, 0, eye[2] - dy * reach], fov: FOLLOW.fov, center: [size.width / 2, size.height / 2] };
 }
 

@@ -19,7 +19,7 @@ import { useConnection } from "../store/connection";
 import { useLive } from "../store/live";
 import { useNav } from "../store/nav";
 import { select, selectTarget, useSelection } from "../store/selection";
-import { focusOn, moveCamera, panned, useCamera, useFocusShot } from "./camera";
+import { adjustOrbit, adjustZoom, focusOn, moveCamera, orbited, panned, useCamera, useFocusShot, wheelZoomed } from "./camera";
 import { CameraControls, useAnimate } from "./CameraControls";
 import { AttackLines } from "./AttackLines";
 import { CALLOUT, CameraCallout } from "./CameraCallout";
@@ -28,7 +28,7 @@ import { DeviceTags } from "./DeviceTags";
 import type { SceneItem } from "./assets";
 import { useAutoScene } from "./autoScene";
 import { useCameras } from "./devices";
-import { bounds, OVERVIEW, overviewShot, planView, type Size, sceneView, type View } from "./layout";
+import { bounds, OVERVIEW, overviewShot, planView, type SceneView, type Size, sceneView, type View } from "./layout";
 import { Scene2D } from "./Scene2D";
 import { HoverMarker, TargetMarker } from "./TargetMarker";
 import { renderedPosition } from "./smoothing";
@@ -118,7 +118,8 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
   const plan = useMemo(() => (size && !webgl2 ? planView(area, size, pose) : null), [area, size, webgl2, pose]);
   const view = view3d ?? plan;
   const state = failed ? "error" : !webgl2 ? "2d" : ready ? "ready" : "loading";
-  const { dragged, ...drag } = useDragPan(view);
+  const { dragged, ...drag } = useDragView(view);
+  useWheelZoom(ref, view);
   // 每次进入主界面、切换区域都从总览开始
   useEffect(() => {
     focusOn(null, false);
@@ -278,21 +279,32 @@ export function Note({ children }: { children: ReactNode }) {
   );
 }
 
-/** 放大后拖拽平移（V-I1）：总览倍数下、跟随视角下不响应；拖拽即时生效，并打断进行中的转场。dragged：本次按下后发生过平移，松开时的单击不选中目标 */
-function useDragPan(view: View | null) {
+/**
+ * 鼠标拖拽（V-I1）：总览下左键平移（缩到最小时没有可平移的余地）、右键或 Shift + 左键旋转（左右改方位、上下改俯角）；
+ * 跟随视角下拖动绕目标转动、上下改仰角；摄像头视角由摄像头决定，不响应。拖拽即时生效，并打断进行中的转场。
+ * dragged：本次按下后发生过移动，松开时的单击不选中目标
+ */
+function useDragView(view: View | null) {
   const last = useRef<readonly [number, number] | null>(null);
+  const mode = useRef<"pan" | "orbit" | "follow">("pan");
   const dragged = useRef(false);
-  // 跟随视角下机位由目标或摄像头决定，不响应拖拽（D-058）
   const zoomedIn = useCamera((s) => s.goal.zoom > OVERVIEW.zoom && !s.focus);
+  const following = useCamera((s) => s.focus?.kind === "target");
   const end = () => {
     last.current = null;
   };
   return {
     dragged,
-    className: zoomedIn ? "absolute inset-0 cursor-grab active:cursor-grabbing" : "absolute inset-0",
+    className: zoomedIn || following ? "absolute inset-0 cursor-grab active:cursor-grabbing" : "absolute inset-0",
+    onContextMenu: (e: MouseEvent) => {
+      if (!onChrome(e.target)) e.preventDefault(); // 右键拖动用于旋转
+    },
     onPointerDown: (e: PointerEvent) => {
       dragged.current = false;
-      if (!zoomedIn || e.button !== 0 || onChrome(e.target)) return;
+      if (onChrome(e.target) || (e.button !== 0 && e.button !== 2)) return;
+      const { focus } = useCamera.getState();
+      if (focus?.kind === "camera") return;
+      mode.current = focus ? "follow" : e.button === 2 || e.shiftKey ? "orbit" : "pan";
       e.currentTarget.setPointerCapture(e.pointerId);
       last.current = [e.clientX, e.clientY];
     },
@@ -301,13 +313,49 @@ function useDragPan(view: View | null) {
       const delta = [e.clientX - last.current[0], e.clientY - last.current[1]] as const;
       last.current = [e.clientX, e.clientY];
       dragged.current ||= delta[0] !== 0 || delta[1] !== 0;
-      moveCamera(panned(useCamera.getState().goal, delta, view.zoom, view.panLimit), false);
+      const { goal, adjust } = useCamera.getState();
+      if (mode.current === "follow") useCamera.setState({ adjust: adjustOrbit(adjust, delta) });
+      else if (mode.current === "orbit") moveCamera(orbited(goal, delta), false);
+      else moveCamera(panned(goal, delta, view.zoom, view.panLimit), false);
     },
     // 浏览器取消手势（如触屏滚动）时同样结束拖拽，否则松开后指针移动仍会平移
     onPointerUp: end,
     onPointerCancel: end,
     onLostPointerCapture: end,
   };
+}
+
+/**
+ * 滚轮缩放：总览下以光标为中心连续缩放（ZOOM_MIN～ZOOM_MAX），跟随视角下拉近推远，摄像头视角下收窄、放宽视场。
+ * 落在浮层（按钮、视角控件、引线卡）上的滚动不处理。原生监听、非被动：React 的 onWheel 是被动监听，阻止不了页面滚动
+ */
+function useWheelZoom(ref: RefObject<HTMLDivElement | null>, view: View | null) {
+  const latest = useRef(view);
+  useEffect(() => {
+    latest.current = view;
+  }, [view]);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const onWheel = (e: WheelEvent) => {
+      const current = latest.current;
+      if (!current || onChrome(e.target) || e.deltaY === 0) return;
+      e.preventDefault();
+      // 按行、按页滚动的设备折算为像素
+      const deltaY = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? element.clientHeight : 1);
+      const { goal, focus, adjust } = useCamera.getState();
+      if (focus) {
+        useCamera.setState({ adjust: adjustZoom(adjust, deltaY) });
+        return;
+      }
+      const box = element.getBoundingClientRect();
+      const center = "shot" in current ? (current as SceneView).shot.center : [box.width / 2, box.height / 2];
+      const offset = [e.clientX - box.left - (center[0] ?? 0), e.clientY - box.top - (center[1] ?? 0)] as const;
+      moveCamera(wheelZoomed(goal, deltaY, offset, current.zoom, current.panLimit), false);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [ref]);
 }
 
 declare global {
