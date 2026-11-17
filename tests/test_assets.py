@@ -106,3 +106,18 @@ def test_catalog_fields() -> None:
 
 def test_models_total_size() -> None:
     assert sum(p.stat().st_size for p in MODELS.iterdir()) <= MAX_BYTES
+
+
+TEXTURES = ROOT / "web/console/public/textures/earth"
+
+
+def test_earth_textures_registered() -> None:
+    """C-RU-01：登录页地球贴图逐一登记、哈希一致；源图为 NASA 发布的公有领域图像。"""
+    registered = {t["file"]: t["sha256"] for t in REGISTRY["textures"]}
+    files = {
+        p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in TEXTURES.iterdir()
+    }
+    assert files == registered
+    assert {t["license"] for t in REGISTRY["textures"]} == {"LicenseRef-NASA-Public-Domain"}
+    assert sum(p.stat().st_size for p in TEXTURES.iterdir()) <= MAX_BYTES

@@ -153,6 +153,20 @@
   animation: enter var(--duration-slow) var(--ease-out) both;
 }
 
+/* 登录后进入控制台（登录页地球俯冲的末段）：控制台从略微放大、虚化的状态落定，与登录层的推进淡出衔接。
+   一次性，不循环（V-A3）；降低动效时随下方 V-A4 规则瞬时出现 */
+@keyframes console-in {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+    filter: blur(6px);
+  }
+}
+
+@utility animate-console-in {
+  animation: console-in 900ms var(--ease-out) 150ms both;
+}
+
 /* 一次性淡出（攻击连线断开，ui.md §5.1）：终态即不可见，动效停止时瞬时消失 */
 @keyframes fade-out {
   from {

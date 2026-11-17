@@ -324,6 +324,46 @@ assets:
       - { id: potted-plant, source: furniture-kit/pottedPlant }
       - { id: grass, source: city-kit-roads/tile-low }
 
+# 登录页地球贴图（设计见 web/console/src/panels/LoginPage/globe/）：前端本地打包，运行时不联网（G-05）。
+# 源图为 NASA Visible Earth 发布的美国政府作品，属公有领域；与 Voyage 后台同一套，由其
+# scripts/build-earth-textures.py 缩放到 4096×2048 生成。source 记录出处编号，不写成网址（CI-07）
+textures:
+  - name: NASA Blue Marble Next Generation（2004 年 10 月，地形与海底地形）
+    file: web/console/public/textures/earth/day-4k.webp
+    sha256: 9236a4f4dd6e80a02fdbcff43e4e6d5ab7d895b319b2498e5e4068b7151c5b84
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 73000/73826（world.topo.bathy.200410）
+    purpose: 登录页地球白昼贴图
+    owner: MyIsmeee
+  - name: NASA Black Marble 2016
+    file: web/console/public/textures/earth/night-4k.webp
+    sha256: f3a163932526c589670e7869b162b8d59d6f6dd6364abf48cf46e9cd5eec785e
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 144000/144898（BlackMarble_2016_3km）
+    purpose: 登录页地球夜间灯光
+    owner: MyIsmeee
+  - name: NASA Blue Marble 合成云图
+    file: web/console/public/textures/earth/clouds-4k.webp
+    sha256: b4f446e6cdc2617865594a37487e39231a064ab017baebcbc892f62127fb14a9
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 57000/57747（cloud_combined_8192）
+    purpose: 登录页地球云层与俯冲穿云
+    owner: MyIsmeee
+  - name: NASA Blue Marble Next Generation 水体遮罩
+    file: web/console/public/textures/earth/water-4k.png
+    sha256: f2ec000e905accfc48377f02efcb7bb4bcb1dbc1fb2a4f76975319a46f7bd6d6
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 74000/74092（world.200407，按海洋色抠出）
+    purpose: 登录页地球海面高光
+    owner: MyIsmeee
+  - name: GEBCO 2008 陆地高程（NASA Visible Earth 发布）
+    file: web/console/public/textures/earth/height-4k.jpg
+    sha256: 8d9a4382e2f7a38b2417850f6812e0cb5901630ce06802ddf2e0b7617ea0ebd2
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 73000/73934（gebco_08_rev_elev）
+    purpose: 登录页地球地形凹凸
+    owner: MyIsmeee
+
 # 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
 # 依赖由 tools/dev/export_efficientvit_seg.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
 build_tools:
