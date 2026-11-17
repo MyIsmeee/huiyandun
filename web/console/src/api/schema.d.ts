@@ -1168,12 +1168,17 @@ export interface components {
                 line: components["schemas"]["Line"];
                 height_m: number;
             }[];
-            /** @description 物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块 */
+            /** @description 物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块。自动场景按 kind 与实测长宽高选择画法（书桌、茶几、圆桌、转椅、凳子、书架、衣柜等） */
             objects: {
                 /** @enum {unknown} */
                 class: "table" | "chair" | "cabinet" | "sofa" | "bed" | "furniture" | "street_furniture";
                 polygon: components["schemas"]["Polygon"];
                 height_m: number;
+                /**
+                 * @description 细分类别：分割模型（ADE20K）在该物体上点数最多的原始类别，如桌子中的书桌、茶几，椅子中的转椅、凳子，柜子中的书架、衣柜、斗柜；缺省时只按 class 与尺寸呈现
+                 * @enum {unknown}
+                 */
+                kind?: "table" | "desk" | "coffee_table" | "chair" | "armchair" | "seat" | "swivel_chair" | "stool" | "cabinet" | "shelf" | "wardrobe" | "chest_of_drawers" | "bookcase" | "sofa" | "bed" | "counter" | "signboard" | "bench" | "streetlight" | "pole" | "traffic_light" | "ashcan";
             }[];
             /** @description 植被：树干底部中心 */
             trees: {

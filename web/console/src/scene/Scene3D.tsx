@@ -52,7 +52,7 @@ export default function Scene3D(props: {
       <Lights area={area} palette={palette} />
       <ShadowCatcher area={area} opacity={palette.shadow} />
       <AreaScene area={area} items={measured ? [] : items} />
-      {measured && <MeasuredScene frames={measured} />}
+      {measured && <MeasuredScene frames={measured} cameras={cameras} />}
       <DeviceMarkers cameras={cameras} />
       <TargetModels cameras={cameras} />
     </Canvas>

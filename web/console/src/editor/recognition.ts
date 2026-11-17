@@ -12,6 +12,8 @@ type Rot = SceneItem["rot"];
 const TILES = [["road", "road"], ["sidewalk", "plaza"], ["grass", "grass"]] as const;
 const WALLS: Record<string, string> = { wall: "wall", fence: "fence", railing: "fence" };
 const OBJECTS: Record<string, string> = { table: "table", chair: "chair", cabinet: "cabinet", sofa: "sofa", bed: "bed" };
+/** 细分类别（kind）有对应资产时优先：书桌、茶几、转椅、扶手椅 */
+const KIND_ASSETS: Record<string, string> = { desk: "desk", coffee_table: "coffee-table", swivel_chair: "office-chair", armchair: "armchair" };
 const MIN_SURFACE_M2 = 2;
 const MIN_WALL_M = 1;
 /** 识别把盆栽记为 1 m 高的矮树（vision-engine TREE_HEIGHT_M），低于此高度转为盆栽 */
@@ -59,7 +61,7 @@ export function draftFromFrames(
       if (asset) for (const piece of straight(line)) add(wallItem(asset, piece, size, catalog));
     }
     for (const object of frame.objects) {
-      const asset = catalog.get(OBJECTS[object.class] ?? "");
+      const asset = catalog.get(KIND_ASSETS[object.kind ?? ""] ?? "") ?? catalog.get(OBJECTS[object.class] ?? "");
       const [x0, y0, x1, y1] = bounds(points(object.polygon));
       const center: Point = [(x0 + x1) / 2, (y0 + y1) / 2];
       if (!asset || !within(center)) continue;
