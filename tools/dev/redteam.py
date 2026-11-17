@@ -5,12 +5,13 @@
   attack-slow                低速尝试，低于规则阈值，由设备行为模型发现（FR-205）
   attack-hijack              attack-sim 对 rtsp-target 发推流声明，企图顶替设备画面（触发 HYD-NET-0002）
   tamper freeze <摄像头>      把该路调试素材的画面源切换为当前画面的定格帧（FR-301）
-  tamper replay <摄像头>      切回约 2 分钟前的片段（FR-302）
-  tamper restore <摄像头>     恢复为按原时间线继续播放
+  tamper replay <摄像头>      切回约 45 秒前的片段（FR-302）
+  tamper restore <摄像头>     切回原始节目，回到它的当前进度
 
-画面篡改只作用于 mediamtx 推流的调试素材（路径名即摄像头编号）；素材的真实播放进度记在
-/tmp/hyd-tamper-<摄像头>.json，恢复时从原时间线的当前位置续播，不与看过的画面重复（否则被判为重放）；
-恢复后仍保留该记录（tampered 记为 false），mediamtx 重启后才重新起算。
+画面篡改只作用于 mediamtx 推流的调试素材（路径名即摄像头编号）。原始节目 src-<摄像头> 从素材第 0 秒起循环推流、
+从不跳转（mediamtx.yml），摄像头路径平时转发它：篡改时把摄像头路径换成从素材某处起播，恢复时切回转发。
+原始节目的进度由它的推流时刻推算，不受篡改影响。/tmp/hyd-tamper-<摄像头>.json 只记是否处于篡改中，
+供 make demo-reset 判断哪些路需要恢复。
 """
 
 import argparse
@@ -25,47 +26,43 @@ import yaml
 
 TIMEOUT_S = 120  # 单条 docker compose 命令的上限（CD-04）
 ATTACK_PARAMS = Path(__file__).resolve().parents[2] / "demo/scenarios/attack-sim.yaml"
-# 重放 2 分钟前的片段：须在 FR-302 的 30～180 s 内
-REPLAY_BACK_S = 120
+# 重放约 45 秒前的片段：须在 FR-302 的 30～180 s 内。越短，恢复后需要的预热越短（识别引擎须看过被重放的片段：
+# 回退秒数 + 10 s 比较窗口），make demo-story 的预热据此取 60 s
+REPLAY_BACK_S = 45
 MEDIAMTX_API = "http://127.0.0.1:9997/v3"  # 只监听容器内
 STATE_DIR = Path("/tmp")
-DONE = {"freeze": "画面已定格", "replay": "已切回约 2 分钟前的片段", "restore": "已恢复"}
+DONE = {
+    "freeze": "画面已定格",
+    "replay": f"已切回约 {REPLAY_BACK_S} 秒前的片段",
+    "restore": "已恢复",
+}
 # 定格帧推流：H.264 全帧内编码、固定量化，解码后逐帧相同（D-080）；$RTSP_PORT、$MTX_PATH 由 mediamtx 展开
 FREEZE_CMD = (
     "ffmpeg -hide_banner -loglevel error -re -loop 1 -framerate 25 -i /tmp/freeze-{path}.png "
     "-c:v libx264 -preset ultrafast -tune stillimage -x264-params keyint=1 -qp 20 -pix_fmt yuv420p "
     "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
 )
-# 从素材的指定秒数起循环推流，同 mediamtx.yml 的默认推流（直接复制编码，从最近的关键帧开始，误差 ≤ 2 s）
+# 从素材的指定秒数起循环推流（直接复制编码，从最近的关键帧开始，素材关键帧间隔 ≤ 2 s）
 STREAM_CMD = (
-    "ffmpeg -hide_banner -loglevel error -re -ss {offset:.0f} -stream_loop -1 -i /media/$MTX_PATH.mp4 "
+    "ffmpeg -hide_banner -loglevel error -re -ss {offset:.0f} -stream_loop -1 -i /media/{path}.mp4 "
     "-c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
 )
 
 
-def position(state: dict[str, float], now: float, duration: float) -> float:
-    """素材原时间线的当前播放秒数：篡改期间原时间线照常前进，循环播放。"""
-    return (state["base"] + now - state["since"]) % duration
+def program_position(now: float, program_ready: float, duration: float) -> float:
+    """原始节目的当前播放秒数：从推流时刻起由素材第 0 秒循环播放、从不跳转。"""
+    return (now - program_ready) % duration
 
 
-def timeline(
-    state: dict[str, float] | None, now: float, ready: float, mediamtx_started: float
-) -> dict[str, float]:
-    """原时间线的记录。只有 mediamtx（重新）启动后的第一次篡改才从路径的推流时刻起算——那时推流从素材
-    第 0 秒开始；之后一直沿用，恢复也不清除：恢复后的推流从中途续播，其推流时刻不是素材的第 0 秒，若据此
-    重算，下一次"切回 2 分钟前"会切到识别引擎没看过的片段，重放无从识别。"""
-    if state is None or state["since"] < mediamtx_started:
-        return {"base": now - ready, "since": now}
-    return state
-
-
-def source_for(action: str, path: str, pos: float, duration: float) -> str:
-    """mediamtx 路径的推流命令。"""
+def path_config(action: str, path: str, pos: float, duration: float) -> dict[str, str | bool]:
+    """摄像头路径的整份配置（config/paths/replace 整体替换）：恢复为转发原始节目，篡改为容器内推流。"""
+    if action == "restore":
+        return {"source": f"rtsp://127.0.0.1:8554/src-{path}", "runOnInit": ""}
     if action == "freeze":
-        return FREEZE_CMD.format(path=path)
-    if action == "replay":
-        return STREAM_CMD.format(offset=(pos - REPLAY_BACK_S) % duration)
-    return STREAM_CMD.format(offset=pos)
+        command = FREEZE_CMD.format(path=path)
+    else:
+        command = STREAM_CMD.format(path=path, offset=(pos - REPLAY_BACK_S) % duration)
+    return {"source": "publisher", "runOnInit": command, "runOnInitRestart": True}
 
 
 class Compose:
@@ -131,32 +128,29 @@ def attack(compose: Compose, slow: bool = False, hijack: bool = False) -> int:
 
 def tamper(compose: Compose, action: str, camera: str) -> int:
     path = camera  # 调试素材的 mediamtx 路径名即摄像头编号（D-101）
-    info = json.loads(compose.mediamtx("wget", "-qO-", f"{MEDIAMTX_API}/paths/get/{path}"))
+    program = json.loads(compose.mediamtx("wget", "-qO-", f"{MEDIAMTX_API}/paths/get/src-{path}"))
     duration = float(
         compose.mediamtx(
             "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
             f"/media/{path}.mp4",
         ).strip()
     )  # fmt: skip
-    now = time.time()
-    state_file = STATE_DIR / f"hyd-tamper-{camera}.json"
-    saved = json.loads(state_file.read_text()) if state_file.is_file() else None
-    ready = datetime.fromisoformat(info["readyTime"]).timestamp()
-    state = timeline(saved, now, ready, compose.started("mediamtx"))
-    pos = position(state, now, duration)
-    # tampered 供 make demo-reset 判断哪些路需要恢复
-    state_file.write_text(json.dumps(state | {"tampered": action != "restore"}))
+    ready = datetime.fromisoformat(program["readyTime"]).timestamp()
+    pos = program_position(time.time(), ready, duration)
     if action == "freeze":
         # 定格帧取自同一路当前画面（FR-307）
         compose.mediamtx(
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-rtsp_transport", "tcp",
             "-i", f"rtsp://127.0.0.1:8554/{path}", "-frames:v", "1", f"/tmp/freeze-{path}.png",
         )  # fmt: skip
-    body = {"runOnInit": source_for(action, path, pos, duration)}
+    body = path_config(action, path, pos, duration)
     compose.mediamtx(
         "wget", "-q", "-O", "-", "--header", "Content-Type: application/json",
         "--post-data", json.dumps(body), f"{MEDIAMTX_API}/config/paths/replace/{path}",
     )  # fmt: skip
+    (STATE_DIR / f"hyd-tamper-{camera}.json").write_text(
+        json.dumps({"tampered": action != "restore"})
+    )
     print(f"{camera}：{DONE[action]}")
     return 0
 

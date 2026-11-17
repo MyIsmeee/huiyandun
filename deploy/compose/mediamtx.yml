@@ -20,9 +20,19 @@ authInternalUsers:
     permissions: [{ action: read }]
 
 pathDefaults:
-  runOnInit: ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i /media/$MTX_PATH.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
   runOnInitRestart: true
+  rtspTransport: tcp
 
+# 原始节目 src-<摄像头>：从素材第 0 秒起循环推流，从不跳转。对外的摄像头路径平时转发它；make tamper 把摄像头路径
+# 临时换成从素材某处起播（定格、重放），恢复时切回转发，回到的就是原始节目的当前进度。
+# 不能靠"按墙钟推算进度、-ss 跳回去"恢复：-ss 与 -stream_loop、-re 同用时实际进度随循环回绕漂移（实测 2 分钟
+# 漂移 7 s、累计超前 30 s 以上），恢复会把刚看过的画面再播一遍，被如实判为重放；从不跳转的循环 88 分钟只差 1.4 s
 paths:
+  src-cam-01:
+    runOnInit: ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i /media/cam-01.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+  src-cam-02:
+    runOnInit: ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i /media/cam-02.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
   cam-01:
+    source: rtsp://127.0.0.1:8554/src-cam-01
   cam-02:
+    source: rtsp://127.0.0.1:8554/src-cam-02
