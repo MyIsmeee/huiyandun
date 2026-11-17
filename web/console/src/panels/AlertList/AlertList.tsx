@@ -11,6 +11,7 @@ import { type Alert, type Execution, type Incident, isPhysical, isPhysicalIncide
 import { select, selectIncident, useSelection } from "../../store/selection";
 import { formatStamp, formatTime } from "../ConnectionStatus/ConnectionStatus";
 import { TimelineDots } from "../IncidentTimeline/IncidentTimeline";
+import { ClearAll, DeleteButton } from "./Clear";
 import { DisposeBar } from "./Dispose";
 
 const BEHAVIOR: Record<string, string> = { fall: "跌倒", climb: "攀爬越界", still: "长时间静止", fight: "打架" };
@@ -199,6 +200,11 @@ export function AlertListView(props: {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        <ClearAll
+          eventIds={shownGroups.flatMap((g) => g.alerts.map((a) => a.event_id))}
+          incidentIds={shownIncidents.map((i) => i.id)}
+          count={shownIncidents.length + shownGroups.reduce((n, g) => n + g.alerts.length, 0)}
+        />
         {onCollapse && (
           <Button variant="ghost" size="icon" aria-label="收起告警" title="收起告警" onClick={onCollapse} className="-mr-2 size-8 text-muted-foreground">
             <PanelRightClose aria-hidden />
@@ -233,7 +239,7 @@ export function AlertListView(props: {
                     ? selectedIncident === incident.id
                     : device !== null && device === selected && incidents.find((i) => i.device_ids.includes(device)) === incident;
                 return (
-                  <li key={incident.id}>
+                  <li key={incident.id} className="flex items-start">
                     <Row device={device} selected={current} onSelect={() => selectIncident(incident)}>
                       {isPhysicalIncident(incident) ? (
                         <TriangleAlert aria-label="物理告警" className="size-5 shrink-0 fill-physical text-foreground" />
@@ -252,6 +258,7 @@ export function AlertListView(props: {
                         <TimelineDots incident={incident} />
                       </span>
                     </Row>
+                    <DeleteButton label="删除该关联事件" eventIds={[]} incidentIds={[incident.id]} />
                   </li>
                 );
               })}
@@ -281,6 +288,7 @@ export function AlertListView(props: {
                         <ChevronDown aria-hidden className={cn("size-4 transition-transform", open && "rotate-180")} />
                       </button>
                     )}
+                    <DeleteButton label={count > 1 ? `删除这 ${count} 条告警` : "删除该告警"} eventIds={group.alerts.map((a) => a.event_id)} />
                   </div>
                   {/* 物理告警与网络告警都可处置：已确认、误报、已处理（告警闭环） */}
                   <DisposeBar alerts={group.alerts} className="mb-1.5 ml-12 mr-3" />

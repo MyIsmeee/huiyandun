@@ -75,6 +75,9 @@ export const api = {
   /** 告警处置：已确认、误报、已处理；结果另经 dispositions 频道推送给所有控制台 */
   disposeAlert: (eventId: string, action: Schemas["DispositionAction"], note?: string) =>
     request<Schemas["AlertDisposition"]>("POST", `/api/alerts/${encodeURIComponent(eventId)}/disposition`, note ? { action, note } : { action }),
+  /** 删除告警：不再列出所给的告警与关联事件，原始记录保留；结果经 cleared 频道推送给所有控制台 */
+  clearAlerts: (eventIds: string[], incidentIds: string[]) =>
+    request<Schemas["AlertsCleared"]>("POST", "/api/alerts/clear", { event_ids: eventIds, incident_ids: incidentIds }),
   /** 确认处置（FR-407）：只提交关联事件 ID，受理后执行结果经 executions 频道推送 */
   confirmContainment: async (incidentId: string) => {
     await send("POST", `/api/incidents/${encodeURIComponent(incidentId)}/confirm-containment`);

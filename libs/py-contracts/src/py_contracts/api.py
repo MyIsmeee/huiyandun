@@ -757,6 +757,39 @@ class AlertDispositionRequest(ContractModel):
     """
 
 
+class IncidentId(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
+    root: str = Field(..., max_length=64)
+
+
+class AlertClearRequest(ContractModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    event_ids: list[UUID] = Field(..., max_length=500)
+    """
+    告警的 event_id
+    """
+    incident_ids: list[IncidentId] = Field(..., max_length=100)
+    """
+    关联事件的 id
+    """
+
+
+class AlertsCleared(ContractModel):
+    """
+    一次删除；控制台不再列出其中的告警与关联事件
+    """
+
+    event_ids: list[UUID]
+    incident_ids: list[str]
+    actor: str
+    """
+    删除人用户名
+    """
+    ts: AwareDatetime
+
+
 class Note(RootModel[str]):
     model_config = {"allow_inf_nan": False}
     root: str = Field(..., max_length=200)
@@ -783,9 +816,9 @@ class WsFrame(ContractModel):
     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
     alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
-    变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；system 为系统消息（如心跳）。
+    变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；cleared 为 AlertsCleared（删除告警）；system 为系统消息（如心跳）。
     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
-    各自的最新状态）与 dispositions（各告警最近一次处置），按发生先后排列（D-077）
+    各自的最新状态）、dispositions（各告警最近一次处置）与 cleared（删除记录），按发生先后排列（D-077）
 
     """
 
@@ -798,6 +831,7 @@ class WsFrame(ContractModel):
         "ai",
         "site",
         "dispositions",
+        "cleared",
         "system",
     ]
     data: dict[str, Any]

@@ -89,6 +89,7 @@ async def push(websocket: WebSocket) -> None:
     state = websocket.app.state
     for frame in [
         *state.devices.snapshot(),
+        *state.cleared.snapshot(),  # 先于告警：控制台据此过滤补推的告警与关联事件
         *state.history.snapshot(),
         *state.dispositions.snapshot(),
     ]:

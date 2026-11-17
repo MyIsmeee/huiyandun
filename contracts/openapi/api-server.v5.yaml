@@ -444,6 +444,29 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/alerts/clear:
+    post:
+      operationId: clearAlerts
+      description: |
+        删除告警：把所列告警与关联事件从所有控制台的告警栏移除，写审计日志，经 WS cleared 频道推送。只是不再列出：
+        原始事件、存证、处置执行与审计记录照常保留，服务重启后从审计日志读回近 24 小时的删除记录
+      x-min-role: operator
+      parameters:
+        - { $ref: "#/components/parameters/RequestId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AlertClearRequest" }
+      responses:
+        "200":
+          description: 删除记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertsCleared" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /api/alerts/{id}/clip:
     get:
       operationId: getAlertClip
@@ -1485,6 +1508,22 @@ components:
       properties:
         action: { $ref: "#/components/schemas/DispositionAction" }
         note: { type: string, maxLength: 200, description: 处置说明，可选 }
+    AlertClearRequest:
+      type: object
+      additionalProperties: false
+      required: [event_ids, incident_ids]
+      properties:
+        event_ids: { type: array, maxItems: 500, items: { type: string, format: uuid }, description: 告警的 event_id }
+        incident_ids: { type: array, maxItems: 100, items: { type: string, maxLength: 64 }, description: 关联事件的 id }
+    AlertsCleared:
+      type: object
+      description: 一次删除；控制台不再列出其中的告警与关联事件
+      required: [event_ids, incident_ids, actor, ts]
+      properties:
+        event_ids: { type: array, items: { type: string, format: uuid } }
+        incident_ids: { type: array, items: { type: string } }
+        actor: { type: string, description: 删除人用户名 }
+        ts: { type: string, format: date-time }
     AlertDisposition:
       type: object
       description: 告警的处置记录；同一告警以最近一次为准
@@ -1502,12 +1541,12 @@ components:
         tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
         alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
         （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
-        变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；system 为系统消息（如心跳）。
+        变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；cleared 为 AlertsCleared（删除告警）；system 为系统消息（如心跳）。
         连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
-        各自的最新状态）与 dispositions（各告警最近一次处置），按发生先后排列（D-077）
+        各自的最新状态）、dispositions（各告警最近一次处置）与 cleared（删除记录），按发生先后排列（D-077）
       required: [channel, data]
       properties:
-        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, site, dispositions, system] }
+        channel: { enum: [tracks, devices, alerts, incidents, executions, ai, site, dispositions, cleared, system] }
         data: { type: object }
     AiInvestigation: { $ref: "../events/hyd.ai.investigation.v1.schema.json" }
     Investigation:

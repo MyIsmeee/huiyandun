@@ -342,6 +342,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/alerts/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description 删除告警：把所列告警与关联事件从所有控制台的告警栏移除，写审计日志，经 WS cleared 频道推送。只是不再列出：
+         *     原始事件、存证、处置执行与审计记录照常保留，服务重启后从审计日志读回近 24 小时的删除记录
+         */
+        post: operations["clearAlerts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/alerts/{id}/clip": {
         parameters: {
             query?: never;
@@ -1158,6 +1178,21 @@ export interface components {
             /** @description 处置说明，可选 */
             note?: string;
         };
+        AlertClearRequest: {
+            /** @description 告警的 event_id */
+            event_ids: string[];
+            /** @description 关联事件的 id */
+            incident_ids: string[];
+        };
+        /** @description 一次删除；控制台不再列出其中的告警与关联事件 */
+        AlertsCleared: {
+            event_ids: string[];
+            incident_ids: string[];
+            /** @description 删除人用户名 */
+            actor: string;
+            /** Format: date-time */
+            ts: string;
+        };
         /** @description 告警的处置记录；同一告警以最近一次为准 */
         AlertDisposition: {
             /** Format: uuid */
@@ -1174,13 +1209,13 @@ export interface components {
          *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
          *     alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
          *     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
-         *     变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；system 为系统消息（如心跳）。
+         *     变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；cleared 为 AlertsCleared（删除告警）；system 为系统消息（如心跳）。
          *     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
-         *     各自的最新状态）与 dispositions（各告警最近一次处置），按发生先后排列（D-077）
+         *     各自的最新状态）、dispositions（各告警最近一次处置）与 cleared（删除记录），按发生先后排列（D-077）
          */
         WsFrame: {
             /** @enum {unknown} */
-            channel: "tracks" | "devices" | "alerts" | "incidents" | "executions" | "ai" | "site" | "dispositions" | "system";
+            channel: "tracks" | "devices" | "alerts" | "incidents" | "executions" | "ai" | "site" | "dispositions" | "cleared" | "system";
             data: Record<string, never>;
         };
         AiInvestigation: components["schemas"]["hyd.ai.investigation.v1.schema"];
@@ -2483,6 +2518,36 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    clearAlerts: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertClearRequest"];
+            };
+        };
+        responses: {
+            /** @description 删除记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertsCleared"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getAlertClip: {

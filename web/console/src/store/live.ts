@@ -12,6 +12,7 @@ export type Execution = Schemas["playbook_execution.schema"];
 type AiFrame = Schemas["AiInvestigation"];
 export type Site = Schemas["Site"];
 export type Disposition = Schemas["AlertDisposition"];
+type Cleared = Schemas["AlertsCleared"];
 /** 告警列表的单条告警：网络告警、行为事件或轨迹规则事件（D-077） */
 export type Alert = SecurityAlert | Behavior | RuleEvent;
 /** 物理告警（行为事件与轨迹规则事件）带 camera_id，网络告警带 device_id */
@@ -97,6 +98,8 @@ interface LiveState {
   aiSeq: Record<string, number>;
   /** 调查流已收到判定或失败帧的关联事件：时间线的"AI 判定"节点只在调查开始与结束时重读 */
   aiDone: Record<string, true>;
+  /** 已删除（不再列出）的告警 event_id 与关联事件 id：之后补推或重复转发的同一条也不再列出 */
+  cleared: { alerts: Record<string, true>; incidents: Record<string, true> };
 }
 
 /** 场景中的实时实体，全部来自 WS 推送（UP-1）；时刻一律取收到推送的本地时刻 */
@@ -113,6 +116,7 @@ export const useLive = create<LiveState>()(() => ({
   executionTimes: {},
   aiSeq: {},
   aiDone: {},
+  cleared: { alerts: {}, incidents: {} },
 }));
 
 /** keep 为假时去掉 id 对应的项 */
@@ -144,7 +148,7 @@ export function receive(frame: Frame, now: number): void {
   if (frame.channel === "alerts" && !lifecycle) {
     const alert = data as Alert;
     useLive.setState((s) => ({
-      alerts: s.alerts.some((a) => a.event_id === alert.event_id)
+      alerts: s.alerts.some((a) => a.event_id === alert.event_id) || s.cleared.alerts[alert.event_id]
         ? s.alerts
         : [alert, ...s.alerts].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, MAX_ALERTS),
     }));
@@ -158,10 +162,23 @@ export function receive(frame: Frame, now: number): void {
     const disposition = data as Disposition;
     useLive.setState((s) => ({ dispositions: { ...s.dispositions, [disposition.event_id]: disposition } }));
   }
+  if (frame.channel === "cleared") {
+    const { event_ids, incident_ids } = data as Cleared;
+    const alerts = new Set(event_ids);
+    const incidents = new Set(incident_ids);
+    useLive.setState((s) => ({
+      alerts: s.alerts.filter((a) => !alerts.has(a.event_id)),
+      incidents: s.incidents.filter((i) => !incidents.has(i.id)),
+      cleared: {
+        alerts: { ...s.cleared.alerts, ...Object.fromEntries(event_ids.map((id) => [id, true as const])) },
+        incidents: { ...s.cleared.incidents, ...Object.fromEntries(incident_ids.map((id) => [id, true as const])) },
+      },
+    }));
+  }
   if (frame.channel === "incidents") {
     const incident = data as Incident;
     useLive.setState((s) => ({
-      incidents: [incident, ...s.incidents.filter((i) => i.id !== incident.id)]
+      incidents: (s.cleared.incidents[incident.id] ? s.incidents : [incident, ...s.incidents.filter((i) => i.id !== incident.id)])
         .sort((a, b) => b.created_at.localeCompare(a.created_at))
         .slice(0, MAX_INCIDENTS),
     }));
