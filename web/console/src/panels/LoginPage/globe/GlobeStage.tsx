@@ -9,17 +9,21 @@ import {
   easeInOutCubic,
   easeOutCubic,
   easeOutQuart,
+  formatLocation,
   forwardAngle,
   fovForRadius,
   hermite,
   lerp,
   localZoneLongitude,
+  nearestAngle,
   radiusForFov,
   REST_DISTANCE,
   restLayout,
   smoothstep,
   span,
   subsolarPoint,
+  type ZoneTable,
+  zoneLocation,
 } from "./motion";
 import {
   cloudShellFragment,
@@ -63,9 +67,7 @@ const THEMES = {
     halo: "#60a5fa",
     haloIntensity: 0.55,
     haloBlending: THREE.NormalBlending,
-    ring: "#52525b",
     meridian: "#0284c7",
-    satellite: "#0369a1",
     scanIdle: "#8ab8ff",
     scanDive: "#2563eb",
     diveTint: "#e8eef8",
@@ -75,9 +77,7 @@ const THEMES = {
     halo: "#8bb8ff",
     haloIntensity: 0.9,
     haloBlending: THREE.AdditiveBlending,
-    ring: "#a1a1aa",
     meridian: "#7dd3fc",
-    satellite: "#e0f2fe",
     scanIdle: "#8ab8ff",
     scanDive: "#60a5fa",
     diveTint: "#0b1220",
@@ -110,9 +110,14 @@ function createTextureLoader() {
   return (url: string) => loader.loadAsync(url);
 }
 
+/**
+ * color：彩色贴图（sRGB）；否则为单通道数据（云量、水体遮罩、高度），着色器只读 .r：按 R8 上传，
+ * 显存是 RGBA 的四分之一（4K 含 mipmap 约 11 MB 而非 43 MB）
+ */
 async function loadTexture(load: (url: string) => Promise<THREE.Texture>, url: string, color: boolean, anisotropy: number) {
   const texture = await load(url);
   texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  if (!color) texture.format = THREE.RedFormat;
   texture.anisotropy = anisotropy;
   texture.wrapS = THREE.RepeatWrapping;
   return texture;
@@ -263,6 +268,7 @@ export const GlobeStage = memo(function GlobeStage({
       coneEdge: q<SVGPathElement>("cone-edge"),
       reticle: q<SVGGElement>("reticle"),
       caption: q<HTMLDivElement>("caption"),
+      coords: q<HTMLSpanElement>("coords"),
 
     };
 
@@ -364,38 +370,23 @@ export const GlobeStage = memo(function GlobeStage({
     const meridianMaterial = new THREE.LineBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
     globe.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(meridianPoints), meridianMaterial));
 
-    // 轨道环与一颗绕行的卫星
-    const orbit = new THREE.Group();
-    orbit.rotation.set(1.2, 0.18, -0.42);
-    const ringPoints: THREE.Vector3[] = [];
-    for (let i = 0; i <= 192; i++) {
-      const a = (i / 192) * Math.PI * 2;
-      ringPoints.push(new THREE.Vector3(Math.cos(a) * 1.34, Math.sin(a) * 1.34, 0));
-    }
-    const ringMaterial = new THREE.LineBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
-    orbit.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ringPoints), ringMaterial));
-    const satelliteMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
-    const satellite = new THREE.Mesh(new THREE.SphereGeometry(0.016, 16, 16), satelliteMaterial);
-    orbit.add(satellite);
-    tilt.add(orbit);
-
     const scanIdle = new THREE.Color();
     const scanDive = new THREE.Color();
+    // 登录页背景固定为深色太空：辉光、经线等始终用深色方案；只有俯冲末段的网格底色与云层随控制台主题，
+    // 末段淡出时与下方控制台的底色衔接
     const applyTheme = (name: ThemeName) => {
-      const t = THEMES[name];
-      // 浅色底上加法混合的辉光会被吃掉，改用普通混合的深一点的蓝
+      const t = THEMES.night;
+      const end = THEMES[name];
       haloUniforms.uColor.value.set(t.halo);
       haloUniforms.uIntensity.value = t.haloIntensity;
       haloMaterial.blending = t.haloBlending;
       haloMaterial.needsUpdate = true;
-      ringMaterial.color.set(t.ring);
       meridianMaterial.color.set(t.meridian);
-      satelliteMaterial.color.set(t.satellite);
       scanIdle.set(t.scanIdle);
-      scanDive.set(t.scanDive);
-      earthUniforms.uDiveTint.value.set(t.diveTint);
-      cloudUniforms.uTint.value.set(t.cloudTint);
-      securityCamera.setTheme(name === "night");
+      scanDive.set(end.scanDive);
+      earthUniforms.uDiveTint.value.set(end.diveTint);
+      cloudUniforms.uTint.value.set(end.cloudTint);
+      securityCamera.setTheme(true);
       requestRender();
     };
     applyThemeRef.current = applyTheme;
@@ -477,6 +468,25 @@ export const GlobeStage = memo(function GlobeStage({
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
 
+    // ── 本地位置：按浏览器时区取代表城市，俯冲飞向这里（坐标表单独分包，不拖慢登录页首屏） ──
+    let home: { lat: number; lng: number } | null = null;
+    const timeZone = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+      } catch {
+        return undefined;
+      }
+    })();
+    import("./zones.json")
+      .then(({ default: table }) => {
+        if (disposed) return;
+        home = zoneLocation(timeZone, table as ZoneTable);
+        parts.coords.textContent = home ? formatLocation(home) : "";
+      })
+      .catch(() => {
+        /* 坐标表加载失败时照旧扎向覆盖区当时所在的地块 */
+      });
+
     // ── 俯冲状态 ──
     interface Dive {
       t: number;
@@ -487,6 +497,8 @@ export const GlobeStage = memo(function GlobeStage({
       tilt0: number;
       tiltT: number;
       target: THREE.Vector3; // 覆盖区中心在地球本地坐标中的位置
+      /** 起跳时覆盖区的世界方向：飞向本地时覆盖区由此平滑移到目标地块；null 为就地锁定 */
+      scan0: THREE.Vector3 | null;
       cx0: number;
       cy0: number;
       fov0: number;
@@ -514,7 +526,10 @@ export const GlobeStage = memo(function GlobeStage({
       dive: () => {
         if (dive || !ready) return;
         globe.updateWorldMatrix(true, false);
-        const target = globe.worldToLocal(earthUniforms.uScanDir.value.clone()).normalize();
+        // 时区查得到时飞向本地，否则锁定覆盖区当时所在的地块
+        const target = home
+          ? toVector(home.lat, home.lng)
+          : globe.worldToLocal(earthUniforms.uScanDir.value.clone()).normalize();
         const lat = Math.asin(THREE.MathUtils.clamp(target.y, -1, 1));
         const lng = Math.atan2(target.x, target.z);
         const yaw0 = globe.rotation.y;
@@ -522,12 +537,14 @@ export const GlobeStage = memo(function GlobeStage({
           t: 0,
           speed: 1,
           yaw0,
-          yawT: forwardAngle(yaw0, -lng),
+          // 就地锁定的地块总在正面偏左，沿自转方向转过去即可；飞向本地按最近的方向转
+          yawT: home ? nearestAngle(yaw0, -lng) : forwardAngle(yaw0, -lng),
           // 接上原有转速：Hermite 的速度以归一化时间计
           yawV: SPIN * motion * (DIVE.align[1] - DIVE.align[0]),
           tilt0: tilt.rotation.x,
           tiltT: lat,
           target,
+          scan0: home ? earthUniforms.uScanDir.value.clone() : null,
           cx0: current.cx,
           cy0: current.cy,
           fov0: current.fov,
@@ -545,6 +562,7 @@ export const GlobeStage = memo(function GlobeStage({
     const sunLocal = new THREE.Vector3();
     const globeQuaternion = new THREE.Quaternion();
     const scratch = new THREE.Vector3();
+    const blend = new THREE.Vector3();
     const t1 = new THREE.Vector3();
     const t2 = new THREE.Vector3();
     type Point = { x: number; y: number };
@@ -633,6 +651,13 @@ export const GlobeStage = memo(function GlobeStage({
       globe.updateWorldMatrix(true, false);
       if (dive) {
         scanDir.copy(dive.target).applyQuaternion(globe.getWorldQuaternion(globeQuaternion)).normalize();
+        // 飞向本地：覆盖区自起跳处滑向目标地块，地球居中放大结束时到位。起跳时目标可能在背面（与起点近乎相反），
+        // 此时权重为 0，取起点；等目标随地球转到正面一侧权重才升上来，插值不会经过球心
+        const w = easeInOutCubic(span(dive.t, DIVE.center[0], DIVE.center[1]));
+        if (dive.scan0 && w < 1) {
+          blend.copy(dive.scan0).lerp(scanDir, w);
+          if (blend.lengthSq() > 1e-6) scanDir.copy(blend).normalize();
+        }
       } else {
         scanDir
           .copy(SCAN_REST)
@@ -666,10 +691,6 @@ export const GlobeStage = memo(function GlobeStage({
       cloudUniforms.uOpacity.value = shell;
       cloudShell.visible = shell > 0.001;
       meridianMaterial.opacity = (0.14 + 0.12 * (0.5 + 0.5 * Math.sin(time * 2)) * motion) * decor;
-      ringMaterial.opacity = 0.16 * decor;
-      satelliteMaterial.opacity = decor;
-      const angle = time * 0.3 * motion + 0.8;
-      satellite.position.set(Math.cos(angle) * 1.34, Math.sin(angle) * 1.34, 0);
 
       renderer.render(scene, camera);
 
@@ -889,10 +910,12 @@ export const GlobeStage = memo(function GlobeStage({
       </svg>
       <div
         data-part="caption"
-        className="absolute top-0 left-0 font-mono text-meta tracking-[0.3em] whitespace-nowrap text-primary"
+        className="absolute top-0 left-0 flex flex-col items-center gap-1 font-mono text-meta tracking-[0.3em] whitespace-nowrap text-primary"
         style={{ opacity: 0 }}
       >
-        锁定区域 · 接入控制台
+        <span>锁定区域 · 接入控制台</span>
+        {/* 按时区定位到的代表城市坐标；查不到时为空 */}
+        <span data-part="coords" className="opacity-70" />
       </div>
     </div>
   );

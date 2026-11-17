@@ -7,6 +7,7 @@ import {
   fovForRadius,
   hermite,
   CARD_WIDTH,
+  cardRightGap,
   radiusForFov,
   REST_DISTANCE,
   restLayout,
@@ -56,7 +57,7 @@ describe("登录页地球 · 俯冲时间线", () => {
 });
 
 describe("登录页地球 · 布局", () => {
-  it("宽屏时地球与卡片成组居中：卡片压在地球右侧，覆盖弧不出屏、不压住上下文案", () => {
+  it("宽屏时卡片按 Voyage 靠右，地球在卡片左侧居中，覆盖弧与卡片留出间距", () => {
     for (const [w, h] of [
       [1024, 700],
       [1440, 900],
@@ -65,15 +66,13 @@ describe("登录页地球 · 布局", () => {
     ] as const) {
       const { cx, cy, radius, split, cardLeft } = restLayout(w, h);
       expect(split).toBe(true);
-      expect(cardLeft).toBeGreaterThan(cx + radius * 0.9);
-      expect(cardLeft).toBeLessThan(cx + radius * 1.2);
-      expect(cardLeft + CARD_WIDTH).toBeLessThanOrEqual(w - 48);
-      expect(cx - radius * 1.22).toBeGreaterThanOrEqual(100);
-      // 左右留白相等
-      expect(Math.abs(cx - radius * 1.22 - (w - cardLeft - CARD_WIDTH))).toBeLessThanOrEqual(1);
+      expect(cardLeft + CARD_WIDTH).toBeCloseTo(w - cardRightGap(w));
+      expect(cx + radius * 1.22).toBeLessThanOrEqual(cardLeft - 47);
       expect(cy - radius * 1.22).toBeGreaterThanOrEqual(119);
       expect(cy + radius * 1.22).toBeLessThanOrEqual(h - 175);
     }
+    expect(cardRightGap(1440)).toBeCloseTo(48 + 1440 * 0.08);
+    expect(cardRightGap(1100)).toBeCloseTo(48 + 1100 * 0.04);
   });
 
   it("窄屏居中", () => {

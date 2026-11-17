@@ -23,6 +23,28 @@ export function localZoneLongitude(date: Date): number {
   return (-date.getTimezoneOffset() / 60) * 15 * DEG;
 }
 
+/** 时区坐标表（zones.json，tools/dev/tz_coordinates.py 由 tzdata 生成）：代表城市的纬度、经度（度）与别名 */
+export interface ZoneTable {
+  zones: Record<string, number[]>;
+  links: Record<string, string>;
+}
+
+/**
+ * 浏览器时区的代表城市（弧度），俯冲飞向这里。时区只到城市一级：同一时区的地方都落在代表城市（全中国为上海）；
+ * 查不到（UTC、Etc/GMT+8 等不对应地点的时区）时返回 null
+ */
+export function zoneLocation(timeZone: string | undefined, table: ZoneTable): { lat: number; lng: number } | null {
+  if (!timeZone) return null;
+  const [lat, lng] = table.zones[table.links[timeZone] ?? timeZone] ?? [];
+  return lat === undefined || lng === undefined ? null : { lat: lat * DEG, lng: lng * DEG };
+}
+
+/** 纬度、经度（弧度）→ 锁定框下的坐标文字，如 31.23°N 121.47°E */
+export function formatLocation({ lat, lng }: { lat: number; lng: number }): string {
+  const part = (rad: number, pos: string, neg: string) => `${Math.abs(rad / DEG).toFixed(2)}°${rad >= 0 ? pos : neg}`;
+  return `${part(lat, "N", "S")} ${part(lng, "E", "W")}`;
+}
+
 export const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 /** t 在 [a, b] 内的归一化进度 */
@@ -49,6 +71,15 @@ export function hermite(p0: number, v0: number, p1: number, s: number): number {
 /** 与 target 同余（模 2π）、且比 from 至少大 minTurn 的最近角度：沿自转方向继续转过去，不倒转 */
 export function forwardAngle(from: number, target: number, minTurn = 0): number {
   return target + Math.ceil((from + minTurn - target) / TAU) * TAU;
+}
+
+/**
+ * 与 target 同余（模 2π）、离 from 最近的角度（至多转半圈）。飞向本地时目标可能刚转过正面，
+ * 沿自转方向追过去要转近一整圈，扫过大半个地球；按最近的方向转
+ */
+export function nearestAngle(from: number, target: number): number {
+  const d = (((target - from) % TAU) + TAU) % TAU;
+  return from + (d > Math.PI ? d - TAU : d);
 }
 
 /**
@@ -92,15 +123,20 @@ export function diveAltitude(t: number, h0 = REST_DISTANCE - 1): number {
 }
 
 export const SPLIT_MIN_WIDTH = 1024;
-/** 登录卡片宽度，与 LoginPage 的 w-[420px] 一致（取自 Voyage 后台登录卡片） */
+/** 登录卡片宽度，与 LoginPage 的 max-w-[420px] 一致（取自 Voyage 后台登录卡片） */
 export const CARD_WIDTH = 420;
-/** 左上角品牌与摄像头、左下角标语各自占用的高度 */
+/** 左上角品牌与摄像头、底部标语各自占用的高度 */
 const TOP_RESERVE = 120;
 const BOTTOM_RESERVE = 176;
 /** 覆盖弧外缘到球心的距离（球半径为 1） */
 const ARC_REACH = 1.22;
-/** 卡片左缘到球心的距离：压在地球右侧辉光与轨道环上，毛玻璃底下透出地球 */
-const CARD_OFFSET = 1.02;
+
+/**
+ * 宽屏时卡片右缘到视口右缘的距离：页面左右内边距 48 px，再加 Voyage 登录页的 lg:pr-[4vw] xl:pr-[8vw]
+ */
+export function cardRightGap(width: number): number {
+  return 48 + width * (width >= 1280 ? 0.08 : 0.04);
+}
 
 export interface RestLayout {
   cx: number;
@@ -112,16 +148,16 @@ export interface RestLayout {
 }
 
 /**
- * 静止时地球的位置与半径（像素）。宽屏时「地球 + 卡片」作为一组水平居中，卡片左缘压在地球右侧；
- * 窄屏时地球居中垫在表单下方
+ * 静止时地球的位置与半径（像素）。宽屏时卡片按 Voyage 靠右，地球在卡片左侧的区域内居中，
+ * 覆盖弧与卡片留出间距；窄屏时地球居中垫在表单下方
  */
 export function restLayout(width: number, height: number): RestLayout {
   if (width >= SPLIT_MIN_WIDTH) {
+    const cardLeft = width - cardRightGap(width) - CARD_WIDTH;
     const area = Math.max(240, height - TOP_RESERVE - BOTTOM_RESERVE);
-    const span = ARC_REACH + CARD_OFFSET; // 左侧覆盖弧外缘到卡片左缘，以半径计
-    const radius = Math.max(120, Math.min(area / 2 / ARC_REACH, (width - CARD_WIDTH - 240) / span));
-    const cardLeft = Math.round((width + span * radius - CARD_WIDTH) / 2);
-    return { cx: cardLeft - CARD_OFFSET * radius, cy: TOP_RESERVE + area / 2, radius, split: true, cardLeft };
+    const cx = cardLeft / 2;
+    const radius = Math.max(120, Math.min(area / 2 / ARC_REACH, (cardLeft - cx - 48) / ARC_REACH));
+    return { cx, cy: TOP_RESERVE + area / 2, radius, split: true, cardLeft };
   }
   return { cx: width / 2, cy: height / 2, radius: Math.min(width, height) * 0.4, split: false, cardLeft: 0 };
 }
