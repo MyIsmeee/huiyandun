@@ -245,6 +245,41 @@ class SuggestedPitchDeg(RootModel[float]):
     """
 
 
+class Geometry(ContractModel):
+    """
+    1.1 起。单目几何模型（MoGe-2）从画面拟合地面得到的安装几何，不依赖行人；近几次估计的中位数。未配置模型或看不到足够地面时为 null
+    """
+
+    height_m: float = Field(..., gt=0.0)
+    """
+    离地高度（米）
+    """
+    pitch_deg: float = Field(..., ge=-90.0, le=90.0)
+    """
+    俯角（度，向下为负）
+    """
+    roll_deg: float = Field(..., ge=-90.0, le=90.0)
+    """
+    侧倾（度）；地面映射不含侧倾，只用于提示
+    """
+    hfov_deg: float = Field(..., gt=0.0, lt=180.0)
+    """
+    水平视角（度）
+    """
+    floor_width_m: float = Field(..., ge=0.0)
+    """
+    画面中可见地面的横向范围（米）
+    """
+    floor_depth_m: float = Field(..., ge=0.0)
+    """
+    画面中可见地面的纵深范围（米）
+    """
+    scale_ref: Literal["model", "desk"]
+    """
+    尺度来源：model 为模型估计；desk 为按画面中桌面的标准高度校正
+    """
+
+
 class PoseCheck(ContractModel):
     """
     安装参数自检结果（D-102 估算映射的兜底检查）：由画面中站立行人推算安装高度与俯角，只对按安装参数估算地面映射的摄像头给出
@@ -279,6 +314,7 @@ class PoseCheck(ContractModel):
     """
     给值守人员看的白话说明
     """
+    geometry: Geometry | None = None
 
 
 class Username(RootModel[str]):
@@ -871,10 +907,13 @@ class VisionBehaviorV1(EventBase):
 
     camera_id: str
     track_id: int
-    behavior: Literal["fall", "climb"]
+    behavior: Literal["fall", "climb", "still", "fight"]
+    """
+    1.2 起增加 still（长时间静止：未倒地的人原地不动）与 fight（疑似打架：两人伸手可及、手腕快速运动且整体未移动）
+    """
     level: Literal["suspected", "confirmed"] | None = "confirmed"
     """
-    1.1 起。suspected 为疑似跌倒（倒地满 2 s），只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认（倒地且基本不动满 8 s），进入物理告警。攀爬只有 confirmed；1.0 的事件没有此字段，按 confirmed
+    1.1 起。suspected 为疑似，只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认，进入物理告警。跌倒：倒地满 2 s 为疑似，倒地且基本不动满 8 s 确认。长时间静止：原地不动满 120 s 为疑似，满 300 s 确认。攀爬只有 confirmed；打架只有 suspected（骨骼几何的启发式判定）。1.0 的事件没有此字段，按 confirmed
     """
     confidence_avg: float = Field(..., ge=0.0, le=1.0)
     duration_s: float = Field(..., ge=0.0)

@@ -43,9 +43,14 @@ def _push(hub: Hub, device: Device | None) -> None:
 
 
 async def start(
-    bus: Bus, hub: Hub, devices: Devices, pose_checks: PoseChecks | None = None
+    bus: Bus,
+    hub: Hub,
+    devices: Devices,
+    pose_checks: PoseChecks | None = None,
+    on_geometry: Callable[[VisionPoseCheckV1], Awaitable[None]] | None = None,
 ) -> None:
-    """核心订阅只收实时事件；安装参数自检只记下每路最新一条，随摄像头列表给出。"""
+    """核心订阅只收实时事件；安装参数自检只记下每路最新一条，随摄像头列表给出；
+    带单目几何估计的自检交给 on_geometry（自动标定写回，auto_pose.py）。"""
 
     async def on_track(event: VisionTrackV1) -> None:
         hub.broadcast(_frame("tracks", event))
@@ -72,6 +77,11 @@ async def start(
 
         async def on_pose_check(event: VisionPoseCheckV1) -> None:
             pose_checks.on_check(event)
+            if on_geometry is not None and event.geometry is not None:
+                try:
+                    await on_geometry(event)
+                except Exception:
+                    log.exception("relay.auto_pose_failed", extra={"camera_id": event.camera_id})
 
         await bus.subscribe("hyd.vision.pose_check.v1", VisionPoseCheckV1, on_pose_check)
     await bus.subscribe("hyd.vision.behavior.v1", VisionBehaviorV1, on_behavior)

@@ -866,6 +866,70 @@ def test_pose_check_listed_until_pose_changed(client: TestClient) -> None:
     assert listed[camera_id]["pose_check"] is None
 
 
+def geometry_check(camera_id: str, **geometry: Any) -> VisionPoseCheckV1:
+    return VisionPoseCheckV1.model_validate({
+        "schema_version": "1.1.0", "event_id": str(uuid.uuid4()), "ts": datetime.now(UTC).isoformat(),
+        "camera_id": camera_id, "status": "insufficient", "samples": 0, "person_height_m": None,
+        "speed_p95_mps": None, "suggested_height_m": None, "suggested_pitch_deg": None,
+        "reasons": ["站立行人样本 0 个"],
+        "geometry": {"height_m": 1.81, "pitch_deg": -10.1, "roll_deg": -0.6, "hfov_deg": 74.7,
+                     "floor_width_m": 4.7, "floor_depth_m": 2.7, "scale_ref": "desk"} | geometry,
+    })  # fmt: skip
+
+
+def test_auto_calibration_writes_back_estimated_pose(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig]
+) -> None:
+    """未标定的摄像头：画面几何估计自动写回高度、俯角、视角，不动平面位置与朝向；写审计；
+    同一台短时间内不重复改；已标定的不改。"""
+    from api_server.auto_pose import ACTOR, AutoPose
+
+    app = cast(Any, client.app)
+    run = cast(Any, client).portal.call  # 应用的数据库连接绑定在测试客户端的事件循环上
+    camera_id = client.post("/api/cameras", json=GATE, headers=headers()).json()["id"]
+    auto = AutoPose(app)
+    run(auto.on_check, geometry_check(camera_id))
+
+    pose = stored(db[1], camera_id)["pose"]
+    assert pose == POSE | {"height_m": 1.81, "pitch_deg": -10.1, "hfov_deg": 74.7}
+    (entry,) = [a for a in audits(db[1], "camera.pose_auto") if a["target"] == camera_id]
+    assert entry["actor"] == ACTOR and entry["before"] == {
+        "height_m": 3,
+        "pitch_deg": -30,
+        "hfov_deg": 90,
+    }
+
+    run(auto.on_check, geometry_check(camera_id, height_m=2.5))  # 刚改过：暂不再改
+    assert stored(db[1], camera_id)["pose"]["height_m"] == 1.81
+
+    fresh = AutoPose(app)
+    run(fresh.on_check, geometry_check(camera_id, height_m=1.85))  # 相差不到 0.15 m：不改
+    assert stored(db[1], camera_id)["pose"]["height_m"] == 1.81
+
+    calibration = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]]
+
+    async def calibrate() -> None:
+        async with transaction(db[1]) as conn:
+            await conn.execute(
+                update(cameras.cameras)
+                .where(cameras.cameras.c.id == camera_id)
+                .values(calibration=calibration)
+            )
+
+    asyncio.run(calibrate())
+    run(AutoPose(app).on_check, geometry_check(camera_id, height_m=2.5))
+    assert stored(db[1], camera_id)["pose"]["height_m"] == 1.81  # 已标定：以标定为准
+
+
+def test_auto_calibration_proposal_rejects_out_of_range() -> None:
+    from api_server.auto_pose import proposal
+
+    geometry = {"height_m": 1.8, "pitch_deg": -10.0, "hfov_deg": 75.0}
+    assert proposal(POSE, geometry) == geometry
+    assert proposal(POSE, geometry | {"pitch_deg": 3.0}) is None  # 朝上：超出可填范围
+    assert proposal(POSE | geometry, geometry) is None
+
+
 # 放在文件末尾：审计日志在测试间不清空，前面的用例按条数断言
 def test_rules_saved_with_defaults_and_sent_in_registry(client: TestClient) -> None:
     """轨迹规则随摄像头保存、补齐默认值，并随登记表下发给 vision-engine。"""

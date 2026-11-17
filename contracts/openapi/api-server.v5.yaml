@@ -169,6 +169,22 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/scene/areas/{id}/auto:
+    get:
+      operationId: getSceneAreaAuto
+      description: |
+        场景自动识别的最近结果：api-server 后台每 10 分钟对每个区域识别一次（只缓存在内存中）。区域没有手工搭建的
+        物体时，态势页按它显示场景。尚未识别过时 frames 为空
+      x-min-role: viewer
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+      responses:
+        "200":
+          description: 识别帧与没有识别结果的摄像头及原因
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SceneAreaFrames" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/cameras:
     get:
       operationId: listCameras

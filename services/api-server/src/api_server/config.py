@@ -27,6 +27,10 @@ class DbConfig(ServiceConfig):
 
 class ApiConfig(DbConfig):
     port: int = Field(8000, ge=1, le=65535, description="HTTP 监听端口")
+    auto_calibration: bool = Field(
+        True,
+        description="自动标定：未做 4 点标定的摄像头，按视觉引擎从画面估出的安装高度、俯角、视角自动写回",
+    )
     display_utc_offset_min: int = Field(
         480,
         ge=-720,

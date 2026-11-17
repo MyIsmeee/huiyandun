@@ -41,6 +41,11 @@ class VisionConfig(ServiceConfig):
         description="DINOv2 ONNX 模型文件的本地路径，判定画面重放（REUSE-23、FR-302）；"
         "未配置时只做冻结判定",
     )
+    geometry_model_file: FilePath | None = Field(
+        None,
+        description="MoGe-2 ONNX 模型文件的本地路径，从画面拟合地面、建议摄像头安装几何；"
+        "未配置时安装参数自检只靠站立行人",
+    )
     gpu_mem_limit_mb: int = Field(
         2048,
         gt=0,
@@ -62,7 +67,8 @@ class DeviceError(RuntimeError):
 
 
 def model_files(config: VisionConfig) -> list[Path]:
-    """服务加载的全部模型：RTMO，以及配置了的 RF-DETR、EfficientViT-Seg、DINOv2。"""
+    """分显存的模型：RTMO，以及配置了的 RF-DETR、EfficientViT-Seg、DINOv2。"""
+    # MoGe-2 不在其中：每 10 分钟才跑一次，固定用 CPU，不分显存（pipeline.serve）
     optional = [config.vehicle_model_file, config.scene_model_file, config.integrity_model_file]
     return [config.model_file] + [f for f in optional if f]
 

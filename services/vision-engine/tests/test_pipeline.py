@@ -788,6 +788,39 @@ def test_pose_check_reported_periodically_for_estimated_mapping() -> None:
     assert camera.pose_check(100.0 + pipeline_module.POSE_CHECK_S) is not None
 
 
+def test_geometry_reported_with_pose_check_even_without_people() -> None:
+    """单目几何的建议随自检立即上报，不必等行人；取最近几次的中位数，估计失败的不计入。"""
+    from vision_engine.monocular import Geometry
+
+    camera = CameraPipeline("cam-05", None, cast(PoseDetector, FakeDetector()), pose=POSE)
+    assert camera.needs_geometry
+    assert camera.pose_check(0.0) is None  # 还没有任何画面
+    camera.add_geometry(Geometry(1.6, -15.0, 1.1, 75.2, 1.1, 1.4, 3589, "desk"), (1920, 1080))
+    first = camera.pose_check(0.0)
+    assert first is not None and first.geometry is not None  # 只有一次估计也上报
+    assert first.geometry.height_m == 1.6
+    camera = CameraPipeline("cam-05", None, cast(PoseDetector, FakeDetector()), pose=POSE)
+    for h in (1.7, 1.9, 1.8):
+        camera.add_geometry(Geometry(h, -10.0, -0.5, 74.6, 4.7, 2.7, 5000, "desk"), (1920, 1080))
+    camera.add_geometry(None, (1920, 1080))
+
+    check = camera.pose_check(0.0)
+    assert check is not None and check.status == "insufficient"
+    assert check.geometry is not None
+    assert (check.geometry.height_m, check.geometry.pitch_deg, check.geometry.hfov_deg) == (
+        1.8,
+        -10.0,
+        74.6,
+    )
+    assert check.geometry.scale_ref == "desk"
+
+
+def test_calibrated_camera_needs_no_geometry() -> None:
+    mapping = GroundMapping.from_pose(POSE, 1280, 720)
+    camera = CameraPipeline("cam-01", mapping, cast(PoseDetector, FakeDetector()), pose=POSE)
+    assert not camera.needs_geometry
+
+
 def test_pose_check_not_reported_for_calibrated_mapping() -> None:
     mapping = GroundMapping.from_pose(POSE, 1280, 720)
     camera = CameraPipeline("cam-01", mapping, cast(PoseDetector, FakeDetector()), pose=POSE)

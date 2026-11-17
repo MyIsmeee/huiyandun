@@ -582,3 +582,38 @@ def test_frames_need_admin_and_known_area(client: TestClient, password: str) -> 
     body = {"username": "viewer", "password": password}
     client.post("/api/auth/login", json=body, headers=headers())
     assert client.get("/api/scene/areas/area-01/frames").status_code == 403
+
+
+def test_auto_scene_fitted_size_covers_recognized_room() -> None:
+    """自动调整区域尺寸：识别出的墙、家具与摄像头的范围加 1 m 边距取整；没有识别结果时不调整。"""
+    from api_server.scene import AUTO_MIN_M, fitted_size
+    from py_contracts.api import SceneAreaFrames
+
+    frame = {
+        "schema_version": "1.1.0", "event_id": "00000000-0000-4000-8000-000000000001",
+        "ts": "2026-11-16T09:00:00Z", "camera_id": "cam-05", "surfaces": [], "trees": [], "markings": [],
+        "walls": [{"class": "wall", "line": [[5.95, 4.54], [1.24, 4.97]], "height_m": 2.8}],
+        "objects": [{"class": "table", "polygon": [[3, 3], [6.2, 3], [6.2, 4], [3, 4]], "height_m": 0.78}],
+    }  # fmt: skip
+    frames = SceneAreaFrames.model_validate({"frames": [frame], "unavailable": [], "stale": []})
+    assert fitted_size(frames, [(0.5, 0.5)]) == (8, 6)
+    empty = SceneAreaFrames(frames=[], unavailable=[], stale=[])
+    assert fitted_size(empty, [(0.5, 0.5)]) is None
+    tiny = frame | {
+        "walls": [],
+        "objects": [{"class": "chair", "polygon": [[1, 1], [1.5, 1], [1.5, 1.5]], "height_m": 0.9}],
+    }
+    small = SceneAreaFrames.model_validate({"frames": [tiny], "unavailable": [], "stale": []})
+    assert fitted_size(small, [(0.5, 0.5)]) == (AUTO_MIN_M, AUTO_MIN_M)
+
+
+def test_auto_scene_range_reaches_farthest_wall() -> None:
+    from api_server.scene import fitted_range
+
+    frame = {
+        "surfaces": [],
+        "objects": [],
+        "walls": [{"class": "wall", "line": [[4.5, 0.5], [4.5, 3.5]], "height_m": 2.8}],
+    }
+    assert fitted_range(frame, (0.5, 0.5)) == 5.5  # 到墙最远端 (4.5, 3.5) 为 5 m，加 0.5 m
+    assert fitted_range({"surfaces": [], "objects": [], "walls": []}, (0.5, 0.5)) is None

@@ -42,6 +42,41 @@ class SuggestedPitchDeg(RootModel[float]):
     """
 
 
+class Geometry(ContractModel):
+    """
+    1.1 起。单目几何模型（MoGe-2）从画面拟合地面得到的安装几何，不依赖行人；近几次估计的中位数。未配置模型或看不到足够地面时为 null
+    """
+
+    height_m: float = Field(..., gt=0.0)
+    """
+    离地高度（米）
+    """
+    pitch_deg: float = Field(..., ge=-90.0, le=90.0)
+    """
+    俯角（度，向下为负）
+    """
+    roll_deg: float = Field(..., ge=-90.0, le=90.0)
+    """
+    侧倾（度）；地面映射不含侧倾，只用于提示
+    """
+    hfov_deg: float = Field(..., gt=0.0, lt=180.0)
+    """
+    水平视角（度）
+    """
+    floor_width_m: float = Field(..., ge=0.0)
+    """
+    画面中可见地面的横向范围（米）
+    """
+    floor_depth_m: float = Field(..., ge=0.0)
+    """
+    画面中可见地面的纵深范围（米）
+    """
+    scale_ref: Literal["model", "desk"]
+    """
+    尺度来源：model 为模型估计；desk 为按画面中桌面的标准高度校正
+    """
+
+
 class PoseCheck(ContractModel):
     """
     安装参数自检结果（D-102 估算映射的兜底检查）：由画面中站立行人推算安装高度与俯角，只对按安装参数估算地面映射的摄像头给出
@@ -76,3 +111,4 @@ class PoseCheck(ContractModel):
     """
     给值守人员看的白话说明
     """
+    geometry: Geometry | None = None

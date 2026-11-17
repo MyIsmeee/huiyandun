@@ -71,11 +71,15 @@ from vision_engine.integrity import (
     ViewDetector,
 )
 from vision_engine.kinematics import Motion
+from vision_engine.monocular import Geometry, MonocularGeometry, combine
 from vision_engine.motion import MotionGate
 from vision_engine.pose_check import PoseChecker
 from vision_engine.rules import Observation, RuleEngine, RuleEvent
 from vision_engine.runtime import DeviceError, VisionConfig, create_session, model_files
+from vision_engine.scene import SCHEMA_VERSION as SCENE_SCHEMA_VERSION
 from vision_engine.scene import ScenePerception, Segmenter
+from vision_engine.scene3d import layout
+from vision_engine.steady import Steady
 
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 TRACK_SUBJECT = "hyd.vision.track.v1"
@@ -87,6 +91,10 @@ RULE_SUBJECT = "hyd.vision.rule.v1"
 type VisionEvent = VisionTrackV1 | VisionBehaviorV1 | VisionIntegrityV1 | VisionRuleV1
 POSE_CHECK_SUBJECT = "hyd.vision.pose_check.v1"  # 核心 NATS，不持久化：消费方只取每路最新一条
 POSE_CHECK_S = 30.0  # 安装参数自检的上报间隔
+# 单目几何自动标定：启动后等画面稳定再估一次，此后每 GEOMETRY_S 一次，取最近 GEOMETRY_KEEP 次的中位数
+GEOMETRY_FIRST_S = 20.0
+GEOMETRY_S = 600.0
+GEOMETRY_KEEP = 5
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
 # 持久化的视觉事件（architecture.md §12）。
 # 保留期取检测事件的默认值 180 天（architecture.md §10）
@@ -96,9 +104,9 @@ STREAM_MAX_AGE_S = 180 * 86400
 SCHEMA_VERSION = "1.0.0"
 INTEGRITY_SCHEMA_VERSION = "1.1.0"  # 1.1：来源与可信度（architecture.md §12）
 TRACK_SCHEMA_VERSION = "1.1.0"  # 1.1：类别、朝向、速度、画面框与骨骼（architecture.md §12）
-BEHAVIOR_SCHEMA_VERSION = "1.1.0"
-RULE_SCHEMA_VERSION = "1.0.0"  # 1.1：跌倒分疑似、确认两级（TK-160）
-POSE_CHECK_SCHEMA_VERSION = "1.0.0"
+BEHAVIOR_SCHEMA_VERSION = "1.2.0"  # 1.1：跌倒分疑似、确认两级（TK-160）；1.2：长时间静止、疑似打架
+RULE_SCHEMA_VERSION = "1.0.0"
+POSE_CHECK_SCHEMA_VERSION = "1.1.0"  # 1.1：单目几何的安装参数建议（geometry）
 TIMEOUT_MS = 5000  # 拉流的建连与读帧超时（CD-04）
 RECONNECT_S = 2.0  # 断流重连与单路循环异常后重试的间隔
 STOP_WAIT_S = 2 * TIMEOUT_MS / 1000 + 1  # 停止一路时等读帧线程退出的上限
@@ -328,6 +336,7 @@ class CameraPipeline:
         # 只有按安装参数估算的映射才自检安装参数；取到首帧（知道画面尺寸）后建立
         self._checker: PoseChecker | None = None
         self._checked_at = -math.inf
+        self._geometry: list[Geometry] = []  # 单目几何的近几次估计（monocular.py）
         self._detector = detector
         self._vehicles = vehicles  # None 时没有车辆，人员只有 RTMO 的正向检出
         self._behaviors = BehaviorDetector(climb_lines or [])
@@ -349,6 +358,7 @@ class CameraPipeline:
         )
         self._motion = Motion()
         self._footing = PersonFooting()
+        self._steady = Steady()  # 画面中不动的人锁定地面位置（steady.py）
         self._relinker = Relinker()
         self._votes: dict[int, Counter[int]] = {}  # 车辆轨迹 → 各帧检出类别的计数
         self._boxes = np.empty((0, 4))
@@ -501,7 +511,10 @@ class CameraPipeline:
             if skeleton is not None:  # 人员取站立的脚点（FR-911）
                 if located is None:
                     continue
-                x, y, uncertainty = located
+                points, scores = skeleton
+                x, y, uncertainty = self._steady.update(
+                    track_id, (bx1, by1, bx2, by2), points, scores, located, timestamp
+                )
                 heading, speed = self._motion.update(track_id, timestamp, x, y)
                 if self._checker is not None:
                     self._checker.add_speed(speed)
@@ -577,12 +590,26 @@ class CameraPipeline:
             end_reason=e.end_reason,
         )
 
+    @property
+    def needs_geometry(self) -> bool:
+        """只有按安装参数估算地面映射的摄像头需要自动标定。"""
+        return self._estimated
+
+    def add_geometry(self, geometry: Geometry | None, frame_size: tuple[int, int]) -> None:
+        """记入一次单目几何估计，并让下一次自检立即上报；还没有行人自检时按画面尺寸建立。"""
+        if geometry is not None:
+            self._geometry = [*self._geometry, geometry][-GEOMETRY_KEEP:]
+        if self._checker is None and self._pose is not None:
+            self._checker = PoseChecker(self._pose, frame_size)
+        self._checked_at = -math.inf
+
     def pose_check(self, now: float) -> VisionPoseCheckV1 | None:
         """每 POSE_CHECK_S 给出一次安装参数自检结果；已标定或尚未取到画面时为 None。"""
         if self._checker is None or now - self._checked_at < POSE_CHECK_S:
             return None
         self._checked_at = now
         result = self._checker.check()
+        geometry = combine(self._geometry, minimum=1)  # 近几次估计的滚动中位数
         return VisionPoseCheckV1(
             schema_version=POSE_CHECK_SCHEMA_VERSION,
             event_id=uuid.uuid4(),
@@ -595,6 +622,17 @@ class CameraPipeline:
             suggested_height_m=result.suggested_height_m,
             suggested_pitch_deg=result.suggested_pitch_deg,
             reasons=result.reasons,
+            geometry=None
+            if geometry is None
+            else {
+                "height_m": geometry.height_m,
+                "pitch_deg": geometry.pitch_deg,
+                "roll_deg": geometry.roll_deg,
+                "hfov_deg": geometry.hfov_deg,
+                "floor_width_m": geometry.floor_width_m,
+                "floor_depth_m": geometry.floor_depth_m,
+                "scale_ref": geometry.scale_ref,
+            },
         )
 
     def stream_lost(self, last_frame: float, now: float) -> VisionIntegrityV1 | None:
@@ -718,6 +756,30 @@ async def run_camera(
         beat()
 
 
+async def run_geometry(
+    pipeline: CameraPipeline, reader: FrameReader, monocular: MonocularGeometry, camera_id: str
+) -> None:
+    """低频估计安装几何（单目几何自动标定）；出错只记录，下个周期再试。不登记健康心跳：两次之间远长于停滞阈值。"""
+    await asyncio.sleep(GEOMETRY_FIRST_S)
+    while True:
+        latest = reader.peek()
+        if latest is not None:
+            frame = latest[1]
+            try:
+                geometry = await asyncio.to_thread(monocular.estimate, frame)
+            except Exception:
+                log.exception("vision.geometry_failed", extra={"camera_id": camera_id})
+            else:
+                height, width = frame.shape[:2]
+                pipeline.add_geometry(geometry, (width, height))
+                log.info(
+                    "vision.geometry",
+                    extra={"camera_id": camera_id}
+                    | ({} if geometry is None else geometry.__dict__),
+                )
+        await asyncio.sleep(GEOMETRY_S)
+
+
 def mapping_of(camera: dict[str, Any], frame: np.ndarray) -> GroundMapping | None:
     """按标定点拟合；不足 4 组时按安装参数与画面尺寸估算（D-102）。"""
     mapping = GroundMapping.fit(camera["calibration"])
@@ -746,10 +808,12 @@ class Cameras:
         embedder: FrameEmbedder | None,
         bus: Bus,
         health: Health,
+        monocular: MonocularGeometry | None = None,
     ) -> None:
         self._config, self._bus, self._health = config, bus, health
         self._detector, self._vehicles = detector, vehicles
         self._segmenter, self._embedder = segmenter, embedder
+        self._monocular = monocular
         self._running: dict[str, _Running] = {}
 
     async def apply(self, event: ConfigCamerasV1) -> None:
@@ -790,7 +854,12 @@ class Cameras:
                 self._health,
             )
         ]
-        self._running[camera_id] = _Running(camera, reader, [asyncio.create_task(r) for r in runs])
+        tasks = [asyncio.create_task(r) for r in runs]
+        if self._monocular is not None and detection.needs_geometry:
+            tasks.append(
+                asyncio.create_task(run_geometry(detection, reader, self._monocular, camera_id))
+            )
+        self._running[camera_id] = _Running(camera, reader, tasks)
 
     async def recognize(self, request: VisionSceneRequestV1) -> VisionSceneReplyV1:
         """对请求中各摄像头的当前画面识别一次环境，供场景初稿（D-133、FR-909）；识别不了的给出原因。"""
@@ -822,11 +891,41 @@ class Cameras:
         if running is None or latest is None or running.reader.age_s() > STREAM_LOST_S:
             return "no_frame"
         frame = latest[1]
+        if self._monocular is not None:
+            # 三维版：按点云测量，不依赖安装高度与俯角（scene3d.py）；看不到地面时退回平面投影
+            scene = await asyncio.to_thread(self._scene3d, camera_id, running.camera, frame)
+            if scene is not None:
+                return scene
         mapping = mapping_of(running.camera, frame)
         if mapping is None:
             return "unmapped"
         perception = ScenePerception(camera_id, mapping, running.camera["pose"], self._segmenter)
         return await asyncio.to_thread(perception.process, frame) or "empty"
+
+    def _scene3d(
+        self, camera_id: str, camera: dict[str, Any], frame: np.ndarray
+    ) -> VisionSceneV1 | None:
+        assert self._monocular is not None and self._segmenter is not None
+        rec = self._monocular.reconstruct(frame)
+        if rec is None:
+            log.info("vision.scene3d_no_floor", extra={"camera_id": camera_id})
+            return None
+        scene = layout(self._segmenter(frame), rec, camera["pose"])
+        log.info(
+            "vision.scene3d",
+            extra={"camera_id": camera_id} | {k: len(v) for k, v in scene.items()},
+        )
+        if not any(scene.values()):
+            return None
+        return VisionSceneV1.model_validate(
+            {
+                "schema_version": SCENE_SCHEMA_VERSION,
+                "event_id": uuid.uuid4(),
+                "ts": datetime.now(UTC),
+                "camera_id": camera_id,
+            }
+            | scene
+        )
 
     async def _stop(self, camera_id: str) -> None:
         running = self._running.pop(camera_id)
@@ -887,12 +986,22 @@ async def serve(config: VisionConfig) -> None:
         log.warning("vision.vehicles_disabled")  # 未配置 HYD_VEHICLE_MODEL_FILE
     if segmenter is None:
         log.warning("vision.scene_disabled")  # 未配置 HYD_SCENE_MODEL_FILE
+    monocular = (
+        # 低频（每 10 分钟）运行，固定用 CPU：显存上限由检测模型平分，MoGe-2 推理需数百 MiB，挤占会让检测失败
+        MonocularGeometry(
+            create_session(config.model_copy(update={"device": "cpu"}), config.geometry_model_file)
+        )
+        if config.geometry_model_file
+        else None
+    )
     if embedder is None:
         log.warning("vision.replay_disabled")  # 未配置 HYD_INTEGRITY_MODEL_FILE
+    if monocular is None:
+        log.warning("vision.geometry_disabled")  # 未配置 HYD_GEOMETRY_MODEL_FILE
     bus = await Bus.connect(config.nats_url, name="vision-engine", timeout_s=config.nats_timeout_s)
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
     health = Health(config.heartbeat_file)
-    cameras = Cameras(config, detector, vehicles, segmenter, embedder, bus, health)
+    cameras = Cameras(config, detector, vehicles, segmenter, embedder, bus, health, monocular)
     # 登记表的流由 api-server 创建；它尚未启动时重试
     while True:
         try:

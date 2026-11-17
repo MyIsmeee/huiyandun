@@ -53,3 +53,15 @@ models:
     card: cards/dinov2-small.md
     purpose: vision-engine 画面可信度，判定画面重放（REUSE-23）
     owner: MyIsmeee
+  - name: moge2-vits
+    version: moge2-vits-normal@e50ffda4+hyd.1
+    task: geometry  # 单目几何：度量点云、法向与视角；只用于估计摄像头安装几何，不检测、不区分人员
+    file: moge2_vits_normal.onnx
+    sha256: 24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2cdc02ff3a52f0
+    # MoGe 作者发布的 ONNX 导出（Hugging Face，固定到提交）；同一作者的 PyTorch 权重 Ruicheng/moge-2-vits-normal 模型卡标注 MIT
+    source: https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx/resolve/e50ffda41565591092adea54c6ac83d6212e1e23/model.onnx
+    source_sha256: 24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2cdc02ff3a52f0
+    license: MIT
+    card: cards/moge2-vits.md
+    purpose: vision-engine 摄像头自动标定：从画面拟合地面，建议安装高度、俯角与视角
+    owner: MyIsmeee

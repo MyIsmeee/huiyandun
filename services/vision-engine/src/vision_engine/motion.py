@@ -2,6 +2,9 @@
 
 运动区域与上一帧的轨迹框合并：静止的人（如跌倒后）没有帧差，仍须持续推理以维持轨迹。
 无运动且无轨迹时返回 None，跳过推理。
+
+每 FULL_EVERY 帧整帧推理一次：一直坐着不动的人一旦漏检、轨迹被删除，就既没有帧差也没有轨迹框，
+只靠门控会永远看不到他（办公室俯拍画面里实测 4 人只剩 1 人）。整帧刷新让这样的人在数秒内重新被检出。
 """
 
 import cv2
@@ -13,11 +16,13 @@ DIFF_THRESHOLD = 25  # 灰度差超过此值视为运动像素
 MIN_MOTION_RATIO = 0.002  # 运动像素少于画面的 0.2% 视为噪声
 PAD_RATIO = 0.2  # 区域向四周扩展其宽高的 20%，避免人体被裁切
 MIN_SIZE = 640  # 区域不小于模型输入，避免把小区域放大推理
+FULL_EVERY = 10  # 每 10 帧（5 FPS 下 2 s）整帧推理一次
 
 
 class MotionGate:
     def __init__(self) -> None:
         self._background: np.ndarray | None = None
+        self._since_full = 0  # 距上次整帧推理的帧数
 
     def region(self, frame: np.ndarray, boxes: np.ndarray) -> tuple[int, int, int, int] | None:
         """返回需要推理的区域 (x1, y1, x2, y2)；boxes 为上一帧的轨迹框（整帧坐标）。"""
@@ -32,9 +37,14 @@ class MotionGate:
         # 尺寸不符，同样重新记背景：否则帧差每帧抛异常，该路检测循环反复失败、不会自行恢复
         if self._background is None or self._background.shape != gray.shape:
             self._background = gray
+            self._since_full = 0
             return 0, 0, w, h
         mask = cv2.absdiff(gray, self._background) > DIFF_THRESHOLD
         cv2.accumulateWeighted(gray, self._background, ALPHA)
+        self._since_full += 1
+        if self._since_full >= FULL_EVERY:
+            self._since_full = 0
+            return 0, 0, w, h
 
         rects = [] if len(boxes) == 0 else [np.asarray(boxes, dtype=np.float64)]
         if mask.mean() >= MIN_MOTION_RATIO:

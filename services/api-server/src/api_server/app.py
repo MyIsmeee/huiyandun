@@ -37,6 +37,7 @@ from api_server import (
     video,
     ws,
 )
+from api_server.auto_pose import AutoPose
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
@@ -138,6 +139,7 @@ def create_app(config: ApiConfig) -> FastAPI:
             asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
             asyncio.create_task(app.state.investigator.run()),  # TK-116
             asyncio.create_task(app.state.cameras.run()),  # D-101
+            asyncio.create_task(app.state.auto_scenes.run(app.state)),  # 场景自动识别
             asyncio.create_task(
                 relay.follow(
                     bus,
@@ -150,7 +152,13 @@ def create_app(config: ApiConfig) -> FastAPI:
             ),
         ]
         try:
-            await relay.start(bus, app.state.hub, app.state.devices, app.state.pose_checks)
+            await relay.start(
+                bus,
+                app.state.hub,
+                app.state.devices,
+                app.state.pose_checks,
+                AutoPose(app, app.state.config.auto_calibration).on_check,
+            )
             yield
         finally:
             for task in tasks:
@@ -178,6 +186,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.hub = ws.Hub()
     app.state.devices = Devices(app.state.site.devices)
     app.state.pose_checks = PoseChecks()
+    app.state.auto_scenes = scene.AutoScenes()
     app.state.history = History()
     app.state.kpis = kpis.KpiTracker(app.state.devices, app.state.history, datetime.now(UTC))
     app.state.llm_last = None  # 最近一次模型调用的结果（llm_chain.invoke），供顶栏模型状态

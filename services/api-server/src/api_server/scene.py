@@ -6,6 +6,7 @@
 每次变更写审计（G-13），之后由 cameras.Registry 按库重建站点、经 WS site 频道推送并下发登记表（FR-906）。
 """
 
+import asyncio
 import logging
 import math
 import uuid
@@ -309,13 +310,12 @@ async def save_area(
     return area
 
 
-@router.get("/areas/{area_id}/frames", dependencies=[Depends(require("admin"))])
-async def get_frames(area_id: str, request: Request) -> SceneAreaFrames:
-    """请 vision-engine 对区域内摄像头的当前画面各识别一次（D-133），供场景页生成初稿（FR-909）；
-    只读，草稿由场景页转换。"""
-    async with request.app.state.engine.connect() as conn:
+async def recognize_area(state: Any, area_id: str) -> SceneAreaFrames | None:
+    """请 vision-engine 对区域内摄像头的当前画面各识别一次（D-133）；区域不存在时为 None。
+    识别服务不可达或应答不合契约时抛出 nats.errors.Error、TimeoutError 或 ValidationError。"""
+    async with state.engine.connect() as conn:
         if await conn.scalar(select(scene_areas.c.id).where(scene_areas.c.id == area_id)) is None:
-            raise HTTPException(404, "区域不存在")
+            return None
         query = select(cameras.c.id).where(cameras.c.area_id == area_id).order_by(cameras.c.id)
         ids = list((await conn.execute(query)).scalars())
     if not ids:
@@ -323,18 +323,191 @@ async def get_frames(area_id: str, request: Request) -> SceneAreaFrames:
     ask = VisionSceneRequestV1(
         schema_version="1.0.0", event_id=uuid.uuid4(), ts=datetime.now(UTC), camera_ids=ids
     )
-    try:
-        reply = await request.app.state.bus.request(
-            RECOGNIZE_SUBJECT, ask, VisionSceneReplyV1, RECOGNIZE_TIMEOUT_S
-        )
-    except (nats.errors.Error, TimeoutError, ValidationError) as e:  # 含不合契约的应答
-        log.warning("scene.recognize_failed", extra={"area_id": area_id, "error": repr(e)})
-        raise HTTPException(503, "识别服务未响应，请稍后重试") from e
+    reply = await state.bus.request(RECOGNIZE_SUBJECT, ask, VisionSceneReplyV1, RECOGNIZE_TIMEOUT_S)
     found = reply.model_dump(mode="json")
     stale = [u["camera_id"] for u in found["unavailable"]]
     return SceneAreaFrames.model_validate(
         {"frames": found["frames"], "unavailable": found["unavailable"], "stale": stale}
     )
+
+
+@router.get("/areas/{area_id}/frames", dependencies=[Depends(require("admin"))])
+async def get_frames(area_id: str, request: Request) -> SceneAreaFrames:
+    """请 vision-engine 对区域内摄像头的当前画面各识别一次（D-133），供场景页生成初稿（FR-909）；
+    只读，草稿由场景页转换。"""
+    try:
+        frames = await recognize_area(request.app.state, area_id)
+    except (nats.errors.Error, TimeoutError, ValidationError) as e:  # 含不合契约的应答
+        log.warning("scene.recognize_failed", extra={"area_id": area_id, "error": repr(e)})
+        raise HTTPException(503, "识别服务未响应，请稍后重试") from e
+    if frames is None:
+        raise HTTPException(404, "区域不存在")
+    return frames
+
+
+AUTO_FIRST_S = 60.0  # 启动后等视觉引擎取到画面、完成首次自动标定再识别
+AUTO_SCENE_S = 600.0
+AUTO_ACTOR = "system:auto-scene"
+AUTO_MARGIN_M = 1.0  # 自动调整区域尺寸时在识别范围外留的边距
+AUTO_MIN_M = 4
+
+
+RANGE_MARGIN_M = 0.5
+RANGE_TOLERANCE_M = 1.0
+
+
+def fitted_range(frame: dict[str, Any], camera_xy: tuple[float, float]) -> float | None:
+    """摄像头到其识别结果中最远一点的距离加余量：室内的视场到墙为止，不必画到默认的 15 m 外。"""
+    points = [
+        p for kind in ("surfaces", "objects") for item in frame[kind] for p in item["polygon"]
+    ]
+    points += [p for wall in frame["walls"] for p in wall["line"]]
+    if not points:
+        return None
+    far = max(math.hypot(x - camera_xy[0], y - camera_xy[1]) for x, y in points)
+    return round(min(50.0, max(2.0, far + RANGE_MARGIN_M)), 1)
+
+
+def fitted_size(
+    frames: SceneAreaFrames, cameras_xy: list[tuple[float, float]]
+) -> tuple[int, int] | None:
+    """识别结果与摄像头所占的范围（平面坐标从 0 起）加边距，取整米；没有识别结果时为 None。"""
+    points: list[tuple[float, float]] = list(cameras_xy)
+    for frame in frames.model_dump(mode="json")["frames"]:
+        for kind in ("surfaces", "objects", "markings"):
+            points += [tuple(p) for item in frame[kind] for p in item["polygon"]]
+        points += [tuple(p) for wall in frame["walls"] for p in wall["line"]]
+        points += [(t["x"], t["y"]) for t in frame["trees"]]
+    if len(points) <= len(cameras_xy):
+        return None
+    width = max(x for x, _ in points) + AUTO_MARGIN_M
+    depth = max(y for _, y in points) + AUTO_MARGIN_M
+    return (
+        min(MAX_SIZE_M, max(AUTO_MIN_M, math.ceil(width))),
+        min(MAX_SIZE_M, max(AUTO_MIN_M, math.ceil(depth))),
+    )
+
+
+class AutoScenes:
+    """场景自动识别（态势页）：后台每 AUTO_SCENE_S 对每个区域识别一次，结果只缓存在内存中。
+    区域没有手工搭建的物体时，态势页直接按它显示场景，不必在场景页手动生成初稿；区域尺寸也按识别出的范围自动调整
+    （房间常远小于默认区域，不调整时挤在一角），写审计，执行者 system:auto-scene。"""
+
+    def __init__(self) -> None:
+        self._latest: dict[str, SceneAreaFrames] = {}
+
+    def get(self, area_id: str) -> SceneAreaFrames:
+        return self._latest.get(area_id) or SceneAreaFrames(frames=[], unavailable=[], stale=[])
+
+    async def refresh(self, state: Any) -> None:
+        async with state.engine.connect() as conn:
+            areas = list((await conn.execute(select(scene_areas.c.id))).scalars())
+        for area_id in areas:
+            try:
+                frames = await recognize_area(state, area_id)
+            except (nats.errors.Error, TimeoutError, ValidationError) as e:
+                log.warning("scene.auto_failed", extra={"area_id": area_id, "error": repr(e)})
+                continue
+            if frames is None:
+                self._latest.pop(area_id, None)
+                continue
+            if frames.frames or area_id not in self._latest:  # 暂时没有画面时保留上一次的结果
+                self._latest[area_id] = frames
+            if frames.frames:
+                await self._fit(state, area_id, frames)
+            log.info(
+                "scene.auto_recognized",
+                extra={"area_id": area_id, "frames": len(frames.frames)},
+            )
+        for gone in set(self._latest) - set(areas):
+            del self._latest[gone]
+
+    async def _fit(self, state: Any, area_id: str, frames: SceneAreaFrames) -> None:
+        """区域没有手工物体时，按识别范围调整尺寸；摄像头规则的几何在区域坐标中，有规则的摄像头所在区域不缩小。"""
+        async with state.engine.begin() as conn:
+            await lock(conn)
+            row = await _locked(conn, area_id)
+            if row["items"]:
+                return
+            placed = (
+                (await conn.execute(select(cameras).where(cameras.c.area_id == area_id)))
+                .mappings()
+                .all()
+            )
+            if any(c["rules"] for c in placed):
+                return
+            now = datetime.now(UTC)
+            ranged = await self._fit_ranges(conn, frames, placed, now)
+            size = fitted_size(frames, [(c["pose"]["x"], c["pose"]["y"]) for c in placed])
+            if size is None or size == (row["width_m"], row["depth_m"]):
+                if ranged:
+                    await state.cameras.apply()
+                return
+            await conn.execute(
+                update(scene_areas)
+                .where(scene_areas.c.id == area_id)
+                .values(width_m=size[0], depth_m=size[1], updated_at=now)
+            )
+            await record(
+                conn,
+                actor=AUTO_ACTOR,
+                action="scene_area.updated",
+                target=area_id,
+                before={"width_m": row["width_m"], "depth_m": row["depth_m"]},
+                after={
+                    "width_m": size[0],
+                    "depth_m": size[1],
+                    "reason": "按场景自动识别的范围调整",
+                },
+                request_id=f"auto-scene-{area_id}-{int(now.timestamp())}",
+            )
+        log.info("scene.auto_fitted", extra={"area_id": area_id, "size": size})
+        await state.cameras.apply()  # 按库重建站点并经 WS 推送
+
+    @staticmethod
+    async def _fit_ranges(
+        conn: AsyncConnection, frames: SceneAreaFrames, placed: list[Any], now: datetime
+    ) -> bool:
+        """按识别结果设置各摄像头的可视距离（相差超过 RANGE_TOLERANCE_M 才改），写审计；返回是否有改动。"""
+        by_camera = {f["camera_id"]: f for f in frames.model_dump(mode="json")["frames"]}
+        changed = False
+        for camera in placed:
+            frame = by_camera.get(camera["id"])
+            pose = camera["pose"]
+            reach = fitted_range(frame, (pose["x"], pose["y"])) if frame else None
+            if reach is None or abs(reach - pose["range_m"]) <= RANGE_TOLERANCE_M:
+                continue
+            await conn.execute(
+                update(cameras)
+                .where(cameras.c.id == camera["id"])
+                .values(pose=dict(pose) | {"range_m": reach}, updated_at=now)
+            )
+            await record(
+                conn,
+                actor=AUTO_ACTOR,
+                action="camera.pose_auto",
+                target=camera["id"],
+                before={"range_m": pose["range_m"]},
+                after={"range_m": reach, "reason": "按场景自动识别的最远处设置可视距离"},
+                request_id=f"auto-range-{camera['id']}-{int(now.timestamp())}",
+            )
+            changed = True
+        return changed
+
+    async def run(self, state: Any) -> None:
+        await asyncio.sleep(AUTO_FIRST_S)
+        while True:
+            try:
+                await self.refresh(state)
+            except Exception:
+                log.exception("scene.auto_loop_failed")
+            await asyncio.sleep(AUTO_SCENE_S)
+
+
+@router.get("/areas/{area_id}/auto", dependencies=[Depends(require("viewer"))])
+async def get_auto_frames(area_id: str, request: Request) -> SceneAreaFrames:
+    """最近一次自动识别的结果（AutoScenes）；尚未识别过时为空。"""
+    return request.app.state.auto_scenes.get(area_id)
 
 
 @router.delete("/areas/{area_id}", status_code=204)
