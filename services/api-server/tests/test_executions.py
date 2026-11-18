@@ -44,13 +44,20 @@ def execution(state: str, reason: str | None = None) -> PlaybookExecutionV1:
     )
 
 
-async def audited(config: ApiConfig) -> list[tuple[str, str, str]]:
+async def audited(
+    config: ApiConfig, events: list[PlaybookExecutionV1]
+) -> list[tuple[str, str, str]]:
+    """这些执行记录写下的审计。数据库在整个测试会话共用，其他用例（如 test_demo_reset）也会留下
+    playbook-executor 的记录，故按事件 ID（即 request_id）只取本用例发布的。"""
     engine = create_engine(config)
     try:
         async with engine.connect() as conn:
             rows = await conn.execute(
                 select(audit_log.c.actor, audit_log.c.action, audit_log.c.target)
-                .where(audit_log.c.actor == executions.ACTOR)
+                .where(
+                    audit_log.c.actor == executions.ACTOR,
+                    audit_log.c.request_id.in_([str(e.event_id) for e in events]),
+                )
                 .order_by(audit_log.c.id)
             )
             return [tuple(r) for r in rows]
@@ -85,16 +92,20 @@ def test_each_state_change_audited_once_across_restart(
         await asyncio.wait_for(task, 5)
         for e in states:
             await bus.js_publish(executions.SUBJECT, e)
-        await asyncio.sleep(0.5)
+        # 等三条都写完再"重启"：机器繁忙时固定等待不够，旧订阅仍在写时新订阅从头重放，两边会重复写
+        for _ in range(100):  # 至多 10 s
+            if len(await audited(config, states)) >= len(states):
+                break
+            await asyncio.sleep(0.1)
+        await bus.close()  # 重启即旧进程退出：旧订阅不再消费
 
         # 重启：从最近审计时刻前一分钟起重放，已写过的跳过
         restarted = await Bus.connect(config.nats_url, name="restarted", timeout_s=2)
         await executions.follow(restarted, engine)
         await asyncio.sleep(0.5)
         await restarted.close()
-        await bus.close()
         await engine.dispose()
-        return await audited(config)
+        return await audited(config, states)
 
     assert asyncio.run(scenario()) == [
         ("playbook-executor", "playbook.executing", "172.30.0.100"),

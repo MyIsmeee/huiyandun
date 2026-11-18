@@ -10,6 +10,7 @@ from py_contracts.events.hyd_ai_investigation_v1_schema import AiInvestigationV1
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_confirmation_v1_schema import CorrelatorConfirmationV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
+from py_contracts.events.hyd_demo_reset_v1_schema import DemoResetV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_playbook_rollback_v1_schema import PlaybookRollbackV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
@@ -204,6 +205,7 @@ SAMPLES: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
         PlaybookRollbackV1,
         {"execution_id": "exe-0001", "actor": "operator1", "request_id": "req-2"},
     ),
+    "hyd.demo.reset.v1": (DemoResetV1, {"actor": "demo-reset", "request_id": "req-3"}),
     "hyd.config.cameras.v1": (
         ConfigCamerasV1,
         {
