@@ -188,16 +188,17 @@ def test_tensorrt_shapes_match_model_inputs() -> None:
 
 
 def test_memory_limit_is_shared_by_loaded_models(fake_session: type[FakeSession]) -> None:
-    """C-HW-12：HYD_GPU_MEM_LIMIT_MB 是整个服务的上限，加载的模型（RTMO、RF-DETR、EfficientViT-Seg、
-    DINOv2）平分，总占用不超过该值。"""
+    """C-HW-12：HYD_GPU_MEM_LIMIT_MB 是检测模型的上限，加载的模型（RTMO、RF-DETR、DINOv2）平分，总占用不超过
+    该值。场景分割（EfficientViT-Seg）低频运行、固定用 CPU，不参与平分（2026-11-18：腾出显存给画面级打架模型）。"""
     fake_session.active = [CUDA, CPU]
-    cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="4096")
+    cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="3072")
     limits = []
     for model_file in model_files(cfg):
         create_session(cfg, model_file, models=len(model_files(cfg)))
         limits.append(fake_session.requested[0][1]["gpu_mem_limit"])
 
-    assert limits == [1024 * 2**20] * 4
+    assert limits == [1024 * 2**20] * 3
+    assert Path(MODEL) in [cfg.scene_model_file]  # 配置了场景分割，但不在平分清单里
 
 
 def test_topdown_model_has_own_limit_and_does_not_shrink_others(
@@ -208,7 +209,7 @@ def test_topdown_model_has_own_limit_and_does_not_shrink_others(
     fake_session.active = [CUDA, CPU]
     cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="2048", HYD_TOPDOWN_MODEL_FILE=MODEL)
 
-    assert len(model_files(cfg)) == 4
+    assert len(model_files(cfg)) == 3
     create_session(cfg, Path(MODEL), limit_mb=runtime.TOPDOWN_MEM_MB)
     assert fake_session.requested[0] == (CUDA, {"gpu_mem_limit": runtime.TOPDOWN_MEM_MB * 2**20})
 
@@ -264,6 +265,6 @@ def test_action_model_has_own_limit(fake_session: type[FakeSession]) -> None:
     fake_session.active = [CUDA, CPU]
     cfg = config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="2048", HYD_ACTION_MODEL_FILE=MODEL)
 
-    assert len(model_files(cfg)) == 4
+    assert len(model_files(cfg)) == 3
     create_session(cfg, Path(MODEL), limit_mb=runtime.ACTION_MEM_MB)
     assert fake_session.requested[0] == (CUDA, {"gpu_mem_limit": runtime.ACTION_MEM_MB * 2**20})

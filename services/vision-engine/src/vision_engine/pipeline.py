@@ -91,6 +91,7 @@ from vision_engine.runtime import (
     TRT_INTEGRITY,
     TRT_TOPDOWN,
     TRT_VEHICLE,
+    VIOLENCE_MEM_MB,
     DeviceError,
     VisionConfig,
     create_session,
@@ -100,6 +101,7 @@ from vision_engine.scene import SCHEMA_VERSION as SCENE_SCHEMA_VERSION
 from vision_engine.scene import ScenePerception, Segmenter
 from vision_engine.scene3d import align, layout
 from vision_engine.steady import Steady
+from vision_engine.violence import ViolenceDetector, ViolenceModel
 
 FPS = 5  # 固定检测帧率（FR-101、C-CV-08），与模型卡一致
 GEOMETRY_THREADS = 2  # MoGe-2 的 CPU 线程上限，见 serve
@@ -360,8 +362,11 @@ class CameraPipeline:
         pose: dict[str, Any] | None = None,
         rules: list[dict[str, Any]] | None = None,
         actions: ActionModel | None = None,
+        violence: ViolenceModel | None = None,
     ) -> None:
         self._camera_id = camera_id
+        # 画面级打架判定（violence.py）：两人贴近时看整幅画面，补骨骼在群殴、遮挡时的失效
+        self._violence = ViolenceDetector(violence) if violence is not None else None
         self._mapping = mapping
         self._rules = RuleEngine(rules or [])
         # 按安装参数估算的映射可能有系统性偏差：规则事件一律为 suspected（只在控制台提示）
@@ -449,6 +454,42 @@ class CameraPipeline:
             for b in self._behaviors.update(ids, keypoints, scores, timestamp, frame_size)
         ]
 
+    def _violence_events(
+        self,
+        frame: np.ndarray,
+        timestamp: float,
+        people: list[tuple[int, tuple[float, float, float, float]]],
+    ) -> list[VisionEvent]:
+        """画面级打架：确认时对贴得最近的两人各发一条确认事件。"""
+        if self._violence is None:
+            return []
+        hit = self._violence.update(frame, timestamp, people)
+        if hit is None:
+            return []
+        a, b, start, prob = hit
+        now = datetime.now(UTC)
+        duration = max(timestamp - start, 0.0)
+        log.info(
+            "vision.fight_by_video",
+            extra={"camera_id": self._camera_id, "tracks": [a, b], "prob": round(prob, 2)},
+        )
+        return [
+            VisionBehaviorV1(
+                schema_version=BEHAVIOR_SCHEMA_VERSION,
+                event_id=uuid.uuid4(),
+                ts=now,
+                camera_id=self._camera_id,
+                track_id=track_id,
+                behavior="fight",
+                level="confirmed",
+                confidence_avg=prob,
+                duration_s=duration,
+                ts_start=now - timedelta(seconds=duration),
+                ts_end=now,
+            )
+            for track_id in (a, b)
+        ]
+
     def _vote(self, track_id: int, class_id: int) -> int:
         """轨迹内多数类别：两轮车常在自行车与摩托车之间逐帧跳变，按多数输出，大屏模型不闪烁。"""
         votes = self._votes.setdefault(int(track_id), Counter())
@@ -499,7 +540,12 @@ class CameraPipeline:
                 timestamp,
                 (width, height),
             )
-            return integrity + vanished + self._rule_events([], timestamp)
+            return (
+                integrity
+                + vanished
+                + self._violence_events(frame, timestamp, [])
+                + self._rule_events([], timestamp)
+            )
         if self._mapping is None and self._pose is not None:
             self._mapping = GroundMapping.from_pose(self._pose, width, height)
             if self._mapping is not None:
@@ -555,6 +601,14 @@ class CameraPipeline:
                 timestamp,
                 (width, height),
             )
+        )
+        events += self._violence_events(
+            frame,
+            timestamp,
+            [
+                (output_id, tuple(float(v) for v in box))
+                for (box, _, _, _), output_id in zip(people, ids, strict=True)
+            ],
         )
         if mapping is None:
             return events  # 没有地面映射不输出坐标（FR-902）
@@ -904,9 +958,11 @@ class Cameras:
         health: Health,
         monocular: MonocularGeometry | None = None,
         actions: ActionModel | None = None,
+        violence: ViolenceModel | None = None,
     ) -> None:
         self._config, self._bus, self._health = config, bus, health
         self._actions = actions
+        self._violence = violence
         self._detector, self._vehicles = detector, vehicles
         self._segmenter, self._embedder = segmenter, embedder
         self._monocular = monocular
@@ -943,6 +999,7 @@ class Cameras:
             camera["pose"],
             camera.get("rules") or [],
             self._actions,
+            self._violence,
         )
         runs = [
             supervise(
@@ -1096,6 +1153,13 @@ async def serve(config: VisionConfig) -> None:
     )
     if actions is None:
         log.warning("vision.actions_disabled")  # 未配置 HYD_ACTION_MODEL_FILE
+    violence = (
+        ViolenceModel(create_session(config, config.violence_model_file, limit_mb=VIOLENCE_MEM_MB))
+        if config.violence_model_file
+        else None
+    )
+    if violence is None:
+        log.warning("vision.violence_disabled")  # 未配置 HYD_VIOLENCE_MODEL_FILE
     vehicles = (
         VehicleDetector(
             str(config.vehicle_model_file),
@@ -1105,7 +1169,14 @@ async def serve(config: VisionConfig) -> None:
         else None
     )
     segmenter = (
-        Segmenter(create_session(config, config.scene_model_file, models))
+        # 低频（每 10 分钟、生成场景初稿时）运行，固定用 CPU：不占显存平分额度（runtime.model_files）
+        Segmenter(
+            create_session(
+                config.model_copy(update={"device": "cpu"}),
+                config.scene_model_file,
+                threads=GEOMETRY_THREADS,
+            )
+        )
         if config.scene_model_file
         else None
     )
@@ -1141,7 +1212,7 @@ async def serve(config: VisionConfig) -> None:
     await bus.ensure_stream(STREAM, STREAM_SUBJECTS, STREAM_MAX_AGE_S)
     health = Health(config.heartbeat_file)
     cameras = Cameras(
-        config, detector, vehicles, segmenter, embedder, bus, health, monocular, actions
+        config, detector, vehicles, segmenter, embedder, bus, health, monocular, actions, violence
     )
     # 登记表的流由 api-server 创建；它尚未启动时重试
     while True:

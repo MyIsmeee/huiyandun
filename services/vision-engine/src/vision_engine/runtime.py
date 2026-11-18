@@ -44,6 +44,11 @@ class VisionConfig(ServiceConfig):
         description="STGCN++ ONNX 模型文件的本地路径：以骨骼序列复核跌倒与打架（action.py）；"
         "未配置时跌倒、打架只按骨骼几何规则判定",
     )
+    violence_model_file: FilePath | None = Field(
+        None,
+        description="VideoMAE（RWF-2000 微调）ONNX 模型文件的本地路径：画面里两人贴近时按整幅画面判定打架"
+        "（violence.py）；未配置时打架只按骨骼判定",
+    )
     scene_model_file: FilePath | None = Field(
         None,
         description="EfficientViT-Seg ONNX 模型文件的本地路径，生成场景初稿时识别摄像头画面中的环境"
@@ -73,7 +78,6 @@ class VisionConfig(ServiceConfig):
         Path("/tmp/hyd-vision-alive"),
         description="全部循环与读帧线程都有进展时每秒更新其修改时间，供健康检查判断（#79）",
     )
-
     tensorrt: bool = Field(
         False,
         description="device 为 cuda 时以 TensorRT 推理 RTMPose、RF-DETR、DINOv2、STGCN++（见 TRT_*）；"
@@ -99,6 +103,8 @@ ACTION_MEM_MB = 256
 # GPU 会话的 CPU 线程数：算子都在 GPU 上，留在 CPU 的只有形状运算（Gather、Concat 等，每次合计约 1 ms）。
 # 默认每个会话按核数开线程池并自旋等待，8 个会话、5 路并发时数百个线程空转抢核，取流与前后处理被挤占
 CUDA_CPU_THREADS = 1
+# 画面级打架模型（VideoMAE-base，16 帧 224×224）单独设上限：只在两人贴近时每秒推理一次
+VIOLENCE_MEM_MB = 512  # 半精度导出，实测 512 MiB 可用、单次约 38 ms（RTX 4060）
 
 
 @dataclass(frozen=True)
@@ -132,10 +138,12 @@ TRT_WORKSPACE_MB = 512
 
 
 def model_files(config: VisionConfig) -> list[Path]:
-    """平分显存的模型：RTMO，以及配置了的 RF-DETR、EfficientViT-Seg、DINOv2。"""
-    # MoGe-2 不在其中：每 10 分钟才跑一次，固定用 CPU，不分显存（pipeline.serve）；
-    # RTMPose、STGCN++ 也不在其中：单独上限 TOPDOWN_MEM_MB、ACTION_MEM_MB
-    optional = [config.vehicle_model_file, config.scene_model_file, config.integrity_model_file]
+    """平分显存的模型：RTMO，以及配置了的 RF-DETR、DINOv2。"""
+    # MoGe-2、EfficientViT-Seg 不在其中：每 10 分钟或生成场景初稿时才跑一次，固定用 CPU，不分显存
+    # （pipeline.serve）。场景分割原也平分显存，常驻占一份额度；三路摄像头加上画面级打架模型后整卡显存耗尽、
+    # 检测线程申请不到 cuBLAS 资源而反复重启（2026-11-18 实测），改到 CPU 腾出这一份。
+    # RTMPose、STGCN++、VideoMAE 也不在其中：单独上限 TOPDOWN_MEM_MB、ACTION_MEM_MB、VIOLENCE_MEM_MB
+    optional = [config.vehicle_model_file, config.integrity_model_file]
     return [config.model_file] + [f for f in optional if f]
 
 
@@ -224,6 +232,10 @@ def gpu_check() -> None:
                 create_session(
                     config, config.action_model_file, limit_mb=ACTION_MEM_MB, trt=TRT_ACTION
                 )
+            )
+        if config.violence_model_file:
+            sessions.append(
+                create_session(config, config.violence_model_file, limit_mb=VIOLENCE_MEM_MB)
             )
     except DeviceError as e:
         log.error("vision.device_unavailable", extra={"error": str(e)})

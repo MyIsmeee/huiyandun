@@ -41,6 +41,9 @@ FIELDS = (
 TASKS = {"pose", "detection", "segmentation", "embedding", "geometry", "action"}
 # G-08 白名单中适用于模型权重的许可证（SPDX）
 LICENSES = {"Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0"}
+# 只许非商业使用的许可证：条目须显式写 non_commercial: true（只用于比赛演示与研究，商用前须替换），
+# 不放宽上面的白名单
+NONCOMMERCIAL_LICENSES = {"CC-BY-NC-4.0"}
 TIMEOUT_S = 300  # 单个压缩包下载上限
 CONVERT_TIMEOUT_S = 3600  # 单个模型转换上限：首次运行需下载 PyTorch
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,7 +98,10 @@ def verify(models: Path, model: dict[str, Any]) -> list[str]:
     errors = []
     if model["task"] not in TASKS:
         errors.append(f"{name}: 类别 {model['task']} 不在白名单（C-CV-01）")
-    if model["license"] not in LICENSES:
+    noncommercial = (
+        model["license"] in NONCOMMERCIAL_LICENSES and model.get("non_commercial") is True
+    )
+    if model["license"] not in LICENSES and not noncommercial:
         errors.append(f"{name}: 许可证 {model['license']} 不在白名单（G-08）")
     if not (models / model["card"]).is_file():
         errors.append(f"{name}: 缺少模型卡 {model['card']}（C-CV-07）")

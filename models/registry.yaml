@@ -92,3 +92,18 @@ models:
     card: cards/stgcnpp-ntu60-2d.md
     purpose: vision-engine 跌倒、打架的动作模型复核：与骨骼几何规则同时成立才确认
     owner: MyIsmeee
+  - name: videomae-rwf2000
+    version: videomae-rwf2000@a6109ed1+hyd.1
+    task: action  # 画面级打架二分类（打架 / 非打架）：只在两人贴近时推理，不检测、不区分身份
+    file: videomae_rwf2000.onnx
+    # 本仓库转换所得：只取上游分类头的前两类、网络为半精度；导出可复现（固定上游提交、PyTorch 与依赖锁定，两次导出哈希一致）
+    sha256: ff090b0ab2e8dccffd1fb4b7126b9a2c4c93903ed9d251884b0c9f1a2be103c7
+    # 上游权重（Hugging Face，固定到提交）；config.json 由 convert 脚本按固定哈希另取
+    source: https://huggingface.co/DanJoshua/videomae_v1_rwf-2000/resolve/a6109ed1103c8e8983186881a0a04f7373f3d84c/model.safetensors
+    source_sha256: dc3ed62f3829c83c57122d70cd05e767b6adf2d8e43f9728b3bd4bc257dfb9db
+    convert: tools/dev/export_videomae_rwf.py
+    license: CC-BY-NC-4.0
+    non_commercial: true  # 只许非商业使用：比赛演示与研究可用，商用前须换成自训权重
+    card: cards/videomae-rwf2000.md
+    purpose: vision-engine 画面级打架判定，补骨骼在群殴、遮挡时的失效
+    owner: MyIsmeee

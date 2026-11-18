@@ -426,12 +426,12 @@ datasets:
     owner: MyIsmeee
 
 # 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
-# 依赖由 tools/dev/export_efficientvit_seg.py.lock、export_stgcnpp.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
+# 依赖由 tools/dev/export_efficientvit_seg.py.lock、export_stgcnpp.py.lock、export_videomae_rwf.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
 build_tools:
   - name: PyTorch（CPU）
     version: 2.8.0+cpu
     license: BSD-3-Clause
-    purpose: EfficientViT-Seg、STGCN++ 权重转为 ONNX（REUSE-25）
+    purpose: EfficientViT-Seg、STGCN++、VideoMAE 权重转为 ONNX（REUSE-25）
     owner: MyIsmeee
   - name: ONNX
     version: 1.23.2
@@ -447,4 +447,9 @@ build_tools:
     version: 4d6c93474730cad2f25e51109adcf96824efc7a3  # v1.2.0 的 git 提交，导出时校验
     license: Apache-2.0
     purpose: 构建 STGCN++ 网络结构以加载权重（tools/dev/export_stgcnpp.py）；导出时拉取，不入库
+    owner: MyIsmeee
+  - name: Hugging Face Transformers
+    version: 4.46.3
+    license: Apache-2.0
+    purpose: 构建 VideoMAE 网络结构以加载打架模型权重（tools/dev/export_videomae_rwf.py）
     owner: MyIsmeee
