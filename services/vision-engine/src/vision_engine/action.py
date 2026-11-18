@@ -67,12 +67,19 @@ class ActionModel:
         self._lock = threading.Lock()
 
     def __call__(self, clips: np.ndarray) -> np.ndarray:
+        # 每批补零到 MAX_BATCH 个片段，输入形状固定：批量在 1～4 间变化时显存池按各种形状反复切分，贴近
+        # ACTION_MEM_MB 后 cuDNN 申请不到工作区、退到慢算法，一批 4 个从约 14 ms 变为 100 ms 以上
+        # （2026-11-18 在 RTX 4060 上实测，人流画面每秒 13 个片段合计 200～500 ms）
+        padded = np.zeros(
+            (math.ceil(len(clips) / MAX_BATCH) * MAX_BATCH, *clips.shape[1:]), np.float32
+        )
+        padded[: len(clips)] = clips
         with self._lock:
             batches = [
-                np.asarray(self._session.run(None, {self._input: part.astype(np.float32)})[0])
-                for part in np.array_split(clips, max(1, math.ceil(len(clips) / MAX_BATCH)))
+                np.asarray(self._session.run(None, {self._input: padded[i : i + MAX_BATCH]})[0])
+                for i in range(0, len(padded), MAX_BATCH)
             ]
-        return np.concatenate(batches)
+        return np.concatenate(batches)[: len(clips)]
 
 
 def _resample(samples: list[Sample], grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

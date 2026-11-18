@@ -42,8 +42,11 @@ class FakeSession:
     active: list[str] = []
     requested: list[Any] = []
 
+    options: Any = None
+
     def __init__(self, path: str, providers: list[Any], sess_options: Any = None) -> None:
         FakeSession.requested = providers
+        FakeSession.options = sess_options
 
     def get_providers(self) -> list[str]:
         return FakeSession.active
@@ -60,6 +63,13 @@ def test_image_disables_onnxruntime_telemetry() -> None:
     dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
 
     assert re.search(r"^ENV .*\bORT_DISABLE_TELEMETRY=1\b", dockerfile, re.MULTILINE)
+
+
+def test_image_runs_openblas_single_threaded() -> None:
+    """引擎里只有小矩阵运算：OpenBLAS 默认每份开 23 个线程、运算后忙等，多路并发时空占约十个核（2026-11-18 实测）。"""
+    dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+
+    assert re.search(r"^ENV .*\bOPENBLAS_NUM_THREADS=1\b", dockerfile, re.MULTILINE)
 
 
 def test_cpu_mode_uses_only_cpu() -> None:
@@ -81,6 +91,18 @@ def test_cuda_active(fake_session: type[FakeSession]) -> None:
     create_session(config(HYD_DEVICE="cuda", HYD_GPU_MEM_LIMIT_MB="1024"), Path(MODEL))
 
     assert fake_session.requested[0] == (CUDA, {"gpu_mem_limit": 1024 * 2**20})
+
+
+def test_cuda_sessions_use_one_cpu_thread_without_spinning(fake_session: type[FakeSession]) -> None:
+    """GPU 会话留在 CPU 的只有形状运算：默认每个会话按核数开线程池并自旋等待，多个会话、多路并发时数百个
+    线程空转抢核（2026-11-18 实测 370 个线程）。"""
+    fake_session.active = [CUDA, CPU]
+
+    create_session(config(HYD_DEVICE="cuda"), Path(MODEL))
+
+    options = fake_session.options
+    assert options.intra_op_num_threads == runtime.CUDA_CPU_THREADS == 1
+    assert options.get_session_config_entry("session.intra_op.allow_spinning") == "0"
 
 
 def test_memory_limit_is_shared_by_loaded_models(fake_session: type[FakeSession]) -> None:

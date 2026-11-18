@@ -152,8 +152,34 @@ def test_model_splits_large_batches() -> None:
 
     session = Session()
     out = ActionModel(cast(object, session))(np.zeros((MAX_BATCH * 2 + 1, 2, CLIP_LEN, 17, 3)))  # type: ignore[arg-type]
-    assert max(session.sizes) <= MAX_BATCH and sum(session.sizes) == MAX_BATCH * 2 + 1
+    assert max(session.sizes) <= MAX_BATCH and sum(session.sizes) >= MAX_BATCH * 2 + 1
     assert out.shape == (MAX_BATCH * 2 + 1, 60)
+    assert out[:, 0].tolist() == [1.0] * MAX_BATCH + [2.0] * MAX_BATCH + [3.0]
+
+
+def test_model_batches_have_fixed_shape() -> None:
+    """每批补零到 MAX_BATCH：批量变化时显存池反复切分，贴近上限后 cuDNN 退到慢算法（2026-11-18 实测）。
+    补的片段不出现在结果里。"""
+    from vision_engine.action import MAX_BATCH
+
+    class Session:
+        def __init__(self) -> None:
+            self.sizes: list[int] = []
+
+        def get_inputs(self) -> list:
+            return [type("Input", (), {"name": "keypoints"})()]
+
+        def run(self, _: object, feed: dict) -> list:
+            batch = feed["keypoints"]
+            self.sizes.append(len(batch))
+            return [batch[:, 0, 0, :1, 0].repeat(60, axis=1)]
+
+    session = Session()
+    clips = np.zeros((MAX_BATCH + 1, 2, CLIP_LEN, 17, 3))
+    clips[:, 0, 0, 0, 0] = np.arange(1, MAX_BATCH + 2)
+    out = ActionModel(cast(object, session))(clips)  # type: ignore[arg-type]
+    assert session.sizes == [MAX_BATCH, MAX_BATCH]
+    assert out[:, 0].tolist() == list(range(1, MAX_BATCH + 2))
 
 
 def test_model_runs_one_inference_at_a_time() -> None:

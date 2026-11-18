@@ -24,6 +24,7 @@ import time
 import uuid
 from collections import Counter, deque
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -153,6 +154,14 @@ RELINK_M = 1.0  # 续接的距离上限：取此值与两者 uncertainty_m 之�
 # 攒满之前每帧都转换
 CONVERT_LEAD = 2.0
 GAP_SAMPLES = 50
+# 每路解码线程数。OpenCV 默认按核数开（实测每路 39 个线程），H.264 帧级多线程解码每多一个线程，输出就多延后一帧：
+# 16 个线程时画面比实际晚约 0.6 s，识别结果随之落后。1080p 单线程即可解 266 帧/秒、2 个线程 350 帧/秒
+# （2026-11-18 实测），远超每路 25 帧/秒；取 2 个，只多一帧延迟
+DECODE_THREADS = 2
+# 一帧之内互不依赖的推理（RF-DETR 与 RTMO、DINOv2 与检测）并行提交的线程：各模型各有会话与 CUDA 流，GPU 上
+# 可以重叠，ONNX Runtime 推理时释放 GIL。提交的都是不再等待其他任务的单次推理，线程数够各路同时各提交两个即可
+INFER_THREADS = 16
+INFER_POOL = ThreadPoolExecutor(INFER_THREADS, thread_name_prefix="infer")
 
 log = logging.getLogger(__name__)
 
@@ -294,6 +303,8 @@ class FrameReader(threading.Thread):
                         TIMEOUT_MS,
                         cv2.CAP_PROP_READ_TIMEOUT_MSEC,
                         TIMEOUT_MS,
+                        cv2.CAP_PROP_N_THREADS,
+                        DECODE_THREADS,
                     ],
                 )
                 # 建连与读帧各有 5 s 超时：建连后再登记一次，此后读帧按 STALL_S 判定停滞
@@ -393,15 +404,17 @@ class CameraPipeline:
             return sv.Detections.empty(), sv.Detections.empty()
         x1, y1, x2, y2 = region
         crop = frame[y1:y2, x1:x2]
-        # RF-DETR 一次推理同时给出车辆与人员框；人员框交给 RTMO 合并并配上骨骼（#287）
-        found, persons = (
-            self._vehicles(crop, offset=(x1, y1))
-            if self._vehicles is not None
-            else (sv.Detections.empty(), None)
-        )
-        people = self._confirmed(
-            self._tracker, self._detector(crop, offset=(x1, y1), persons=persons), timestamp
-        )
+        # RF-DETR 一次推理同时给出车辆与人员框；人员框交给 RTMO 合并并配上骨骼（#287）。
+        # 两者的推理互不依赖：RF-DETR 交给推理线程，本线程同时做 RTMO 正向推理，之后再合并
+        if self._vehicles is None:
+            detected = self._detector(crop, offset=(x1, y1), persons=None)
+            found = sv.Detections.empty()
+        else:
+            pending = INFER_POOL.submit(self._vehicles, crop, offset=(x1, y1))
+            candidates = self._detector.candidates(crop)
+            found, persons = pending.result()
+            detected = self._detector(crop, offset=(x1, y1), persons=persons, candidates=candidates)
+        people = self._confirmed(self._tracker, detected, timestamp)
         vehicles = self._confirmed(self._vehicle_tracker, found, timestamp)
         self._boxes = np.concatenate([people.xyxy, vehicles.xyxy])
         return people, vehicles
@@ -448,10 +461,15 @@ class CameraPipeline:
     def process(self, frame: np.ndarray, timestamp: float) -> list[VisionEvent]:
         # 画面可信度判定先于运动门控：定格画面没有运动，门控会跳过推理（C-CV-09）
         integrity: list[VisionIntegrityV1] = []
+        # 画面嵌入（DINOv2）与检测互不依赖：先交给推理线程，与下面的门控、检测同时进行
+        embedding_pending = (
+            INFER_POOL.submit(self._embedder, frame) if self._embedder is not None else None
+        )
         if self._freeze.update(frame, timestamp):
             integrity.append(self._integrity("freeze", FREEZE_S, "rule", 1.0, None))
-        if self._embedder is not None:
-            embedding = self._embedder(frame)
+        tracked, vehicles = self.track(frame, timestamp)
+        if embedding_pending is not None:
+            embedding = embedding_pending.result()
             replay = self._replay.update(embedding, timestamp)
             if replay is not None:
                 # 只写相对时刻：界面与报告按站点时区显示，这里写 UTC 钟点会与之对不上（D-106）
@@ -467,7 +485,6 @@ class CameraPipeline:
                 integrity.append(
                     self._integrity(view.kind, VIEW_S, "model", view.confidence, detail)
                 )
-        tracked, vehicles = self.track(frame, timestamp)
         height, width = frame.shape[:2]
         if not len(tracked) and not len(vehicles):
             # 无目标时同样推进：消失的轨迹按时结束，原地消失按时判定

@@ -83,6 +83,9 @@ TOPDOWN_MEM_MB = 256
 # 2026-11-17 在 RTX 4060 上实测：128 MiB 时单个片段即申请不到（图卷积一次要约 40 MiB），192 MiB 批量 8 失败，
 # 256 MiB 批量 4 约 16 ms
 ACTION_MEM_MB = 256
+# GPU 会话的 CPU 线程数：算子都在 GPU 上，留在 CPU 的只有形状运算（Gather、Concat 等，每次合计约 1 ms）。
+# 默认每个会话按核数开线程池并自旋等待，8 个会话、5 路并发时数百个线程空转抢核，取流与前后处理被挤占
+CUDA_CPU_THREADS = 1
 
 
 def model_files(config: VisionConfig) -> list[Path]:
@@ -108,9 +111,13 @@ def create_session(
     else:
         providers = [CPU]
     options = ort.SessionOptions()
+    if config.device == "cuda" and threads is None:
+        threads = CUDA_CPU_THREADS
     if threads is not None:
         options.intra_op_num_threads = threads
         options.inter_op_num_threads = 1
+    if config.device == "cuda":
+        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
     session = ort.InferenceSession(str(model_file), sess_options=options, providers=providers)
     active = session.get_providers()
     if config.device == "cuda" and active[0] != CUDA:

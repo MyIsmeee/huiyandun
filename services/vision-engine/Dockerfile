@@ -22,8 +22,10 @@ RUN uv sync --frozen --no-dev --no-editable --package vision-engine
 FROM base
 RUN useradd --system --uid 10001 --no-create-home hyd
 COPY --from=build /app/.venv /app/.venv
-# onnxruntime 默认在 import 时向 mobile.events.data.microsoft.com 发送遥测（抓包确认），须关闭（G-05）
-ENV PATH=/app/.venv/bin:$PATH ORT_DISABLE_TELEMETRY=1
+# onnxruntime 默认在 import 时向 mobile.events.data.microsoft.com 发送遥测（抓包确认），须关闭（G-05）。
+# OpenBLAS（numpy 与 OpenCV 各带一份）单线程：引擎里只有卡尔曼滤波、单应矩阵这类小矩阵运算，默认各开 23 个线程、
+# 每次运算后忙等，5 路并发时这 46 个线程各占约半个核却不做事（2026-11-18 实测）
+ENV PATH=/app/.venv/bin:$PATH ORT_DISABLE_TELEMETRY=1 OPENBLAS_NUM_THREADS=1
 # C-OPS-04：非 root 运行
 USER hyd
 CMD ["hyd-vision"]

@@ -79,11 +79,16 @@ class FakeDetector:
         self.shift = 0  # 框与关键点另加的右移像素：设为接近框宽时跟踪器换新编号
         self.persons: sv.Detections | None = None  # 最近一次收到的 RF-DETR 人员框
 
+    def candidates(self, image: np.ndarray) -> None:
+        """与 RF-DETR 同时做的正向推理：替身不需要，合并时在 __call__ 里生成结果。"""
+        return None
+
     def __call__(
         self,
         image: np.ndarray,
         offset: tuple[int, int] = (0, 0),
         persons: sv.Detections | None = None,
+        candidates: object = None,
     ) -> sv.Detections:
         x = 300 + 2 * self.calls + self.shift
         self.calls += 1
@@ -779,6 +784,25 @@ def test_reader_beats_on_connect_and_every_frame(monkeypatch: pytest.MonkeyPatch
     G = pipeline_module.OPEN_GRACE_S
     assert beats == [G, 0.0, 0.0, 0.0, G]
     assert reader.latest() is not None and reader.latest()[0] == 2
+
+
+def test_reader_limits_decode_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H.264 帧级多线程解码每多一个线程画面就多延后一帧：OpenCV 默认按核数开，识别结果落后画面约 0.6 s。"""
+    opened = threading.Event()
+    params: list[int] = []
+
+    def capture(url: str, backend: int, options: list[int]) -> ReadCapture:
+        params.extend(options)
+        opened.set()
+        threading.Event().wait()  # 之后一直阻塞：测试结束后线程不再连真实地址
+        raise AssertionError
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", capture)
+    FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: None).start()
+    assert opened.wait(2)
+
+    settings = dict(zip(params[::2], params[1::2], strict=True))
+    assert settings[pipeline_module.cv2.CAP_PROP_N_THREADS] == pipeline_module.DECODE_THREADS == 2
 
 
 POSE = {

@@ -2,7 +2,14 @@
 
 import numpy as np
 
-from vision_engine.detector import LOWER_BODY, LOWER_BODY_MIN, TopDownPose, refine
+from vision_engine.detector import (
+    LOWER_BODY,
+    LOWER_BODY_MIN,
+    TOPDOWN_BATCHES,
+    BatchRTMPose,
+    TopDownPose,
+    refine,
+)
 
 
 class FakeModel:
@@ -50,3 +57,45 @@ def test_refine_without_people_does_nothing() -> None:
     points, scores = np.zeros((0, 17, 2)), np.zeros((0, 17))
     out = refine(topdown(np.full(17, 0.5)), np.zeros((10, 10, 3)), np.zeros((0, 4)), points, scores)
     assert out[0].shape == (0, 17, 2) and out[1].shape == (0, 17)
+
+
+class SimccSession:
+    """RTMPose 会话的替身：记录每次推理的批量；第 i 个人的 simcc 峰值在 x = i + 1、y = 2(i + 1) 处。"""
+
+    def __init__(self) -> None:
+        self.sizes: list[int] = []
+
+    def get_inputs(self) -> list:
+        return [type("Input", (), {"name": "input"})()]
+
+    def run(self, _: object, feed: dict) -> list[np.ndarray]:
+        batch = feed["input"]
+        assert batch.dtype == np.float32 and batch.shape[1:] == (3, 256, 192)
+        start = sum(self.sizes)
+        self.sizes.append(len(batch))
+        x, y = np.zeros((len(batch), 17, 384)), np.zeros((len(batch), 17, 512))
+        for k in range(len(batch)):
+            x[k, :, start + k + 1] = y[k, :, 2 * (start + k + 1)] = 0.8
+        return [x, y]
+
+
+def test_batch_rtmpose_runs_people_together_in_fixed_shapes() -> None:
+    """一帧里的人一次推理（rtmlib 逐框各一次），批量补齐到 TOPDOWN_BATCHES 中的一档，超过最大一档时分批。"""
+    session = SimccSession()
+    model = BatchRTMPose(session)  # type: ignore[arg-type]
+    image = np.zeros((480, 640, 3), np.uint8)
+    for n, sizes in ((3, [4]), (16, [16]), (17, [16, 16])):
+        session.sizes = []
+        boxes = [[10.0 * i, 0.0, 10.0 * i + 96, 128.0] for i in range(n)]
+        points, scores = model(image, boxes)
+        assert session.sizes == sizes and set(sizes) <= set(TOPDOWN_BATCHES)
+        assert points.shape == (n, 17, 2) and scores.shape == (n, 17)
+        # 各人的结果按框的顺序：框 96×128 外扩 1.25 倍为 120×160（恰为输入的宽高比），simcc 每格为输入的 1/2
+        scale = np.array([120.0, 160.0])
+        for i, box in enumerate(boxes):
+            center = np.array([box[0] + 48, 64.0])
+            expected = (
+                np.array([(i + 1) / 2 / 192, 2 * (i + 1) / 2 / 256]) * scale + center - scale / 2
+            )
+            assert np.allclose(points[i, 0], expected)
+        assert np.allclose(scores, 0.8)

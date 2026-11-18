@@ -8,13 +8,17 @@ RTMO 把整帧缩到 640 宽，画面中 150～300 像素高的人只剩 50～10
 
 import contextlib
 import io
+import math
+import threading
 
 import cv2
 import numpy as np
 import onnxruntime as ort
 import supervision as sv
-from rtmlib import RFDETR, RTMO, RTMPose
+from rtmlib import RFDETR, RTMO
 from rtmlib.tools.object_detection.post_processings import multiclass_nms
+from rtmlib.tools.pose_estimation.post_processings import get_simcc_maximum
+from rtmlib.tools.pose_estimation.pre_processings import bbox_xyxy2cs, top_down_affine
 
 NMS_IOU = 0.45
 MIN_SCORE = 0.3  # 低分框交给 ByteTrack 第二阶段关联，不直接建立轨迹
@@ -32,16 +36,63 @@ LOWER_BODY_MIN = 0.4  # 逐人模型膝、踝置信度低于此值视为不可�
 type Candidates = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 
+TOPDOWN_INPUT = (192, 256)  # RTMPose 输入宽、高
+TOPDOWN_PADDING = 1.25  # 人员框外扩比例，与 rtmlib 相同
+# 一次推理的人数补齐到其中最小的够用者、超过最大者分批：输入形状只有这几种，cuDNN 算法选择与显存池都稳定。
+# 16 人一批在 runtime.TOPDOWN_MEM_MB 内实测约 14 ms（RTX 4060），逐人推理 16 次约 40 ms
+TOPDOWN_BATCHES = (1, 2, 4, 8, 16)
+RTMPOSE_MEAN = (123.675, 116.28, 103.53)  # rtmlib RTMPose 的默认值（BGR 画面按此顺序减）
+RTMPOSE_STD = (58.395, 57.12, 57.375)
+
+
+class BatchRTMPose:
+    """与 rtmlib RTMPose 同样的前后处理，但一帧里的人员一次推理（rtmlib 逐框各跑一次会话）。
+
+    归一化改为查表：裁剪放大后的画面是 8 位，按 rtmlib 的 float64 算式先算好 256 级再转 float32，结果逐位相同。
+    各路摄像头共用会话、逐次推理：两路同时以 16 人一批推理会超出 TOPDOWN_MEM_MB（同 action.ActionModel）。"""
+
+    def __init__(self, session: ort.InferenceSession) -> None:
+        self._session = session
+        self._input = session.get_inputs()[0].name
+        self._lock = threading.Lock()
+        levels = np.arange(256, dtype=np.float64)[:, None]
+        mean, std = np.array(RTMPOSE_MEAN), np.array(RTMPOSE_STD)
+        self._lut = ((levels - mean) / std).astype(np.float32).reshape(256, 1, 3)
+
+    def __call__(self, image: np.ndarray, boxes: list) -> tuple[np.ndarray, np.ndarray]:
+        crops, centers, scales = [], [], []
+        for box in boxes:
+            center, scale = bbox_xyxy2cs(np.asarray(box, dtype=float), padding=TOPDOWN_PADDING)
+            crop, scale = top_down_affine(TOPDOWN_INPUT, scale, center, image)
+            crops.append(cv2.LUT(crop, self._lut))
+            centers.append(center)
+            scales.append(scale)
+        n = len(crops)
+        width = next((b for b in TOPDOWN_BATCHES if b >= n), TOPDOWN_BATCHES[-1])
+        batch = np.zeros(
+            (math.ceil(n / width) * width, 3, TOPDOWN_INPUT[1], TOPDOWN_INPUT[0]), np.float32
+        )
+        batch[:n] = np.stack(crops).transpose(0, 3, 1, 2)
+        with self._lock:
+            parts = [
+                self._session.run(None, {self._input: batch[i : i + width]})
+                for i in range(0, len(batch), width)
+            ]
+        simcc_x = np.concatenate([p[0] for p in parts])[:n]
+        simcc_y = np.concatenate([p[1] for p in parts])[:n]
+        locs, scores = get_simcc_maximum(simcc_x, simcc_y)
+        center, scale = np.stack(centers)[:, None], np.stack(scales)[:, None]
+        # 与 rtmlib RTMPose.postprocess 同一算式：simcc 分辨率为输入的 2 倍
+        points = locs / 2.0 / TOPDOWN_INPUT * scale + center - scale / 2
+        return points, scores
+
+
 class TopDownPose:
     """RTMPose 逐人骨骼：输入画面与人员框（画面坐标 xyxy），输出关键点 (N, 17, 2) 与置信度 (N, 17)。"""
 
     def __init__(self, model_file: str, session: ort.InferenceSession) -> None:
-        # 同 PoseDetector：rtmlib 构造时自建会话，先以 CPU 构造，再换成 runtime.create_session 的会话
-        with contextlib.redirect_stdout(io.StringIO()):
-            self._model = RTMPose(
-                model_file, model_input_size=(192, 256), backend="onnxruntime", device="cpu"
-            )
-        self._model.session = session
+        del model_file  # 会话已由 runtime.create_session 建好；保留参数与 PoseDetector 一致
+        self._model = BatchRTMPose(session)
 
     def __call__(self, image: np.ndarray, boxes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         if len(boxes) == 0:
@@ -95,19 +146,27 @@ class PoseDetector:
         dets, poses = self._model.inference(padded)
         return dets[0, :, :4] / ratio, dets[0, :, 4], poses[0, :, :, :2] / ratio, poses[0, :, :, 2]
 
+    def candidates(self, image: np.ndarray) -> Candidates:
+        """正向推理的候选，不依赖 RF-DETR：可与 RF-DETR 同时推理，再交给 __call__ 合并。"""
+        return self._infer(image)
+
     def __call__(
         self,
         image: np.ndarray,
         offset: tuple[int, int] = (0, 0),
         persons: sv.Detections | None = None,
+        candidates: Candidates | None = None,
     ) -> sv.Detections:
         """检测 image（可为整帧的裁剪区域）；offset 为裁剪区域左上角，结果换算回整帧坐标。
 
         persons 为 RF-DETR 在同一区域检出的人员（整帧坐标），与 RTMO 的正向检出取并集：同一人用 RF-DETR 的
         框与置信度、RTMO 的骨骼；RF-DETR 独有的人关键点置信度为 0；RTMO 独有的框保留，松散框除外。
-        None（未配置 RF-DETR）时只有 RTMO 的正向检出。"""
+        None（未配置 RF-DETR）时只有 RTMO 的正向检出。candidates 为同一 image 上 candidates() 的结果，
+        不给时在此推理。"""
         dx, dy = offset
-        boxes, scores, points, point_scores = self._infer(image)
+        boxes, scores, points, point_scores = (
+            self._infer(image) if candidates is None else candidates
+        )
         boxes, points = boxes + (dx, dy, dx, dy), points + (dx, dy)
         _, keep = multiclass_nms(boxes, scores[:, None], nms_thr=NMS_IOU, score_thr=MIN_SCORE)
         own = np.array([] if keep is None else keep, dtype=int)
