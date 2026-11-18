@@ -135,11 +135,11 @@ def main() -> int:
     step("第一步：锁定目标")
     print(f"  目标：演示摄像头 cam-07   {TARGET}")
     print("  方式：RTSP 认证接口，用常见弱口令逐个尝试")
-    time.sleep(2)
+    time.sleep(0.5)
 
     step(f"第二步：口令爆破（{params['attempts']} 次，每 {params['interval_s']} s 一次）")
     bruteforce(compose, params)
-    time.sleep(3)
+    time.sleep(1)
 
     step("第三步：篡改画面（重放攻击）")
     with contextlib.redirect_stdout(io.StringIO()):

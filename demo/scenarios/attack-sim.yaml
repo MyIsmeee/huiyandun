@@ -17,6 +17,6 @@ hijack: { attempts: 3, interval_s: 2 }
 # 录屏演示（make attack-show）：轮换常见弱口令、放慢节奏便于观看；60 s 内超过 5 次即触发 HYD-NET-0001，
 # 封禁生效后余下的尝试连接被切断。口令均为公开的常见弱口令，目标从不放行远端读取，每个都回 401
 show:
-  attempts: 12
-  interval_s: 0.8
+  attempts: 10
+  interval_s: 0.3
   wordlist: ["12345", "123456", admin, password, "888888", "666666", "111111", "000000", "1234", abc123, qwerty, "54321"]
