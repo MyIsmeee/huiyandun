@@ -9,7 +9,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime, timedelta
-from ipaddress import IPv4Network, IPv6Network, ip_address
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
 from typing import Any
 
 from playbook_executor.action import Action, ActionContext, ActionError
@@ -47,11 +47,14 @@ class Executor:
         whitelist: list[Network],
         publish: Publish,
         ttl_override_s: int | None = None,
+        self_ips: frozenset[IPv4Address | IPv6Address] = frozenset(),
     ) -> None:
         self._playbooks = {p.id: p for p in playbooks}
         self._actions = actions  # 键为 "<adapter>.<action>"
         self._mode = mode
         self._whitelist = whitelist
+        # 边缘主机自身的地址：从本机发起的登录爆破（如在演示机上 ssh 自己）以它为攻击源，封了就切断本机
+        self._self_ips = self_ips
         self._publish = publish
         self._ttl_override = ttl_override_s  # 演示时可缩短封禁时长（FR-404）
         self._executions: dict[str, PlaybookExecutionV1] = {}
@@ -187,6 +190,8 @@ class Executor:
         if ip.is_loopback or ip.is_multicast or ip.is_unspecified or ip.is_link_local:
             # 与 privileged-helper 指令协议拒绝的地址一致（C-SEC-06）：封不了，如实记为不处置
             return "攻击源是本机或非单播地址，不处置"
+        if ip in self._self_ips:
+            return "攻击源是边缘主机自身地址，不处置"
         if not self._whitelist:
             return "未配置核心业务白名单，只告警不处置"
         if any(incident.source_ip in net for net in self._whitelist):

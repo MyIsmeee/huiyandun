@@ -640,7 +640,7 @@ volumes:
   correlator-state:
   zeek-logs:
   evidence-data:  # 存证（G-07），只有 evidence-service 挂载
-  recordings:  # recorder 的 20 分钟环形录像，不是存证
+  recordings:  # recorder 的 1 小时环形录像，不是存证
   helper-run:  # privileged-helper 的套接字，只与 playbook-executor 共享
 
 # 口令由 make demo-up 首次运行时生成，不入库（G-14）

@@ -7,6 +7,7 @@
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
 
 import nats
@@ -68,6 +69,10 @@ class ExecutorConfig(ServiceConfig):
     ttl_override_s: int | None = Field(
         None, ge=1, le=86400, description="覆盖全部 Playbook 的 TTL，如演示时缩短封禁时长（FR-404）"
     )
+    lan_ip: IPv4Address | IPv6Address | None = Field(
+        None,
+        description="边缘主机在局域网中的地址（deploy/compose/.env 的 HYD_LAN_IP）：攻击源是它时不处置，避免封掉本机",
+    )
     heartbeat_file: Path = Field(
         Path("/tmp/hyd-playbook-alive"), description="事件循环每秒更新其修改时间，供健康检查判断"
     )
@@ -116,6 +121,7 @@ def build(config: ExecutorConfig, bus: Bus) -> Executor:
         whitelist=site.whitelist,
         publish=publish,
         ttl_override_s=config.ttl_override_s,
+        self_ips=frozenset([config.lan_ip] if config.lan_ip is not None else []),
     )
 
 

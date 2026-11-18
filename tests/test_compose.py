@@ -147,7 +147,7 @@ def test_go2rtc_api_reachable_only_by_its_clients() -> None:
     assert "core-net" not in internal
 
 
-@pytest.mark.parametrize("name", ["web-console", "go2rtc"])
+@pytest.mark.parametrize("name", ["web-console", "go2rtc", "api-server", "playbook-executor"])
 def test_lan_ip_defaults_to_loopback(name: str) -> None:
     """#303：不设 HYD_LAN_IP 时取 127.0.0.1，控制台证书与 WebRTC 候选与只供本机访问时相同。"""
     assert SERVICES[name]["environment"]["HYD_LAN_IP"] == "${HYD_LAN_IP:-127.0.0.1}"

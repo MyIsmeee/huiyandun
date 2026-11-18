@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any
 
@@ -192,6 +192,12 @@ def test_model_evidence_waits_without_executing() -> None:
         ({}, {"source_ip": "fe80::1"}, "攻击源是本机或非单播地址，不处置"),
         ({}, {"source_ip": "224.0.0.251"}, "攻击源是本机或非单播地址，不处置"),
         ({}, {"source_ip": "0.0.0.0"}, "攻击源是本机或非单播地址，不处置"),
+        # 在边缘主机上发起的爆破以它的局域网地址为攻击源（2026-11-18 实测封掉了演示机自己）
+        (
+            {"self_ips": frozenset([ip_address("192.168.5.199")])},
+            {"source_ip": "192.168.5.199"},
+            "攻击源是边缘主机自身地址，不处置",
+        ),
     ],
 )
 def test_skipped_with_reason(kwargs: dict[str, Any], changes: dict[str, Any], reason: str) -> None:
