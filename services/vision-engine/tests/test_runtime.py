@@ -72,6 +72,19 @@ def test_image_runs_openblas_single_threaded() -> None:
     assert re.search(r"^ENV .*\bOPENBLAS_NUM_THREADS=1\b", dockerfile, re.MULTILINE)
 
 
+def test_image_installs_pinned_tensorrt_runtime() -> None:
+    """TensorRT EP 动态加载 libnvinfer.so.10、libnvonnxparser.so.10：镜像须装上且版本锁定（G-15），
+    引擎缓存目录归运行用户所有。"""
+    dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+
+    version = re.search(r"^ARG TENSORRT=(10\.\S+)$", dockerfile, re.MULTILINE)
+    assert version
+    for package in ("libnvinfer10", "libnvonnxparsers10"):
+        assert f"{package}=${{TENSORRT}}" in dockerfile
+    assert "chown hyd /var/cache/hyd-trt" in dockerfile
+    assert runtime.VisionConfig.model_fields["trt_cache_dir"].default == Path("/var/cache/hyd-trt")
+
+
 def test_cpu_mode_uses_only_cpu() -> None:
     session = create_session(config(HYD_DEVICE="cpu"), Path(MODEL))
 
@@ -103,6 +116,75 @@ def test_cuda_sessions_use_one_cpu_thread_without_spinning(fake_session: type[Fa
     options = fake_session.options
     assert options.intra_op_num_threads == runtime.CUDA_CPU_THREADS == 1
     assert options.get_session_config_entry("session.intra_op.allow_spinning") == "0"
+
+
+def test_tensorrt_used_for_listed_models_when_enabled(
+    fake_session: type[FakeSession], tmp_path: Path
+) -> None:
+    """HYD_TENSORRT 时给出 Trt 的模型先交 TensorRT（引擎缓存在 trt_cache_dir），它不支持的算子仍在 CUDA 上。"""
+    fake_session.active = [runtime.TENSORRT, CUDA, CPU]
+    cfg = config(HYD_DEVICE="cuda", HYD_TENSORRT="true", HYD_TRT_CACHE_DIR=str(tmp_path / "trt"))
+
+    create_session(cfg, Path(MODEL), limit_mb=256, trt=runtime.TRT_TOPDOWN)
+
+    name, options = fake_session.requested[0]
+    assert name == runtime.TENSORRT
+    assert options["trt_fp16_enable"] is True
+    assert options["trt_engine_cache_enable"] and options["trt_engine_cache_path"] == str(
+        tmp_path / "trt"
+    )
+    assert options["trt_profile_min_shapes"] == "input:1x3x256x192"
+    assert (
+        options["trt_profile_max_shapes"]
+        == options["trt_profile_opt_shapes"]
+        == "input:16x3x256x192"
+    )
+    assert (tmp_path / "trt").is_dir()
+    assert fake_session.requested[1] == (CUDA, {"gpu_mem_limit": 256 * 2**20})
+
+
+def test_tensorrt_not_used_without_flag_or_spec(fake_session: type[FakeSession]) -> None:
+    fake_session.active = [CUDA, CPU]
+
+    create_session(config(HYD_DEVICE="cuda"), Path(MODEL), trt=runtime.TRT_TOPDOWN)
+    assert fake_session.requested[0][0] == CUDA
+    create_session(config(HYD_DEVICE="cuda", HYD_TENSORRT="true"), Path(MODEL))  # RTMO：不给 Trt
+    assert fake_session.requested[0][0] == CUDA
+
+
+def test_tensorrt_fallback_is_refused(fake_session: type[FakeSession], tmp_path: Path) -> None:
+    """TensorRT 运行库缺失时 ONNX Runtime 只记警告、退回 CUDA：声明了就须生效。"""
+    fake_session.active = [CUDA, CPU]
+    cfg = config(HYD_DEVICE="cuda", HYD_TENSORRT="true", HYD_TRT_CACHE_DIR=str(tmp_path))
+
+    with pytest.raises(DeviceError, match="TensorrtExecutionProvider"):
+        create_session(cfg, Path(MODEL), trt=runtime.TRT_INTEGRITY)
+
+
+def test_tensorrt_shapes_match_model_inputs() -> None:
+    """引擎按 Trt 的形状范围构建，超出范围的输入推理时报错：须与各模块实际送入的形状一致。
+    RF-DETR 只用单精度：半精度检测框偏移（IoU 中位 0.96），见 runtime.TRT_* 的实测注释。"""
+    from vision_engine import action, detector, integrity
+
+    assert runtime.TRT_TOPDOWN.max_shape == (
+        detector.TOPDOWN_BATCHES[-1],
+        3,
+        detector.TOPDOWN_INPUT[1],
+        detector.TOPDOWN_INPUT[0],
+    )
+    assert runtime.TRT_TOPDOWN.min_shape[0] == detector.TOPDOWN_BATCHES[0]
+    assert runtime.TRT_VEHICLE.max_shape == (1, 3, *detector.VEHICLE_INPUT)
+    assert runtime.TRT_VEHICLE.fp16 is False
+    assert runtime.TRT_INTEGRITY.max_shape == (1, 3, integrity.EMBED_INPUT, integrity.EMBED_INPUT)
+    assert runtime.TRT_ACTION.max_shape == (
+        action.MAX_BATCH,
+        action.PERSONS,
+        action.CLIP_LEN,
+        17,
+        3,
+    )
+    for trt in (runtime.TRT_VEHICLE, runtime.TRT_INTEGRITY, runtime.TRT_ACTION):
+        assert trt.min_shape == trt.max_shape  # 固定形状
 
 
 def test_memory_limit_is_shared_by_loaded_models(fake_session: type[FakeSession]) -> None:

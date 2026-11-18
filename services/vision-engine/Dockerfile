@@ -20,7 +20,18 @@ COPY services services
 RUN uv sync --frozen --no-dev --no-editable --package vision-engine
 
 FROM base
-RUN useradd --system --uid 10001 --no-create-home hyd
+# TensorRT 运行库（HYD_TENSORRT，见 runtime.TRT_*）：onnxruntime-gpu 的 TensorRT EP 动态加载 libnvinfer.so.10 与
+# libnvonnxparser.so.10，缺失时只记警告、退回 CUDA。取基础镜像 CUDA 源里的 TensorRT 10 包，版本锁定（G-15）；
+# 包名的 cuda13.2 为构建所用的 CUDA 小版本，CUDA 13 内向下兼容，13.0 运行库上实测可用。另带插件库（ONNX 解析器按需加载）。
+# 约 2.5 GB，多为各代显卡的引擎构建资源。放在虚拟环境之前：源码改动不重新下载
+ARG TENSORRT=10.16.1.11-1+cuda13.2
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libnvinfer10=${TENSORRT} libnvonnxparsers10=${TENSORRT} libnvinfer-plugin10=${TENSORRT} \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --system --uid 10001 --no-create-home hyd \
+    # TensorRT 引擎缓存（HYD_TRT_CACHE_DIR）：compose 挂命名卷，首次挂载时按此处的属主初始化
+    && mkdir -p /var/cache/hyd-trt && chown hyd /var/cache/hyd-trt
 COPY --from=build /app/.venv /app/.venv
 # onnxruntime 默认在 import 时向 mobile.events.data.microsoft.com 发送遥测（抓包确认），须关闭（G-05）。
 # OpenBLAS（numpy 与 OpenCV 各带一份）单线程：引擎里只有卡尔曼滤波、单应矩阵这类小矩阵运算，默认各开 23 个线程、

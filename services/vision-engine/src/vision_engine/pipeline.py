@@ -87,6 +87,10 @@ from vision_engine.rules import Observation, RuleEngine, RuleEvent
 from vision_engine.runtime import (
     ACTION_MEM_MB,
     TOPDOWN_MEM_MB,
+    TRT_ACTION,
+    TRT_INTEGRITY,
+    TRT_TOPDOWN,
+    TRT_VEHICLE,
     DeviceError,
     VisionConfig,
     create_session,
@@ -1079,10 +1083,14 @@ async def serve(config: VisionConfig) -> None:
         # 两阶段骨骼（detector.TopDownPose）：按人员框逐人重新估计
         detector.topdown = TopDownPose(
             str(config.topdown_model_file),
-            create_session(config, config.topdown_model_file, limit_mb=TOPDOWN_MEM_MB),
+            create_session(
+                config, config.topdown_model_file, limit_mb=TOPDOWN_MEM_MB, trt=TRT_TOPDOWN
+            ),
         )
     actions = (
-        ActionModel(create_session(config, config.action_model_file, limit_mb=ACTION_MEM_MB))
+        ActionModel(
+            create_session(config, config.action_model_file, limit_mb=ACTION_MEM_MB, trt=TRT_ACTION)
+        )
         if config.action_model_file
         else None
     )
@@ -1091,7 +1099,7 @@ async def serve(config: VisionConfig) -> None:
     vehicles = (
         VehicleDetector(
             str(config.vehicle_model_file),
-            create_session(config, config.vehicle_model_file, models),
+            create_session(config, config.vehicle_model_file, models, trt=TRT_VEHICLE),
         )
         if config.vehicle_model_file
         else None
@@ -1102,7 +1110,9 @@ async def serve(config: VisionConfig) -> None:
         else None
     )
     embedder = (
-        FrameEmbedder(create_session(config, config.integrity_model_file, models))
+        FrameEmbedder(
+            create_session(config, config.integrity_model_file, models, trt=TRT_INTEGRITY)
+        )
         if config.integrity_model_file
         else None
     )

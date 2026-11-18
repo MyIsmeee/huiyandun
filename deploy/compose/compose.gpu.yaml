@@ -6,7 +6,15 @@ services:
       HYD_DEVICE: cuda
       # 默认 2048 MiB 由 4 个模型平分，3 路摄像头时 RF-DETR 的 512 MiB 不够，显存耗尽后 CUDA 上下文损坏、全部检测停摆
       HYD_GPU_MEM_LIMIT_MB: "5120"
+      # RTMPose、RF-DETR、DINOv2、STGCN++ 以 TensorRT 推理（runtime.TRT_*）。首次启动构建引擎约 5 分钟，
+      # 期间健康检查不通过；引擎存于 trt-cache 卷，此后启动直接读取
+      HYD_TENSORRT: "true"
+    volumes:
+      - trt-cache:/var/cache/hyd-trt
     deploy:
       resources:
         reservations:
           devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+volumes:
+  trt-cache:
