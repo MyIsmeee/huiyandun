@@ -13,7 +13,10 @@ from api_server.app import create_app
 from api_server.auth import ROLES, require, verify_password
 from api_server.config import ApiConfig
 from api_server.db import transaction
+from api_server.login_guard import THRESHOLD
+from py_common.bus import Bus
 from py_contracts.api import Error, LoginResponse, Session
+from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
 RID = {"X-Request-ID": "req-auth"}
 # cryptography 47.0.0 以 hash_password 的参数生成；口令 legacy-pass-1 仅用于本测试
@@ -132,3 +135,33 @@ def test_verifies_hash_from_earlier_cryptography_release() -> None:
     """升级 cryptography 后，已有账户的口令哈希仍能校验，账户仍能登录。"""
     assert verify_password("legacy-pass-1", LEGACY_HASH)
     assert not verify_password("legacy-pass-2", LEGACY_HASH)
+
+
+def test_repeated_failures_publish_bruteforce_alert(client: TestClient, password: str) -> None:
+    """控制台登录爆破（HYD-WEB-0001）：同一来源连续失败达到阈值，发布网络告警，控制台告警栏随即显示。"""
+    received: list[SecurityAlertV1] = []
+    attacker = {"X-Forwarded-For": "192.168.5.23", **RID}
+
+    def attack() -> None:
+        body = {"username": "admin", "password": password + "x"}
+        for _ in range(THRESHOLD + 2):
+            assert client.post("/api/auth/login", json=body, headers=attacker).status_code == 401
+
+    async def listen() -> None:
+        bus = await Bus.connect(client.app.state.config.nats_url, name="listen", timeout_s=2)
+
+        async def on_alert(event: SecurityAlertV1) -> None:
+            received.append(event)
+
+        await bus.subscribe("hyd.security.alert.v1", SecurityAlertV1, on_alert)
+        await asyncio.to_thread(attack)
+        await asyncio.sleep(0.3)
+        await bus.close()
+
+    asyncio.run(listen())
+
+    [alert] = received
+    assert (alert.rule_id, alert.category, str(alert.src_ip)) == (
+        "HYD-WEB-0001", "auth_bruteforce", "192.168.5.23",
+    )  # fmt: skip
+    assert alert.device_id is None

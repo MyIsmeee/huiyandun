@@ -68,6 +68,8 @@ services:
       - zeek-logs:/zeek/logs:ro
       - correlator-state:/var/lib/correlator:ro
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro
+    # 本机局域网地址（ops.md §5）：控制台登录爆破告警（HYD-WEB-0001）的目标地址
+    environment: { HYD_LAN_IP: "${HYD_LAN_IP:-127.0.0.1}" }
     depends_on:
       migrate: { condition: service_completed_successfully }
       nats: { condition: service_healthy }  # 订阅事件转发到 WS 各频道

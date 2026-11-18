@@ -46,6 +46,7 @@ from api_server.devices import Devices
 from api_server.history import History
 from api_server.investigation_tools import Tools
 from api_server.localtime import site_tz
+from api_server.login_guard import LoginGuard
 from api_server.pose_checks import PoseChecks
 from py_common.bus import Bus
 from py_common.log import bind_request_id
@@ -135,6 +136,8 @@ def create_app(config: ApiConfig) -> FastAPI:
         await bus.ensure_stream(
             cameras.STREAM, [cameras.SUBJECT], cameras.STREAM_MAX_AGE_S, max_msgs_per_subject=1
         )
+        # 控制台登录爆破告警（HYD-WEB-0001）与网络探针的告警同流；流通常已由 correlator 创建，配置相同时不变
+        await bus.ensure_stream(auth.ALERT_STREAM, [auth.ALERT_SUBJECT], auth.ALERT_MAX_AGE_S)
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
             # 告警处置记录在审计日志中：后台读回，数据库暂不可达时重试，不推迟服务就绪
@@ -189,6 +192,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.tz = site_tz(config.display_utc_offset_min)
     app.state.site = site.load(config.site_file)
     app.state.hub = ws.Hub()
+    app.state.login_guard = LoginGuard(config.lan_ip)
     app.state.devices = Devices(app.state.site.devices)
     app.state.pose_checks = PoseChecks()
     app.state.auto_scenes = scene.AutoScenes()

@@ -311,9 +311,15 @@ export function AlertListView(props: {
   );
 }
 
+/** 平台自身遭受的攻击（HYD-WEB-*，如控制台登录爆破）：目标是平台而不是摄像头，不按未登记设备显示 */
+function isPlatform(alert: Alert): boolean {
+  return "rule_id" in alert && alert.rule_id.startsWith("HYD-WEB-");
+}
+
 /** 目标未登记为设备的网络告警（FR-203）：标出被攻击的地址，否则无从得知哪台主机遭攻击 */
 export function unregistered(alert: Alert): string {
-  return "dst_ip" in alert ? `未登记设备 ${alert.dst_ip}` : "未登记设备";
+  const name = isPlatform(alert) ? "管理平台" : "未登记设备";
+  return "dst_ip" in alert ? `${name} ${alert.dst_ip}` : name;
 }
 
 /** 一条告警或合并行；count > 1 时标出次数 */
@@ -335,7 +341,13 @@ function AlertRow(props: { alert: Alert; selected: string | null; count: number 
         </span>
         <span
           className="block text-meta text-subtle-foreground tabular-nums"
-          title={device === null ? "目标地址未登记为摄像头：告警不关联成事件、不自动处置，登记后纳入防护" : undefined}
+          title={
+            device !== null
+              ? undefined
+              : isPlatform(alert)
+                ? "管理平台自身遭攻击：请核查来源地址，告警不自动处置"
+                : "目标地址未登记为摄像头：告警不关联成事件、不自动处置，登记后纳入防护"
+          }
         >
           {device ?? unregistered(alert)} · {count > 1 ? "最近 " : ""}
           {formatStamp(Date.parse(alert.ts))}

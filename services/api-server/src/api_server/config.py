@@ -1,5 +1,6 @@
 """配置项（CD-05）。"""
 
+from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
 
 from pydantic import Field
@@ -27,6 +28,10 @@ class DbConfig(ServiceConfig):
 
 class ApiConfig(DbConfig):
     port: int = Field(8000, ge=1, le=65535, description="HTTP 监听端口")
+    lan_ip: IPv4Address | IPv6Address = Field(
+        IPv4Address("127.0.0.1"),
+        description="本机局域网地址（ops.md §5，与 web-console 相同）：控制台登录爆破告警的目标地址",
+    )
     auto_calibration: bool = Field(
         True,
         description="自动标定：未做 4 点标定的摄像头，按视觉引擎从画面估出的安装高度、俯角、视角自动写回",

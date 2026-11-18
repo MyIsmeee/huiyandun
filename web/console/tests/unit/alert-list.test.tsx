@@ -232,6 +232,15 @@ describe("AlertList", () => {
     expect(label.getAttribute("title")).toContain("不自动处置");
     expect(screen.getByText("告警 1").closest("button")).toHaveProperty("disabled", true);
   });
+
+  it("控制台登录爆破（HYD-WEB-0001）标为管理平台遭攻击，而不是未登记设备", () => {
+    receive(frame("alerts", { ...alert(1), rule_id: "HYD-WEB-0001", device_id: null, dst_ip: "192.168.5.199" }), 0);
+    render(<AlertList stale={false} lastFrameAt={0} />);
+
+    const label = screen.getByText(/管理平台 192\.168\.5\.199/);
+    expect(label.getAttribute("title")).toContain("管理平台自身遭攻击");
+    expect(screen.queryByText(/未登记设备/)).toBeNull();
+  });
 });
 
 describe("按关联事件选中", () => {
