@@ -60,6 +60,7 @@ ENDPOINTS = [
     ("post", "/api/executions/{id}/rollback", "operator"),
     ("post", "/api/alerts/{id}/disposition", "operator"),  # 告警处置：确认、误报、已处理
     ("post", "/api/alerts/clear", "operator"),  # 删除告警：不再列出，原始记录保留
+    ("get", "/api/cameras/usb-devices", "admin"),  # 边缘主机上的 USB 摄像头
     ("get", "/api/alerts/{id}/clip", "viewer"),  # 单条告警前后的录像回放
     ("post", "/api/incidents/{id}/evidence/export", "operator"),
     ("get", "/api/llm/providers", "admin"),

@@ -449,3 +449,16 @@ def test_notifier_is_opt_in_and_only_it_reaches_notify_egress() -> None:
     assert notifier["read_only"] is True and notifier["cap_drop"] == ["ALL"]
     assert "ports" not in notifier and "volumes" not in notifier
     assert notifier["secrets"] == ["notify_targets"]
+
+
+def test_usb_cameras_device_access_least_privilege() -> None:
+    """USB 摄像头：只有 ingest 能打开设备，且只放开视频设备（主设备号 81）；api-server 只读设备名，打不开设备。"""
+    assert SERVICES["ingest"]["device_cgroup_rules"] == ["c 81:* rmw"]
+    assert "/dev:/hostdev:ro" in SERVICES["ingest"]["volumes"]
+    assert "/dev:/hostdev:ro" in SERVICES["api-server"]["volumes"]
+    granted = {n for n, s in SERVICES.items() if s.get("device_cgroup_rules") or s.get("devices")}
+    assert granted <= {
+        "ingest",
+        "vision-engine",
+    }  # vision-engine 的 GPU 透传在 compose.gpu.yaml，这里不应出现
+    assert "device_cgroup_rules" not in SERVICES["api-server"]

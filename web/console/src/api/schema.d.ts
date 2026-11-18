@@ -149,6 +149,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cameras/usb-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description 插在边缘主机上的 USB 摄像头（只列视频采集节点），供新增摄像头时选择接入；已接入的标出摄像头编号。
+         *     拔插后重新读取即可看到变化，不需要重启
+         */
+        get: operations["listUsbDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cameras": {
         parameters: {
             query?: never;
@@ -834,12 +854,14 @@ export interface components {
             name: string;
             ip: string;
             /**
-             * @description pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>
+             * @description pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>；usb 为插在边缘主机上的 USB 摄像头，由 ingest 读取设备
              * @enum {unknown}
              */
-            ingest: "pull" | "push";
-            /** @description 推流时为 null */
+            ingest: "pull" | "push" | "usb";
+            /** @description 推流与 USB 时为 null */
             source: components["schemas"]["CameraSource"] | null;
+            /** @description USB 摄像头的设备标识（/dev/v4l/by-id 下的名字，拔插后不变）；其余接入方式为 null */
+            device: string | null;
             username: string | null;
             /** @description 口令只写不读（C-ST-03） */
             password_set: boolean;
@@ -865,11 +887,13 @@ export interface components {
         };
         CameraCreate: {
             name: string;
-            ip: string;
+            /** @description 设备 IP，拉流与推流时必填；USB 摄像头没有网络地址，省略时自动分配本机占位地址 127.0.1.N */
+            ip?: string;
             /** @enum {unknown} */
-            ingest: "pull" | "push";
+            ingest: "pull" | "push" | "usb";
             /** @description 拉流时必填 */
             source?: components["schemas"]["CameraSource"] | null;
+            device?: components["schemas"]["UsbDeviceId"];
             username?: string | null;
             /** Format: password */
             password?: string;
@@ -881,8 +905,9 @@ export interface components {
             name?: string;
             ip?: string;
             /** @enum {unknown} */
-            ingest?: "pull" | "push";
+            ingest?: "pull" | "push" | "usb";
             source?: components["schemas"]["CameraSource"] | null;
+            device?: components["schemas"]["UsbDeviceId"];
             username?: string | null;
             /**
              * Format: password
@@ -894,6 +919,18 @@ export interface components {
             climb_lines?: components["schemas"]["ClimbLine"][];
             /** @description 省略表示不修改；给出时整体替换 */
             rules?: components["schemas"]["camera_rule.schema"][];
+        };
+        /** @description USB 摄像头的设备标识：边缘主机 /dev/v4l/by-id 下的名字（拔插后不变），改为 USB 接入时必填 */
+        UsbDeviceId: string;
+        UsbDevice: {
+            device: components["schemas"]["UsbDeviceId"];
+            /** @description 便于辨认的设备名 */
+            name: string;
+            /** @description 已接入时为对应的摄像头编号 */
+            camera_id: string | null;
+        };
+        UsbDeviceList: {
+            items: components["schemas"]["UsbDevice"][];
         };
         CalibrationInput: {
             /** @description 打开标定对话框时摄像头所在区域；与库中不一致时 409 */
@@ -2117,6 +2154,28 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listUsbDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 设备列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsbDeviceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listCameras: {

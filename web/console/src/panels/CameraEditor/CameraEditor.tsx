@@ -1,4 +1,4 @@
-import { CircleAlert, Eraser, X } from "lucide-react";
+import { CircleAlert, Eraser, RefreshCw, X } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -48,6 +48,8 @@ export type CameraForm = {
   path: string;
   /** 兼容模式：经 MediaMTX 中继拉流，只对 RTSP / RTMP 有效（D-117） */
   relay: boolean;
+  /** USB 摄像头的设备标识（/dev/v4l/by-id 下的名字） */
+  device: string;
   username: string;
   password: string;
   pose: Pose;
@@ -64,6 +66,7 @@ const initialForm = (c: Camera | null): CameraForm => ({
   port: c?.source?.port ?? PROTOCOLS.rtsp[1],
   path: c?.source?.path ?? "",
   relay: c?.source?.relay ?? false,
+  device: c?.device ?? "",
   username: c?.username ?? "",
   password: "",
   pose: c?.pose ?? DEFAULT_POSE,
@@ -78,6 +81,9 @@ const RELAYABLE = new Set<Protocol>(["rtsp", "rtmp"]);
 
 /** 主机留空时取设备 IP（常见情况：摄像头本身提供取流服务）；推流不带拉流地址与凭据 */
 export function body(form: CameraForm): Schemas["CameraCreate"] {
+  // USB 摄像头没有网络地址：不提交设备 IP，新增时由服务端分配占位地址，修改时保持不变
+  if (form.ingest === "usb")
+    return { name: form.name.trim(), pose: form.pose, climb_lines: form.climb_lines, ingest: "usb", device: form.device, source: null, username: null };
   const common = { name: form.name.trim(), ip: form.ip.trim(), pose: form.pose, climb_lines: form.climb_lines };
   if (form.ingest === "push") return { ...common, ingest: "push", source: null, username: null };
   return {
@@ -278,7 +284,11 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           <Label htmlFor="cam-name">名称</Label>
           <Input id="cam-name" required maxLength={40} value={form.name} onChange={(e) => set({ name: e.target.value })} />
           <Label htmlFor="cam-ip">设备 IP</Label>
-          <Input id="cam-ip" required placeholder="192.168.8.31" value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
+          {form.ingest === "usb" ? (
+            <span id="cam-ip" className="text-sm text-muted-foreground">USB 摄像头无需填写</span>
+          ) : (
+            <Input id="cam-ip" required placeholder="192.168.8.31" value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
+          )}
           <span>接入方式</span>
           <RadioGroup
             aria-label="接入方式"
@@ -290,6 +300,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
               [
                 ["pull", "拉流（系统从摄像头取流）"],
                 ["push", "推流（设备推到本机）"],
+                ["usb", "USB 摄像头（插在本机）"],
               ] as const
             ).map(([value, label]) => (
               <Label key={value}>
@@ -298,7 +309,9 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
               </Label>
             ))}
           </RadioGroup>
-          {form.ingest === "push" ? (
+          {form.ingest === "usb" ? (
+            <UsbPicker value={form.device} self={saved?.id ?? null} onChange={(device, name) => set({ device, name: form.name || name })} />
+          ) : form.ingest === "push" ? (
             <PushInfo id={saved?.id ?? null} password={pushPassword} />
           ) : (
             <>
@@ -486,6 +499,66 @@ function NumberInput(props: { id?: string; label: string; value: string; error: 
 }
 
 /** 推流地址、用户名与口令（FR-907、V-CAM2）：口令只在保存为推流后显示一次 */
+type UsbDevice = Schemas["UsbDevice"];
+
+/**
+ * USB 摄像头的设备选择：列出插在边缘主机上的摄像头，已被其他摄像头接入的不可选；拔插后点刷新。
+ * 选中时名称为空则带出设备名
+ */
+export function UsbPicker(props: { value: string; self: string | null; onChange: (device: string, name: string) => void }) {
+  const { value, self, onChange } = props;
+  const [devices, setDevices] = useState<UsbDevice[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  /** 每次刷新加一，重新读取设备列表 */
+  const [round, setRound] = useState(0);
+  useEffect(() => {
+    let current = true;
+    api.listUsbDevices().then(
+      (list) => {
+        if (!current) return;
+        setDevices(list.items);
+        setFailed(false);
+      },
+      () => current && setFailed(true),
+    );
+    return () => {
+      current = false;
+    };
+  }, [round]);
+  const load = () => setRound((n) => n + 1);
+  const empty = devices !== null && devices.length === 0;
+  return (
+    <>
+      <Label htmlFor="cam-usb">设备</Label>
+      <div className="col-span-3 flex items-center gap-2">
+        <Select value={value || undefined} onValueChange={(device) => onChange(device, devices?.find((d) => d.device === device)?.name ?? "")} disabled={!devices || empty}>
+          <SelectTrigger id="cam-usb" className="min-w-0 flex-1">
+            <SelectValue placeholder={failed ? "读取设备失败" : devices === null ? "正在查找 USB 摄像头…" : empty ? "未发现 USB 摄像头" : "选择要接入的摄像头"} />
+          </SelectTrigger>
+          <SelectContent>
+            {devices?.map((d) => {
+              const taken = d.camera_id !== null && d.camera_id !== self;
+              return (
+                <SelectItem key={d.device} value={d.device} disabled={taken}>
+                  {d.name}
+                  {taken && `（已接入为 ${d.camera_id}）`}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+        <button type="button" onClick={load} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <RefreshCw aria-hidden />
+          刷新
+        </button>
+      </div>
+      <p className="col-span-4 text-xs text-subtle-foreground">
+        只列出插在慧眼盾主机上的 USB 摄像头；插在其他电脑上的请用"推流"。插上新摄像头后点刷新。
+      </p>
+    </>
+  );
+}
+
 function PushInfo({ id, password }: { id: string | null; password: string | null }) {
   return (
     <dl className="col-span-4 grid grid-cols-[6rem_minmax(0,1fr)] gap-y-1 rounded-lg border border-border p-3">

@@ -85,7 +85,20 @@ def client(db: tuple[ApiConfig, ApiConfig], password: str, key_file: Path) -> It
     asyncio.run(reset())
     push = key_file.parent / "push_password"
     push.write_text("push-secret\n")
-    config = db[1].model_copy(update={"device_key_file": key_file, "push_password_file": push})
+    # 宿主 /dev 的替身：一个 USB 摄像头的采集节点与元数据节点（by-id 符号链接）
+    by_id = key_file.parent / "dev/v4l/by-id"
+    by_id.mkdir(parents=True)
+    (key_file.parent / "dev/video2").touch()
+    (key_file.parent / "dev/video3").touch()
+    (by_id / f"{USB}").symlink_to("../../video2")
+    (by_id / USB.replace("index0", "index1")).symlink_to("../../video3")
+    config = db[1].model_copy(
+        update={
+            "device_key_file": key_file,
+            "push_password_file": push,
+            "host_dev_dir": key_file.parent / "dev",
+        }
+    )
     with TestClient(create_app(config), base_url="https://testserver") as c:
         login(c, "admin", password)
         # 登记表为空时由后台任务从 site.yaml 初始导入
@@ -323,13 +336,16 @@ def test_sync_go2rtc_adds_replaces_and_removes(tmp_path: Path, key_file: Path) -
 class FakeIngest:
     """MediaMTX 的路径配置接口：记下增删改调用；列表中另有推流用的正则路径，不应被动到。"""
 
-    def __init__(self, paths: dict[str, str]) -> None:
-        self.paths = paths
+    def __init__(self, paths: dict[str, Any]) -> None:
+        self.paths = paths  # 路径名 → 来源地址，或整份配置
         self.calls: list[tuple[str, str, Any]] = []
 
     async def get(self, path: str, **_: Any) -> Any:
-        items = [{"name": "~^cam-[0-9]+$", "source": "publisher"}]
-        items += [{"name": n, "source": s} for n, s in self.paths.items()]
+        items: list[dict[str, Any]] = [{"name": "~^cam-[0-9]+$", "source": "publisher"}]
+        items += [
+            {"name": n} | (c if isinstance(c, dict) else {"source": c})
+            for n, c in self.paths.items()
+        ]
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"items": items})
 
     async def delete(self, path: str, **_: Any) -> Any:
@@ -337,9 +353,9 @@ class FakeIngest:
         self.paths.pop(path.rsplit("/", 1)[1])
         return SimpleNamespace(raise_for_status=lambda: None)
 
-    async def request(self, method: str, path: str, json: dict[str, Any]) -> Any:
-        self.calls.append((method, path, json))
-        self.paths[path.rsplit("/", 1)[1]] = json["source"]
+    async def post(self, path: str, json: dict[str, Any]) -> Any:
+        self.calls.append(("POST", path, json))
+        self.paths[path.rsplit("/", 1)[1]] = json
         return SimpleNamespace(raise_for_status=lambda: None)
 
 
@@ -359,7 +375,7 @@ def test_relay_camera_is_pulled_through_ingest(key_file: Path) -> None:
     conf = {"source": camera, "sourceOnDemand": False, "rtspTransport": "tcp"}
     assert ingest.calls == [
         ("delete", "/v3/config/paths/delete/cam-08", None),
-        ("PATCH", "/v3/config/paths/patch/cam-07", conf),
+        ("POST", "/v3/config/paths/replace/cam-07", conf),
     ]
     ingest.calls.clear()
     asyncio.run(cameras.Registry(state)._sync_ingest([relay, plain]))
@@ -960,3 +976,69 @@ def test_rules_saved_with_defaults_and_sent_in_registry(client: TestClient) -> N
         client.patch("/api/cameras/cam-03", json={"rules": []}, headers=headers()).json()["rules"]
         == []
     )
+
+
+USB = "usb-GEMBIRD_Generic_UVC_1.00_camera_AppoTech_AX2311-video-index0"
+USB_BODY = {"name": "USB 摄像头", "ingest": "usb", "device": USB} | {k: GATE[k] for k in ("pose",)}
+
+
+def test_usb_devices_listed_and_camera_created_without_ip(client: TestClient) -> None:
+    """只列视频采集节点（index0）；USB 摄像头不填 IP 时分配本机占位地址，已接入的设备标出摄像头编号。"""
+    r = client.get("/api/cameras/usb-devices")
+    assert r.status_code == 200, r.text
+    assert r.json()["items"] == [
+        {
+            "device": USB,
+            "name": "GEMBIRD Generic UVC 1.00 camera AppoTech AX2311",
+            "camera_id": None,
+        }
+    ]
+
+    r = client.post("/api/cameras", json=USB_BODY, headers=headers())
+    assert r.status_code == 201, r.text
+    camera = r.json()
+    assert (camera["ingest"], camera["device"], camera["source"], camera["ip"]) == (
+        "usb",
+        USB,
+        None,
+        "127.0.1.1",
+    )
+    assert "push_password" not in camera or camera["push_password"] is None
+    [item] = client.get("/api/cameras/usb-devices").json()["items"]
+    assert item["camera_id"] == camera["id"]
+
+    second = client.post("/api/cameras", json=USB_BODY | {"name": "第二路"}, headers=headers())
+    assert second.json()["ip"] == "127.0.1.2"  # 占位地址不重复
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"name": "x", "ingest": "usb", "pose": GATE["pose"]},  # 没选设备
+        {"name": "x", "ingest": "usb", "device": "../../video2", "pose": GATE["pose"]},  # 非法标识
+        {k: v for k, v in GATE.items() if k != "ip"},  # 拉流不填 IP
+    ],
+)
+def test_create_usb_rejects(client: TestClient, body: dict[str, Any]) -> None:
+    assert client.post("/api/cameras", json=body, headers=headers()).status_code == 400
+
+
+def test_usb_camera_read_by_ingest(key_file: Path) -> None:
+    """USB 摄像头：ingest 本机 ffmpeg 读 by-id 设备推到同名路径，go2rtc 从 ingest 取；与兼容模式互换时整体替换。"""
+    site_file = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
+    config = SimpleNamespace(site_file=site_file, device_key_file=key_file)
+    ingest = FakeIngest({})
+    state = SimpleNamespace(config=config, ingest=ingest)
+    camera = {"id": "cam-09", "password_enc": None} | row(
+        ingest="usb", protocol=None, host=None, port=None, path=USB
+    )
+
+    assert cameras.source_url(camera, None) == "rtsp://172.30.10.10:8554/cam-09"
+    asyncio.run(cameras.Registry(state)._sync_ingest([camera]))
+    [(method, path, conf)] = ingest.calls
+    assert (method, path, conf["source"]) == ("POST", "/v3/config/paths/add/cam-09", "publisher")
+    assert f"-f v4l2 -i /hostdev/v4l/by-id/{USB} " in conf["runOnInit"]
+    assert "rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH" in conf["runOnInit"]
+    ingest.calls.clear()
+    asyncio.run(cameras.Registry(state)._sync_ingest([camera]))
+    assert ingest.calls == []  # 未变化不重复下发

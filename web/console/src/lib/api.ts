@@ -115,6 +115,8 @@ export const api = {
   /** 模型供应商（FR-601～604），只有 admin 可用；顺序即故障转移顺序 */
   /** 摄像头登记表（FR-905，D-101），仅 admin */
   listCameras: () => request<Schemas["CameraList"]>("GET", "/api/cameras"),
+  /** 边缘主机上的 USB 摄像头：每次重新读取，拔插后刷新即可 */
+  listUsbDevices: () => request<Schemas["UsbDeviceList"]>("GET", "/api/cameras/usb-devices"),
   createCamera: (body: Schemas["CameraCreate"]) => request<Schemas["Camera"]>("POST", "/api/cameras", body),
   updateCamera: (id: string, body: Schemas["CameraUpdate"]) =>
     request<Schemas["Camera"]>("PATCH", `/api/cameras/${encodeURIComponent(id)}`, body),

@@ -322,6 +322,30 @@ class Username(RootModel[str]):
     root: str = Field(..., max_length=128)
 
 
+class UsbDeviceId(RootModel[str]):
+    model_config = {"allow_inf_nan": False}
+    root: str = Field(..., pattern="^[A-Za-z0-9._:-]{1,200}$")
+    """
+    USB 摄像头的设备标识：边缘主机 /dev/v4l/by-id 下的名字（拔插后不变），改为 USB 接入时必填
+    """
+
+
+class UsbDevice(ContractModel):
+    device: UsbDeviceId
+    name: str
+    """
+    便于辨认的设备名
+    """
+    camera_id: str | None
+    """
+    已接入时为对应的摄像头编号
+    """
+
+
+class UsbDeviceList(ContractModel):
+    items: list[UsbDevice]
+
+
 class Point1(RootModel[list[float]]):
     model_config = {"allow_inf_nan": False}
     root: list[float] = Field(..., max_length=4, min_length=4)
@@ -1149,13 +1173,17 @@ class Camera(ContractModel):
     """
     name: str
     ip: IPv4Address | IPv6Address
-    ingest: Literal["pull", "push"]
+    ingest: Literal["pull", "push", "usb"]
     """
-    pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>
+    pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>；usb 为插在边缘主机上的 USB 摄像头，由 ingest 读取设备
     """
     source: CameraSource | None
     """
-    推流时为 null
+    推流与 USB 时为 null
+    """
+    device: str | None
+    """
+    USB 摄像头的设备标识（/dev/v4l/by-id 下的名字，拔插后不变）；其余接入方式为 null
     """
     username: str | None
     password_set: bool
@@ -1194,12 +1222,16 @@ class CameraList(ContractModel):
 
 class CameraCreate(ContractModel):
     name: str = Field(..., max_length=40, min_length=1)
-    ip: IPv4Address | IPv6Address
-    ingest: Literal["pull", "push"]
+    ip: IPv4Address | IPv6Address | None = None
+    """
+    设备 IP，拉流与推流时必填；USB 摄像头没有网络地址，省略时自动分配本机占位地址 127.0.1.N
+    """
+    ingest: Literal["pull", "push", "usb"]
     source: CameraSource | None = None
     """
     拉流时必填
     """
+    device: UsbDeviceId | None = None
     username: Username | None = None
     password: SecretStr | None = Field(None, max_length=128)
     pose: Pose
@@ -1210,8 +1242,9 @@ class CameraCreate(ContractModel):
 class CameraUpdate(ContractModel):
     name: str | None = Field(None, max_length=40, min_length=1)
     ip: IPv4Address | IPv6Address | None = None
-    ingest: Literal["pull", "push"] | None = None
+    ingest: Literal["pull", "push", "usb"] | None = None
     source: CameraSource | None = None
+    device: UsbDeviceId | None = None
     username: Username | None = None
     password: SecretStr | None = Field(None, max_length=128)
     """

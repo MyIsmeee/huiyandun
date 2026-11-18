@@ -15,6 +15,7 @@ const CAM: Camera = {
   ingest: "pull",
   source: { protocol: "rtsp", host: "192.168.8.39", port: 554, path: "/live", relay: false },
   username: null,
+  device: null,
   password_set: false,
   area_id: "area-01",
   pose: POSE,

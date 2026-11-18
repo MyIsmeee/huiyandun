@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api } from "../../src/lib/api";
-import { type Camera, CameraEditor, body } from "../../src/panels/CameraEditor/CameraEditor";
+import { type Camera, CameraEditor, UsbPicker, body } from "../../src/panels/CameraEditor/CameraEditor";
 import { CameraListView, address } from "../../src/panels/CameraList/CameraList";
 
 // Radix RadioGroup 依赖 jsdom 未实现的 ResizeObserver
@@ -19,6 +19,7 @@ const CAM: Camera = {
   ingest: "pull",
   source: { protocol: "rtsp", host: "192.168.8.31", port: 554, path: "/Streaming/Channels/101", relay: false },
   username: "admin",
+  device: null,
   password_set: true,
   area_id: null,
   pose: POSE,
@@ -87,7 +88,7 @@ describe("摄像头列表（ui.md §7.2）", () => {
 
 describe("添加与编辑（ui.md §7.2）", () => {
   it("请求体：主机留空取设备 IP；口令为空不发送（只写不读）", () => {
-    const form = { name: " 后门 ", ip: "10.0.0.5", ingest: "pull" as const, protocol: "http" as const, host: "", port: 80, path: "video.mjpg", relay: true, username: "", password: "", pose: POSE, climb_lines: [] };
+    const form = { name: " 后门 ", ip: "10.0.0.5", ingest: "pull" as const, protocol: "http" as const, host: "", port: 80, path: "video.mjpg", relay: true, device: "", username: "", password: "", pose: POSE, climb_lines: [] };
     expect(body(form)).toEqual({
       name: "后门",
       ip: "10.0.0.5",
@@ -101,7 +102,7 @@ describe("添加与编辑（ui.md §7.2）", () => {
   });
 
   it("推流：不带拉流地址与凭据；列表显示推流地址与用户名（FR-907）", () => {
-    const form = { name: "手机", ip: "10.0.0.6", ingest: "push" as const, protocol: "rtsp" as const, host: "x", port: 554, path: "p", relay: false, username: "u", password: "pw", pose: POSE, climb_lines: [] };
+    const form = { name: "手机", ip: "10.0.0.6", ingest: "push" as const, protocol: "rtsp" as const, host: "x", port: 554, path: "p", relay: false, device: "", username: "u", password: "pw", pose: POSE, climb_lines: [] };
     expect(body(form)).toEqual({ name: "手机", ip: "10.0.0.6", ingest: "push", source: null, username: null, pose: POSE, climb_lines: [] });
     expect(address({ ...CAM, ingest: "push", source: null })).toBe(`推流地址 rtsp://${location.hostname}:8554/cam-03 · 用户 hyd`);
   });
@@ -352,5 +353,39 @@ describe("安装参数自检（D-102 估算映射）", () => {
 
     await open({ ...CAM, calibration: [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]], calibration_error_m: 0.2, pose_check: SUSPECT });
     expect(screen.queryByRole("status", { name: "安装参数自检" })).toBeNull();
+  });
+});
+
+describe("USB 摄像头", () => {
+  // Radix Select 打开时滚动到选中项；jsdom 没有实现
+  Element.prototype.scrollIntoView ??= () => undefined;
+  Element.prototype.hasPointerCapture ??= () => false;
+  it("请求体：不带设备 IP 与拉流地址，带设备标识", () => {
+    const form = { name: "门口 USB", ip: "", ingest: "usb" as const, protocol: "rtsp" as const, host: "", port: 554, path: "", relay: false, device: "usb-Cam-video-index0", username: "", password: "", pose: POSE, climb_lines: [] };
+    expect(body(form)).toEqual({ name: "门口 USB", ingest: "usb", device: "usb-Cam-video-index0", source: null, username: null, pose: POSE, climb_lines: [] });
+  });
+
+  it("列出本机 USB 摄像头：已被其他摄像头接入的不可选，选中时带出设备名；刷新重新读取", async () => {
+    const list = vi.spyOn(api, "listUsbDevices").mockResolvedValue({
+      items: [
+        { device: "usb-A-video-index0", name: "A Cam", camera_id: null },
+        { device: "usb-B-video-index0", name: "B Cam", camera_id: "cam-09" },
+      ],
+    });
+    const changed = vi.fn();
+    render(<UsbPicker value="" self={null} onChange={changed} />);
+    await waitFor(() => expect(screen.getByText("选择要接入的摄像头")).toBeTruthy());
+    fireEvent.click(screen.getByRole("combobox"));
+    expect(screen.getByRole("option", { name: /B Cam（已接入为 cam-09）/ }).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: "A Cam" }));
+    expect(changed).toHaveBeenCalledWith("usb-A-video-index0", "A Cam");
+    fireEvent.click(screen.getByRole("button", { name: /刷新/ }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
+
+  it("没有 USB 摄像头时提示插上后刷新", async () => {
+    vi.spyOn(api, "listUsbDevices").mockResolvedValue({ items: [] });
+    render(<UsbPicker value="" self={null} onChange={() => undefined} />);
+    await waitFor(() => expect(screen.getByText("未发现 USB 摄像头")).toBeTruthy());
   });
 });

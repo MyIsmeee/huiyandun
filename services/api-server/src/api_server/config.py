@@ -56,6 +56,10 @@ class ApiConfig(DbConfig):
     ingest_timeout_s: float = Field(
         5.0, gt=0, le=60, description="调用 MediaMTX 控制接口的超时，单位秒（CD-04）"
     )
+    host_dev_dir: Path = Field(
+        Path("/hostdev"),
+        description="宿主 /dev 的只读挂载，列出 USB 摄像头（v4l/by-id）；只读设备名，不打开设备",
+    )
     llm_key_file: Path = Field(
         Path("/run/secrets/llm_key_secret"),
         description="加密供应商 API Key 的 32 字节密钥（base64），不入库（C-ST-03、G-14）",

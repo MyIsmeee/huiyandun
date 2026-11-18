@@ -62,6 +62,8 @@ services:
     secrets: [db_app_password, llm_key_secret, device_key_secret, push_password]
     volumes:
       - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 站点配置（FR-901）
+      # 列出 USB 摄像头的设备名（v4l/by-id）；没有设备访问权限，打不开设备
+      - /dev:/hostdev:ro
       # 值班员只读工具（TK-116）：会话日志、行为模型基线（TK-115）与 ATT&CK 精简表
       - zeek-logs:/zeek/logs:ro
       - correlator-state:/var/lib/correlator:ro
@@ -315,7 +317,12 @@ services:
       - sh
       - -c
       - sed "s|__PUSH_PASS__|$$(cat /run/secrets/push_password)|" /base/ingest.yml > /tmp/ingest.yml && exec /mediamtx /tmp/ingest.yml
-    volumes: ["./ingest.yml:/base/ingest.yml:ro"]
+    volumes:
+      - ./ingest.yml:/base/ingest.yml:ro
+      # USB 摄像头（api_server/usb.py）：宿主 /dev 只读挂载，整个挂而非只挂 /dev/v4l——没插摄像头时该目录不存在，
+      # 插上后才由 udev 创建，挂整个 /dev 才能热插拔。设备权限只放开视频设备（主设备号 81）
+      - /dev:/hostdev:ro
+    device_cgroup_rules: ["c 81:* rmw"]
     ports: ["8554:8554/tcp"]
     # video-net：控制接口只监听此固定地址、只放行 api-server（兼容模式中继路径，D-117）；
     # camera-net：兼容模式下代为拉取登记表中的摄像头（D-103、D-117，G-05 例外）
