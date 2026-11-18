@@ -157,3 +157,21 @@ def test_small_items_on_table_carry_base_height() -> None:
     assert item["kind"] == "monitor"
     assert 0.6 <= item["base_m"] <= 0.75
     assert all("base_m" not in o for o in out["objects"] if o["class"] == "table")
+
+
+def test_small_items_not_eroded_away() -> None:
+    """一台远处的显示器只占分割的几格，腐蚀后约百来个点：小件点数下限低，仍给出；同样大小的柜子按噪声丢弃。"""
+    labels, rec = build()
+    h = rec.cloud @ rec.floor.up + rec.floor.d
+    top = rec.valid & (np.abs(h - 0.75) < 0.02)
+    r, c = np.argwhere(top)[len(np.argwhere(top)) // 2]
+    patch = np.zeros_like(top)
+    patch[r - 5 : r + 5, c - 12 : c + 12] = True  # 腐蚀 2 像素后剩 6 × 20 = 120 个点
+    patch &= top
+    assert patch.sum() == 240
+
+    for name, found in (("appliance", True), ("cabinet", False)):
+        marked = labels.copy()
+        marked[patch] = label(name)
+        out = layout(marked, rec, POSE)
+        assert any(o["class"] == name for o in out["objects"]) is found, name

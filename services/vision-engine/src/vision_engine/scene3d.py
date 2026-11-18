@@ -34,6 +34,7 @@ from vision_engine.scene import (
     MIN_LENGTH_M,
     MIN_SMALL_AREA_M2,
     OBJECT_SIZE_M,
+    SMALL_AREA_CLASSES,
     SMALL_CLASSES,
     SURFACES,
     TREE_HEIGHT_M,
@@ -46,6 +47,9 @@ from vision_engine.scene import (
 
 CELL_M = 0.2  # 平面栅格边长
 MIN_POINTS = 150  # 一个区域至少的点数（640×360 点云）
+# 小件（SMALL_CLASSES）至少的点数：分割只有 64×64 格，一格约合 56 个点，腐蚀后一台远处的显示器只剩几十个点，
+# 按 MIN_POINTS 整类丢弃。腐蚀仍保留：掩码边缘会沾上背后墙面的点，不腐蚀时沿墙多出一条假物体
+MIN_SMALL_POINTS = 60
 FLOOR_TOL_M = 0.15  # 地面类别的点离地不超过此值
 ABOVE_FLOOR_M = 0.05  # 物体的点至少高出地面此值
 MAX_HEIGHT_M = 3.0  # 高于此的点（天花板、灯）不计入物体与墙脚
@@ -154,7 +158,7 @@ def layout(
     for name in ADE20K:
         region = cv2.erode((grid == label(name)).astype(np.uint8), kernel).astype(bool)
         mask = region & solid
-        if mask.sum() < MIN_POINTS:
+        if mask.sum() < (MIN_SMALL_POINTS if name in SMALL_CLASSES else MIN_POINTS):
             continue
         p, h = project(rec.cloud[mask])
         near = np.linalg.norm(p - project.camera, axis=1) <= reach
@@ -206,7 +210,7 @@ def layout(
             continue
         keep = (above[name] >= ABOVE_FLOOR_M) & (above[name] <= MAX_HEIGHT_M)
         points, heights_all = plane[name][keep], above[name][keep]
-        for member in _members(points):
+        for member in _members(points, MIN_SMALL_POINTS if name in SMALL_CLASSES else MIN_POINTS):
             cluster, heights = points[member], heights_all[member]
             footprint = _footprint(cluster, project.camera, depth, dominant)
             top = float(np.clip(np.percentile(heights, 95), *HEIGHT_RANGE_M))
@@ -218,7 +222,7 @@ def layout(
             base = float(np.percentile(heights, 5))
             if name in SMALL_CLASSES and base >= BASE_MIN_M:
                 item["base_m"] = round(min(base, top - 0.05), 2)
-            least = MIN_SMALL_AREA_M2 if name in SMALL_CLASSES else MIN_AREA_M2
+            least = MIN_SMALL_AREA_M2 if name in SMALL_AREA_CLASSES else MIN_AREA_M2
             if (area := _area(footprint)) >= least:
                 polygons.append((area, "objects", item))
     trees = []
@@ -385,9 +389,9 @@ def _kind(ade: np.ndarray) -> str | None:
     return max(named)[1] if named else None
 
 
-def _members(points: np.ndarray) -> list[np.ndarray]:
-    """_clusters 的各簇成员（布尔掩码）。"""
-    if len(points) < MIN_POINTS:
+def _members(points: np.ndarray, least: int = MIN_POINTS) -> list[np.ndarray]:
+    """_clusters 的各簇成员（布尔掩码）；不足 least 个点的簇不计。"""
+    if len(points) < least:
         return []
     counts, origin = _raster(points)
     occupied = (counts >= 2).astype(np.uint8)
@@ -397,7 +401,7 @@ def _members(points: np.ndarray) -> list[np.ndarray]:
     found = []
     for k in range(1, n):
         member = owner == k
-        if member.sum() >= MIN_POINTS:
+        if member.sum() >= least:
             found.append(member)
     return found
 

@@ -353,6 +353,27 @@ def test_segmenter_maps_classes_and_drops_low_confidence_and_dark() -> None:
     assert (labels[:, GRID // 2 :] == 0).all()
 
 
+class ObjectSession(FakeSession):
+    """左半边路面；右半边椅子（ADE20K 19），最大概率约 0.4：低于地面门槛、高于物体门槛。"""
+
+    def run(self, names: None, feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        (logits,) = super().run(names, feed)
+        logits[0, 19, :, GRID // 2 :] = np.log(0.4 / 0.6 * 149)
+        return [logits]
+
+
+def test_segmenter_keeps_dark_objects_with_lower_confidence() -> None:
+    """黑皮椅、黑屏显示器：物体类别按较低的置信度门槛保留，且不受明暗过滤；地面在暗处仍滤掉。"""
+    frame = blank(128)
+    frame[: SIZE // 4] = 10  # 上方 1/4 过暗
+
+    labels = Segmenter(cast(Any, ObjectSession()))(frame)
+
+    assert (labels[:, GRID // 2 :] == label("chair")).all()
+    assert (labels[: GRID // 4, : GRID // 2] == 0).all()
+    assert (labels[GRID // 4 :, : GRID // 2] == label("road")).all()
+
+
 class CountingSession(FakeSession):
     """记下同时在跑的推理数。"""
 

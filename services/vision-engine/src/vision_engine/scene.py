@@ -26,7 +26,11 @@ MEAN = np.array([0.485, 0.456, 0.406]) * 255  # ImageNet 归一化，与上游�
 STD = np.array([0.229, 0.224, 0.225]) * 255
 # 格子最大类别概率低于此值不输出；演示帧街道、室内的中位数为 0.75～0.91（模型卡）
 MIN_CONFIDENCE = 0.5
-# 灰度均值超出此范围的格子不输出：暗光、过曝与画面黑边（黑边会被识别为墙）
+# 物体类别的格子门槛低一些：小件与深色家具的最大概率常在 0.3～0.5（2026-11-18 办公室实测：显示器中位数 0.46～0.56，
+# 桌子 10 分位 0.38），按 0.5 显示器只剩一两格。误识别的格子由三维阶段的离地高度与点数再筛一遍
+MIN_OBJECT_CONFIDENCE = 0.35
+# 灰度均值超出此范围的格子不输出：暗光、过曝与画面黑边（黑边会被识别为墙）。只用于地面与立面：
+# 黑色显示器、黑皮椅的格子灰度低至 6～30，亮屏过曝，按此过滤会把它们整片滤掉（同一实测：显示器 29 格中 21 格过暗）
 DARK, BRIGHT = 40, 250
 SIMPLIFY_M = 0.2
 MAX_POLYGONS = 64  # 地面、物体与标线合计，按面积保留最大的
@@ -136,6 +140,8 @@ OBJECT_SIZE_M = {
 # 小件物品（电器、箱包）的底面面积下限：桌上的显示器底面约 0.1 m²，按 MIN_AREA_M2 会被滤掉
 SMALL_CLASSES = {"appliance", "box"}
 MIN_SMALL_AREA_M2 = 0.04
+# 用小件面积下限的类别：另含垃圾桶、灯杆等街道设施（垃圾桶底面约 0.3 m 见方，不足 MIN_AREA_M2）
+SMALL_AREA_CLASSES = SMALL_CLASSES | {"street_furniture"}
 TREE_HEIGHT_M = {"tree": 5.0, "plant": 1.0}
 
 LUT = np.zeros(150, np.uint8)
@@ -145,6 +151,9 @@ for _i, _name in enumerate(CLASSES, 1):
 
 def label(name: str) -> int:
     return CLASSES.index(name) + 1
+
+
+OBJECT_LABELS = [label(name) for name in OBJECT_SIZE_M]
 
 
 class Segmenter:
@@ -171,7 +180,10 @@ class Segmenter:
         gray = cv2.resize(
             cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (GRID, GRID), interpolation=cv2.INTER_AREA
         )
-        labels[(confidence < MIN_CONFIDENCE) | (gray < DARK) | (gray > BRIGHT)] = 0
+        objects = np.isin(labels, OBJECT_LABELS)
+        unlit = (gray < DARK) | (gray > BRIGHT)
+        doubtful = (confidence < MIN_CONFIDENCE) | unlit
+        labels[np.where(objects, confidence < MIN_OBJECT_CONFIDENCE, doubtful)] = 0
         return labels, ade
 
 
