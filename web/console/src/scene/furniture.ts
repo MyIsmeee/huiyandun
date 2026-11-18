@@ -57,6 +57,20 @@ const LEG = 0.05;
 const CHAIR_MAX_M = 0.6;
 /** 物体底面长边上限：超出的多是把一排东西连在一起 */
 const OBJECT_MAX_M = 3.5;
+/**
+ * 并排的椅子在点云中连成一簇（相距不到 0.2 m 栅格）：底面某一边达到 CHAIR_ROW_MIN_M 即按 CHAIR_PITCH_M 的间距排开多把，
+ * 不当成一把椅子截断。一把椅子连带坐着的人约 1 m，按间距取整仍是 1 把
+ */
+const CHAIR_ROW_MIN_M = 1.1;
+/**
+ * 短边（进深方向）要更长才算前后两排：椅子连带坐着的人、掩码外扩到椅背后的地面，进深常到 1.3 m 以上
+ * （2026-11-18 实测：并排两把扶手转椅的簇为 1.53 × 1.34 m）
+ */
+const CHAIR_BLOCK_MIN_M = 1.8;
+const CHAIR_PITCH_M = 0.7;
+const ROW_MAX = 6;
+/** 一边排开的把数 */
+export const chairCount = (side: number) => (side < CHAIR_ROW_MIN_M ? 1 : clamp(Math.round(side / CHAIR_PITCH_M), 2, ROW_MAX));
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** 画法：细分类别优先，尺寸兜底（见文件说明）；length ≥ width */
@@ -70,7 +84,8 @@ export function styleOf(cls: SceneFrame["objects"][number]["class"], kind: Kind 
       if (length / Math.max(width, 0.01) < 1.25 && length <= 1.5) return "round";
       return "dining";
     case "chair":
-      if (kind === "bench" || length >= 1.1) return "bench";
+      // 长条的"座位"（ADE20K seat）是长凳；其余椅子连成长条是并排的几把（furniture 排开）
+      if (kind === "bench" || (kind === "seat" && length >= CHAIR_ROW_MIN_M)) return "bench";
       if (kind === "armchair") return "armchair";
       if (kind === "stool") return height >= 0.62 ? "barstool" : "stool";
       if (height <= 0.6) return "stool"; // 没有高出座面的靠背
@@ -368,10 +383,22 @@ function bed(l: number, w: number, h: number): Piece[] {
 
 /**
  * 物体的零件；length、width 为底面实测长宽（length ≥ width）。椅子截断到常见尺寸（底面常连带坐着的人），
- * 其余截断到 OBJECT_MAX_M
+ * 连成一片的按间距排开多把（chairCount）；其余截断到 OBJECT_MAX_M
  */
 export function furniture(cls: SceneFrame["objects"][number]["class"], kind: Kind | null | undefined, length: number, width: number, height: number): { style: Style; pieces: Piece[] } {
   const style = styleOf(cls, kind, length, width, height);
+  if (cls === "chair" && style !== "armchair" && style !== "bench") {
+    const [L, W] = [Math.min(length, OBJECT_MAX_M), Math.min(width, OBJECT_MAX_M)];
+    const [nx, nz] = [chairCount(L), W >= CHAIR_BLOCK_MIN_M ? chairCount(W) : 1];
+    if (nx * nz > 1) {
+      const one = furniture(cls, kind, L / nx, W / nz, height).pieces;
+      const pieces = Array.from({ length: nx * nz }, (_, k) => {
+        const [dx, dz] = [-L / 2 + ((k % nx) + 0.5) * (L / nx), -W / 2 + (Math.floor(k / nx) + 0.5) * (W / nz)];
+        return one.map((p): Piece => ({ ...p, at: [p.at[0] + dx, p.at[1], p.at[2] + dz] }));
+      }).flat();
+      return { style, pieces };
+    }
+  }
   const cap = style === "bench" ? 2.5 : cls === "chair" && style !== "armchair" ? CHAIR_MAX_M : OBJECT_MAX_M;
   const [l, w, h] = [Math.max(Math.min(length, cap), 0.2), Math.max(Math.min(width, cap), 0.2), height];
   switch (style) {

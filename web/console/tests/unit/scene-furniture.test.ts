@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { objectParts } from "../../src/scene/MeasuredScene";
-import { furniture, type Piece, styleOf } from "../../src/scene/furniture";
+import { chairCount, furniture, type Piece, styleOf } from "../../src/scene/furniture";
 
 /** 零件在自身坐标中的外接范围：[x, y, z] 各自的 [最小, 最大] */
 function extent(p: Piece): [number, number][] {
@@ -34,6 +34,25 @@ describe("家具画法（自动场景白模）", () => {
     expect(styleOf("chair", "armchair", 0.9, 0.85, 0.9)).toBe("armchair");
     expect(styleOf("chair", "seat", 1.6, 0.45, 0.45)).toBe("bench");
     expect(styleOf("chair", "chair", 0.5, 0.5, 0.9)).toBe("chair");
+  });
+
+  it("并排连成一簇的椅子按间距排开多把，不当成长凳、也不截成一把", () => {
+    expect(styleOf("chair", "chair", 2.1, 0.5, 0.9)).toBe("chair");
+    expect(styleOf("chair", undefined, 1.6, 0.5, 0.9)).toBe("chair");
+    expect([0.6, 1.0, 1.1, 1.4, 2.1, 3.5, 9].map(chairCount)).toEqual([1, 1, 2, 2, 3, 5, 6]);
+    const one = furniture("chair", "chair", 0.6, 0.5, 0.9).pieces;
+    expect(furniture("chair", "chair", 1.0, 0.5, 0.9).pieces).toHaveLength(one.length); // 一把椅子连带坐着的人
+    const row = furniture("chair", "chair", 2.1, 0.5, 0.9).pieces;
+    expect(row).toHaveLength(one.length * 3);
+    const swivel = furniture("chair", "swivel_chair", 0.6, 0.6, 1.0).pieces.length;
+    expect(furniture("chair", "swivel_chair", 1.5, 1.35, 1.0).pieces).toHaveLength(swivel * 2); // 进深含人与外扩，仍是一排
+    const block = furniture("chair", "swivel_chair", 2.0, 1.9, 1.0).pieces; // 前后两排：3 × 3 把
+    expect(block).toHaveLength(swivel * 9);
+    for (const [pieces, l, w] of [[row, 2.1, 0.5], [block, 2.0, 1.9]] as const)
+      for (const e of pieces.map(extent)) {
+        expect(Math.max(-(e[0]?.[0] ?? 0), e[0]?.[1] ?? 0)).toBeLessThanOrEqual(l / 2 + 0.06);
+        expect(Math.max(-(e[2]?.[0] ?? 0), e[2]?.[1] ?? 0)).toBeLessThanOrEqual(w / 2 + 0.06);
+      }
   });
 
   it("柜子：书架、衣柜、斗柜、矮柜、文件柜、普通柜", () => {

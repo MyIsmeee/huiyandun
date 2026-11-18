@@ -4,11 +4,11 @@ import {
   EyeOff,
   Link2,
   type LucideIcon,
-  ShieldCheck,
   Undo2,
   Workflow,
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -261,9 +261,7 @@ function useReducedMotion(): boolean {
 function Brand({ className = "" }: { className?: string }) {
   return (
     <div className={`flex items-center gap-3 ${className}`}>
-      <span className="grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground">
-        <ShieldCheck aria-hidden className="size-5" />
-      </span>
+      <BrandMark className="h-10" />
       <span>
         <span className="block text-lg leading-tight font-medium">慧眼盾</span>
         <span className="block text-xs tracking-[0.3em] text-white/60">

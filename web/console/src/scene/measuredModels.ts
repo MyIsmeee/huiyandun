@@ -50,23 +50,39 @@ export function modelFor(o: SceneObject): string | null {
   return null;
 }
 
-/** 底面多边形的中心与长边转角（场景坐标：平面 (x, y) → (x, 0, y)；转角同 MeasuredScene 的 rect） */
-function frame(polygon: number[][]): { center: Point; angle: number } {
+/**
+ * 并排时连成一簇的模型（几台显示器、一摞纸箱）的单件宽度（米）：底面长边达到 1.5 倍即按长边排开多件，至多 ROW_MAX 件。
+ * 其余（电视、冰箱等）一簇一件
+ */
+const WIDTH_M: Record<string, number> = { monitor: 0.55, box: 0.45, "box-open": 0.45 };
+const ROW_MAX = 6;
+
+/** 一簇摆几件 */
+export function countOf(id: string, length: number): number {
+  const w = WIDTH_M[id];
+  return w && length >= 1.5 * w ? Math.min(ROW_MAX, Math.round(length / w)) : 1;
+}
+
+/** 底面多边形的中心、长边长度与转角（场景坐标：平面 (x, y) → (x, 0, y)；转角同 MeasuredScene 的 rect） */
+function frame(polygon: number[][]): { center: Point; length: number; angle: number } {
   const p = polygon.map(([x = 0, y = 0]) => [x, y] as const);
   const center: Point = [p.reduce((s, q) => s + q[0], 0) / p.length, p.reduce((s, q) => s + q[1], 0) / p.length];
   const [a, b, c] = [p[0] ?? center, p[1] ?? center, p[2] ?? center];
   const e1 = Math.hypot(b[0] - a[0], b[1] - a[1]);
   const e2 = Math.hypot(c[0] - b[0], c[1] - b[1]);
   const [from, to] = e1 >= e2 ? [a, b] : [b, c];
-  return { center, angle: -Math.atan2(to[1] - from[1], to[0] - from[0]) };
+  return { center, length: Math.max(e1, e2), angle: -Math.atan2(to[1] - from[1], to[0] - from[0]) };
 }
 
 /**
  * 模型的放置矩阵：底面中心、底部离地 base_m（放在桌面上的显示器等），绕竖直轴转到底面长边，正面（+z）朝向识别它的
- * 摄像头一侧；按资产目录的比例换成米，不按实测尺寸拉伸（识别的底面是点云外接矩形，拉伸会把模型压扁）
+ * 摄像头一侧；按资产目录的比例换成米，不按实测尺寸拉伸（识别的底面是点云外接矩形，拉伸会把模型压扁）。
+ * along：沿底面长边偏离中心的距离（米），排开多件时用
  */
-export function placement(o: SceneObject, asset: Asset, eye?: Point): Matrix4 {
-  const { center, angle: base } = frame(o.polygon);
+export function placement(o: SceneObject, asset: Asset, eye?: Point, along = 0): Matrix4 {
+  const { center: mid, angle: base } = frame(o.polygon);
+  // 长边方向即绕竖直轴转 base 后的自身 x 轴：平面 (cos base, −sin base)
+  const center: Point = [mid[0] + along * Math.cos(base), mid[1] - along * Math.sin(base)];
   const toward = eye ? (eye[0] - center[0]) * Math.sin(base) + (eye[1] - center[1]) * Math.cos(base) : 1;
   const angle = (toward < 0 ? base + Math.PI : base) - (asset.yaw * Math.PI) / 180;
   return new Matrix4().compose(
@@ -76,7 +92,7 @@ export function placement(o: SceneObject, asset: Asset, eye?: Point): Matrix4 {
   );
 }
 
-/** 各资产的放置矩阵；没有对应模型或目录中没有该资产的物体不在其中（由调用方按方块画） */
+/** 各资产的放置矩阵；没有对应模型或目录中没有该资产的物体不在其中（由调用方按方块画）。并排连成一簇的按 countOf 排开 */
 export function measuredModels(
   frames: SceneFrame[],
   catalog: Map<string, Asset>,
@@ -89,7 +105,12 @@ export function measuredModels(
       const id = modelFor(o);
       const asset = id ? catalog.get(id) : undefined;
       if (!asset) continue;
-      groups.set(asset.id, [...(groups.get(asset.id) ?? []), placement(o, asset, eyes[f.camera_id])]);
+      const { length } = frame(o.polygon);
+      const n = countOf(asset.id, length);
+      const eye = eyes[f.camera_id];
+      const list = groups.get(asset.id) ?? [];
+      for (let k = 0; k < n; k += 1) list.push(placement(o, asset, eye, (k + 0.5 - n / 2) * (length / n)));
+      groups.set(asset.id, list);
       placed.add(o);
     }
   return { groups, placed };

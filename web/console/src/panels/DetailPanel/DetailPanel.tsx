@@ -1,4 +1,4 @@
-import { ArrowLeft, Clock } from "lucide-react";
+import { ArrowLeft, Clock, Waypoints } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,6 +10,7 @@ import { ActionBar } from "../ActionBar/ActionBar";
 import { AiInvestigation } from "../AiInvestigation/AiInvestigation";
 import { IncidentTimeline } from "../IncidentTimeline/IncidentTimeline";
 import { LiveVideo } from "../LiveVideo/LiveVideo";
+import { openRelation } from "../RelationGraph/RelationDialog";
 import { ReportBar } from "../ReportBar/ReportBar";
 
 const TYPE: Record<Device["type"], string> = { camera: "摄像头", nvr: "录像机", switch: "交换机" };
@@ -86,6 +87,13 @@ function DeviceSummary(props: { device: Device; stale: boolean }) {
             <dd>{mappingText(device.camera.calibration, device.camera.reproj_error_m)}</dd>
           </>
         )}
+        <dt className="text-subtle-foreground">关联</dt>
+        <dd>
+          <Button variant="outline" size="xs" onClick={() => openRelation(device.id)}>
+            <Waypoints aria-hidden />
+            查看关系图
+          </Button>
+        </dd>
       </dl>
   );
 }

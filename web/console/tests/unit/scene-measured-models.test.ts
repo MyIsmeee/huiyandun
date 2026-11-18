@@ -2,7 +2,7 @@ import { Quaternion, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 import type { SceneFrame } from "../../src/editor/recognition";
 import type { Asset } from "../../src/scene/assets";
-import { measuredModels, modelFor, placement } from "../../src/scene/measuredModels";
+import { countOf, measuredModels, modelFor, placement } from "../../src/scene/measuredModels";
 
 type SceneObject = SceneFrame["objects"][number];
 
@@ -60,5 +60,22 @@ describe("自动场景的电器、箱包与卫浴", () => {
     const { groups, placed } = measuredModels([frame], new Map([["monitor", asset("monitor")]]), { "cam-05": [2, 10] });
     expect([...groups.keys()]).toEqual(["monitor"]);
     expect(placed.size).toBe(1); // box 不在目录中：按方块画
+  });
+
+  it("几台显示器连成一簇：按长边排开多台，沿长边等距、都朝向摄像头", () => {
+    expect([0.6, 0.8, 1.1, 1.65, 9].map((l) => countOf("monitor", l))).toEqual([1, 1, 2, 3, 6]);
+    expect(countOf("tv", 3)).toBe(1); // 电视、冰箱等一簇一件
+    const frame = {
+      camera_id: "cam-05",
+      surfaces: [],
+      walls: [],
+      trees: [],
+      markings: [],
+      objects: [object({ kind: "monitor", base_m: 0.75, polygon: square(2, 3, 1.65, 0.3) })],
+    } as unknown as SceneFrame;
+    const { groups } = measuredModels([frame], new Map([["monitor", asset("monitor")]]), { "cam-05": [2, 10] });
+    const at = (groups.get("monitor") ?? []).map((m) => new Vector3().setFromMatrixPosition(m));
+    expect(at.map((v) => Number(v.x.toFixed(2)))).toEqual([1.45, 2, 2.55]);
+    for (const v of at) expect([v.y, v.z]).toEqual([0.75, 3]);
   });
 });

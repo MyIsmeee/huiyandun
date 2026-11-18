@@ -1,5 +1,6 @@
-import { CircleAlert, ListChecks, LogOut, MapPin, ShieldCheck } from "lucide-react";
+import { CircleAlert, ListChecks, LogOut, MapPin, Waypoints } from "lucide-react";
 import { useEffect, useState } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ import { ConnectionStatus } from "../ConnectionStatus/ConnectionStatus";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { Overview } from "../Overview/Overview";
 import { ProviderPage } from "../ProviderList/ProviderList";
+import { openRelation, RelationDialog, useRelation } from "../RelationGraph/RelationDialog";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 import { WallPage } from "../VideoWall/WallPage";
 
@@ -83,9 +85,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
     <div data-live={!offline} className="flex h-full flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-3">
         <span className="flex shrink-0 items-center gap-2 text-[15px] font-semibold whitespace-nowrap">
-          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <ShieldCheck aria-hidden className="size-4" />
-          </span>
+          <BrandMark className="h-7" />
           慧眼盾
         </span>
         <NavBar page={page} admin={admin} onChange={(next) => leave(() => go(next))} />
@@ -100,6 +100,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
               权限信息读取失败，正在重试
             </p>
           )}
+          <RelationButton site={site} />
           <InvestigationButton />
           <LlmStatusBadge />
           <ConnectionStatus />
@@ -141,6 +142,8 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       {/* 研判面板：高危关联事件实时到达时自动打开，逐步展示 AI 调查过程 */}
       <InvestigationWatcher />
       <InvestigationSheet stale={offline} />
+      {/* 关系图：以摄像头为中心的攻击源、关联事件与处置 */}
+      <RelationDialog site={site} />
       {/* 确认级物理告警：响铃并弹出带当时画面的处置卡片 */}
       <Alarm />
       {/* 操作结果提示（设计 150 §9A）：保存、删除区域的成功与失败 */}
@@ -163,6 +166,26 @@ function InvestigationButton() {
     >
       <ListChecks aria-hidden />
       研判
+    </Button>
+  );
+}
+
+/**
+ * 顶栏"关系图"：以选中的设备为中心；没有选中时取最近一次被攻击或出现告警的设备，再退回第一台摄像头
+ */
+function RelationButton({ site }: { site: Site }) {
+  const open = useRelation((s) => s.deviceId !== null);
+  const selected = useSelection((s) => s.deviceId);
+  const latest = useLive((s) => {
+    const a = s.alerts[0];
+    return a ? ("camera_id" in a ? a.camera_id : a.device_id) : (s.incidents[0]?.device_ids[0] ?? null);
+  });
+  const known = (id: string | null) => (id && site.devices.some((d) => d.id === id) ? id : null);
+  const target = known(selected) ?? known(latest) ?? site.devices.find((d) => d.type === "camera")?.id ?? site.devices[0]?.id;
+  return (
+    <Button variant={open ? "secondary" : "ghost"} size="sm" disabled={!target} aria-pressed={open} onClick={() => target && openRelation(target)}>
+      <Waypoints aria-hidden />
+      关系图
     </Button>
   );
 }
