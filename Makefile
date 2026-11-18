@@ -1,5 +1,5 @@
 .PHONY: licenses lint lint-py lint-imports lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper demo-reset demo-story
+	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper demo-reset demo-story attack-show
 
 WEB = pnpm --dir web/console
 
@@ -209,3 +209,8 @@ demo-story: demo-reset
 	@sleep 20
 	$(MAKE) --no-print-directory tamper ACTION=replay CAMERA=cam-02
 	@echo "约 15 s 后识别出画面重放，生成跨域事件 HYD-X-0001；结束后执行 make demo-reset"
+
+# 录屏用的攻击演示：复位与预热后等待回车，再分步骤展示锁定目标、弱口令爆破（被封禁后连接被切断）、画面重放。
+# 参数登记于 demo/scenarios/attack-sim.yaml 的 show；YES=1 不等待回车
+attack-show:
+	uv run python tools/dev/attack_show.py $(if $(filter 1,$(YES)),--yes) -- $(COMPOSE)
