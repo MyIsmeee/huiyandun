@@ -10,10 +10,11 @@ import { api, type Site } from "../../lib/api";
 import { useArea } from "../../scene/areas";
 import { connect, useConnection } from "../../store/connection";
 import { applySite, useLive } from "../../store/live";
-import { type AdminPage, go, type Page, useNav } from "../../store/nav";
+import { type AdminPage, go, isMainPage, type Page, useNav } from "../../store/nav";
 import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AdminFrame } from "../Admin/AdminFrame";
+import { BigScreen } from "../BigScreen/BigScreen";
 import { Alarm } from "../Alarm/Alarm";
 import { CameraPage } from "../CameraList/CameraList";
 import { InvestigationSheet, InvestigationWatcher } from "../InvestigationSheet/InvestigationSheet";
@@ -24,6 +25,7 @@ import { Overview } from "../Overview/Overview";
 import { ProviderPage } from "../ProviderList/ProviderList";
 import { openRelation, RelationDialog, useRelation } from "../RelationGraph/RelationDialog";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
+import { ThreatBanner } from "../ThreatBanner/ThreatBanner";
 import { WallPage } from "../VideoWall/WallPage";
 
 const deselect = () => select(null);
@@ -117,9 +119,13 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </Button>
         </div>
       </header>
+      {/* 攻防态势：被攻击时整条变红、屏幕边缘红光，AI 防护阻断后变绿 */}
+      <ThreatBanner site={site} />
 
       {main === "wall" ? (
         <WallPage site={site} admin={admin} stale={offline} lastFrameAt={lastFrameAt} />
+      ) : main === "screen" ? (
+        <BigScreen site={site} stale={offline} lastFrameAt={lastFrameAt} />
       ) : (
         <Overview site={site} stale={offline} lastFrameAt={lastFrameAt} onBuild={admin ? () => go("scene") : undefined} />
       )}
@@ -190,10 +196,10 @@ function RelationButton({ site }: { site: Site }) {
   );
 }
 
-const isAdminPage = (page: Page): page is AdminPage => page !== "overview" && page !== "wall";
+const isAdminPage = (page: Page): page is AdminPage => !isMainPage(page);
 
 /**
- * 顶栏分段导航（D-106、设计 150 §3）：态势 · 监控墙 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
+ * 顶栏分段导航（D-106、设计 150 §3）：监控墙 · 态势 · 大屏 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
  * 摄像头、场景、模型供应商在管理页左侧栏切换（产品负责人 2026-11-09 选定，导航不重复）
  */
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
@@ -201,6 +207,7 @@ function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => v
   const items: { page: Page; label: string; current: boolean }[] = [
     { page: "wall", label: "监控墙", current: page === "wall" },
     { page: "overview", label: "态势", current: page === "overview" },
+    { page: "screen", label: "大屏", current: page === "screen" },
   ];
   if (admin) items.push({ page: "cameras", label: "管理", current: isAdminPage(page) });
   return (

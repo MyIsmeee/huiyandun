@@ -45,7 +45,8 @@ export function AttackLines({ area, cameras, view }: { area: Area; cameras: Came
         {lines.map(({ id, from, to, contained, fade }) => {
           const [x1, y1] = from;
           const [x2, y2] = to;
-          const dash = { stroke: STATUS.cyber, strokeWidth: 2, strokeDasharray: DASH.join(" ") };
+          // 线宽 3 px 并带红色光晕：投屏时远处也看得清攻击方向
+          const dash = { stroke: STATUS.cyber, strokeWidth: 3, strokeDasharray: DASH.join(" "), filter: "drop-shadow(0 0 3px rgb(208 59 59 / 0.9))" };
           if (!contained) return <line key={id} data-attack-line={id} className="animate-dash-flow" x1={x1} y1={y1} x2={x2} y2={y2} {...dash} />;
           // 断开：去掉中段，两端各留一截后淡出
           const at = (t: number) => [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t] as const;

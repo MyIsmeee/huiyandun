@@ -69,7 +69,8 @@ export interface Look {
 }
 
 export const CONE = { color: BEAM, opacity: 0.14, breathe: false };
-const CYBER_CONE = { color: STATUS.cyber, opacity: 0.25, breathe: true };
+// 告警视场比常态浓得多：投屏、远处观看时也能一眼认出被攻击的摄像头
+const CYBER_CONE = { color: STATUS.cyber, opacity: 0.4, breathe: true };
 /** 处置中、待联动：保持告警色，攻击已在处理，不再呼吸 */
 const HELD_CONE = { ...CYBER_CONE, breathe: false };
 const base = { opacity: 1, outline: null, ring: null, cone: CONE, tags: [] };
@@ -103,7 +104,7 @@ export function deviceLook(state: DeviceState): Look {
       return {
         ...base,
         fill: STATUS.physical,
-        cone: { color: STATUS.physical, opacity: 0.25, breathe: false },
+        cone: { color: STATUS.physical, opacity: 0.35, breathe: false },
         tags: [{ icon: "physical", text: "物理告警", color: STATUS.physical }],
       };
     case "cyber_alert":
@@ -132,7 +133,7 @@ export function deviceLook(state: DeviceState): Look {
       return {
         ...base,
         fill: STATUS.contained,
-        cone: { color: STATUS.contained, opacity: 0.18, breathe: false },
+        cone: { color: STATUS.contained, opacity: 0.32, breathe: false },
         tags: [{ icon: "contained", text: "已处置", color: STATUS.contained }],
       };
     case "notify_only":

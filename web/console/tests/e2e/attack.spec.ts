@@ -63,3 +63,21 @@ test("没有网络告警的设备不画连线", async ({ page }) => {
   sockets[0]?.send(JSON.stringify({ channel: "devices", data: camera("physical_alert") }));
   await expect(page.locator("[data-attacker]")).toHaveCount(0);
 });
+
+test("攻防态势横幅：被攻击时红色横幅与屏幕边缘红光，处置生效后变绿并写明已封禁", async ({ page }) => {
+  await presetMotion(page, true);
+  await freezeClock(page);
+  const sockets = await open(page, [camera("normal")]);
+  await expect(page.getByRole("region", { name: "攻防态势" })).toHaveCount(0);
+
+  sockets[0]?.send(JSON.stringify({ channel: "alerts", data: ALERT }));
+  sockets[0]?.send(JSON.stringify({ channel: "devices", data: camera("cyber_alert") }));
+  const banner = page.getByRole("alert").filter({ hasText: "正在遭受网络攻击" });
+  await expect(banner).toContainText("攻击源 172.30.0.100");
+  await expect(page.locator("[data-attack-glow]")).toHaveCount(1);
+  await expectNoOverflow(page);
+
+  sockets[0]?.send(JSON.stringify({ channel: "devices", data: camera("contained") }));
+  await expect(page.getByRole("status").filter({ hasText: "AI 防护已阻断攻击" })).toContainText("172.30.0.100 已封禁");
+  await expect(page.locator("[data-attack-glow]")).toHaveCount(0);
+});

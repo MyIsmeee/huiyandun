@@ -65,6 +65,7 @@ export function VideoTileView(
   // 告警与处置状态：状态色内描边 + 药丸（V-W2）；离线、未标定不算告警，用文字表达
   const alert = look.tags.find((t) => t.icon !== "offline" && t.icon !== "uncalibrated");
   const ring = selected ? "var(--primary)" : alert?.color;
+  const emphasis = alert !== undefined && EMPHASIZED.has(alert.icon);
   return (
     <div
       ref={rootRef}
@@ -109,8 +110,14 @@ export function VideoTileView(
           离线
         </p>
       )}
-      {/* 描边不呼吸：画面本身在动（V-W2）；选中为强调色，优先于告警色 */}
-      {ring && <div className="pointer-events-none absolute inset-0 rounded-lg border-2" style={{ borderColor: ring }} />}
+      {/* 选中为强调色，优先于告警色。网络攻击与处置期间加粗描边并向内发光，攻击中呼吸，投屏时远处也能认出被攻击的那一路 */}
+      {ring && (
+        <div
+          data-tile-ring={alert?.icon ?? "selected"}
+          className={cn("pointer-events-none absolute inset-0 rounded-lg", emphasis ? "border-4" : "border-2", alert && ATTACKING.has(alert.icon) && "animate-pulse")}
+          style={{ borderColor: ring, boxShadow: emphasis && alert ? `inset 0 0 36px ${alert.color}` : undefined }}
+        />
+      )}
     </div>
   );
 }
@@ -122,6 +129,11 @@ function StatePill({ icon, color, text }: { icon: keyof typeof ICONS; color: str
     </StatusPill>
   );
 }
+
+/** 加粗描边的状态：网络攻击、处置中、只通知、已处置（ui.md §5.1） */
+const EMPHASIZED: ReadonlySet<string> = new Set(["cyber", "pending", "notified", "contained"]);
+/** 描边呼吸的状态：攻击仍在进行 */
+const ATTACKING: ReadonlySet<string> = new Set(["cyber", "notified"]);
 
 /** 事件来自瓦片内的按钮（如"重试"）：只执行按钮本身，不连带选中或放大该路 */
 const fromControl = (e: SyntheticEvent) => e.target instanceof Element && e.target.closest("button") !== null;

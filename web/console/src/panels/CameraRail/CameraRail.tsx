@@ -1,7 +1,7 @@
 import { Car, CircleCheck, PanelLeftClose, PanelLeftOpen, Plus, User, VideoOff } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { StatusIcon } from "@/components/StatusPill";
+import { StatusIcon, statusTint } from "@/components/StatusPill";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -84,18 +84,25 @@ function RailCard(props: { device: Device; collapsed: boolean; selected: boolean
   const Icon = tag ? ICONS[tag.icon] : CircleCheck;
   // 告警与处置：状态色描边（V-S3 另配图标与文字）；离线与未标定只用文字
   const alert = tag && tag.icon !== "offline" && tag.icon !== "uncalibrated" ? tag.color : undefined;
+  const emphasis = tag !== undefined && ["cyber", "pending", "notified", "contained"].includes(tag.icon);
+  const attacking = tag !== undefined && (tag.icon === "cyber" || tag.icon === "notified");
   return (
     <button
       type="button"
       aria-pressed={selected}
       aria-label={`${device.id} ${device.name}`}
       onClick={onSelect}
-      style={alert ? { borderColor: alert } : undefined}
+      data-alert={tag?.icon}
+      // 网络攻击、处置期间整项用状态色浅底并加一圈状态色，攻击中外圈呼吸（V-S3 另配图标与文字）
+      style={alert ? { borderColor: alert, ...(emphasis && !selected ? { backgroundColor: statusTint(alert), boxShadow: `0 0 0 2px ${alert}` } : {}) } : undefined}
       className={cn(
-        "flex w-full flex-col gap-1.5 rounded-lg border-2 p-1.5 text-left transition-colors hover:bg-secondary",
+        "relative flex w-full flex-col gap-1.5 rounded-lg border-2 p-1.5 text-left transition-colors hover:bg-secondary",
         selected ? "border-primary bg-accent" : !alert && "border-transparent",
       )}
     >
+      {emphasis && attacking && !selected && (
+        <span aria-hidden className="pointer-events-none absolute -inset-1 animate-pulse rounded-xl" style={{ boxShadow: `0 0 18px 4px ${alert}` }} />
+      )}
       {!collapsed && <Thumbnail id={device.id} offline={device.state === "offline"} />}
       <span className={cn("flex items-center gap-1.5 px-1", collapsed && "flex-col")}>
         <StatusIcon icon={Icon} color={tag?.color} />
