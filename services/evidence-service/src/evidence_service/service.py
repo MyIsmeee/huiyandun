@@ -28,7 +28,7 @@ from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
-# 重启后重放范围不超过 recorder 的录像保留期（20 分钟）
+# 重启后重放范围不超过 recorder 的录像保留期（1 小时）
 REPLAY = timedelta(minutes=15)
 SUBSCRIBE_WAIT_S = 30.0  # 先订阅命中事件，最多等这么久再订阅关联事件（生产者未启动时流不存在）
 RESUBSCRIBE_S = 5.0

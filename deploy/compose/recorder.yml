@@ -1,4 +1,4 @@
-# 持续录像（TK-080、D-098）：从 go2rtc 拉各路流写 fMP4 分段，环形保留 20 分钟，供 evidence-service 截取
+# 持续录像（TK-080、D-098）：从 go2rtc 拉各路流写 fMP4 分段，环形保留 1 小时，供 evidence-service 截取
 # 告警前后的原始码流（C-EVD-02）。路径由 evidence-service 按摄像头登记表经配置接口增删，路径名即摄像头编号（D-101）
 logLevel: info
 

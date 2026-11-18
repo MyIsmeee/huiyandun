@@ -202,6 +202,8 @@ services:
       - helper-run:/run/hyd-helper
       - ../../demo/scenarios/site.yaml:/etc/hyd/site.yaml:ro  # 部署模式与核心业务白名单（C-SEC-03）
       - ../../playbooks:/etc/hyd/playbooks:ro
+    # 本机局域网地址（ops.md §5）：攻击源是本机时不处置，避免封掉自己
+    environment: { HYD_LAN_IP: "${HYD_LAN_IP:-127.0.0.1}" }
     depends_on:
       nats: { condition: service_healthy }
       correlator: { condition: service_healthy }  # 关联事件的流由 correlator 创建
@@ -383,7 +385,7 @@ services:
       start_interval: 2s
 
   # 持续录像（TK-080、D-098）：复用 MediaMTX（REUSE-04）从 go2rtc 拉流（摄像头仍只被拉一次，C-CV-10），
-  # 环形保留 20 分钟；只开回放接口，只在 evidence-net 供 evidence-service 截取告警前后的片段
+  # 环形保留 1 小时；只开回放接口，只在 evidence-net 供 evidence-service 截取告警前后的片段
   recorder:
     image: bluenviron/mediamtx:1.21.3-ffmpeg@sha256:208e9f1740a09a5ee63b6308e77ce0d54fce0456462f640e6bd9acfc62ebb5a2
     profiles: [vision]
