@@ -3,7 +3,7 @@
 用法：python tools/dev/attack_show.py [--yes] -- <docker compose 命令及全局参数>
 
   准备    复位演示环境（解除封禁、清空去重期、恢复画面）；画面刚被篡改过时先预热，然后等待按回车开始
-  第一步  锁定目标：演示摄像头 cam-07 的 RTSP 服务
+  第一步  锁定目标：演示摄像头（登记为 DEVICE）的 RTSP 服务
   第二步  口令爆破：轮换常见弱口令逐个尝试，慧眼盾封禁后余下的尝试连接被切断
   第三步  画面篡改：把摄像头画面换成 45 秒前的录像（重放）
   结束    提示去控制台查看研判过程；make demo-reset 复位
@@ -27,9 +27,11 @@ import redteam  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = (
-    "rtsp://172.30.0.12:8554/cam"  # rtsp-target 在 attack-net 中的固定地址，登记为演示摄像头 cam-07
+    "rtsp://172.30.0.12:8554/cam"  # rtsp-target 在 attack-net 中的固定地址，登记为演示摄像头 DEVICE
 )
-CAMERA = "cam-02"  # 画面篡改作用的调试素材路径，即 cam-07 的画面源
+CAMERA = "cam-02"  # 画面篡改作用的调试素材路径，即 DEVICE 的画面源
+# 靶机在登记表中的编号（编号只增不复用，重新登记后随之修改，并同步 demo/scenarios/demo-quiet.yaml 的 keep）
+DEVICE = "cam-11"
 WARMUP_S = 60  # 恢复画面后须先正常播放：重放回退 45 s + 比较窗口 10 s（Makefile demo-story）
 ATTEMPT = re.compile(r"attempt (\d+): ([^:]+):(\S+) -> (.*)")
 COLOR = sys.stdout.isatty()
@@ -133,7 +135,7 @@ def main() -> int:
     compose.call("exec", "-T", "api-server", "hyd-api", "demo-reset")
 
     step("第一步：锁定目标")
-    print(f"  目标：演示摄像头 cam-07   {TARGET}")
+    print(f"  目标：演示摄像头 {DEVICE}   {TARGET}")
     print("  方式：RTSP 认证接口，用常见弱口令逐个尝试")
     time.sleep(0.5)
 
@@ -144,7 +146,7 @@ def main() -> int:
     step("第三步：篡改画面（重放攻击）")
     with contextlib.redirect_stdout(io.StringIO()):
         redteam.tamper(compose, "replay", CAMERA)
-    print(f"  已把 cam-07 的实时画面换成 {redteam.REPLAY_BACK_S} 秒前的录像，掩盖现场的真实情况")
+    print(f"  已把 {DEVICE} 的实时画面换成 {redteam.REPLAY_BACK_S} 秒前的录像，掩盖现场的真实情况")
 
     step("攻击结束")
     print('  到控制台查看：告警栏的跨域事件、右侧"事件研判"面板中 AI 的逐步调查过程')

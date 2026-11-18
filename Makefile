@@ -1,5 +1,5 @@
 .PHONY: licenses lint lint-py lint-imports lint-web test codegen codegen-check doctor demo-media demo-up demo-down demo-health \
-	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper demo-reset demo-story attack-show
+	console-ca fetch-models verify-models test-rules eval-behavior explain-fall explain-live llm-check attack attack-slow attack-hijack tamper demo-reset demo-story attack-show demo-quiet demo-normal
 
 WEB = pnpm --dir web/console
 
@@ -39,6 +39,8 @@ LINKAGE ?= 0
 NOTIFY ?= 0
 # 演示栈的 correlator 响应 make demo-reset（compose.yaml 中默认关闭，直接用 docker compose 部署时不生效）
 export HYD_DEMO_RESET = true
+# 演示静默（demo/scenarios/demo-quiet.yaml）：make demo-quiet 打开；make demo-up、make demo-normal 恢复为关闭
+export HYD_DEMO_QUIET = false
 COMPOSE =docker compose -f deploy/compose/compose.yaml \
 	$(if $(filter 0,$(GPU)),,-f deploy/compose/compose.gpu.yaml) \
 	$(if $(filter 1,$(LINKAGE)),-f deploy/compose/compose.linkage.yaml --profile linkage) \
@@ -209,6 +211,13 @@ demo-story: demo-reset
 	@sleep 20
 	$(MAKE) --no-print-directory tamper ACTION=replay CAMERA=cam-02
 	@echo "约 15 s 后识别出画面重放，生成跨域事件 HYD-X-0001；结束后执行 make demo-reset"
+
+# 演示场景预设：现场摄像头演示前打开，不展示、不关联遮挡挪位冻结重放、疑似跌倒、长时间静止与未登记目标的网络告警；
+# 只重建 api-server 与 correlator（约 10 s，控制台自动重连），其余容器不动。演示结束后 make demo-normal
+demo-quiet: export HYD_DEMO_QUIET = true
+demo-quiet demo-normal:
+	$(COMPOSE) up -d --wait --no-build --no-deps api-server correlator
+	@echo "演示静默：$$($(COMPOSE) exec -T api-server printenv HYD_DEMO_QUIET)"
 
 # 录屏用的攻击演示：复位与预热后等待回车，再分步骤展示锁定目标、弱口令爆破（被封禁后连接被切断）、画面重放。
 # 参数登记于 demo/scenarios/attack-sim.yaml 的 show；YES=1 不等待回车

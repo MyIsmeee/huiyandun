@@ -19,6 +19,7 @@ from pathlib import Path
 
 import nats
 import nats.js.errors
+import yaml
 from pydantic import Field
 
 from correlator.behavior import WINDOW_S, BehaviorModel, save_state
@@ -28,6 +29,7 @@ from correlator.normalize import Ip, device_index, normalize
 from correlator.rules import MODELS, Event, load_rules
 from py_common.bus import Bus
 from py_common.config import ServiceConfig, load_config
+from py_common.demo_quiet import QuietPreset
 from py_common.log import configure_logging
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
@@ -93,6 +95,13 @@ class CorrelatorConfig(ServiceConfig):
     demo_reset: bool = Field(
         False,
         description="响应 hyd.demo.reset.v1，清空去重期以便重演攻击；只在演示环境开启，生产部署保持关闭",
+    )
+    demo_quiet: bool = Field(
+        False,
+        description="演示静默：按 demo_quiet_file 跳过易误报事件的关联；只由 make demo-quiet 打开，生产部署保持关闭",
+    )
+    demo_quiet_file: Path = Field(
+        Path("/etc/hyd/demo-quiet.yaml"), description="演示场景预设 demo/scenarios/demo-quiet.yaml"
     )
 
 
@@ -228,8 +237,10 @@ async def follow[T: Event](
         await asyncio.sleep(RESUBSCRIBE_S)
 
 
-async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
-    """建立关联引擎的订阅：先恢复去重状态，再重放并持续接收事件。"""
+async def correlate(
+    engine: Engine, bus: Bus, window: timedelta, quiet: QuietPreset | None = None
+) -> None:
+    """建立关联引擎的订阅：先恢复去重状态，再重放并持续接收事件；演示静默的事件不参与关联。"""
     started = datetime.now(UTC)
 
     async def restore(incident: CorrelatorIncidentV1) -> None:
@@ -241,6 +252,8 @@ async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
     )
 
     async def on_event(subject: str, event: Event) -> None:
+        if quiet is not None and quiet.hides(event):
+            return
         for incident in engine.feed(subject, event):
             await publish_incident(bus, incident)
 
@@ -315,8 +328,14 @@ async def serve(config: CorrelatorConfig) -> None:
     devices: dict[Ip, str] = {}
     model: list[BehaviorModel] = []  # 取到登记表后再加载：存盘状态按设备编号恢复
     await follow_registry(bus, devices, model)
+    quiet = None
+    if config.demo_quiet:
+        quiet = QuietPreset.model_validate(
+            yaml.safe_load(config.demo_quiet_file.read_text(encoding="utf-8"))
+        )
+        log.warning("correlator.demo_quiet", extra={"preset": quiet.model_dump()})
     tasks = [
-        correlate(engine, bus, window),
+        correlate(engine, bus, window, quiet),
         run(EveTail(config.eve_file, config.state_file), devices, bus, config),
     ]
     if config.host_eve_file is not None:

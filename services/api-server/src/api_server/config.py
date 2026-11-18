@@ -100,3 +100,10 @@ class ApiConfig(DbConfig):
         Path("/etc/hyd/attack.json"),
         description="ATT&CK 精简查表 rules/attack/techniques.json，值班员工具 lookup_technique 读取",
     )
+    demo_quiet: bool = Field(
+        False,
+        description="演示静默：按 demo_quiet_file 不展示易误报的事件；只由 make demo-quiet 打开，生产部署保持关闭",
+    )
+    demo_quiet_file: Path = Field(
+        Path("/etc/hyd/demo-quiet.yaml"), description="演示场景预设 demo/scenarios/demo-quiet.yaml"
+    )

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 
 import httpx2
+import yaml
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -49,6 +50,7 @@ from api_server.localtime import site_tz
 from api_server.login_guard import LoginGuard
 from api_server.pose_checks import PoseChecks
 from py_common.bus import Bus
+from py_common.demo_quiet import QuietPreset
 from py_common.log import bind_request_id
 
 log = logging.getLogger(__name__)
@@ -156,6 +158,7 @@ def create_app(config: ApiConfig) -> FastAPI:
                     app.state.history,
                     app.state.investigator,
                     app.state.kpis,
+                    app.state.quiet,
                 )
             ),
         ]
@@ -166,6 +169,7 @@ def create_app(config: ApiConfig) -> FastAPI:
                 app.state.devices,
                 app.state.pose_checks,
                 AutoPose(app, app.state.config.auto_calibration).on_check,
+                app.state.quiet,
             )
             yield
         finally:
@@ -191,6 +195,12 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.config = config
     app.state.tz = site_tz(config.display_utc_offset_min)
     app.state.site = site.load(config.site_file)
+    app.state.quiet = None
+    if config.demo_quiet:
+        app.state.quiet = QuietPreset.model_validate(
+            yaml.safe_load(config.demo_quiet_file.read_text(encoding="utf-8"))
+        )
+        log.warning("api.demo_quiet", extra={"preset": app.state.quiet.model_dump()})
     app.state.hub = ws.Hub()
     app.state.login_guard = LoginGuard(config.lan_ip)
     app.state.devices = Devices(app.state.site.devices)

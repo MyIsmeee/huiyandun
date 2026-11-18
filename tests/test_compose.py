@@ -161,6 +161,28 @@ def test_demo_reset_off_unless_makefile() -> None:
     assert "export HYD_DEMO_RESET = true" in makefile
 
 
+@pytest.mark.parametrize("name", ["api-server", "correlator"])
+def test_demo_quiet_off_unless_make_demo_quiet(name: str) -> None:
+    """演示静默会隐藏告警：直接用 docker compose 部署与 make demo-up 时关闭，只有 make demo-quiet 打开。"""
+    service = SERVICES[name]
+    assert service["environment"]["HYD_DEMO_QUIET"] == "${HYD_DEMO_QUIET:-false}"
+    assert "../../demo/scenarios/demo-quiet.yaml:/etc/hyd/demo-quiet.yaml:ro" in service["volumes"]
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "export HYD_DEMO_QUIET = false" in makefile
+    assert "demo-quiet: export HYD_DEMO_QUIET = true" in makefile
+
+
+def test_demo_quiet_preset_valid() -> None:
+    """仓库中的演示场景预设可加载；断流与确认的跌倒、攀爬不被静默。"""
+    from py_common.demo_quiet import QuietPreset
+
+    text = (ROOT / "demo/scenarios/demo-quiet.yaml").read_text(encoding="utf-8")
+    preset = QuietPreset.model_validate(yaml.safe_load(text))
+    assert "stream_lost" not in preset.integrity.hide
+    assert "confirmed" not in preset.behavior.hide_levels
+    assert {"fall", "climb"}.isdisjoint(preset.behavior.hide_behaviors)
+
+
 @pytest.mark.parametrize(("module", "network"), [("api", "video-net"), ("rtsp", "demo-net")])
 def test_go2rtc_listens_only_on_internal_network(module: str, network: str) -> None:
     """#97：edge-net、camera-net 有宿主网关，宿主进程经它们可访问 go2rtc。API（信令、取帧、增删流）
