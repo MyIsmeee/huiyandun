@@ -417,3 +417,95 @@ def test_pose_detector_picks_model_by_output_count() -> None:
 
     assert isinstance(yolo, YoloPoseDetector)
     assert not isinstance(rtmo, YoloPoseDetector)
+
+
+ORANGE = (0, 128, 255)  # BGR 明亮橙色：火焰
+
+
+def weak(session: FakeSession, visible: int = 5) -> FakeSession:
+    """只有前 visible 个关键点可见（其余置信度 0.1）：火焰、空椅子上 RTMO 给出的残缺骨骼。"""
+    session.keypoints[0, :, visible:, 2] = 0.1
+    return session
+
+
+def test_rtmo_only_box_without_full_skeleton_dropped() -> None:
+    """火焰、浓烟、空椅子被 RTMO 单独框成人（2026-11-18 演示素材）：RTMO 独有的框须骨骼完整。"""
+    session = weak(FakeSession([[100, 100, 200, 300, 0.9]]))
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[800, 100, 900, 400]]))
+
+    assert result.xyxy.tolist() == [[800, 100, 900, 400]]
+
+
+def test_rtmo_boxes_checked_when_detr_sees_nobody() -> None:
+    """火场画面里 RF-DETR 常一个人也没认出：此时 RTMO 的框同样须可信。"""
+    session = weak(FakeSession([[100, 100, 200, 300, 0.9]]))
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    assert len(pose(np.zeros((720, 1280, 3), np.uint8), persons=sv.Detections.empty())) == 0
+
+
+def test_rtmo_boxes_not_checked_without_detr() -> None:
+    """未配置 RF-DETR（persons 为 None）时没有可比照的检出，RTMO 的框照常输出。"""
+    session = weak(FakeSession([[100, 100, 200, 300, 0.9]]))
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    assert len(pose(np.zeros((720, 1280, 3), np.uint8))) == 1
+
+
+def test_rtmo_only_box_on_flame_dropped_despite_full_skeleton() -> None:
+    """RTMO 在火焰上也会给出完整骨骼：框内明亮橙红像素占比 ≥ FLAME_MAX 的不是人。"""
+    session = FakeSession([[100, 100, 200, 300, 0.9]])  # 整帧 [200, 200, 400, 600]
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+    image = np.zeros((720, 1280, 3), np.uint8)
+    image[200:600, 200:400] = ORANGE
+
+    result = pose(image, persons=people([[800, 100, 900, 400]]))
+
+    assert result.xyxy.tolist() == [[800, 100, 900, 400]]
+
+
+def test_detr_person_on_flame_dropped_only_without_skeleton() -> None:
+    """RF-DETR 在火上也会给出低分人员框：压着火焰又没有完整骨骼的去掉；站在火前、骨骼完整的人照常保留。"""
+    image = np.zeros((720, 1280, 3), np.uint8)
+    image[:, :] = ORANGE
+    no_skeleton = FakeSession([[100, 100, 200, 300, 0.9]], on_call=1)  # 正向推理无人
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, no_skeleton))
+    assert len(pose(image, persons=people([[220, 230, 380, 590]], score=0.4))) == 0
+
+    with_skeleton = FakeSession([[100, 100, 200, 300, 0.9]])
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, with_skeleton))
+    assert pose(image, persons=people([[220, 230, 380, 590]])).xyxy.tolist() == [
+        [220, 230, 380, 590]
+    ]
+
+
+def test_credible_needs_both_models_to_see_the_skeleton() -> None:
+    """两个模型各有幻觉：RTMO 在火焰上、RTMPose 在深色杂物上都会给出整副骨骼，取两者可见关键点数的较小者。"""
+    from vision_engine.detector import SKELETON_MIN, credible
+
+    image, box = np.zeros((100, 100, 3), np.uint8), np.array([10.0, 10, 60, 90])
+    full, empty = np.full(17, 0.8), np.zeros(17)
+    enough = np.r_[np.full(SKELETON_MIN, 0.8), np.zeros(17 - SKELETON_MIN)]
+
+    assert credible(image, box, full, full, confirmed=False)
+    assert credible(image, box, enough, enough, confirmed=False)
+    fewer = np.r_[np.full(SKELETON_MIN - 1, 0.8), np.zeros(18 - SKELETON_MIN)]
+    assert not credible(image, box, full, fewer, confirmed=False)  # 差一个
+    assert not credible(image, box, full, empty, confirmed=False)  # 火焰：RTMPose 精修后看不到
+    assert not credible(image, box, empty, full, confirmed=False)  # 深色杂物：RTMO 看不到
+    assert credible(image, box, empty, empty, confirmed=True)  # RF-DETR 认出、不在火上：照常保留
+
+
+def test_flame_ratio() -> None:
+    from vision_engine.detector import flame_ratio
+
+    image = np.zeros((100, 100, 3), np.uint8)
+    image[:, :50] = ORANGE
+    image[:, 50:75] = (40, 60, 160)  # 暗红衣服：不够亮，不算火焰
+
+    assert flame_ratio(image, np.array([0.0, 0, 100, 100])) == pytest.approx(0.5)
+    assert flame_ratio(image, np.array([50.0, 0, 100, 100])) == 0.0
+    assert flame_ratio(image, np.array([-20.0, -20, 25, 200])) == 1.0  # 超出画面的部分截掉
+    assert flame_ratio(image, np.array([120.0, 0, 150, 50])) == 0.0  # 完全在画面外

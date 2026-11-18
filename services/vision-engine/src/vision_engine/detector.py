@@ -4,7 +4,10 @@
 配置了 RTMPose 时为两阶段：按每个人员框从原画面裁剪、放大到 192×256 重新估计骨骼，取代 RTMO 的整帧结果。
 RTMO 把整帧缩到 640 宽，画面中 150～300 像素高的人只剩 50～100 像素；逐人裁剪后头、髋、膝、踝的可见比例明显
 提高（cam-05 实测 103 人次：踝 26%～51% → 63%，髋约 70% → 82%）。逐人模型会把桌后被挡的腿"猜"出来：膝、踝
-置信度低于 LOWER_BODY_MIN 的视为不可见。横躺者（框宽大于高）保留 RTMO 正向与旋转推理中骨骼更清楚的一方。"""
+置信度低于 LOWER_BODY_MIN 的视为不可见。横躺者（框宽大于高）保留 RTMO 正向与旋转推理中骨骼更清楚的一方。
+
+RTMO 独有、RF-DETR 没认出的框，须两个模型的骨骼都完整、且不是火焰才输出；RF-DETR 认出的压着火焰又没有完整骨骼的
+也去掉（credible）：火焰、浓烟、空椅子会被 RTMO 单独框成人，火焰也会被 RF-DETR 以低分框成人。"""
 
 import contextlib
 import io
@@ -32,6 +35,17 @@ CONTAINED = 0.8
 
 LOWER_BODY = [13, 14, 15, 16]  # 左右膝、左右踝
 LOWER_BODY_MIN = 0.4  # 逐人模型膝、踝置信度低于此值视为不可见：多是被桌椅挡住后"猜"出的位置
+
+# RTMO 独有（RF-DETR 没认出是人）的框，须骨骼完整且不是火焰才输出。演示素材里火焰、火场浓烟、搭着外套的空折叠椅、
+# 深色杂物都曾被 RTMO 单独框成人并确认为轨迹（2026-11-18）。两个模型对假目标各有"幻觉"：RTMO 在火焰上常给出 12～15
+# 个关键点、RTMPose 精修后只剩 0～8 个；深色杂物上反过来，RTMO 0～2 个、RTMPose 10～12 个；真人两者都在 9 个以上。
+# 取两者可见关键点数的较小者 ≥ SKELETON_MIN：本地 9 段素材上，跌倒（俯拍瘫坐）、人流、攀爬中 RTMO 独有的真人框
+# 几乎全部保留，火焰框去掉 80%+，空椅子、深色杂物全部去掉。仍漏网的火焰框由颜色排除：框内明亮橙红像素占比
+# ≥ FLAME_MAX 的不是人（火焰 0.06～0.62，真人最高 0.13，穿橙红衣服又被 RF-DETR 漏检的人有误删的可能）
+SKELETON_MIN = 8
+KEYPOINT_SEEN = 0.3  # 可见关键点的置信度下限，与 action.KEYPOINT_MIN 相同
+FLAME_MAX = 0.2
+FLAME_HUE, FLAME_SAT, FLAME_VALUE = 25, 90, 180  # OpenCV HSV（色相 0～180）：橙红、饱和、明亮
 
 type Candidates = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
@@ -171,8 +185,15 @@ class PoseDetector:
         _, keep = multiclass_nms(boxes, scores[:, None], nms_thr=NMS_IOU, score_thr=MIN_SCORE)
         own = np.array([] if keep is None else keep, dtype=int)
         if persons is None or len(persons) == 0:
+            # 配置了 RF-DETR 而它这一帧一个人也没认出时，RTMO 的框全是独有的，同样须可信（火场里多是这种情况）
             return self._refined(
-                image, offset, boxes[own], scores[own], points[own], point_scores[own]
+                image,
+                offset,
+                boxes[own],
+                scores[own],
+                points[own],
+                point_scores[own],
+                confirmed=None if persons is None else 0,
             )
         found = persons.xyxy
         keypoints, keypoint_scores = np.zeros((len(found), 17, 2)), np.zeros((len(found), 17))
@@ -213,6 +234,7 @@ class PoseDetector:
             np.concatenate([persons.confidence, scores[extra]]),
             np.concatenate([keypoints, points[extra]]),
             np.concatenate([keypoint_scores, point_scores[extra]]),
+            confirmed=len(found),
         )
 
     def _refined(
@@ -223,15 +245,32 @@ class PoseDetector:
         scores: np.ndarray,
         points: np.ndarray,
         point_scores: np.ndarray,
+        confirmed: int | None = None,
     ) -> sv.Detections:
-        """配置了逐人模型时按人员框重新估计骨骼；boxes、points 为整帧坐标，image 为 offset 处的裁剪区域。"""
+        """配置了逐人模型时按人员框重新估计骨骼；boxes、points 为整帧坐标，image 为 offset 处的裁剪区域。
+        配置了 RF-DETR 时 confirmed 为前面 RF-DETR 认出的人数，其余为 RTMO 独有的框，不可信的去掉（见 credible）；
+        None（未配置 RF-DETR）时不核验。"""
+        dx, dy = offset
+        local = boxes - (dx, dy, dx, dy)
+        detected = point_scores
         if self.topdown is not None and len(boxes):
-            dx, dy = offset
-            local, local_points = boxes - (dx, dy, dx, dy), points - (dx, dy)
             local_points, point_scores = refine(
-                self.topdown, image, local, local_points, point_scores
+                self.topdown, image, local, points - (dx, dy), point_scores
             )
             points = local_points + (dx, dy)
+        if confirmed is not None and len(boxes):
+            keep = np.array(
+                [
+                    credible(image, local[i], detected[i], point_scores[i], i < confirmed)
+                    for i in range(len(boxes))
+                ]
+            )
+            boxes, scores, points, point_scores = (
+                boxes[keep],
+                scores[keep],
+                points[keep],
+                point_scores[keep],
+            )
         return _people(boxes, scores, points, point_scores)
 
 
@@ -274,6 +313,32 @@ def pose_detector(model_file: str, session: ort.InferenceSession) -> PoseDetecto
     if len(session.get_outputs()) == 1:
         return YoloPoseDetector(session)
     return PoseDetector(model_file, session)
+
+
+def credible(
+    image: np.ndarray, box: np.ndarray, detected: np.ndarray, refined: np.ndarray, confirmed: bool
+) -> bool:
+    """是否当作人。骨骼完整指两个模型可见关键点数的较小者 ≥ SKELETON_MIN；火焰指框内明亮橙红像素占比 ≥ FLAME_MAX。
+    RTMO 独有的框须骨骼完整且不是火焰。RF-DETR 认出的（confirmed）只在压着火焰且骨骼不完整时去掉：它在火上也会给出
+    0.3～0.5 的人员框；站在火前的真人骨骼完整，照常保留。低分、骨骼不全的 RF-DETR 框不因此去掉：正常素材里这类框
+    多是只露出腿的行人、婴儿车里的孩子、倒地或运动模糊的人（火焰色占比最高 0.04）。
+    box 为 image 中的坐标；detected 为 RTMO 的关键点置信度（RF-DETR 的人没配上 RTMO 时为 0），refined 为逐人模型
+    精修后的（未配置时与前者相同）。"""
+    seen = min(int((detected >= KEYPOINT_SEEN).sum()), int((refined >= KEYPOINT_SEEN).sum()))
+    if confirmed:
+        return seen >= SKELETON_MIN or flame_ratio(image, box) < FLAME_MAX
+    return seen >= SKELETON_MIN and flame_ratio(image, box) < FLAME_MAX
+
+
+def flame_ratio(image: np.ndarray, box: np.ndarray) -> float:
+    """框内明亮橙红像素的占比：火焰。"""
+    height, width = image.shape[:2]
+    x1, y1 = max(int(box[0]), 0), max(int(box[1]), 0)
+    x2, y2 = min(int(np.ceil(box[2])), width), min(int(np.ceil(box[3])), height)
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    h, s, v = cv2.split(cv2.cvtColor(image[y1:y2, x1:x2], cv2.COLOR_BGR2HSV))
+    return float(((h <= FLAME_HUE) & (s >= FLAME_SAT) & (v >= FLAME_VALUE)).mean())
 
 
 def _people(
