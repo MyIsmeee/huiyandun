@@ -33,3 +33,7 @@ models/weights/
 
 # TypeScript 增量构建缓存
 web/console/tsconfig.tsbuildinfo
+
+# 本机安装的 Claude Code 技能（第三方），不入库
+.claude/skills/
+skills-lock.json
