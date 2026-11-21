@@ -1,0 +1,5 @@
+# 合成样本（R-02）：按 architecture.md §12 的事件契约手写的事件序列，services/correlator/tests/test_rule_samples.py 回放
+source: 合成
+license: 自研，无第三方内容
+anonymization: 不含真实数据；只用演示站点的设备 ID
+description: 认证爆破类偏离命中、外传类偏离不命中、规则告警不命中、目标未登记、持续偏离去重

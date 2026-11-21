@@ -162,6 +162,23 @@ def test_segmentation_task_allowed(models: Path) -> None:
     assert run("verify", models).returncode == 0
 
 
+def test_noncommercial_license_needs_explicit_flag(models: Path) -> None:
+    """非商业许可证只在条目显式写 non_commercial: true 时通过，白名单本身不放宽（G-08）。"""
+    run("fetch", models)
+    update(models, license="CC-BY-NC-4.0")
+    assert run("verify", models).returncode == 1
+    update(models, non_commercial=True)  # type: ignore[arg-type]
+    assert run("verify", models).returncode == 0
+
+
+def test_action_task_allowed(models: Path) -> None:
+    """骨骼动作分类：输入只有关键点，不看画面、不区分身份（G-04）。"""
+    run("fetch", models)
+    update(models, task="action")
+
+    assert run("verify", models).returncode == 0
+
+
 def test_embedding_task_allowed(models: Path) -> None:
     """整帧画面嵌入（画面可信度，REUSE-23）在白名单内。"""
     run("fetch", models)

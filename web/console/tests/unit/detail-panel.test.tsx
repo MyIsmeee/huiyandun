@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DetailPanel, TargetPanel } from "../../src/panels/DetailPanel/DetailPanel";
+import { DetailPanel, Details, TargetPanel } from "../../src/panels/DetailPanel/DetailPanel";
+import { useNav } from "../../src/store/nav";
 import { type Device, type Target, useLive } from "../../src/store/live";
 
 vi.mock("../../src/panels/LiveVideo/LiveVideo", async (original) => ({
@@ -30,7 +31,8 @@ describe("DetailPanel", () => {
     expect(screen.getByText("交换机")).toBeTruthy();
     expect(screen.getByText("10.0.0.2")).toBeTruthy();
     expect(screen.getByText("离线")).toBeTruthy();
-    expect(screen.getByText("该设备没有视频流")).toBeTruthy();
+    // 交换机没有画面：不显示实时画面一节
+    expect(screen.queryByText("实时画面")).toBeNull();
     expect(screen.queryByText("数据非实时")).toBeNull();
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "返回告警" }));
@@ -107,6 +109,8 @@ describe("地面映射（V-CAM9、FR-902、FR-910）", () => {
       mapping,
       homography: null,
       reproj_error_m,
+      climb_lines: [],
+      rules: [],
     },
   });
 
@@ -129,5 +133,57 @@ describe("地面映射（V-CAM9、FR-902、FR-910）", () => {
     useLive.setState({ devices: { "cam-01": camera("calibrated", 0.21) } });
     render(<TargetPanel target={TARGET} stale={false} onClose={vi.fn()} />);
     expect(screen.getByText("±0.4 m")).toBeTruthy();
+  });
+});
+
+describe("详情被遮住时的 Esc 与画面保持", () => {
+  afterEach(() => useNav.setState(useNav.getInitialState()));
+
+  it("管理页盖住或对话框打开时，Esc 不关闭详情", () => {
+    const onClose = vi.fn();
+    render(<DetailPanel device={DEVICE} stale={false} onClose={onClose} />);
+    useNav.setState({ page: "scene" });
+    fireEvent.keyDown(window, { key: "Escape" });
+    useNav.setState({ page: "overview" });
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.append(dialog);
+    fireEvent.keyDown(window, { key: "Escape" });
+    dialog.remove();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("监控墙上（video 为假）不另开一路实时画面：画面已在墙上播放", () => {
+    const device = { ...DEVICE, id: "cam-01", type: "camera", state: "normal", camera: { stream: "cam-01", area_id: null, pose: { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 }, calibration: [], mapping: "estimated", homography: null, reproj_error_m: null, climb_lines: [], rules: [] } } as Device;
+    render(<Details device={device} target={undefined} stale={false} onClose={vi.fn()} video={false} />);
+    expect(screen.queryByText("实时画面")).toBeNull();
+    expect(screen.queryByText("播放 cam-01")).toBeNull();
+  });
+
+  it("在设备画面上选中该摄像头的目标：实时画面不重建", () => {
+    const device = {
+      ...DEVICE,
+      id: "cam-01",
+      type: "camera",
+      state: "normal",
+      camera: {
+        stream: "cam-01",
+        area_id: "area-01",
+        pose: { x: 2, y: 2, height_m: 3, yaw_deg: 45, pitch_deg: -30, hfov_deg: 90, range_m: 15 },
+        calibration: [],
+        mapping: "estimated",
+        homography: null,
+        reproj_error_m: null,
+        climb_lines: [],
+        rules: [],
+      },
+    } as Device;
+    const { rerender } = render(<Details device={device} target={undefined} stale={false} onClose={vi.fn()} />);
+    const before = screen.getByText("播放 cam-01");
+    rerender(<Details device={undefined} target={TARGET} stale={false} onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "人员 #7" })).toBeTruthy();
+    expect(screen.getByText("播放 cam-01")).toBe(before);
   });
 });

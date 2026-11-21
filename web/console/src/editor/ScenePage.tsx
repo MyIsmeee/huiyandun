@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronDown, CircleAlert, Clock, House, Minus, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, CircleAlert, Clock, House, Minus, PencilRuler, Plus, RotateCw, Route, Trash2 } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,17 +15,20 @@ import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
 import { api, type SceneArea, type Site } from "../lib/api";
 import { formatTime } from "../panels/ConnectionStatus/ConnectionStatus";
+import { useArea } from "../scene/areas";
 import { ControlButton, useAnimate } from "../scene/CameraControls";
 import { Boundary, Note, supportsWebGL2 } from "../scene/SceneViewport";
 import { useConnection } from "../store/connection";
 import type { Device } from "../store/live";
 import { applySite } from "../store/live";
-import { DeleteAreaDialog, NewAreaDialog } from "./AreaDialogs";
+import { DeleteAreaDialog, EditAreaDialog, NewAreaDialog } from "./AreaDialogs";
 import { areaPlacements, placedCameras, registryCameras } from "./cameras";
 import { cameraTool, selectTool, useDraft, useDraftSync } from "./draft";
 import { DraftBar, DraftButton } from "./DraftControls";
 import { DiscardDialog, guardLeave, HistoryButtons } from "./History";
 import { Library } from "./Library";
+import { toggleRules, useRules } from "./rules";
+import { RulesPanel } from "./RulesPanel";
 import { SaveButton } from "./SaveButton";
 import { SelectionBar } from "./SelectionBar";
 import type { EditorView } from "./view";
@@ -41,9 +44,10 @@ const refresh = () => api.getSite().then(applySite, () => undefined);
  * 区域数据取自站点（GET /api/site 与 WS site 频道），保存后各浏览器 5 s 内更新
  */
 export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }) {
-  const [areaId, setAreaId] = useState<string | null>(null);
+  // 从态势页"编辑此区域"进入时打开态势页正在看的区域
+  const [areaId, setAreaId] = useState<string | null>(() => useArea.getState().areaId);
   const area = site.areas.find((a) => a.id === areaId) ?? site.areas[0] ?? null;
-  const [dialog, setDialog] = useState<"new" | "delete" | null>(null);
+  const [dialog, setDialog] = useState<"new" | "edit" | "delete" | null>(null);
   const create = () => setDialog("new");
 
   return (
@@ -54,12 +58,27 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           返回
         </Button>
         <h1 className="text-base font-semibold">场景</h1>
-        {area && <AreaMenu areas={site.areas} current={area} onSelect={(id) => guardLeave(() => setAreaId(id))} onDelete={() => setDialog("delete")} />}
+        {area && (
+          <AreaMenu
+            areas={site.areas}
+            current={area}
+            onSelect={(id) => guardLeave(() => setAreaId(id))}
+            onEdit={() => setDialog("edit")}
+            onDelete={() => setDialog("delete")}
+          />
+        )}
+        {area && (
+          <Button variant="ghost" size="sm" onClick={() => setDialog("edit")} title="修改区域名称与尺寸" className="text-muted-foreground">
+            <PencilRuler aria-hidden />
+            {area.width_m}×{area.depth_m} m
+          </Button>
+        )}
         <Button variant="outline" size="sm" onClick={create}>
           <Plus aria-hidden />
           新区域
         </Button>
         <span className="ml-auto" />
+        {area && <RulesButton />}
         {area && <DraftButton key={area.id} area={area} />}
         {area && <HistoryButtons />}
         {area && <SaveButton area={area} />}
@@ -103,6 +122,11 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
           }}
         />
       )}
+      {dialog === "edit" && area && (
+        <Suspense fallback={null}>
+          <EditAreaDialog area={area} cameras={areaPlacements(site.devices, area.id)} onClose={() => setDialog(null)} onSaved={() => void refresh()} />
+        </Suspense>
+      )}
       {dialog === "delete" && area && (
         <DeleteAreaDialog area={area} onClose={() => setDialog(null)} onDeleted={() => void refresh()} />
       )}
@@ -111,8 +135,27 @@ export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }
   );
 }
 
+/** 轨迹规则面板的开关：打开时退出模型与摄像头放置 */
+function RulesButton() {
+  const open = useRules((s) => s.open);
+  return (
+    <Button
+      variant={open ? "secondary" : "outline"}
+      size="sm"
+      aria-pressed={open}
+      onClick={() => {
+        selectTool(null);
+        toggleRules();
+      }}
+    >
+      <Route aria-hidden />
+      规则
+    </Button>
+  );
+}
+
 /** 区域切换（设计 150 §3）：列出全部区域，末尾为删除当前区域 */
-function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id: string) => void; onDelete: () => void }) {
+function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id: string) => void; onEdit: () => void; onDelete: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -133,6 +176,10 @@ function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id
           ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={props.onEdit}>
+          <PencilRuler aria-hidden />
+          修改名称与尺寸
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={props.onDelete}>
           <Trash2 aria-hidden />
           删除当前区域
@@ -148,7 +195,7 @@ function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id
  */
 function AreaView({ area, devices }: { area: SceneArea; devices: Device[] }) {
   const saved = areaPlacements(devices, area.id);
-  useDraftSync(area, saved);
+  useDraftSync(area, saved, devices.flatMap((d) => (d.camera ? [d.id] : [])));
   const placements = useDraft((s) => (s.areaId === area.id ? s.cameras : null)) ?? saved;
   // 重新放置中的摄像头只显示跟随指针的预览
   const moving = cameraTool(useDraft((s) => s.tool));
@@ -156,9 +203,13 @@ function AreaView({ area, devices }: { area: SceneArea; devices: Device[] }) {
   // 草稿载入前（换区域的第一帧）先显示区域已保存的内容
   const items = useDraft((s) => (s.areaId === area.id ? s.items : area.items));
   const placing = useDraft((s) => s.tool !== null);
-  // Esc 退出放置（E-2）
+  // Esc 退出放置（E-2）；已处理的 Esc 标记 defaultPrevented，被管理页盖住的态势页详情不再随之收起
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && selectTool(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || useDraft.getState().tool === null) return;
+      e.preventDefault();
+      selectTool(null);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
@@ -166,6 +217,7 @@ function AreaView({ area, devices }: { area: SceneArea; devices: Device[] }) {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [view, setView] = useState<EditorView | null>(null);
   const offline = useConnection((s) => !s.open && !s.connecting);
+  const rulesOpen = useRules((s) => s.open);
   const lastFrameAt = useConnection((s) => s.lastFrameAt);
   if (!webgl2) return <Note>场景编辑需要支持 WebGL2 的浏览器</Note>;
 
@@ -177,6 +229,7 @@ function AreaView({ area, devices }: { area: SceneArea; devices: Device[] }) {
         </Suspense>
       </Boundary>
       {state === "ready" && view && <ViewTools view={view} />}
+      {state === "ready" && rulesOpen && <RulesPanel devices={devices} areaId={area.id} />}
       {state === "ready" && (
         <Suspense fallback={null}>
           <SelectionBar width={area.width_m} depth={area.depth_m} />

@@ -41,6 +41,22 @@ def test_same_value_gets_same_pseudonym_and_prefix_is_not_cut() -> None:
     assert p.restore(out) == {"device_id": "cam-1", "a": "10.0.0.1 与 10.0.0.12，cam-1、cam-12"}
 
 
+def test_empty_device_id_gets_no_pseudonym() -> None:
+    """空的设备编号（如模型上一轮给出的空参数）不设假名：否则替换匹配每个字符间隙，整份材料被插满假名。"""
+    p = Pseudonyms()
+    data = {
+        "device_id": "",
+        "camera_id": " ",
+        "note": "扫描 10.0.0.1 端口",
+        "other": {"device_id": "cam-1"},
+    }
+    out = p.redact(data)
+
+    assert out["note"] == "扫描 HOST_001 端口"
+    assert out["other"] == {"device_id": "DEV_001"}
+    assert p.restore(out) == data
+
+
 def test_redact_covers_values_next_to_separators() -> None:
     """紧挨 - _ 或字母的内网地址、紧挨分隔符的设备 ID 同样替换，不能原样发往公网（C-LLM-03）。"""
     p = Pseudonyms()

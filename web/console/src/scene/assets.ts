@@ -39,6 +39,9 @@ export const MATERIALS = {
   canopy: "#B7C4B0",
 } as const;
 
+/** 区域边线的颜色（3D 与 2D 视图）：比地面与网格（屋顶灰）深一档，在浅色地面上可辨又不抢物体的视觉 */
+export const OUTLINE = "#9AA6B8";
+
 export interface Category {
   id: string;
   name: string;

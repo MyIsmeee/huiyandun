@@ -4,12 +4,17 @@ import { Object3D, type PerspectiveCamera } from "three";
 import { DeviceMarkers } from "./DeviceMarkers";
 import { TargetModels } from "./TargetModels";
 import type { Camera } from "./devices";
+import type { SceneFrame } from "../editor/recognition";
 import { AreaScene } from "./AreaScene";
+import { BackdropScene } from "./Backdrop";
+import { MeasuredScene } from "./MeasuredScene";
 import type { SceneItem } from "./assets";
 import type { Area, SceneView } from "./layout";
+import { DAY, type ScenePalette, useScenePalette } from "./palette";
+import { seatsFromFrames, seatsFromItems } from "./seating";
 
-/** 页面底色（ui.md §3），场景背景与远处渐隐取同色 */
-export const BACKGROUND = "#F4F5F7";
+/** 页面底色（ui.md §3），场景背景与远处渐隐取同色；夜间警戒的取值见 palette.ts */
+export const BACKGROUND = DAY.background;
 /** 主光方向（ui.md §5.2）：方位 135°、仰角 55° */
 const SUN_AZIMUTH = (135 * Math.PI) / 180;
 const SUN_ELEVATION = (55 * Math.PI) / 180;
@@ -17,42 +22,63 @@ const SUN_ELEVATION = (55 * Math.PI) / 180;
 const SHADOW_MAP = import.meta.env.MODE === "e2e" ? 1024 : 2048;
 /** 渐隐的过渡距离，单位米 */
 const FOG_M = 50;
-/** 阴影承接面的不透明度（设计 150 §4）：只显示阴影，其余完全透明；浅色地面上约 25% 即清晰可见 */
-const SHADOW_OPACITY = 0.25;
 /** 阴影承接面与阴影相机在区域外多留的边距，单位米 */
 const SHADOW_MARGIN_M = 4;
 
 /**
  * 空间态势（D-120、D-111、设计 150 §9）：当前区域管理员搭建的场景与渐隐地面，叠加设备、视场与检出目标；
  * 只显示阴影的承接面让物体落地。
- * 固定的半球光 + 平行主光，投射软阴影，不随时间变化。按需渲染（frameloop="demand"）：无常驻动效（V-A3），
+ * 固定的半球光 + 平行主光，投射软阴影，不随时间变化；夜间警戒时换为深色背景与冷色弱光（palette.ts）。按需渲染（frameloop="demand"）：无常驻动效（V-A3），
  * 只有对应真实告警的动效持续请求重绘。flat 关闭色调映射，色值与规范一致。
  */
-export default function Scene3D(props: { area: Area; items: SceneItem[]; cameras: Camera[]; view: SceneView; onReady: () => void }) {
-  const { area, items, cameras, view, onReady } = props;
+export default function Scene3D(props: {
+  area: Area;
+  items: SceneItem[];
+  cameras: Camera[];
+  view: SceneView;
+  onReady: () => void;
+  /** 自动识别的场景：给出时按实测尺寸画白模（MeasuredScene），不画 items */
+  measured?: SceneFrame[] | null;
+  /** 自动识别的场景改画实景底图（Backdrop.tsx），不画白模 */
+  photo?: boolean;
+}) {
+  const { area, items, cameras, view, onReady, measured, photo = false } = props;
   // 远处渐隐为底色：区域在取景中心周围时始终不受影响，跟随视角下地平线柔和过渡
   const fogNear = Math.hypot(...view.shot.eye.map((v, i) => v - (view.shot.look[i] ?? 0))) + Math.hypot(area.width_m, area.height_m) / 2;
+  const palette = useScenePalette();
+  // 可坐的位置：自动识别的场景取识别到的椅子与沙发，手工搭建的取椅子类资产（seating.ts）
+  const seats = useMemo(() => (measured ? seatsFromFrames(measured) : seatsFromItems(items)), [measured, items]);
   return (
-    <Canvas flat shadows="soft" frameloop="demand">
-      <color attach="background" args={[BACKGROUND]} />
-      <fog attach="fog" args={[BACKGROUND, fogNear, fogNear + FOG_M]} />
+    <Canvas flat shadows="percentage" frameloop="demand">
+      <color attach="background" args={[palette.background]} />
+      <fog attach="fog" args={[palette.background, fogNear, fogNear + FOG_M]} />
       <ViewCamera view={view} />
       <FirstFrame onReady={onReady} />
-      <Lights area={area} />
-      <ShadowCatcher area={area} />
-      <AreaScene area={area} items={items} />
+      <Repaint palette={palette} />
+      <Lights area={area} palette={palette} />
+      <ShadowCatcher area={area} opacity={palette.shadow} />
+      <AreaScene area={area} items={measured ? [] : items} />
+      {measured && (photo ? <BackdropScene frames={measured} /> : <MeasuredScene frames={measured} cameras={cameras} />)}
       <DeviceMarkers cameras={cameras} />
-      <TargetModels cameras={cameras} />
+      <TargetModels cameras={cameras} seats={seats} />
     </Canvas>
   );
 }
 
-/** 光照强度：朝上的受光面总辐照约为 π，Lambert 材质在受光面呈现规定的材质色（设计 150 §4） */
-const HEMI_INTENSITY = 1.5;
-const SUN_INTENSITY = 2;
+/** 按需渲染下，主题切换不会自己触发重绘：外观变了就请求一帧 */
+function Repaint({ palette }: { palette: ScenePalette }) {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => invalidate(), [palette, invalidate]);
+  return null;
+}
 
-/** 半球光 + 平行主光；主光的阴影相机贴合区域，阴影清晰且不浪费贴图 */
-export function Lights({ area }: { area: Area }) {
+/**
+ * 半球光 + 平行主光；主光的阴影相机贴合区域，阴影清晰且不浪费贴图。
+ * 日间光照强度（palette.DAY）：朝上的受光面总辐照约为 π，Lambert 材质在受光面呈现规定的材质色（设计 150 §4）
+ */
+export function Lights({ area, palette = DAY }: { area: Area; palette?: ScenePalette }) {
+  const [sky, floor, hemiIntensity] = palette.hemi;
+  const [sunColor, sunIntensity] = palette.sun;
   const [cx, cz] = [area.x0 + area.width_m / 2, area.y0 + area.height_m / 2];
   const target = useMemo(() => new Object3D(), []);
   const radius = Math.hypot(area.width_m, area.height_m) / 2 + SHADOW_MARGIN_M;
@@ -63,12 +89,13 @@ export function Lights({ area }: { area: Area }) {
   ];
   return (
     <>
-      <hemisphereLight args={["#FFFFFF", "#E5E7EB", HEMI_INTENSITY]} />
+      <hemisphereLight args={[sky, floor, hemiIntensity]} />
       <primitive object={target} position={[cx, 0, cz]} />
       <directionalLight
         position={sun}
         target={target}
-        intensity={SUN_INTENSITY}
+        color={sunColor}
+        intensity={sunIntensity}
         castShadow
         shadow-mapSize={[SHADOW_MAP, SHADOW_MAP]}
         shadow-bias={-0.0005}
@@ -84,8 +111,11 @@ export function Lights({ area }: { area: Area }) {
   );
 }
 
-/** 只显示阴影的承接面：区域加边距，略高于地面，不接收点选 */
-export function ShadowCatcher({ area }: { area: Area }) {
+/**
+ * 只显示阴影的承接面：区域加边距，略高于地面，不接收点选。
+ * 不透明度（设计 150 §4）：只显示阴影，其余完全透明；浅色地面上约 25% 即清晰可见
+ */
+export function ShadowCatcher({ area, opacity = DAY.shadow }: { area: Area; opacity?: number }) {
   const [w, h] = [area.width_m + SHADOW_MARGIN_M * 2, area.height_m + SHADOW_MARGIN_M * 2];
   return (
     <mesh
@@ -95,7 +125,7 @@ export function ShadowCatcher({ area }: { area: Area }) {
       raycast={() => undefined}
     >
       <planeGeometry args={[w, h]} />
-      <shadowMaterial opacity={SHADOW_OPACITY} transparent depthWrite={false} />
+      <shadowMaterial opacity={opacity} transparent depthWrite={false} />
     </mesh>
   );
 }

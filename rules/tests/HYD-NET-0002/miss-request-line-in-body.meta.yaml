@@ -1,0 +1,6 @@
+# 合成样本（R-02）：python tools/dev/rtsp_pcap.py rules/tests 生成
+source: 合成
+license: 自研，无第三方内容
+anonymization: 不含真实数据；地址取文档示例网段（RFC 5737）
+description: SET_PARAMETER 的正文里引用了 ANNOUNCE 请求行，不在报文开头
+alerts: 0

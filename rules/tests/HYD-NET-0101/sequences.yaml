@@ -1,0 +1,46 @@
+# 关联规则样本（C-SEC-01）：按列表顺序送入引擎（即到达顺序），t 为事件发生时刻（秒）
+# 未写的字段由测试补默认值：告警为 enforce、rule 来源的 auth_bruteforce，画面事件为 rule 来源的 freeze
+cases:
+  - name: 规则判定的认证爆破
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+    incidents: [{ requires_confirmation: false }]
+
+  - name: 模型来源的告警不触发
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, source: model }
+    incidents: []
+
+  - name: 行为异常不是认证爆破
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, category: behavior_anomaly, source: model }
+    incidents: []
+
+  - name: monitor 告警不参与关联
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02, mode: monitor }
+    incidents: []
+
+  - name: 目标未登记为设备
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: null }
+    incidents: []
+
+  - name: 单独的画面事件不触发
+    events:
+      - { t: 0, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+    incidents: []
+
+  - name: 攻击持续时不重复生成，停止 5 分钟后再次出现才算新事件
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 60, subject: hyd.security.alert.v1, device_id: cam-02 }
+      - { t: 330, subject: hyd.security.alert.v1, device_id: cam-02 }  # 距上次命中 270 s：仍在顺延的去重期内
+      - { t: 700, subject: hyd.security.alert.v1, device_id: cam-02 }  # 停止 370 s 后再次出现
+    incidents: [{ requires_confirmation: false }, { requires_confirmation: false }]
+
+  - name: 不同设备各自生成
+    events:
+      - { t: 0, subject: hyd.security.alert.v1, device_id: cam-01 }
+      - { t: 1, subject: hyd.security.alert.v1, device_id: cam-02 }
+    incidents: [{ requires_confirmation: false }, { requires_confirmation: false }]

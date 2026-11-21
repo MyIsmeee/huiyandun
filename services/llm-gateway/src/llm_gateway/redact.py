@@ -71,6 +71,8 @@ class Pseudonyms:
         self._counts = {"HOST": 0, "DEV": 0}
 
     def _add(self, real: str, kind: str) -> None:
+        if not real.strip():
+            return  # 空编号（如模型给出的空参数）不设假名：空串的替换会匹配每个字符间隙，整份材料被插满假名
         if real not in self._fake:
             self._counts[kind] += 1
             self._fake[real] = f"{kind}_{self._counts[kind]:03d}"

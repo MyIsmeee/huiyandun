@@ -92,10 +92,10 @@ test("点选另一区域摄像头的告警：切到该区域并显示详情；�
   await switcher(page).click();
   await page.getByRole("menuitemradio", { name: /一号楼大厅/ }).click();
   ws?.send(JSON.stringify({ channel: "alerts", data: ALERT }));
-  await expect(side(page).getByRole("button", { name: /HYD-NET-0001/ })).toBeVisible();
+  await expect(side(page).getByRole("button", { name: /口令暴力破解/ })).toBeVisible();
   await expect(switcher(page)).toHaveAccessibleName("区域：一号楼大厅");
 
-  await side(page).getByRole("button", { name: /HYD-NET-0001/ }).click();
+  await side(page).getByRole("button", { name: /口令暴力破解/ }).click();
   await expect(switcher(page)).toHaveAccessibleName("区域：二号楼机房");
   await expect(side(page).getByRole("heading", { name: "cam-02" })).toBeVisible();
 });
@@ -115,5 +115,5 @@ test("告警卡收起为带计数的胶囊；选中设备时仍显示详情，�
   await expect(capsule).toBeVisible();
 
   await capsule.click();
-  await expect(side(page).getByRole("button", { name: /HYD-NET-0001/ })).toBeVisible();
+  await expect(side(page).getByRole("button", { name: /口令暴力破解/ })).toBeVisible();
 });

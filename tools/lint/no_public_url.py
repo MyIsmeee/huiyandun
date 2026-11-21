@@ -71,6 +71,11 @@ EXCLUDED = (
     # 构建期模型转换（make fetch-models）：拉取上游代码与 PyTorch，不进入任何镜像（REUSE-25）
     "tools/dev/export_efficientvit_seg.py",
     "tools/dev/export_efficientvit_seg.py.lock",
+    # 同上：STGCN++、VideoMAE 的权重转换（models/registry.yaml 的 convert，third-party.yaml 的 build_tools）
+    "tools/dev/export_stgcnpp.py",
+    "tools/dev/export_stgcnpp.py.lock",
+    "tools/dev/export_videomae_rwf.py",
+    "tools/dev/export_videomae_rwf.py.lock",
 )
 # 只在开发机访问的下载地址：按文件放行指定键所在行，同一文件的其他行照常扫描。
 # 模型权重地址只由 make fetch-models 读取，registry.yaml 不进入任何镜像（R-03、C-RU-06）；

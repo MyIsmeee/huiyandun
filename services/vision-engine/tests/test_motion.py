@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from vision_engine.motion import MIN_SIZE, MotionGate
+from vision_engine.motion import FULL_EVERY, MIN_SIZE, MotionGate
 
 W, H = 1280, 720
 NO_BOXES = np.empty((0, 4))
@@ -48,6 +48,15 @@ def test_motion_region_covers_moving_object() -> None:
     assert 0 <= x1 and x2 <= W and 0 <= y1 and y2 <= H
 
 
+def test_resolution_change_resets_background() -> None:
+    # 摄像头换码流或重连后分辨率、宽高比改变：重新记背景并整帧推理，不因旧背景尺寸不符而抛异常
+    gate = primed()
+    smaller = np.full((480, 640, 3), 40, np.uint8)  # 4:3，缩小后高度与 16:9 的旧背景不同
+
+    assert gate.region(smaller, NO_BOXES) == (0, 0, 640, 480)
+    assert gate.region(smaller, NO_BOXES) is None  # 新背景生效：静止画面照常跳过
+
+
 def test_still_track_keeps_region() -> None:
     # 跌倒后静止的人没有帧差，仍须推理以维持轨迹
     gate = primed()
@@ -57,3 +66,12 @@ def test_still_track_keeps_region() -> None:
     assert region is not None
     x1, y1, x2, y2 = region
     assert x1 <= 100 and y1 <= 50 and x2 >= 180 and y2 >= 250
+
+
+def test_full_frame_refresh_finds_people_who_never_move() -> None:
+    """静止场景也每 FULL_EVERY 帧整帧推理一次：坐着不动、轨迹已丢的人能重新检出。"""
+    gate = primed()
+    regions = [gate.region(frame(), NO_BOXES) for _ in range(2 * FULL_EVERY)]
+    full = [i for i, r in enumerate(regions) if r == (0, 0, W, H)]
+    assert full == [FULL_EVERY - 1, 2 * FULL_EVERY - 1]
+    assert all(r is None for i, r in enumerate(regions) if i not in full)

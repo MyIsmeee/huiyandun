@@ -1,0 +1,18 @@
+# 单域关联：设备遭认证爆破即生成关联事件，交 Playbook 封禁攻击源（FR-202、FR-401）
+# 序号段 01xx 留给只引用网络告警的关联规则，与 rules/suricata 的检测规则序号（00xx）互不重复
+# 样本：rules/tests/HYD-NET-0101/sequences.yaml
+id: HYD-NET-0101
+version: 1.0.0
+name: 认证爆破
+# 上线即 enforce：只引用已验证并转 enforce 的规则告警（HYD-NET-0001，TK-030、TK-031、D-068），
+# 不接受模型来源的告警，判定完全确定，无须人工确认；monitor 告警由引擎排除，不会命中
+mode: enforce
+window_s: 60
+group_by: device_id
+sequence:
+  - subject: hyd.security.alert.v1
+    match: { category: auth_bruteforce, source: rule }
+emit:
+  severity: high  # 画面随后遭篡改时由 HYD-X-0001 升为 critical
+  title: 摄像头遭认证爆破
+  techniques: [T1110]  # Brute Force

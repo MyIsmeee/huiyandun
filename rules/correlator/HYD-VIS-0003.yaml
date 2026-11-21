@@ -1,0 +1,17 @@
+# 单域关联（物理域）：确认的跌倒或攀爬越线即生成关联事件（FR-303）
+# 疑似跌倒、长时间静止、疑似打架只在控制台提示，不进入关联（TK-160；静止易与伏案久坐混淆）。
+# 人员险情不是网络攻击：severity 取 medium，不交 AI 值班员研判；关联事件自动触发存证，事后可出报告
+# 样本：rules/tests/HYD-VIS-0003/sequences.yaml
+id: HYD-VIS-0003
+version: 1.0.0
+name: 人员险情（跌倒、攀爬越线）
+mode: enforce
+window_s: 60
+group_by: device_id
+sequence:
+  - subject: hyd.vision.behavior.v1
+    match: { behavior: [fall, climb], level: confirmed }
+emit:
+  severity: medium
+  title: 现场人员跌倒或攀爬越线
+  techniques: []  # 人员险情不对应 ATT&CK 技术

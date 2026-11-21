@@ -3,7 +3,9 @@
 以假会话代替模型；有横躺且没配上骨骼的 RF-DETR 人员时，另推理逆时针 90°、顺时针 90° 两次（ROTATIONS）。
 """
 
+import contextlib
 import importlib.util
+import io
 from types import SimpleNamespace
 from typing import cast
 
@@ -12,8 +14,9 @@ import onnxruntime as ort
 import pytest
 import supervision as sv
 from onnxruntime.datasets import get_example
+from rtmlib import RFDETR
 
-from vision_engine.detector import PoseDetector, VehicleDetector
+from vision_engine.detector import PoseDetector, VehicleDetector, YoloPoseDetector, pose_detector
 
 
 class FakeSession:
@@ -225,6 +228,27 @@ def vehicles(queries: list[tuple[float, float, float, float, int, float]]) -> Ve
     return VehicleDetector(get_example("sigmoid.onnx"), session)
 
 
+@pytest.mark.parametrize("shape", [(1080, 1920, 3), (200, 400, 3), (512, 512, 3)])
+def test_vehicle_preprocess_matches_rtmlib_bit_for_bit(shape: tuple[int, int, int]) -> None:
+    """查表的前处理与 rtmlib 的逐像素浮点运算逐位相同：模型看到的输入不变。"""
+    image = np.random.default_rng(0).integers(0, 256, shape, np.uint8)
+    fed: list[np.ndarray] = []
+
+    class Session(FakeDetrSession):
+        def run(self, names: list[str], feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+            fed.append(feed["input"])
+            return super().run(names, feed)
+
+    session = cast(ort.InferenceSession, Session([(0.5, 0.5, 0.2, 0.2, 2, 0.9)]))
+    VehicleDetector(get_example("sigmoid.onnx"), session)(image)
+    with contextlib.redirect_stdout(io.StringIO()):
+        reference = RFDETR(get_example("sigmoid.onnx"), model_input_size=(512, 512), device="cpu")
+    expected, _ = reference.preprocess(image)
+
+    assert fed[0].dtype == np.float32
+    assert np.array_equal(fed[0][0], expected.transpose(2, 0, 1))
+
+
 def test_vehicles_mapped_to_full_frame_with_class_and_score() -> None:
     """裁剪区域 400×200、左上角 (100, 50)：归一化框按区域尺寸放大后平移回整帧。"""
     detections, _ = vehicles([(0.5, 0.5, 0.5, 0.5, 2, 0.9)])(
@@ -350,3 +374,138 @@ def test_without_detr_only_upright_pass() -> None:
 
     assert session.calls == 1
     assert result.xyxy.tolist() == [[200, 200, 400, 600]]
+
+
+class FakeYoloSession:
+    """按 YOLO26-pose 免 NMS 导出的格式返回 (1, 300, 57)：框、置信度、类别、17 × (x, y, 置信度)。"""
+
+    def __init__(self, rows: list[list[float]]) -> None:
+        self.output = np.zeros((1, 300, 57), np.float32)
+        for i, row in enumerate(rows):
+            self.output[0, i, :5] = row
+            self.output[0, i, 6:] = np.tile([150, 390, 0.8], 17)
+
+    def get_inputs(self) -> list[SimpleNamespace]:
+        return [SimpleNamespace(name="images")]
+
+    def get_outputs(self) -> list[SimpleNamespace]:
+        return [SimpleNamespace(name="output0")]
+
+    def run(self, names: list[str], feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        assert feed["images"].shape == (1, 3, 640, 640)
+        assert feed["images"].dtype == np.float32
+        assert feed["images"].max() <= 1
+        return [self.output]
+
+
+def test_yolo_maps_letterboxed_output_to_full_frame() -> None:
+    # 1280×720 的裁剪区域缩放为 0.5，上下各补 140 像素；区域左上角位于整帧 (100, 40)
+    session = FakeYoloSession([[100, 240, 200, 440, 0.9], [400, 240, 450, 340, 0.1]])
+    image = np.zeros((720, 1280, 3), np.uint8)
+
+    result = pose_detector("unused.onnx", cast(ort.InferenceSession, session))(image, (100, 40))
+
+    assert len(result) == 1  # 低分框与置信度为 0 的空行丢弃
+    assert result.xyxy[0].tolist() == [300, 240, 500, 640]
+    assert result.data["keypoints"][0, 0].tolist() == [400, 540]
+    assert result.data["keypoint_scores"][0, 0] == np.float32(0.8)
+
+
+def test_pose_detector_picks_model_by_output_count() -> None:
+    yolo = pose_detector("unused.onnx", cast(ort.InferenceSession, FakeYoloSession([])))
+    rtmo = pose_detector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, FakeSession([])))
+
+    assert isinstance(yolo, YoloPoseDetector)
+    assert not isinstance(rtmo, YoloPoseDetector)
+
+
+ORANGE = (0, 128, 255)  # BGR 明亮橙色：火焰
+
+
+def weak(session: FakeSession, visible: int = 5) -> FakeSession:
+    """只有前 visible 个关键点可见（其余置信度 0.1）：火焰、空椅子上 RTMO 给出的残缺骨骼。"""
+    session.keypoints[0, :, visible:, 2] = 0.1
+    return session
+
+
+def test_rtmo_only_box_without_full_skeleton_dropped() -> None:
+    """火焰、浓烟、空椅子被 RTMO 单独框成人（2026-11-18 演示素材）：RTMO 独有的框须骨骼完整。"""
+    session = weak(FakeSession([[100, 100, 200, 300, 0.9]]))
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    result = pose(np.zeros((720, 1280, 3), np.uint8), persons=people([[800, 100, 900, 400]]))
+
+    assert result.xyxy.tolist() == [[800, 100, 900, 400]]
+
+
+def test_rtmo_boxes_checked_when_detr_sees_nobody() -> None:
+    """火场画面里 RF-DETR 常一个人也没认出：此时 RTMO 的框同样须可信。"""
+    session = weak(FakeSession([[100, 100, 200, 300, 0.9]]))
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    assert len(pose(np.zeros((720, 1280, 3), np.uint8), persons=sv.Detections.empty())) == 0
+
+
+def test_rtmo_boxes_not_checked_without_detr() -> None:
+    """未配置 RF-DETR（persons 为 None）时没有可比照的检出，RTMO 的框照常输出。"""
+    session = weak(FakeSession([[100, 100, 200, 300, 0.9]]))
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+
+    assert len(pose(np.zeros((720, 1280, 3), np.uint8))) == 1
+
+
+def test_rtmo_only_box_on_flame_dropped_despite_full_skeleton() -> None:
+    """RTMO 在火焰上也会给出完整骨骼：框内明亮橙红像素占比 ≥ FLAME_MAX 的不是人。"""
+    session = FakeSession([[100, 100, 200, 300, 0.9]])  # 整帧 [200, 200, 400, 600]
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, session))
+    image = np.zeros((720, 1280, 3), np.uint8)
+    image[200:600, 200:400] = ORANGE
+
+    result = pose(image, persons=people([[800, 100, 900, 400]]))
+
+    assert result.xyxy.tolist() == [[800, 100, 900, 400]]
+
+
+def test_detr_person_on_flame_dropped_only_without_skeleton() -> None:
+    """RF-DETR 在火上也会给出低分人员框：压着火焰又没有完整骨骼的去掉；站在火前、骨骼完整的人照常保留。"""
+    image = np.zeros((720, 1280, 3), np.uint8)
+    image[:, :] = ORANGE
+    no_skeleton = FakeSession([[100, 100, 200, 300, 0.9]], on_call=1)  # 正向推理无人
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, no_skeleton))
+    assert len(pose(image, persons=people([[220, 230, 380, 590]], score=0.4))) == 0
+
+    with_skeleton = FakeSession([[100, 100, 200, 300, 0.9]])
+    pose = PoseDetector(get_example("sigmoid.onnx"), cast(ort.InferenceSession, with_skeleton))
+    assert pose(image, persons=people([[220, 230, 380, 590]])).xyxy.tolist() == [
+        [220, 230, 380, 590]
+    ]
+
+
+def test_credible_needs_both_models_to_see_the_skeleton() -> None:
+    """两个模型各有幻觉：RTMO 在火焰上、RTMPose 在深色杂物上都会给出整副骨骼，取两者可见关键点数的较小者。"""
+    from vision_engine.detector import SKELETON_MIN, credible
+
+    image, box = np.zeros((100, 100, 3), np.uint8), np.array([10.0, 10, 60, 90])
+    full, empty = np.full(17, 0.8), np.zeros(17)
+    enough = np.r_[np.full(SKELETON_MIN, 0.8), np.zeros(17 - SKELETON_MIN)]
+
+    assert credible(image, box, full, full, confirmed=False)
+    assert credible(image, box, enough, enough, confirmed=False)
+    fewer = np.r_[np.full(SKELETON_MIN - 1, 0.8), np.zeros(18 - SKELETON_MIN)]
+    assert not credible(image, box, full, fewer, confirmed=False)  # 差一个
+    assert not credible(image, box, full, empty, confirmed=False)  # 火焰：RTMPose 精修后看不到
+    assert not credible(image, box, empty, full, confirmed=False)  # 深色杂物：RTMO 看不到
+    assert credible(image, box, empty, empty, confirmed=True)  # RF-DETR 认出、不在火上：照常保留
+
+
+def test_flame_ratio() -> None:
+    from vision_engine.detector import flame_ratio
+
+    image = np.zeros((100, 100, 3), np.uint8)
+    image[:, :50] = ORANGE
+    image[:, 50:75] = (40, 60, 160)  # 暗红衣服：不够亮，不算火焰
+
+    assert flame_ratio(image, np.array([0.0, 0, 100, 100])) == pytest.approx(0.5)
+    assert flame_ratio(image, np.array([50.0, 0, 100, 100])) == 0.0
+    assert flame_ratio(image, np.array([-20.0, -20, 25, 200])) == 1.0  # 超出画面的部分截掉
+    assert flame_ratio(image, np.array([120.0, 0, 150, 50])) == 0.0  # 完全在画面外

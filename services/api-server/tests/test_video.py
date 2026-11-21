@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from api_server.app import create_app
 from api_server.config import ApiConfig
+from api_server.video import CODEC_UNSUPPORTED
 
 OFFER = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\n"
 ANSWER = "v=0\r\no=- 3 4 IN IP4 127.0.0.1\r\ns=-\r\n"
@@ -95,6 +96,20 @@ def test_go2rtc_failure_is_bad_gateway(client: TestClient, handler: Handler) -> 
 
     assert res.status_code == 502
     assert res.json()["code"] == "bad_gateway"
+
+
+def test_unsupported_codec_says_how_to_fix(client: TestClient) -> None:
+    # go2rtc 原文（H.265 摄像头、Linux Chrome 的 offer）
+    body = (
+        "streams: codecs not matched: video:H265, audio:AAC => "
+        "video:VP8, video:VP9, video:H264, video:AV1"
+    )
+    go2rtc(client, lambda _: httpx2.Response(500, text=body))
+
+    res = client.post("/api/devices/cam-01/webrtc", content=OFFER, headers=HEADERS)
+
+    assert res.status_code == 502
+    assert res.json()["message"] == CODEC_UNSUPPORTED
 
 
 def test_requires_login(db: tuple[ApiConfig, ApiConfig]) -> None:

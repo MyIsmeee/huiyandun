@@ -1,0 +1,34 @@
+# 告警通知（可选）：make demo-up NOTIFY=1 叠加本文件。确认级物理告警与高等级关联事件推送到企业微信、钉钉群机器人
+# 或通用 Webhook（services/notifier）。机器人地址写在 deploy/compose/.secrets/notify_targets（YAML，见服务 README），
+# 只存于本机（G-14）；文件为空时服务空转、不出网。
+#
+# 这是除 llm-gateway 之外唯一接入出站网络的服务（DP-05 例外）：只订阅告警，不接入数据库、视频与处置网络，
+# 不开放端口。不需要外部通知的部署不叠加本文件，出网面与默认部署相同。
+services:
+  notifier:
+    image: huiyandun/notifier:local
+    build: { context: ../.., dockerfile: services/notifier/Dockerfile }
+    profiles: [notify]
+    secrets: [notify_targets]
+    environment:
+      HYD_CONSOLE_URL: ${HYD_CONSOLE_URL:-}
+    depends_on: { nats: { condition: service_healthy } }
+    networks: [core-net, notify-egress]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      # 进程在即健康：未配置机器人时空转，平台拒收只记日志，不影响控制台告警
+      test: ["CMD", "python3", "-c", "import os, sys; sys.exit(0 if os.path.exists('/proc/1') else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  # 出站网络：只有 notifier 接入
+  notify-egress: {}
+
+secrets:
+  notify_targets:
+    file: .secrets/notify_targets

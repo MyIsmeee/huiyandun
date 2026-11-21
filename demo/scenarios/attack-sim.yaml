@@ -1,5 +1,6 @@
-# attack-sim 的受控行为定义（DP-09）：攻击方只对自建目标 rtsp-target 发 RTSP 认证重试。
-# 红方命令 make attack 以 compose 的 environment 默认值启动 attack-sim，make attack-slow 以 slow 的参数启动（D-105）
+# attack-sim 的受控行为定义（DP-09）：攻击方只对自建目标 rtsp-target 发 RTSP 认证重试或推流声明。
+# 红方命令 make attack 以 compose 的 environment 默认值启动 attack-sim，make attack-slow 以 slow 的参数启动，
+# make attack-hijack 以 hijack 的参数改用推流劫持脚本（D-105）
 target: rtsp-target          # 只允许的目标，与 compose 的 attack-sim 服务名一致
 port: 8554                   # 目标 RTSP 端口
 path: cam                    # 目标 RTSP 路径
@@ -10,3 +11,12 @@ interval_s: 0                # 两次尝试之间的停顿
 # 低速模式（make attack-slow，FR-205）：每 20 s 一次，任意 60 s 内至多 3 次，规则不告警；4 次跨越 60 s 以上，
 # 每个 30 s 窗口都有尝试，行为模型连续两个窗口可见
 slow: { attempts: 4, interval_s: 20 }
+# 推流劫持（make attack-hijack）：只发 ANNOUNCE 声明、不发送码流；目标不给远端发布权限，每次都回 401。
+# 一次即触发 HYD-NET-0002；多发几次用来观察封禁生效后连接被复位
+hijack: { attempts: 3, interval_s: 2 }
+# 录屏演示（make attack-show）：轮换常见弱口令、放慢节奏便于观看；60 s 内超过 5 次即触发 HYD-NET-0001，
+# 封禁生效后余下的尝试连接被切断。口令均为公开的常见弱口令，目标从不放行远端读取，每个都回 401
+show:
+  attempts: 10
+  interval_s: 0.3
+  wordlist: ["12345", "123456", admin, password, "888888", "666666", "111111", "000000", "1234", abc123, qwerty, "54321"]

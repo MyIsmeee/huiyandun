@@ -143,3 +143,23 @@ describe("跟随视角（V-I1、D-058）", () => {
     expect(result.current).toEqual(cameraShot(POSE, SIZE));
   });
 });
+
+describe("聚焦对象离开当前区域（摄像头被移出区域或删除）", () => {
+  it("摄像头视角：聚焦的摄像头不在当前区域时退出聚焦，回到总览", () => {
+    renderHook(() => useFocusShot(BASE, SIZE, [], false));
+    act(() => focusOn({ kind: "camera", id: "cam-01" }, false));
+    expect(useCamera.getState().focus).toBeNull();
+  });
+
+  it("跟随目标：所属摄像头不在当前区域时退出跟随", () => {
+    renderHook(() => useFocusShot(BASE, SIZE, [], false));
+    act(() => focusOn({ kind: "target", key: KEY }, false));
+    expect(useCamera.getState().focus).toBeNull();
+  });
+
+  it("聚焦的摄像头仍在区域内：保持摄像头视角", () => {
+    renderHook(() => useFocusShot(BASE, SIZE, CAMERAS, false));
+    act(() => focusOn({ kind: "camera", id: "cam-01" }, false));
+    expect(useCamera.getState().focus).toEqual({ kind: "camera", id: "cam-01" });
+  });
+});

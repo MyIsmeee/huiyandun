@@ -26,7 +26,11 @@ MEAN = np.array([0.485, 0.456, 0.406]) * 255  # ImageNet 归一化，与上游�
 STD = np.array([0.229, 0.224, 0.225]) * 255
 # 格子最大类别概率低于此值不输出；演示帧街道、室内的中位数为 0.75～0.91（模型卡）
 MIN_CONFIDENCE = 0.5
-# 灰度均值超出此范围的格子不输出：暗光、过曝与画面黑边（黑边会被识别为墙）
+# 物体类别的格子门槛低一些：小件与深色家具的最大概率常在 0.3～0.5（2026-11-18 办公室实测：显示器中位数 0.46～0.56，
+# 桌子 10 分位 0.38），按 0.5 显示器只剩一两格。误识别的格子由三维阶段的离地高度与点数再筛一遍
+MIN_OBJECT_CONFIDENCE = 0.35
+# 灰度均值超出此范围的格子不输出：暗光、过曝与画面黑边（黑边会被识别为墙）。只用于地面与立面：
+# 黑色显示器、黑皮椅的格子灰度低至 6～30，亮屏过曝，按此过滤会把它们整片滤掉（同一实测：显示器 29 格中 21 格过暗）
 DARK, BRIGHT = 40, 250
 SIMPLIFY_M = 0.2
 MAX_POLYGONS = 64  # 地面、物体与标线合计，按面积保留最大的
@@ -65,8 +69,58 @@ ADE20K = {
     "street_furniture": [43, 69, 87, 93, 136, 138],
     "tree": [4, 72],  # tree、palm
     "plant": [17],  # 盆栽等，以矮树呈现
+    # 2026-11-17 扩充：办公室、茶水间、卫生间常见物品，大屏按细分类别摆放对应模型（显示器放在桌面上）
+    # computer、crt screen、monitor、television、refrigerator、washer、microwave、oven、stove、dishwasher、lamp、fan
+    "appliance": [74, 141, 143, 89, 50, 107, 124, 118, 71, 129, 36, 139],
+    "box": [41, 115, 112],  # box、bag、basket
+    "fixture": [65, 47, 37, 145],  # toilet、sink、bathtub、shower
 }
 CLASSES = list(ADE20K)  # 格子取值 = 下标 + 1，0 为未识别
+# 物体的细分类别（契约 SceneFrame.objects[].kind）：ADE20K 编号 → 名称。渲染类别把它们合并了（桌子含书桌、茶几），
+# 前端按细分类别与实测尺寸选择画法
+KINDS = {
+    15: "table",
+    33: "desk",
+    64: "coffee_table",
+    19: "chair",
+    30: "armchair",
+    31: "seat",
+    75: "swivel_chair",
+    110: "stool",
+    10: "cabinet",
+    24: "shelf",
+    35: "wardrobe",
+    44: "chest_of_drawers",
+    62: "bookcase",
+    23: "sofa",
+    7: "bed",
+    45: "counter",
+    43: "signboard",
+    69: "bench",
+    87: "streetlight",
+    93: "pole",
+    136: "traffic_light",
+    138: "ashcan",
+    74: "computer",
+    141: "crt_screen",
+    143: "monitor",
+    89: "television",
+    50: "refrigerator",
+    107: "washer",
+    124: "microwave",
+    118: "oven",
+    71: "stove",
+    129: "dishwasher",
+    36: "lamp",
+    139: "fan",
+    41: "box",
+    115: "bag",
+    112: "basket",
+    65: "toilet",
+    47: "sink",
+    37: "bathtub",
+    145: "shower",
+}
 SURFACES = ["road", "sidewalk", "floor", "grass", "earth"]
 # 黑板取其下方的墙脚线，板高 1.2 m（离地 0.9 m 由大屏绘制）
 WALL_HEIGHT_M = {"wall": 2.8, "building": 6.0, "fence": 1.2, "railing": 1.0, "board": 1.2}
@@ -79,7 +133,15 @@ OBJECT_SIZE_M = {
     "bed": (1.5, 0.6),
     "furniture": (0.6, 0.8),
     "street_furniture": (0.4, 0.8),
+    "appliance": (0.3, 0.5),
+    "box": (0.4, 0.4),
+    "fixture": (0.5, 0.8),
 }
+# 小件物品（电器、箱包）的底面面积下限：桌上的显示器底面约 0.1 m²，按 MIN_AREA_M2 会被滤掉
+SMALL_CLASSES = {"appliance", "box"}
+MIN_SMALL_AREA_M2 = 0.04
+# 用小件面积下限的类别：另含垃圾桶、灯杆等街道设施（垃圾桶底面约 0.3 m 见方，不足 MIN_AREA_M2）
+SMALL_AREA_CLASSES = SMALL_CLASSES | {"street_furniture"}
 TREE_HEIGHT_M = {"tree": 5.0, "plant": 1.0}
 
 LUT = np.zeros(150, np.uint8)
@@ -89,6 +151,9 @@ for _i, _name in enumerate(CLASSES, 1):
 
 def label(name: str) -> int:
     return CLASSES.index(name) + 1
+
+
+OBJECT_LABELS = [label(name) for name in OBJECT_SIZE_M]
 
 
 class Segmenter:
@@ -101,17 +166,25 @@ class Segmenter:
         self._lock = threading.Lock()
 
     def __call__(self, frame: np.ndarray) -> np.ndarray:
+        return self.segment(frame)[0]
+
+    def segment(self, frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """(渲染类别网格, ADE20K 原始类别编号网格)；后者供物体的细分类别（KINDS）。"""
         rgb = cv2.cvtColor(cv2.resize(frame, (INPUT, INPUT)), cv2.COLOR_BGR2RGB)
         x = ((rgb - MEAN) / STD).transpose(2, 0, 1)[None].astype(np.float32)
         with self._lock:
             logits = self._session.run(None, {self._input: x})[0][0]
         confidence = 1 / np.exp(logits - logits.max(0)).sum(0)  # softmax 的最大值
-        labels = LUT[logits.argmax(0)]
+        ade = logits.argmax(0).astype(np.uint8)
+        labels = LUT[ade]
         gray = cv2.resize(
             cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (GRID, GRID), interpolation=cv2.INTER_AREA
         )
-        labels[(confidence < MIN_CONFIDENCE) | (gray < DARK) | (gray > BRIGHT)] = 0
-        return labels
+        objects = np.isin(labels, OBJECT_LABELS)
+        unlit = (gray < DARK) | (gray > BRIGHT)
+        doubtful = (confidence < MIN_CONFIDENCE) | unlit
+        labels[np.where(objects, confidence < MIN_OBJECT_CONFIDENCE, doubtful)] = 0
+        return labels, ade
 
 
 class ScenePerception:

@@ -137,7 +137,32 @@ describe("AiInvestigation", () => {
     vi.spyOn(api, "getInvestigation").mockRejectedValue(new Error("HTTP 502"));
     push("incidents", incident());
     show();
-    expect(await screen.findByText("无法读取调查记录")).toBeTruthy();
+    expect(await screen.findByText("无法读取调查记录，正在重试")).toBeTruthy();
+  });
+
+  it("新近的高危事件尚无记录时为等待调查，每 5 s 重读直到开始调查", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-11-08T02:01:00Z") });
+    const get = vi
+      .spyOn(api, "getInvestigation")
+      .mockRejectedValueOnce(new ApiError(404, "该关联事件尚未开始调查"))
+      .mockResolvedValue(investigation());
+    push("incidents", incident());
+    show();
+    await act(async () => undefined);
+    expect(screen.getByText("等待调查…")).toBeTruthy();
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(screen.getByText("先看攻击源近期的告警")).toBeTruthy();
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("已读到调查中的记录后重读失败：不再按旧记录计时，说明正在重试", async () => {
+    vi.spyOn(api, "getInvestigation").mockResolvedValueOnce(investigation()).mockRejectedValue(new Error("HTTP 502"));
+    push("incidents", incident());
+    show();
+    expect(await screen.findByText(/调查中 · 已用/)).toBeTruthy();
+    push("ai", { incident_id: "inc-1", seq: 1, kind: "verdict", step: null, verdict: null, error: null, provider: null });
+    expect(await screen.findByText("调查记录读取失败，正在重试")).toBeTruthy();
+    expect(screen.queryByText(/调查中 · 已用/)).toBeNull();
   });
 
   it("未溯源的实体弱化并说明（FR-1103、V-AI3）", async () => {
@@ -202,7 +227,7 @@ describe("AiInvestigation", () => {
     push("executions", execution("pending"));
     show();
     await screen.findByText("判定为攻击");
-    expect(screen.getByRole("button", { name: /确认处置/ }).textContent).toBe("确认处置：isolate-attacker 封禁 172.30.0.100");
+    expect(screen.getByRole("button", { name: /确认处置/ }).textContent).toBe("确认处置：封禁攻击源 172.30.0.100");
   });
 
   it.each([
@@ -228,6 +253,18 @@ describe("AiInvestigation", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "确认中…" }).hasAttribute("disabled")).toBe(true));
     push("executions", execution("executing"));
     expect(screen.queryByRole("button", { name: /确认/ })).toBeNull();
+  });
+
+  it("确认中收到同一执行的重复推送（如重连补推）：仍为确认中", async () => {
+    vi.spyOn(api, "getInvestigation").mockResolvedValue(investigation());
+    vi.spyOn(api, "confirmContainment").mockResolvedValue(undefined);
+    push("incidents", incident());
+    push("executions", execution("pending"));
+    show();
+    fireEvent.click(screen.getByRole("button", { name: /确认处置/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "确认中…" })).toBeTruthy());
+    push("executions", execution("pending"));
+    expect(screen.getByRole("button", { name: "确认中…" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("受理后超时未收到执行结果：恢复可点并提示", async () => {

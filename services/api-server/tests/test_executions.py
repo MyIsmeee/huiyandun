@@ -9,8 +9,9 @@ from typing import Any
 import nats
 import nats.js.errors
 import pytest
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from api_server import executions
 from api_server.audit import audit_log
@@ -43,13 +44,20 @@ def execution(state: str, reason: str | None = None) -> PlaybookExecutionV1:
     )
 
 
-async def audited(config: ApiConfig) -> list[tuple[str, str, str]]:
+async def audited(
+    config: ApiConfig, events: list[PlaybookExecutionV1]
+) -> list[tuple[str, str, str]]:
+    """这些执行记录写下的审计。数据库在整个测试会话共用，其他用例（如 test_demo_reset）也会留下
+    playbook-executor 的记录，故按事件 ID（即 request_id）只取本用例发布的。"""
     engine = create_engine(config)
     try:
         async with engine.connect() as conn:
             rows = await conn.execute(
                 select(audit_log.c.actor, audit_log.c.action, audit_log.c.target)
-                .where(audit_log.c.actor == executions.ACTOR)
+                .where(
+                    audit_log.c.actor == executions.ACTOR,
+                    audit_log.c.request_id.in_([str(e.event_id) for e in events]),
+                )
                 .order_by(audit_log.c.id)
             )
             return [tuple(r) for r in rows]
@@ -84,16 +92,20 @@ def test_each_state_change_audited_once_across_restart(
         await asyncio.wait_for(task, 5)
         for e in states:
             await bus.js_publish(executions.SUBJECT, e)
-        await asyncio.sleep(0.5)
+        # 等三条都写完再"重启"：机器繁忙时固定等待不够，旧订阅仍在写时新订阅从头重放，两边会重复写
+        for _ in range(100):  # 至多 10 s
+            if len(await audited(config, states)) >= len(states):
+                break
+            await asyncio.sleep(0.1)
+        await bus.close()  # 重启即旧进程退出：旧订阅不再消费
 
         # 重启：从最近审计时刻前一分钟起重放，已写过的跳过
         restarted = await Bus.connect(config.nats_url, name="restarted", timeout_s=2)
         await executions.follow(restarted, engine)
         await asyncio.sleep(0.5)
         await restarted.close()
-        await bus.close()
         await engine.dispose()
-        return await audited(config)
+        return await audited(config, states)
 
     assert asyncio.run(scenario()) == [
         ("playbook-executor", "playbook.executing", "172.30.0.100"),
@@ -121,6 +133,56 @@ def test_database_unreachable_at_start_retried_not_raised(
         return alive
 
     assert asyncio.run(scenario())
+
+
+def server_error(sqlstate: str, message: str) -> Exception:
+    """asyncpg 方言转换出的服务端错误：SQLSTATE 记在 sqlstate 上。"""
+    error = Exception(message)
+    error.sqlstate = sqlstate  # type: ignore[attr-defined]
+    return error
+
+
+@pytest.mark.parametrize(
+    "transient",
+    [
+        DBAPIError("insert", {}, server_error("57P03", "the database system is starting up")),
+        DBAPIError("insert", {}, server_error("57P01", "terminating connection")),
+        DBAPIError("insert", {}, server_error("53300", "too many connections")),
+        DBAPIError("insert", {}, server_error("57014", "canceling statement due to timeout")),
+        DBAPIError("insert", {}, Exception("connection was closed in the middle of operation")),
+        PoolTimeout("QueuePool limit reached"),
+    ],
+    ids=["starting", "shutdown", "connections", "canceled", "closed", "pool"],
+)
+def test_transient_database_errors_retried_without_gap(
+    db: tuple[ApiConfig, ApiConfig], monkeypatch: pytest.MonkeyPatch, transient: Exception
+) -> None:
+    """数据库启动或关闭中、连接数已满、语句被取消、取连接超时：asyncpg 方言一律给出 DBAPIError（不是
+    OperationalError），同样要重试到成功，不能当成永久错误跳过。"""
+    monkeypatch.setattr(executions, "RETRY_S", 0.05)
+    real = executions.record
+    calls = {"n": 0}
+
+    async def flaky(*args: Any, **kwargs: Any) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise transient
+        await real(*args, **kwargs)
+
+    monkeypatch.setattr(executions, "record", flaky)
+    event = execution("contained")
+
+    async def scenario() -> int:
+        engine = create_engine(db[1])
+        await asyncio.wait_for(executions.audit_execution(engine, event), 5)
+        async with engine.connect() as conn:
+            count = await conn.scalar(
+                select(func.count()).where(audit_log.c.request_id == str(event.event_id))
+            )
+        await engine.dispose()
+        return count or 0
+
+    assert asyncio.run(scenario()) == 1
 
 
 def test_failed_write_retried_without_gap(
@@ -163,7 +225,7 @@ def test_permanent_write_error_logged_and_skipped(
     monkeypatch.setattr(executions, "RETRY_S", 0.05)
 
     async def rejected(*args: Any, **kwargs: Any) -> None:
-        raise IntegrityError("insert", {}, Exception("violates check constraint"))
+        raise IntegrityError("insert", {}, server_error("23514", "violates check constraint"))
 
     monkeypatch.setattr(executions, "record", rejected)
 
@@ -175,3 +237,24 @@ def test_permanent_write_error_logged_and_skipped(
     with caplog.at_level(logging.ERROR):
         asyncio.run(scenario())
     assert any(r.getMessage() == "api.execution_audit_rejected" for r in caplog.records)
+
+
+def test_real_constraint_violation_is_permanent(db: tuple[ApiConfig, ApiConfig]) -> None:
+    """真实数据库给出的约束错误带 SQLSTATE 23 类，判为永久错误；连接被拒则不是。"""
+
+    async def violation() -> SQLAlchemyError:
+        engine = create_engine(db[1])
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text("INSERT INTO audit_log (actor) VALUES (NULL)"))
+        except SQLAlchemyError as e:
+            return e
+        finally:
+            await engine.dispose()
+        raise AssertionError("应当违反非空约束")
+
+    error = asyncio.run(violation())
+    assert executions._permanent(error)
+    assert not executions._permanent(
+        DBAPIError("x", {}, server_error("08006", "connection failure"))
+    )

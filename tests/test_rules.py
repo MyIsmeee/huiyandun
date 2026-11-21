@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-SAMPLES = ROOT / "rules/tests/HYD-NET-0001"
+SAMPLES = ROOT / "rules/tests"
 
 
 def test_samples_reproducible(tmp_path: Path) -> None:
@@ -16,11 +16,19 @@ def test_samples_reproducible(tmp_path: Path) -> None:
     subprocess.run(
         [sys.executable, ROOT / "tools/dev/rtsp_pcap.py", tmp_path], check=True, timeout=30
     )
-    generated = {p.name: p.read_bytes() for p in tmp_path.glob("*.pcap")}
-    assert generated == {p.name: p.read_bytes() for p in SAMPLES.glob("*.pcap")}
-    assert {p.name.removesuffix(".meta.yaml") for p in SAMPLES.glob("*.meta.yaml")} == {
-        name.removesuffix(".pcap") for name in generated
+
+    def pcaps(root: Path) -> dict[str, bytes]:
+        return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.glob("*/*.pcap")}
+
+    generated = pcaps(tmp_path)
+    assert {name.split("/")[0] for name in generated} == {"HYD-NET-0001", "HYD-NET-0002"}
+    assert generated == pcaps(SAMPLES)
+    described = {
+        p.relative_to(SAMPLES).as_posix().removesuffix(".meta.yaml")
+        for p in SAMPLES.glob("*/*.meta.yaml")
+        if p.name != "sequences.meta.yaml"  # 关联规则的事件序列样本，由 correlator 测试回放
     }
+    assert described == {name.removesuffix(".pcap") for name in generated}
 
 
 def test_vendor_rulesets_registered() -> None:

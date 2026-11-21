@@ -1,4 +1,4 @@
-import type { Target } from "../../store/live";
+import type { Mark, Target } from "../../store/live";
 
 /** 实测超过此时长未更新即隐藏该目标的叠加（FR-107：与画面偏差不超过 300 ms） */
 export const STALE_MS = 300;
@@ -51,3 +51,23 @@ export function hitTarget(point: [number, number], boxes: { key: string; bbox: n
   }
   return best?.key ?? null;
 }
+
+const MARK_LABEL: Record<Mark["kind"], string> = {
+  fall: "跌倒",
+  climb: "攀爬",
+  still: "长时间静止",
+  fight: "打架",
+  intrusion: "区域入侵",
+  line_crossing: "越线",
+};
+
+/** 告警标记的标签：行为（疑似加前缀）、规则名称与已持续的秒数；越线是瞬时事件，不计时 */
+export function markText(mark: Mark, now: number): string {
+  const parts = [`${mark.level === "suspected" ? "疑似" : ""}${MARK_LABEL[mark.kind]}`];
+  if (mark.name) parts.push(mark.name);
+  if (mark.kind !== "line_crossing") parts.push(`${Math.max(0, Math.floor((now - mark.since) / 1000))} 秒`);
+  return parts.join(" · ");
+}
+
+/** 闪烁的不透明度：每秒一次，在 0.35 与 1 之间按余弦变化（不做硬切的明灭，避免刺眼） */
+export const blink = (now: number): number => 0.35 + 0.65 * (0.5 + 0.5 * Math.cos((2 * Math.PI * now) / 1000));

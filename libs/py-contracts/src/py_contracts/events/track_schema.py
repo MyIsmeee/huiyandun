@@ -14,7 +14,7 @@ class HeadingDeg(RootModel[float]):
     model_config = {"allow_inf_nan": False}
     root: float = Field(..., ge=0.0, lt=360.0)
     """
-    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    平面上的运动方向，0 为 +x 方向、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；起步不足 3 帧或静止时为 null
     """
 
 
@@ -71,7 +71,7 @@ class Track(ContractModel):
     uncertainty_m: float = Field(..., ge=0.0)
     heading_deg: HeadingDeg | None
     """
-    平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null
+    平面上的运动方向，0 为 +x 方向、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；起步不足 3 帧或静止时为 null
     """
     speed_mps: SpeedMps | None
     """

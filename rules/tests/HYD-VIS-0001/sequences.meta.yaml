@@ -1,0 +1,5 @@
+# 合成样本（R-02）：按 architecture.md §12 的事件契约手写的事件序列，services/correlator/tests/test_rule_samples.py 回放
+source: 合成
+license: 自研，无第三方内容
+anonymization: 不含真实数据；只用演示站点的设备 ID
+description: 遮挡、挪位命中，断流与网络告警不命中，持续遮挡去重

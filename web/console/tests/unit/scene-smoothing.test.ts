@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { facing, figure } from "../../src/scene/pose";
-import { renderDelay, TargetSmoother } from "../../src/scene/smoothing";
+import { forget, release, renderDelay, renderTime, retain, smoothed, smoothers, TargetSmoother } from "../../src/scene/smoothing";
 import { positionAt } from "../../src/scene/targets";
 import type { Target } from "../../src/store/live";
 
@@ -145,5 +145,60 @@ describe("骨骼平滑（V-A8、V-P4）", () => {
     expect(visible(0.35, 100)).toBe(1);
     expect(visible(0.25, 200)).toBe(1);
     expect(visible(0.15, 300)).toBe(0);
+  });
+});
+
+describe("姿态插值与位置同一渲染时间轴（V-A7、V-A8）", () => {
+  it("按真实渲染时刻逐帧取姿态：画面中匀速移动的关键点每帧都前进，不在新实测到达后冻结再跳半步", () => {
+    const smoother = new TargetSmoother();
+    const trail: [number, number, number][] = [];
+    const frames: number[] = [];
+    for (let now = 0; now <= 4000; now += FRAME_MS) {
+      while ((trail.at(-1)?.[2] ?? -SAMPLE_MS) + SAMPLE_MS <= now) {
+        const at = (trail.at(-1)?.[2] ?? -SAMPLE_MS) + SAMPLE_MS;
+        trail.push([at / 1000, 0, at]);
+        // 关键点在画面中以每秒 0.05 的速度右移
+        smoother.update({ trail, heading_deg: null, keypoints: STANDING.map(([u, v]) => [u + at / 20_000, v, 0.9]), bbox: BBOX });
+      }
+      if (now < 2000) continue; // 滤波与渲染延迟估计稳定之后
+      const u = smoother.pose(renderTime({ trail }, now, true))?.keypoints?.[0]?.[0];
+      if (u !== undefined) frames.push(u);
+    }
+    const steps = frames.slice(1).map((u, i) => u - (frames[i] ?? u));
+    expect(Math.min(...steps)).toBeGreaterThan(0);
+  });
+});
+
+describe("平滑状态由多个使用者共用（smoothing.ts retain）", () => {
+  const target = (key: string): Target => ({
+    camera_id: key.split("/")[0] ?? "",
+    track_id: 1,
+    object_class: "person",
+    x: 0,
+    y: 0,
+    uncertainty_m: 0.3,
+    heading_deg: null,
+    speed_mps: null,
+    bbox: [0, 0, 1, 1],
+    keypoints: null,
+    trail: [[0, 0, 0]],
+  });
+
+  it("一方不再使用、另一方仍在用的状态保留；双方都不用（或卸载）后释放", () => {
+    const [scene, overlay] = [{}, {}];
+    smoothed("cam-09/1", target("cam-09/1"));
+    retain(overlay, new Set(["cam-09/1"]));
+    retain(scene, new Set()); // 3D 场景切到别的区域，不再画 cam-09
+    expect(smoothers.has("cam-09/1")).toBe(true);
+
+    retain(overlay, new Set()); // 目标离开画面
+    expect(smoothers.has("cam-09/1")).toBe(false);
+
+    smoothed("cam-09/2", target("cam-09/2"));
+    retain(overlay, new Set(["cam-09/2"]));
+    release(overlay); // 叠加卸载
+    expect(smoothers.has("cam-09/2")).toBe(false);
+    release(scene);
+    forget(new Set());
   });
 });

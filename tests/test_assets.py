@@ -15,6 +15,15 @@ CATALOG = json.loads((MODELS / "catalog.json").read_text(encoding="utf-8"))
 REGISTRY = yaml.safe_load((ROOT / "deploy/third-party.yaml").read_text(encoding="utf-8"))
 MAX_BYTES = 8 * 1024 * 1024  # 资产随代码提交，总量 ≤ 8 MB（设计 150 §8）
 ASSET_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")  # 契约 SceneItem.asset
+# 团队自制模型（web/console/assets/custom/）合并为单独的文件，按其清单校验，不是第三方资产、不登记
+CUSTOM_DIR = ROOT / "web/console/assets/custom"
+CUSTOM_GLB = "scene-custom.glb"
+CUSTOM = (yaml.safe_load((CUSTOM_DIR / "models.yaml").read_text(encoding="utf-8")) or {}).get(
+    "models"
+) or []
+# 人形零件同为团队自制（tools/dev/figure_parts.py 在 Blender 中生成），不登记；零件名与 scene/parts.ts 的 PARTS 一致
+FIGURE_GLB = "figure-parts.glb"
+FIGURE_PARTS = {"torso", "neck", "upper_arm", "forearm", "thigh", "shin", "foot", "head"}
 
 
 def gltf_json(path: Path) -> dict:
@@ -30,7 +39,7 @@ def test_scene_assets_registered() -> None:
     files = {
         p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in MODELS.iterdir()
-        if p.name != "catalog.json"
+        if p.name not in ("catalog.json", CUSTOM_GLB, FIGURE_GLB)
     }
     assert files == registered
     assert {a["license"] for a in REGISTRY["assets"]} == {"CC0-1.0"}
@@ -41,7 +50,31 @@ def test_catalog_models_registered_one_by_one() -> None:
     registered = {
         (Path(a["file"]).name, m["id"]) for a in REGISTRY["assets"] for m in a.get("models", [])
     }
-    assert registered == {(a["file"], a["id"]) for a in CATALOG["assets"]}
+    assert registered == {
+        (a["file"], a["id"]) for a in CATALOG["assets"] if a["file"] != CUSTOM_GLB
+    }
+
+
+def test_custom_models_match_manifest() -> None:
+    """自制模型与清单一一对应、源文件在库、注明作者；清单为空时没有 scene-custom.glb。
+    改了清单或源文件后须运行 tools/dev/assets.py --custom 重建。"""
+    built = [
+        (a["id"], a["category"], a["name"]) for a in CATALOG["assets"] if a["file"] == CUSTOM_GLB
+    ]
+    assert built == [(m["id"], m["category"], m["name"]) for m in CUSTOM]
+    assert (MODELS / CUSTOM_GLB).exists() == bool(CUSTOM)
+    for model in CUSTOM:
+        assert model.get("author"), model["id"]
+        assert (CUSTOM_DIR / model.get("file", f"{model['id']}.glb")).is_file(), model["id"]
+
+
+def test_figure_parts_complete() -> None:
+    """人形零件齐全、每个零件一个物体；不带材质、贴图、骨骼与动画（颜色由前端按状态给出，G-04）。
+    改了零件后须运行 blender --background --python tools/dev/figure_parts.py 重建。"""
+    doc = gltf_json(MODELS / FIGURE_GLB)
+    assert sorted(n["name"] for n in doc["nodes"]) == sorted(FIGURE_PARTS)
+    assert all("mesh" in n for n in doc["nodes"])
+    assert not [k for k in ("materials", "textures", "images", "skins", "animations") if doc.get(k)]
 
 
 def test_catalog_matches_model_files() -> None:
@@ -73,3 +106,30 @@ def test_catalog_fields() -> None:
 
 def test_models_total_size() -> None:
     assert sum(p.stat().st_size for p in MODELS.iterdir()) <= MAX_BYTES
+
+
+TEXTURES = ROOT / "web/console/public/textures/earth"
+
+
+def test_earth_textures_registered() -> None:
+    """C-RU-01：登录页地球贴图逐一登记、哈希一致；源图为 NASA 发布的公有领域图像。"""
+    registered = {t["file"]: t["sha256"] for t in REGISTRY["textures"]}
+    files = {
+        p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in TEXTURES.iterdir()
+    }
+    assert files == registered
+    assert {t["license"] for t in REGISTRY["textures"]} == {"LicenseRef-NASA-Public-Domain"}
+    assert sum(p.stat().st_size for p in TEXTURES.iterdir()) <= MAX_BYTES
+
+
+def test_timezone_table_registered() -> None:
+    """C-RU-01：登录页俯冲用的时区坐标表（tzdata 抽取）登记于 datasets，哈希与版本一致。"""
+    (entry,) = (d for d in REGISTRY["datasets"] if d["file"].endswith("globe/zones.json"))
+    path = ROOT / entry["file"]
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == entry["sha256"]
+    table = json.loads(path.read_text(encoding="utf-8"))
+    assert table["version"] == entry["version"]
+    assert table["zones"]["Asia/Shanghai"] == [31.2333, 121.4667]
+    # 别名只指向表中有坐标的时区
+    assert set(table["links"].values()) <= set(table["zones"])

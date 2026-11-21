@@ -126,7 +126,12 @@ class _Run:
                     "rounds_left": MAX_ROUNDS - done}  # fmt: skip
             evidence = {"incident": self._incident, "results": [s["result"] for s in self._steps]}
             outcome = await llm_chain.invoke(
-                self._state, TASK, data, deadline_s=remaining, evidence=evidence
+                self._state,
+                TASK,
+                data,
+                deadline_s=remaining,
+                evidence=evidence,
+                severity=self._incident.get("severity"),
             )
             if outcome.provider is not None:
                 self._provider = {

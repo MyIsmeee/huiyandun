@@ -7,6 +7,7 @@ import type { Area } from "../scene/layout";
 import { ACCENT } from "../scene/targets";
 import { replaceItem, selectItem, useDraft } from "./draft";
 import { BLOCKED, extent, inside, overlaps } from "./placement";
+import { useRules } from "./rules";
 
 const GROUND = new Plane(new Vector3(0, 1, 0), 0);
 /** 指针射线与地面的交点（平面坐标）：按在楼顶上也取其下方的地面点，拖动不跳 */
@@ -21,7 +22,9 @@ function groundPoint(e: ThreeEvent<PointerEvent>): [number, number] | null {
  */
 export function EditableScene({ area, items }: { area: Area; items: SceneItem[] }) {
   const catalog = useCatalog();
-  const placing = useDraft((s) => s.tool !== null);
+  // 绘制规则也算放置：点地面只加顶点，不选中、不拖动物体（按下物体会先选中它，⌫ 撤销一点时连物体一起删掉）
+  const drawing = useRules((s) => s.drawing !== null);
+  const placing = useDraft((s) => s.tool !== null) || drawing;
   const selected = useDraft((s) => s.selected);
   const [drag, setDrag] = useState<{ index: number; from: [number, number]; item: SceneItem } | null>(null);
   const shown = drag ? items.map((it, i) => (i === drag.index ? drag.item : it)) : items;

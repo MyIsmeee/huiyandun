@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -282,3 +283,39 @@ def test_integrity_followed_into_history(
         while c.app.state.history.event(event.event_id) is None:
             assert time.monotonic() < deadline
             time.sleep(0.05)
+
+
+@pytest.fixture
+def quiet_client(db: tuple[ApiConfig, ApiConfig], password: str) -> Iterator[TestClient]:
+    """演示静默打开，预设为仓库中的 demo/scenarios/demo-quiet.yaml。"""
+    preset = Path(__file__).resolve().parents[3] / "demo/scenarios/demo-quiet.yaml"
+    config = db[1].model_copy(update={"demo_quiet": True, "demo_quiet_file": preset})
+    with TestClient(create_app(config), base_url="https://testserver") as c:
+        body = {"username": "viewer", "password": password}
+        c.post("/api/auth/login", json=body, headers={"X-Request-ID": "r"})
+        yield c
+
+
+def test_demo_quiet_skips_hidden_events(quiet_client: TestClient, nats_url: str) -> None:
+    """演示静默：疑似跌倒与目标未登记的网络告警不推送；确认的跌倒与控制台登录爆破照常推送。
+    建连补推含此前用例留在流中的告警，按 event_id 判断，不依赖帧的先后。"""
+    hidden = [
+        (BEHAVIOR, behavior().model_copy(update={"level": "suspected"})),
+        (ALERT, alert().model_copy(update={"device_id": None})),
+    ]
+    shown = [
+        (BEHAVIOR, behavior()),
+        (ALERT, alert().model_copy(update={"rule_id": "HYD-WEB-0001", "device_id": None})),
+    ]
+    with quiet_client.websocket_connect(WS_URL) as ws:
+        for subject, event in hidden + shown:
+            publish(nats_url, subject, event)
+        pending = {str(e.event_id) for _, e in shown}
+        seen: set[str] = set()
+        while pending - seen:
+            frame = next_frame(quiet_client, ws)
+            assert frame != SENTINEL, f"未收到 {pending - seen}"
+            if frame.channel == "alerts":
+                seen.add(frame.data["event_id"])
+
+    assert seen.isdisjoint(str(e.event_id) for _, e in hidden)

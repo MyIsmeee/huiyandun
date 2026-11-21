@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field, RootModel
 
 from py_contracts.base import ContractModel
 
+from . import camera_rule_schema
 from .event_base_schema import EventBase
 
 
@@ -53,6 +54,10 @@ class RegisteredCamera(ContractModel):
     climb_lines: list[ClimbLine]
     """
     禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）
+    """
+    rules: list[camera_rule_schema.CameraRule] | None = None
+    """
+    轨迹规则（区域入侵、有向越线）；1.x 早期登记表没有此字段，按空
     """
 
 

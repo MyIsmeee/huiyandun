@@ -18,4 +18,13 @@ describe("初稿识别的等待时限", () => {
 
     expect(timeout.mock.calls.map(([ms]) => ms > 15_000)).toEqual([true]);
   });
+
+  it("按表单超时算出的时限不是有限数时回退默认时限，请求照常发出", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ models: [] }), { status: 200 })));
+
+    await api.discoverModels({ base_url: "http://192.168.1.50:8080/v1", timeout_s: Number.NaN });
+
+    expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([10_000]);
+  });
 });

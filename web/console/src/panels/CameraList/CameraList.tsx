@@ -11,9 +11,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
+import { showArea } from "../../scene/areas";
 import { mappingText } from "../../scene/devices";
 import { useLive } from "../../store/live";
-import { type Camera, CameraEditor, PUSH_USER, pushUrl } from "../CameraEditor/CameraEditor";
+import { go } from "../../store/nav";
+import { type Camera, CameraEditor, PUSH_USER, pushUrl, useSite } from "../CameraEditor/CameraEditor";
 
 export type CameraLoad = { status: "loading" } | { status: "failed"; message: string } | { status: "ready"; cameras: Camera[] };
 
@@ -92,6 +94,9 @@ export function CameraListView(props: {
 }) {
   const { load, notice, deleting } = props;
   const devices = useLive((s) => s.devices);
+  // 推送的设备状态；WS 尚未连上时取读到的站点中的状态，都没有时如实显示未知，不默认为在线
+  const site = useSite();
+  const stateOf = (id: string) => devices[id]?.state ?? site?.devices.find((d) => d.id === id)?.state;
   return (
     <section aria-label="摄像头" className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-6 py-8 text-sm">
       <header className="flex items-center gap-3">
@@ -141,7 +146,8 @@ export function CameraListView(props: {
               <TableRow className="text-meta">
                 <TableHead className="w-24 pl-4">编号</TableHead>
                 <TableHead>名称与地址</TableHead>
-                <TableHead className="w-44">接入</TableHead>
+                <TableHead className="w-28">接入</TableHead>
+                <TableHead className="w-36">区域</TableHead>
                 <TableHead className="w-16">状态</TableHead>
                 <TableHead className="w-40">地面映射</TableHead>
                 <TableHead className="w-24 pr-4 text-right">操作</TableHead>
@@ -149,21 +155,27 @@ export function CameraListView(props: {
             </TableHeader>
             <TableBody>
               {load.cameras.map((camera) => {
-                const offline = devices[camera.id]?.state === "offline";
+                const state = stateOf(camera.id);
                 return (
                   <TableRow key={camera.id}>
                     <TableCell className="pl-4 font-mono text-muted-foreground">{camera.id}</TableCell>
                     <TableCell>
                       <span className="block font-medium">{camera.name}</span>
                       <span className="block truncate text-xs text-subtle-foreground">
-                        {address(camera)} · 口令 {camera.password_set ? "已设置" : "未设置"}
+                        {/* 推流不用拉流口令：推流口令只在保存为推流后显示一次，这里不列，免得读成推流没有口令 */}
+                        {address(camera)}
+                        {camera.source && ` · 口令 ${camera.password_set ? "已设置" : "未设置"}`}
                       </span>
                     </TableCell>
-                    <TableCell className="truncate text-xs text-muted-foreground">
-                      {camera.source ? `拉流 · ${PROTOCOL[camera.source.protocol]}` : "推流"} · {camera.ip}
+                    {/* 地址已在名称下方列出，这里只写接入方式；设备 IP 用于关联网络告警，悬停可见 */}
+                    <TableCell className="truncate text-xs text-muted-foreground" title={`设备 IP ${camera.ip}`}>
+                      {camera.source ? `拉流 · ${PROTOCOL[camera.source.protocol]}` : "推流"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      <AreaLink areaId={camera.area_id} areas={site?.areas ?? []} />
                     </TableCell>
                     {/* 在线状态以图标形状 + 文字表达，不使用状态色（V-CAM1） */}
-                    <TableCell className="text-xs">{offline ? "○ 离线" : "● 在线"}</TableCell>
+                    <TableCell className="text-xs">{state === undefined ? "—" : state === "offline" ? "○ 离线" : "● 在线"}</TableCell>
                     <TableCell className="text-xs text-subtle-foreground">{mappingText(camera.calibration, camera.calibration_error_m)}</TableCell>
                     <TableCell className="space-x-2 pr-4 text-right">
                       <button type="button" aria-label={`编辑 ${camera.name}`} onClick={() => props.onEdit(camera)} className={button}>
@@ -200,5 +212,27 @@ export function CameraListView(props: {
       )}
       {props.editor}
     </section>
+  );
+}
+
+/**
+ * 所在区域：摄像头在场景页放入区域（FR-908），这里只显示并给出入口——未放入时 3D 中不出现、不按区域估算位置，
+ * 是"画面有人、大屏没人"的常见原因
+ */
+function AreaLink({ areaId, areas }: { areaId: string | null; areas: { id: string; name: string }[] }) {
+  const area = areas.find((a) => a.id === areaId);
+  const open = () => {
+    if (area) showArea(area.id);
+    go("scene");
+  };
+  return (
+    <button
+      type="button"
+      onClick={open}
+      title={area ? `在场景页查看"${area.name}"` : "到场景页把摄像头放入区域"}
+      className={`max-w-full truncate underline-offset-4 hover:underline ${area ? "" : "text-subtle-foreground"}`}
+    >
+      {area ? area.name : "未放入区域"}
+    </button>
   );
 }

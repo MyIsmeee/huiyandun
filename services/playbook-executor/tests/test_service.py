@@ -30,6 +30,7 @@ from playbook_executor.service import (
 )
 from privileged_helper.server import HelperConfig, start
 from py_common.bus import Bus
+from py_contracts.events.hyd_correlator_confirmation_v1_schema import CorrelatorConfirmationV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 
@@ -86,7 +87,7 @@ def test_incident_contained_and_not_repeated_after_restart(nats_url: str, tmp_pa
     nft = FakeNft()
 
     async def scenario() -> list[str]:
-        server = await start(helper_config, nft)
+        (server,) = await start(helper_config, nft)
         raw = await nats.connect(nats_url)
         for name in (
             "HYD_INCIDENT",
@@ -128,3 +129,56 @@ def test_incident_contained_and_not_repeated_after_restart(nats_url: str, tmp_pa
     assert states[:3] == ["executing", "verifying", "contained"]
     assert states.count("executing") == 1
     assert nft.blocked == {"172.30.0.100": 60}
+
+
+def test_confirmation_given_during_downtime_takes_effect(nats_url: str, tmp_path: Path) -> None:
+    """执行器停机期间到达的需确认关联事件，值班员在其恢复前已确认：恢复后先建出等待确认的执行、再处理
+    确认，处置照常执行，不白等到过期。"""
+    config, helper_config = configs(tmp_path, nats_url)
+    nft = FakeNft()
+
+    async def scenario() -> list[str]:
+        (server,) = await start(helper_config, nft)
+        raw = await nats.connect(nats_url)
+        for name in ("HYD_INCIDENT", EXECUTION_STREAM, COMMAND_STREAM):
+            try:
+                await raw.jetstream().delete_stream(name)
+            except nats.js.errors.NotFoundError:
+                pass
+        await raw.close()
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        await bus.ensure_stream("HYD_INCIDENT", [INCIDENT_SUBJECT], 3600)
+        await bus.ensure_stream(EXECUTION_STREAM, [EXECUTION_SUBJECT], MAX_AGE_S)
+        await bus.ensure_stream(COMMAND_STREAM, [CONFIRMATION_SUBJECT, ROLLBACK_SUBJECT], MAX_AGE_S)
+        states: list[str] = []
+        contained = asyncio.Event()
+
+        async def on_execution(execution: PlaybookExecutionV1) -> None:
+            states.append(execution.state)
+            if execution.state == "contained":
+                contained.set()
+
+        await bus.subscribe(EXECUTION_SUBJECT, PlaybookExecutionV1, on_execution)
+        # 执行器尚未启动：关联事件与确认都已在流中
+        pending = incident().model_copy(update={"requires_confirmation": True})
+        await bus.js_publish(INCIDENT_SUBJECT, pending)
+        await bus.js_publish(
+            CONFIRMATION_SUBJECT,
+            CorrelatorConfirmationV1.model_validate(
+                {
+                    "schema_version": "1.0.0",
+                    "event_id": str(uuid.uuid4()),
+                    "ts": datetime.now(UTC).isoformat(),
+                    "incident_id": pending.id,
+                    "actor": "operator",
+                    "request_id": str(uuid.uuid4()),
+                }
+            ),
+        )
+        await subscribe(build(config, bus), bus)
+        await asyncio.wait_for(contained.wait(), 5)
+        await bus.close()
+        server.close()
+        return states
+
+    assert asyncio.run(scenario()) == ["pending", "executing", "verifying", "contained"]

@@ -161,6 +161,22 @@ def test_non_openai_response_explained(provider: Provider) -> None:
     assert message(provider).startswith("返回的不是 OpenAI 兼容格式；")
 
 
+def test_non_json_model_list_explained(provider: Provider) -> None:
+    """声明为 JSON 而响应体不是：给出原因，不报 500。"""
+    provider.models = lambda _: httpx2.Response(
+        200, content=b"<html>login</html>", headers={"content-type": "application/json"}
+    )
+    assert message(provider).startswith("返回的不是 OpenAI 兼容格式；")
+
+
+def test_unparsable_address_explained(provider: Provider) -> None:
+    assert message(provider, base_url="http://192.168.1.50:abc/v1").startswith("地址格式不正确；")
+    r = provider.post("/internal/probe", base_url="http://192.168.1.50:abc/v1")
+    assert r.status_code == 200
+    assert checks(r)["connectivity"]["reason"] == "地址格式不正确"
+    assert provider.seen == []
+
+
 # 测试连接：分项结果、健康分档、结构化输出探测
 
 
@@ -260,3 +276,25 @@ def test_empty_choices_treated_as_unsupported(provider: Provider) -> None:
     provider.chat = lambda _: httpx2.Response(200, json=body)
     r = provider.post("/internal/probe")
     assert r.status_code == 200 and r.json()["structured_output"] == "none"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        httpx2.Response(200, text="<html>portal</html>", headers={"content-type": "text/html"}),
+        httpx2.Response(200, content=b"not json", headers={"content-type": "application/json"}),
+        httpx2.Response(200, json={"choices": [{"index": 0, "message": None}]}),
+        httpx2.Response(200, json=[1, 2, 3]),
+    ],
+    ids=["html", "broken-json", "null-message", "array"],
+)
+def test_non_openai_chat_response_reported_not_crashed(
+    provider: Provider, reply: httpx2.Response
+) -> None:
+    """/chat/completions 返回 200 但不是 OpenAI 的响应结构：写进结构化输出一项，能力记为未知，不报 500。"""
+    provider.chat = lambda _: reply
+    r = provider.post("/internal/probe")
+
+    assert r.status_code == 200
+    assert checks(r)["structured_output"]["reason"] == "返回的不是 OpenAI 兼容格式"
+    assert r.json()["structured_output"] is None

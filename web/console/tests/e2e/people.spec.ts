@@ -26,17 +26,33 @@ const STANDING: [number, number][] = [
 /** 双手举过头顶：肘与腕抬高 */
 const RAISED = STANDING.map(([side, height], i): [number, number] => (i >= 7 && i <= 10 ? [side * 1.1, i <= 8 ? 1.7 : 1.98] : [side, height]));
 
+/** helpers.camera 的摄像头位姿：关键点按它投影，与场景中人形的三维重建一致 */
+const LENS = { x: 16, y: 14, height_m: 3, yaw_deg: 300, pitch_deg: -30, hfov_deg: 90 };
+
 /**
- * 画到 16:9 画面上，人高约占画面三成；rotate 为画面内旋转（跌倒为 90°）；hidden 中的关键点置信度为 0（看不清）；
- * 检测框底边为最低的可见关键点
+ * 人员站在 at（平面坐标，米）、正对摄像头，按摄像头位姿投影到 16:9 画面上；rotate 为画面内旋转（跌倒为 90°：
+ * 沿画面左右方向贴地躺倒）；hidden 中的关键点置信度为 0（看不清）；检测框底边为最低的可见关键点
  */
-function pose(points: [number, number][], rotate = 0, hidden: number[] = []) {
-  const [c, s, k] = [Math.cos(rotate), Math.sin(rotate), 0.3 / 1.7];
-  const keypoints = points.map(([side, h], i) => [
-    0.45 + ((side * c + h * s) * k * 9) / 16,
-    0.8 - (h * c - side * s) * k,
-    hidden.includes(i) ? 0 : 0.9,
-  ]);
+function pose(points: [number, number][], rotate = 0, hidden: number[] = [], at: [number, number] = [17, 12]) {
+  const [yaw, pitch] = [(LENS.yaw_deg * Math.PI) / 180, (LENS.pitch_deg * Math.PI) / 180];
+  type V = [number, number, number];
+  const f: V = [Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)];
+  const r: V = [-Math.sin(yaw), 0, Math.cos(yaw)]; // 画面右方，与 body.ts、视觉引擎的约定一致（俯视 x 向右、y 向下）
+  const up: V = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  const view: V = [Math.cos(yaw), 0, Math.sin(yaw)];
+  const tan = Math.tan((LENS.hfov_deg * Math.PI) / 360);
+  const dot = (a: number[], b: number[]) => a.reduce((sum, v, i) => sum + v * (b[i] ?? 0), 0);
+  const [c, s] = [Math.cos(rotate), Math.sin(rotate)];
+  const keypoints = points.map(([side, h], i) => {
+    const [across, height] = [side * c + h * s, h * c - side * s];
+    // 直立时 height 为离地高度；躺倒时贴地 0.1 m，height 变为沿视线的前后
+    const p: V = rotate === 0
+      ? [at[0] + r[0] * across, height, at[1] + r[2] * across]
+      : [at[0] + r[0] * across + view[0] * height, 0.1, at[1] + r[2] * across + view[2] * height];
+    const d: V = [p[0] - LENS.x, p[1] - LENS.height_m, p[2] - LENS.y];
+    const z = dot(d, f);
+    return [(dot(d, r) / z / tan + 1) / 2, (1 - dot(d, up) / z / (tan * 9 / 16)) / 2, hidden.includes(i) ? 0 : 0.9];
+  });
   const seen = keypoints.filter(([, , score]) => score);
   const us = (seen.length ? seen : keypoints).map(([u = 0]) => u);
   const vs = (seen.length ? seen : keypoints).map(([, v = 0]) => v);
@@ -93,7 +109,7 @@ test("跌倒：化身转物理告警，摄像头上方定位针写明跌倒与�
   await still(page);
   const [ws] = await open(page, [camera("normal")]);
   await walk(page, ws, 0.4);
-  const fallen = { ...BASE, ...TARGET, ...pose(STANDING, Math.PI / 2), camera_id: "cam-01", track_id: 7, x: 19.4, y: 10.8, uncertainty_m: 0.4 };
+  const fallen = { ...BASE, ...TARGET, ...pose(STANDING, Math.PI / 2, [], [19.4, 10.8]), camera_id: "cam-01", track_id: 7, x: 19.4, y: 10.8, uncertainty_m: 0.4 };
   ws?.send(JSON.stringify({ channel: "tracks", data: fallen }));
   ws?.send(JSON.stringify({ channel: "alerts", data: fall }));
   ws?.send(JSON.stringify({ channel: "devices", data: camera("physical_alert") }));
@@ -191,8 +207,8 @@ test("姿态人形：站立、抬手、跌倒与画面姿态一致（FR-109）",
   await zoomIn(page);
   const people = [
     { track_id: 1, x: 17, y: 12, ...pose(STANDING) },
-    { track_id: 2, x: 18.2, y: 11.4, ...pose(RAISED) },
-    { track_id: 3, x: 19.4, y: 10.8, ...pose(STANDING, Math.PI / 2) },
+    { track_id: 2, x: 18.2, y: 11.4, ...pose(RAISED, 0, [], [18.2, 11.4]) },
+    { track_id: 3, x: 19.4, y: 10.8, ...pose(STANDING, Math.PI / 2, [], [19.4, 10.8]) },
   ];
   for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
   await page.clock.runFor(500);
@@ -209,8 +225,8 @@ test("人形补全：桌后只见上半身时腿半透明补全，完全不可�
   await zoomIn(page);
   const people = [
     { track_id: 1, x: 17, y: 12, ...pose(STANDING) },
-    { track_id: 2, x: 18.2, y: 11.4, ...pose(STANDING, 0, [13, 14, 15, 16]) },
-    { track_id: 3, x: 19.4, y: 10.8, ...pose(STANDING, 0, STANDING.map((_, i) => i)) },
+    { track_id: 2, x: 18.2, y: 11.4, ...pose(STANDING, 0, [13, 14, 15, 16], [18.2, 11.4]) },
+    { track_id: 3, x: 19.4, y: 10.8, ...pose(STANDING, 0, STANDING.map((_, i) => i), [19.4, 10.8]) },
   ];
   for (const p of people) ws?.send(JSON.stringify({ channel: "tracks", data: { ...BASE, ...TARGET, ...p, camera_id: "cam-01", uncertainty_m: 0.4 } }));
   await page.clock.runFor(500);

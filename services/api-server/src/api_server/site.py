@@ -61,6 +61,8 @@ def _device(camera: dict[str, Any], mode: str) -> dict[str, Any]:
             # 单应矩阵与重投影误差由 vision-engine 计算（TK-023）
             "homography": None,
             "reproj_error_m": None,
+            "climb_lines": camera["climb_lines"] or [],
+            "rules": [],
         },
     }
 

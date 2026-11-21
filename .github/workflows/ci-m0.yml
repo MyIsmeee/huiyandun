@@ -191,8 +191,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           # -r 须放在子命令前：不加时只扫描根项目，漏掉 web/* 工作区包
+          # 复合表达式整串匹配，只列出各项均在白名单内的组合（@antv/vendor 为 MIT AND ISC）
           bad=$(pnpm -r licenses list --prod --json | jq -r 'to_entries[]
-            | select(.key | test("^(MIT|ISC|0BSD|BSD-[23]-Clause|Apache-2\\.0|MPL-2\\.0|PostgreSQL|Zlib|CC0-1\\.0|PSF-2\\.0)$") | not)
+            | select(.key | test("^(MIT|ISC|0BSD|BSD-[23]-Clause|Apache-2\\.0|MPL-2\\.0|PostgreSQL|Zlib|CC0-1\\.0|PSF-2\\.0|MIT AND ISC)$") | not)
             | "\(.key): \([.value[].name] | join(", "))"')
           if [ -n "$bad" ]; then
             echo "非白名单许可证（G-08）："

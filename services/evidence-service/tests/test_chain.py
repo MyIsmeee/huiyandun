@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
 
+from evidence_service import store
 from evidence_service.store import GENESIS, Chain, ChainBroken, Entry, canonical, record_hash
 
 ALERT = b'{"event_id":"a1"}'
@@ -160,3 +162,59 @@ def test_broken_chain_refuses_to_load(
 
     with pytest.raises(ChainBroken, match=f"第 {seq} 条{reason}"):
         Chain(tmp_path, signer)
+
+
+@pytest.mark.parametrize("failing", ["write", "fsync"])
+def test_failed_append_leaves_chain_intact(
+    tmp_path: Path, signer: Ed25519PrivateKey, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    """存证卷写满或 IO 错误：写到一半失败的那批记录从文件中截掉，之后的追加与重启校验都照常。"""
+    chain = Chain(tmp_path, signer)
+    chain.append(entries("inc-1"))
+    chain_file = tmp_path / "chain.jsonl"
+    before = chain_file.read_bytes()
+    real_write, real_fsync = os.write, os.fsync
+    armed = {"on": True}
+
+    def half_write(fd: int, data: bytes) -> int:
+        if armed["on"] and failing == "write" and os.fstat(fd).st_size > len(before):
+            raise OSError(28, "No space left on device")  # 已写出一部分之后
+        return real_write(fd, bytes(data)[: max(1, len(data) // 2)] if armed["on"] else data)
+
+    def failing_fsync(fd: int) -> None:
+        if armed["on"] and failing == "fsync" and os.fstat(fd).st_size > len(before):
+            armed["on"] = False  # 截回后的那次 fsync 放行
+            raise OSError(5, "Input/output error")
+        real_fsync(fd)
+
+    monkeypatch.setattr(store.os, "write", half_write)
+    monkeypatch.setattr(store.os, "fsync", failing_fsync)
+    with pytest.raises(OSError):
+        chain.append([Entry("incident", "inc-2", {})])
+    armed["on"] = False
+
+    assert chain_file.read_bytes() == before
+    assert "inc-2" not in chain.incidents
+    chain.append([Entry("incident", "inc-3", {})])
+    reloaded = Chain(tmp_path, signer)  # 校验通过：序号连续、没有残行
+    assert reloaded.incidents == {"inc-1", "inc-3"}
+
+
+def test_append_refused_after_unrecoverable_failure(
+    tmp_path: Path, signer: Ed25519PrivateKey, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """连截回也失败时文件状态未知：之后不再追加，不在可能残缺的链后接新记录。"""
+    chain = Chain(tmp_path, signer)
+    chain.append(entries("inc-1"))
+
+    def broken(*args: object) -> None:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(store.os, "fsync", broken)
+    monkeypatch.setattr(store.os, "ftruncate", broken)
+    with pytest.raises(OSError):
+        chain.append([Entry("incident", "inc-2", {})])
+    monkeypatch.undo()
+
+    with pytest.raises(ChainBroken, match="未能恢复"):
+        chain.append([Entry("incident", "inc-3", {})])

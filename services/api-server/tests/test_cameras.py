@@ -30,6 +30,7 @@ from py_contracts.events.hyd_vision_calibration_reply_v1_schema import VisionCal
 from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
     VisionCalibrationRequestV1,
 )
+from py_contracts.events.hyd_vision_pose_check_v1_schema import VisionPoseCheckV1
 
 POSE = {
     "x": 12,
@@ -84,7 +85,20 @@ def client(db: tuple[ApiConfig, ApiConfig], password: str, key_file: Path) -> It
     asyncio.run(reset())
     push = key_file.parent / "push_password"
     push.write_text("push-secret\n")
-    config = db[1].model_copy(update={"device_key_file": key_file, "push_password_file": push})
+    # 宿主 /dev 的替身：一个 USB 摄像头的采集节点与元数据节点（by-id 符号链接）
+    by_id = key_file.parent / "dev/v4l/by-id"
+    by_id.mkdir(parents=True)
+    (key_file.parent / "dev/video2").touch()
+    (key_file.parent / "dev/video3").touch()
+    (by_id / f"{USB}").symlink_to("../../video2")
+    (by_id / USB.replace("index0", "index1")).symlink_to("../../video3")
+    config = db[1].model_copy(
+        update={
+            "device_key_file": key_file,
+            "push_password_file": push,
+            "host_dev_dir": key_file.parent / "dev",
+        }
+    )
     with TestClient(create_app(config), base_url="https://testserver") as c:
         login(c, "admin", password)
         # 登记表为空时由后台任务从 site.yaml 初始导入
@@ -149,11 +163,19 @@ def test_create_password_write_only_and_audited(
     )
 
 
+ZONE_RULE = {"id": "yard", "name": "库区", "type": "intrusion", "points": [[0, 0], [4, 0], [4, 3]]}
+LINE_RULE = {"id": "gate", "name": "大门", "type": "line_crossing", "points": [[0, 0], [0, 5]]}
+
+
 @pytest.mark.parametrize(
     ("change", "status"),
     [
         ({"source": None}, 400),  # 拉流须有地址
         ({"climb_lines": [[100, 50, 100, 300]]}, 400),  # 竖直警戒线
+        ({"rules": [ZONE_RULE | {"points": [[0, 0], [1, 0]]}]}, 400),  # 区域不足 3 个顶点
+        ({"rules": [LINE_RULE, LINE_RULE]}, 400),  # 规则编号重复
+        ({"rules": [LINE_RULE | {"points": [[0, 0], [0.05, 0]]}]}, 400),  # 两点重合
+        ({"rules": [LINE_RULE | {"type": "loitering"}]}, 400),  # 未知类型
         ({"source": GATE["source"] | {"path": "/live#video=copy"}}, 400),  # go2rtc 参数
         ({"source": GATE["source"] | {"host": "exec:rm -rf /"}}, 400),
         ({"source": GATE["source"] | {"protocol": "exec"}}, 400),
@@ -314,13 +336,16 @@ def test_sync_go2rtc_adds_replaces_and_removes(tmp_path: Path, key_file: Path) -
 class FakeIngest:
     """MediaMTX 的路径配置接口：记下增删改调用；列表中另有推流用的正则路径，不应被动到。"""
 
-    def __init__(self, paths: dict[str, str]) -> None:
-        self.paths = paths
+    def __init__(self, paths: dict[str, Any]) -> None:
+        self.paths = paths  # 路径名 → 来源地址，或整份配置
         self.calls: list[tuple[str, str, Any]] = []
 
     async def get(self, path: str, **_: Any) -> Any:
-        items = [{"name": "~^cam-[0-9]+$", "source": "publisher"}]
-        items += [{"name": n, "source": s} for n, s in self.paths.items()]
+        items: list[dict[str, Any]] = [{"name": "~^cam-[0-9]+$", "source": "publisher"}]
+        items += [
+            {"name": n} | (c if isinstance(c, dict) else {"source": c})
+            for n, c in self.paths.items()
+        ]
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"items": items})
 
     async def delete(self, path: str, **_: Any) -> Any:
@@ -328,9 +353,9 @@ class FakeIngest:
         self.paths.pop(path.rsplit("/", 1)[1])
         return SimpleNamespace(raise_for_status=lambda: None)
 
-    async def request(self, method: str, path: str, json: dict[str, Any]) -> Any:
-        self.calls.append((method, path, json))
-        self.paths[path.rsplit("/", 1)[1]] = json["source"]
+    async def post(self, path: str, json: dict[str, Any]) -> Any:
+        self.calls.append(("POST", path, json))
+        self.paths[path.rsplit("/", 1)[1]] = json
         return SimpleNamespace(raise_for_status=lambda: None)
 
 
@@ -350,7 +375,7 @@ def test_relay_camera_is_pulled_through_ingest(key_file: Path) -> None:
     conf = {"source": camera, "sourceOnDemand": False, "rtspTransport": "tcp"}
     assert ingest.calls == [
         ("delete", "/v3/config/paths/delete/cam-08", None),
-        ("PATCH", "/v3/config/paths/patch/cam-07", conf),
+        ("POST", "/v3/config/paths/replace/cam-07", conf),
     ]
     ingest.calls.clear()
     asyncio.run(cameras.Registry(state)._sync_ingest([relay, plain]))
@@ -389,7 +414,15 @@ def test_registry_event_has_no_credentials() -> None:
           "climb_lines": [], "username": "admin", "password_enc": b"x", "host": "192.168.8.31"}]
     )  # fmt: skip
     dumped = event.model_dump(mode="json")
-    assert set(dumped["cameras"][0]) == {"id", "name", "ip", "pose", "calibration", "climb_lines"}
+    assert set(dumped["cameras"][0]) == {
+        "id",
+        "name",
+        "ip",
+        "pose",
+        "calibration",
+        "climb_lines",
+        "rules",
+    }
 
 
 class FakeSite:
@@ -823,3 +856,189 @@ def test_pose_change_keeps_calibration(
 
     assert r.status_code == 200, r.text
     assert (r.json()["calibration"], r.json()["calibration_error_m"]) == (CALIBRATION, 0.21)
+
+
+# 放在最后：新增与修改摄像头会留下审计记录，其他用例按审计条数断言
+def test_pose_check_listed_until_pose_changed(client: TestClient) -> None:
+    """视觉引擎的安装参数自检随列表给出；改了安装参数即丢弃（旧建议相对旧参数）。"""
+    camera_id = client.post("/api/cameras", json=GATE, headers=headers()).json()["id"]
+    event = VisionPoseCheckV1.model_validate({
+        "schema_version": "1.0.0", "event_id": str(uuid.uuid4()), "ts": datetime.now(UTC).isoformat(),
+        "camera_id": camera_id, "status": "suspect", "samples": 24, "person_height_m": 4.9,
+        "speed_p95_mps": 12.5, "suggested_height_m": 1.0, "suggested_pitch_deg": -8.0,
+        "reasons": ["按当前参数推算行人身高约 4.9 m"],
+    })  # fmt: skip
+    cast(Any, client.app).state.pose_checks.on_check(event)
+
+    listed = {c["id"]: c for c in client.get("/api/cameras").json()["items"]}
+    assert listed[camera_id]["pose_check"]["suggested_height_m"] == 1.0
+    assert listed["cam-01"]["pose_check"] is None
+
+    patch = {"pose": POSE | {"height_m": 1.0, "pitch_deg": -8}}
+    assert (
+        client.patch(f"/api/cameras/{camera_id}", json=patch, headers=headers()).status_code == 200
+    )
+    listed = {c["id"]: c for c in client.get("/api/cameras").json()["items"]}
+    assert listed[camera_id]["pose_check"] is None
+
+
+def geometry_check(camera_id: str, **geometry: Any) -> VisionPoseCheckV1:
+    return VisionPoseCheckV1.model_validate({
+        "schema_version": "1.1.0", "event_id": str(uuid.uuid4()), "ts": datetime.now(UTC).isoformat(),
+        "camera_id": camera_id, "status": "insufficient", "samples": 0, "person_height_m": None,
+        "speed_p95_mps": None, "suggested_height_m": None, "suggested_pitch_deg": None,
+        "reasons": ["站立行人样本 0 个"],
+        "geometry": {"height_m": 1.81, "pitch_deg": -10.1, "roll_deg": -0.6, "hfov_deg": 74.7,
+                     "floor_width_m": 4.7, "floor_depth_m": 2.7, "scale_ref": "desk"} | geometry,
+    })  # fmt: skip
+
+
+def test_auto_calibration_writes_back_estimated_pose(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig]
+) -> None:
+    """未标定的摄像头：画面几何估计自动写回高度、俯角、视角，不动平面位置与朝向；写审计；
+    同一台短时间内不重复改；已标定的不改。"""
+    from api_server.auto_pose import ACTOR, AutoPose
+
+    app = cast(Any, client.app)
+    run = cast(Any, client).portal.call  # 应用的数据库连接绑定在测试客户端的事件循环上
+    camera_id = client.post("/api/cameras", json=GATE, headers=headers()).json()["id"]
+    auto = AutoPose(app)
+    run(auto.on_check, geometry_check(camera_id))
+
+    pose = stored(db[1], camera_id)["pose"]
+    assert pose == POSE | {"height_m": 1.81, "pitch_deg": -10.1, "hfov_deg": 74.7}
+    (entry,) = [a for a in audits(db[1], "camera.pose_auto") if a["target"] == camera_id]
+    assert entry["actor"] == ACTOR and entry["before"] == {
+        "height_m": 3,
+        "pitch_deg": -30,
+        "hfov_deg": 90,
+    }
+
+    run(auto.on_check, geometry_check(camera_id, height_m=2.5))  # 刚改过：暂不再改
+    assert stored(db[1], camera_id)["pose"]["height_m"] == 1.81
+
+    fresh = AutoPose(app)
+    run(fresh.on_check, geometry_check(camera_id, height_m=1.85))  # 相差不到 0.15 m：不改
+    assert stored(db[1], camera_id)["pose"]["height_m"] == 1.81
+
+    calibration = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 1, 2, 3], [4, 5, 6, 7]]
+
+    async def calibrate() -> None:
+        async with transaction(db[1]) as conn:
+            await conn.execute(
+                update(cameras.cameras)
+                .where(cameras.cameras.c.id == camera_id)
+                .values(calibration=calibration)
+            )
+
+    asyncio.run(calibrate())
+    run(AutoPose(app).on_check, geometry_check(camera_id, height_m=2.5))
+    assert stored(db[1], camera_id)["pose"]["height_m"] == 1.81  # 已标定：以标定为准
+
+
+def test_auto_calibration_proposal_rejects_out_of_range() -> None:
+    from api_server.auto_pose import proposal
+
+    geometry = {"height_m": 1.8, "pitch_deg": -10.0, "hfov_deg": 75.0}
+    assert proposal(POSE, geometry) == geometry
+    assert proposal(POSE, geometry | {"pitch_deg": 3.0}) is None  # 朝上：超出可填范围
+    assert proposal(POSE | geometry, geometry) is None
+
+
+# 放在文件末尾：审计日志在测试间不清空，前面的用例按条数断言
+def test_rules_saved_with_defaults_and_sent_in_registry(client: TestClient) -> None:
+    """轨迹规则随摄像头保存、补齐默认值，并随登记表下发给 vision-engine。"""
+    client.post("/api/cameras", json=GATE, headers=headers())
+    r = client.patch(
+        "/api/cameras/cam-03",
+        json={"rules": [ZONE_RULE, LINE_RULE | {"direction": "forward"}]},
+        headers=headers(),
+    )
+    assert r.status_code == 200, r.text
+    zone, line = r.json()["rules"]
+    assert (zone["classes"], zone["min_duration_s"], zone["direction"]) == (["person"], 1, "any")
+    assert line["direction"] == "forward"
+
+    rows = [dict(c) for c in client.get("/api/cameras").json()["items"]]
+    event = cameras.registry([r | {"ip": r["ip"]} for r in rows])
+    [sent] = [c for c in event.model_dump(mode="json")["cameras"] if c["id"] == "cam-03"]
+    assert [rule["id"] for rule in sent["rules"]] == ["yard", "gate"]
+    # 站点中的摄像头信息带规则与警戒线，供监控墙画到画面上
+    shown = site_camera(client, "cam-03")
+    assert ([rule["id"] for rule in shown["rules"]], shown["climb_lines"]) == (["yard", "gate"], [])
+
+    # 省略 rules 不修改；给出空列表即清空
+    assert client.patch("/api/cameras/cam-03", json={"name": "后门"}, headers=headers()).json()[
+        "rules"
+    ]
+    assert (
+        client.patch("/api/cameras/cam-03", json={"rules": []}, headers=headers()).json()["rules"]
+        == []
+    )
+
+
+USB = "usb-GEMBIRD_Generic_UVC_1.00_camera_AppoTech_AX2311-video-index0"
+USB_BODY = {"name": "USB 摄像头", "ingest": "usb", "device": USB} | {k: GATE[k] for k in ("pose",)}
+
+
+def test_usb_devices_listed_and_camera_created_without_ip(client: TestClient) -> None:
+    """只列视频采集节点（index0）；USB 摄像头不填 IP 时分配本机占位地址，已接入的设备标出摄像头编号。"""
+    r = client.get("/api/cameras/usb-devices")
+    assert r.status_code == 200, r.text
+    assert r.json()["items"] == [
+        {
+            "device": USB,
+            "name": "GEMBIRD Generic UVC 1.00 camera AppoTech AX2311",
+            "camera_id": None,
+        }
+    ]
+
+    r = client.post("/api/cameras", json=USB_BODY, headers=headers())
+    assert r.status_code == 201, r.text
+    camera = r.json()
+    assert (camera["ingest"], camera["device"], camera["source"], camera["ip"]) == (
+        "usb",
+        USB,
+        None,
+        "127.0.1.1",
+    )
+    assert "push_password" not in camera or camera["push_password"] is None
+    [item] = client.get("/api/cameras/usb-devices").json()["items"]
+    assert item["camera_id"] == camera["id"]
+
+    second = client.post("/api/cameras", json=USB_BODY | {"name": "第二路"}, headers=headers())
+    assert second.json()["ip"] == "127.0.1.2"  # 占位地址不重复
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"name": "x", "ingest": "usb", "pose": GATE["pose"]},  # 没选设备
+        {"name": "x", "ingest": "usb", "device": "../../video2", "pose": GATE["pose"]},  # 非法标识
+        {k: v for k, v in GATE.items() if k != "ip"},  # 拉流不填 IP
+    ],
+)
+def test_create_usb_rejects(client: TestClient, body: dict[str, Any]) -> None:
+    assert client.post("/api/cameras", json=body, headers=headers()).status_code == 400
+
+
+def test_usb_camera_read_by_ingest(key_file: Path) -> None:
+    """USB 摄像头：ingest 本机 ffmpeg 读 by-id 设备推到同名路径，go2rtc 从 ingest 取；与兼容模式互换时整体替换。"""
+    site_file = Path(__file__).resolve().parents[3] / "demo/scenarios/site.yaml"
+    config = SimpleNamespace(site_file=site_file, device_key_file=key_file)
+    ingest = FakeIngest({})
+    state = SimpleNamespace(config=config, ingest=ingest)
+    camera = {"id": "cam-09", "password_enc": None} | row(
+        ingest="usb", protocol=None, host=None, port=None, path=USB
+    )
+
+    assert cameras.source_url(camera, None) == "rtsp://172.30.10.10:8554/cam-09"
+    asyncio.run(cameras.Registry(state)._sync_ingest([camera]))
+    [(method, path, conf)] = ingest.calls
+    assert (method, path, conf["source"]) == ("POST", "/v3/config/paths/add/cam-09", "publisher")
+    assert f"-f v4l2 -i /hostdev/v4l/by-id/{USB} " in conf["runOnInit"]
+    assert "rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH" in conf["runOnInit"]
+    ingest.calls.clear()
+    asyncio.run(cameras.Registry(state)._sync_ingest([camera]))
+    assert ingest.calls == []  # 未变化不重复下发

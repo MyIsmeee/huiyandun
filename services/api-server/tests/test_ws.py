@@ -113,3 +113,34 @@ def test_session_expiry_closes_connection(
     with ws_connect() as ws, pytest.raises(WebSocketDisconnect) as exc:
         ws.receive_json()
     assert exc.value.code == 1008
+
+
+def test_backlog_larger_than_queue_is_delivered(client: TestClient) -> None:
+    """建连补推的帧数超过 QUEUE_SIZE 时照常送达、不断开：告警、关联事件、执行积满后补推可达 300 帧以上，
+    原先每次建连都因队列已满而断开，控制台一直显示"数据非实时"（2026-11-18 实测）。"""
+    import uuid
+    from datetime import UTC, datetime
+
+    from py_contracts.api import AlertDisposition
+
+    total = QUEUE_SIZE + 50
+    for _ in range(total):
+        client.app.state.dispositions.add(  # type: ignore[attr-defined]
+            AlertDisposition.model_validate(
+                {
+                    "event_id": str(uuid.uuid4()),
+                    "action": "acknowledged",
+                    "note": None,
+                    "actor": "operator",
+                    "ts": datetime.now(UTC).isoformat(),
+                }
+            )
+        )
+    received = 0
+    with client.websocket_connect(WS_URL) as ws:
+        for _ in range(total + 50):
+            if ws.receive_json()["channel"] == "dispositions":
+                received += 1
+                if received == total:
+                    break
+    assert received == total

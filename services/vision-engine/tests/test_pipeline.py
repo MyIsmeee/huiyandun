@@ -24,6 +24,7 @@ from py_contracts.events.hyd_vision_calibration_request_v1_schema import (
     VisionCalibrationRequestV1,
 )
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 from py_contracts.events.hyd_vision_track_v1_schema import VisionTrackV1
 from vision_engine import pipeline as pipeline_module
 from vision_engine.detector import PoseDetector, VehicleDetector
@@ -48,6 +49,23 @@ from vision_engine.pipeline import (
 MAPPING = GroundMapping.fit([[u, v, u / 100, v / 100] for u in (0, 1000) for v in (0, 700)])
 
 
+class ReadCapture:
+    """cv2.VideoCapture 的替身基类：子类只给出 read，读帧线程分开调用的 grab / retrieve 由它拆出。"""
+
+    def read(self) -> tuple[bool, np.ndarray | None]:
+        raise NotImplementedError
+
+    def grab(self) -> bool:
+        ok, self._grabbed = self.read()
+        return ok
+
+    def retrieve(self) -> tuple[bool, np.ndarray | None]:
+        return True, self._grabbed
+
+    def release(self) -> None:
+        pass
+
+
 class FakeDetector:
     """每次调用返回一个人（框随调用次数右移 2 像素）；person=False 时返回空。
 
@@ -61,11 +79,16 @@ class FakeDetector:
         self.shift = 0  # 框与关键点另加的右移像素：设为接近框宽时跟踪器换新编号
         self.persons: sv.Detections | None = None  # 最近一次收到的 RF-DETR 人员框
 
+    def candidates(self, image: np.ndarray) -> None:
+        """与 RF-DETR 同时做的正向推理：替身不需要，合并时在 __call__ 里生成结果。"""
+        return None
+
     def __call__(
         self,
         image: np.ndarray,
         offset: tuple[int, int] = (0, 0),
         persons: sv.Detections | None = None,
+        candidates: object = None,
     ) -> sv.Detections:
         x = 300 + 2 * self.calls + self.shift
         self.calls += 1
@@ -615,6 +638,37 @@ def test_persistently_failing_loop_does_not_exit_process(
     assert (tmp_path / "alive").exists()
 
 
+@pytest.mark.parametrize(
+    "message",
+    [  # 2026-11-17 实机日志中的三种报错（节选）
+        "CUDNN_FE failure 11: CUDNN_BACKEND_API_FAILED ; GPU=0 ; hostname=x ; "
+        "file=/onnxruntime_src/onnxruntime/core/providers/cuda/nn/conv.cc ; line=484",
+        "CUDA failure 700: an illegal memory access was encountered ; GPU=0 ; hostname=x ; "
+        "file=/onnxruntime_src/onnxruntime/core/providers/cuda/gpu_data_transfer.cc ; line=91",
+        "CUBLAS failure 1: the library was not initialized ; GPU=0 ; hostname=x ; "
+        "file=/onnxruntime_src/onnxruntime/core/providers/cuda/cuda_execution_provider.cc ; line=245",
+    ],
+)
+def test_cuda_fault_exits_process(
+    message: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CUDA 执行出错后进程内的上下文不可恢复，各路此后每次推理都失败：退出进程由 Compose 拉起，不原地重试。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.05)
+
+    def exit_(code: int) -> None:
+        raise SystemExit(code)
+
+    monkeypatch.setattr(pipeline_module.os, "_exit", exit_)
+
+    async def broken(beat: Callable[[], None]) -> None:
+        raise RuntimeError(f"[ONNXRuntimeError] : 1 : FAIL : {message}")
+
+    with pytest.raises(SystemExit) as exited:
+        asyncio.run(supervise("cam-01/detect", broken, Health(tmp_path / "alive")))
+
+    assert exited.value.code == 1
+
+
 def test_heartbeat_updated_while_all_loops_progress(tmp_path: Path) -> None:
     health = Health(tmp_path / "alive")
     health.beat("cam-01/detect")
@@ -651,6 +705,19 @@ def test_stalled_loop_exits_process(
     assert not (tmp_path / "alive").exists()
 
 
+def test_connect_grace_delays_stall(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """建连前的登记带宽限：多路同时断流、建连排队时不判停滞；宽限过后仍无进展才判停滞。"""
+    monkeypatch.setattr(pipeline_module, "STALL_S", 0.1)
+    health = Health(tmp_path / "alive")
+    health.beat("cam-01/reader", grace=0.3)
+    health.beat("cam-02/reader")
+
+    time.sleep(0.2)
+    assert health.stalled() == ["cam-02/reader"]
+    time.sleep(0.3)
+    assert health.stalled() == ["cam-01/reader", "cam-02/reader"]
+
+
 def test_reader_survives_capture_exception(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -669,7 +736,7 @@ def test_reader_survives_capture_exception(
         raise pipeline_module.cv2.error("模拟解码器异常")
 
     monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", capture)
-    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: beats.append(1))
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: beats.append(grace))
     with caplog.at_level(logging.ERROR):
         reader.start()
         assert done.wait(2)
@@ -685,7 +752,7 @@ def test_reader_beats_on_connect_and_every_frame(monkeypatch: pytest.MonkeyPatch
     beats = []
     done = threading.Event()
 
-    class Capture:
+    class Capture(ReadCapture):
         def __init__(self) -> None:
             self.frames = 2
 
@@ -709,13 +776,33 @@ def test_reader_beats_on_connect_and_every_frame(monkeypatch: pytest.MonkeyPatch
         return Capture()
 
     monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", capture)
-    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: beats.append(1))
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: beats.append(grace))
     reader.start()
     assert done.wait(2)
 
-    # 第一次：建连前、建连后、两帧各一次；第二次：建连前一次
-    assert len(beats) == 5
+    # 第一次：建连前（带建连宽限）、建连后、两帧各一次；第二次：建连前一次
+    G = pipeline_module.OPEN_GRACE_S
+    assert beats == [G, 0.0, 0.0, 0.0, G]
     assert reader.latest() is not None and reader.latest()[0] == 2
+
+
+def test_reader_limits_decode_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H.264 帧级多线程解码每多一个线程画面就多延后一帧：OpenCV 默认按核数开，识别结果落后画面约 0.6 s。"""
+    opened = threading.Event()
+    params: list[int] = []
+
+    def capture(url: str, backend: int, options: list[int]) -> ReadCapture:
+        params.extend(options)
+        opened.set()
+        threading.Event().wait()  # 之后一直阻塞：测试结束后线程不再连真实地址
+        raise AssertionError
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", capture)
+    FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: None).start()
+    assert opened.wait(2)
+
+    settings = dict(zip(params[::2], params[1::2], strict=True))
+    assert settings[pipeline_module.cv2.CAP_PROP_N_THREADS] == pipeline_module.DECODE_THREADS == 2
 
 
 POSE = {
@@ -742,6 +829,62 @@ def test_tracks_located_by_pose_without_calibration() -> None:
     assert last.x > 0  # 在摄像头前方
 
 
+def test_pose_check_reported_periodically_for_estimated_mapping() -> None:
+    """安装参数自检：估算映射取到首帧后每 POSE_CHECK_S 给出一次；样本不足时为 insufficient。"""
+    camera = CameraPipeline("cam-01", None, cast(PoseDetector, FakeDetector()), pose=POSE)
+    assert camera.pose_check(0.0) is None  # 尚未取到画面
+    for i in range(4):
+        camera.process(frame(i), timestamp=i / FPS)
+
+    first = camera.pose_check(100.0)
+    assert first is not None and first.camera_id == "cam-01"
+    assert first.status == "insufficient"
+    assert camera.pose_check(100.0 + pipeline_module.POSE_CHECK_S - 1) is None
+    assert camera.pose_check(100.0 + pipeline_module.POSE_CHECK_S) is not None
+
+
+def test_geometry_reported_with_pose_check_even_without_people() -> None:
+    """单目几何的建议随自检立即上报，不必等行人；取最近几次的中位数，估计失败的不计入。"""
+    from vision_engine.monocular import Geometry
+
+    camera = CameraPipeline("cam-05", None, cast(PoseDetector, FakeDetector()), pose=POSE)
+    assert camera.needs_geometry
+    assert camera.pose_check(0.0) is None  # 还没有任何画面
+    camera.add_geometry(Geometry(1.6, -15.0, 1.1, 75.2, 1.1, 1.4, 3589, "desk"), (1920, 1080))
+    first = camera.pose_check(0.0)
+    assert first is not None and first.geometry is not None  # 只有一次估计也上报
+    assert first.geometry.height_m == 1.6
+    camera = CameraPipeline("cam-05", None, cast(PoseDetector, FakeDetector()), pose=POSE)
+    for h in (1.7, 1.9, 1.8):
+        camera.add_geometry(Geometry(h, -10.0, -0.5, 74.6, 4.7, 2.7, 5000, "desk"), (1920, 1080))
+    camera.add_geometry(None, (1920, 1080))
+
+    check = camera.pose_check(0.0)
+    assert check is not None and check.status == "insufficient"
+    assert check.geometry is not None
+    assert (check.geometry.height_m, check.geometry.pitch_deg, check.geometry.hfov_deg) == (
+        1.8,
+        -10.0,
+        74.6,
+    )
+    assert check.geometry.scale_ref == "desk"
+
+
+def test_calibrated_camera_needs_no_geometry() -> None:
+    mapping = GroundMapping.from_pose(POSE, 1280, 720)
+    camera = CameraPipeline("cam-01", mapping, cast(PoseDetector, FakeDetector()), pose=POSE)
+    assert not camera.needs_geometry
+
+
+def test_pose_check_not_reported_for_calibrated_mapping() -> None:
+    mapping = GroundMapping.from_pose(POSE, 1280, 720)
+    camera = CameraPipeline("cam-01", mapping, cast(PoseDetector, FakeDetector()), pose=POSE)
+    for i in range(4):
+        camera.process(frame(i), timestamp=i / FPS)
+
+    assert camera.pose_check(100.0) is None
+
+
 def test_unmapped_pose_outputs_no_coordinates() -> None:
     """朝向地平线以上：估算不成立，只输出设备级行为，不输出坐标。"""
     camera = CameraPipeline(
@@ -755,7 +898,7 @@ def test_reader_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     """D-101：摄像头删除或参数变化时停止读帧线程。"""
     monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
 
-    class Capture:
+    class Capture(ReadCapture):
         def read(self) -> tuple[bool, np.ndarray | None]:
             return True, frame(0)
 
@@ -763,11 +906,81 @@ def test_reader_stops(monkeypatch: pytest.MonkeyPatch) -> None:
             pass
 
     monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", lambda *a: Capture())
-    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: None)
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: None)
     reader.start()
     reader.stop()
     reader.join(2)
     assert not reader.is_alive()
+
+
+def test_reader_converts_only_frames_near_next_take(monkeypatch: pytest.MonkeyPatch) -> None:
+    """解码每帧都做，转换成画面只做临近取用的：取用后的大半个周期内不转换，临近预计时刻恢复，取到的仍是新帧。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
+    monkeypatch.setattr(pipeline_module, "GAP_SAMPLES", 5)
+    grabbed, retrieved = 0, 0
+
+    class Capture(ReadCapture):
+        def grab(self) -> bool:
+            nonlocal grabbed
+            time.sleep(0.01)  # 100 帧/秒的源
+            grabbed += 1
+            return True
+
+        def retrieve(self) -> tuple[bool, np.ndarray | None]:
+            nonlocal retrieved
+            retrieved += 1
+            return True, frame(grabbed)
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", lambda *a: Capture())
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: None, period_s=0.5)
+    reader.start()
+    try:
+        time.sleep(0.2)  # 尚无人取用：每帧都转换
+        assert retrieved >= grabbed - 1
+        first = reader.latest()  # 检测循环取用：预计 0.5 s 后再来
+        assert first is not None
+        time.sleep(0.1)  # 等正在进行的一帧过去
+        before = retrieved
+        time.sleep(0.2)  # 距预计时刻还有 0.2 s 以上，远大于提前量（约 2 个帧间隔）
+        assert retrieved == before
+        assert reader.peek() is not None and reader.peek()[0] == before  # peek 不改变预计
+        time.sleep(0.3)  # 已过预计时刻
+        second = reader.latest()
+        assert second is not None and second[0] > first[0]
+        assert reader.age_s() < 0.1  # 取到的是刚转换的帧
+        assert retrieved < grabbed - 10
+    finally:
+        reader.stop()
+        reader.join(2)
+
+
+def test_reader_converts_every_frame_until_gaps_measured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """帧间隔尚未攒够样本时不预计：每帧都转换。"""
+    monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
+    retrieved = 0
+
+    class Capture(ReadCapture):
+        def grab(self) -> bool:
+            time.sleep(0.01)
+            return True
+
+        def retrieve(self) -> tuple[bool, np.ndarray | None]:
+            nonlocal retrieved
+            retrieved += 1
+            return True, frame(0)
+
+    monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", lambda *a: Capture())
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: None, period_s=10)
+    reader.start()
+    try:
+        while reader.latest() is None:
+            time.sleep(0.01)
+        before = retrieved
+        time.sleep(0.2)  # 不足 GAP_SAMPLES 帧
+        assert retrieved > before + 5
+    finally:
+        reader.stop()
+        reader.join(2)
 
 
 def test_reader_reports_age_of_latest_frame(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -775,7 +988,7 @@ def test_reader_reports_age_of_latest_frame(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
     reads = iter([(True, frame(0))])
 
-    class Capture:
+    class Capture(ReadCapture):
         def read(self) -> tuple[bool, np.ndarray | None]:
             return next(reads, (False, None))
 
@@ -783,7 +996,7 @@ def test_reader_reports_age_of_latest_frame(monkeypatch: pytest.MonkeyPatch) -> 
             pass
 
     monkeypatch.setattr(pipeline_module.cv2, "VideoCapture", lambda *a: Capture())
-    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda: None)
+    reader = FrameReader("cam-01", "rtsp://go2rtc:8554/cam-01", lambda grace: None)
     assert reader.age_s() == float("inf")
 
     reader.start()
@@ -892,7 +1105,7 @@ def test_removed_camera_does_not_leave_stale_heartbeat(
     10 s 后整个进程被判停滞退出。删除后不得留下该路的健康登记。"""
     monkeypatch.setattr(pipeline_module, "RECONNECT_S", 0.01)
 
-    class Capture:
+    class Capture(ReadCapture):
         def read(self) -> tuple[bool, np.ndarray | None]:
             time.sleep(0.05)  # 删除时线程大多正卡在读帧调用中
             return True, frame(0)
@@ -966,3 +1179,57 @@ def test_calibration_reply_gives_reason() -> None:
         None,
         None,
     )
+
+
+RULES = [
+    # 竖直线 x = 4 m，自 (4, 0) 指向 (4, 10)：假检测器的人自西向东走过，为 forward（左 → 右）
+    {"id": "gate", "name": "大门", "type": "line_crossing", "points": [[4, 0], [4, 10]]},
+    {
+        "id": "yard",
+        "name": "库区",
+        "type": "intrusion",
+        "points": [[3.9, 5], [6, 5], [6, 7], [3.9, 7]],
+        "min_duration_s": 1,
+    },
+]
+
+
+def run_rules(camera: CameraPipeline, frames: int) -> list[VisionTrackV1 | VisionRuleV1]:
+    return [
+        e
+        for i in range(frames)
+        for e in camera.process(frame(i), timestamp=i / FPS)
+        if isinstance(e, VisionTrackV1 | VisionRuleV1)
+    ]
+
+
+def test_rules_emit_crossing_and_intrusion_on_calibrated_camera() -> None:
+    """轨迹规则：人以 0.1 m/s 自 3.52 m 向东走 12 s，越过 x = 4 m 的线、进入 x ≥ 3.9 m 的区域。"""
+    camera = CameraPipeline("cam-01", MAPPING, cast(PoseDetector, FakeDetector()), rules=RULES)
+
+    rules = [e for e in run_rules(camera, 60) if isinstance(e, VisionRuleV1)]
+
+    assert [(e.rule_id, e.phase, e.direction) for e in rules] == [
+        ("gate", "pulse", "forward"),
+        ("yard", "start", None),
+    ]
+    assert all(e.level == "confirmed" and e.mapping == "calibrated" for e in rules)
+    assert rules[1].since < rules[1].ts  # 区域：确认进入早于告警
+
+
+def test_rules_on_estimated_mapping_are_suspected() -> None:
+    """估算映射同样判定规则，事件一律为 suspected。线垂直于该人在估算映射下的走向，过其轨迹中点。"""
+    plain = CameraPipeline("cam-01", None, cast(PoseDetector, FakeDetector()), pose=POSE)
+    # 估算映射下该人每帧只移动约 1 cm、误差约 0.4 m（滞回带 0.8 m）：走 48 s 才两端都离线够远
+    path = [(e.x, e.y) for e in run_rules(plain, 240) if isinstance(e, VisionTrackV1)]
+    (x0, y0), (x1, y1) = path[0], path[-1]
+    mx, my, dx, dy = (x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0
+    line = {**RULES[0], "points": [[mx - 5 * dy, my + 5 * dx], [mx + 5 * dy, my - 5 * dx]]}
+    camera = CameraPipeline(
+        "cam-01", None, cast(PoseDetector, FakeDetector()), pose=POSE, rules=[line]
+    )
+
+    rules = [e for e in run_rules(camera, 240) if isinstance(e, VisionRuleV1)]
+
+    assert [e.rule_id for e in rules] == ["gate"]
+    assert all(e.level == "suspected" and e.mapping == "estimated" for e in rules)

@@ -123,6 +123,16 @@ def test_non_http_url_rejected(url: str) -> None:
     assert e.value.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "url", ["http://192.168.1.50:abc/v1", "http://192.168.1.50:99999/v1", "http://[::1/v1"]
+)
+def test_unparsable_url_rejected_not_crashed(url: str) -> None:
+    """端口不是数字或超出范围、方括号不成对：400 并说明，不存入库（否则每次调用都在网关报错）。"""
+    with pytest.raises(HTTPException) as e:
+        llm.normalize(url)
+    assert e.value.status_code == 400
+
+
 def test_api_key_sealed_with_random_nonce(key_file: Path) -> None:
     """C-ST-03：AES-256-GCM，密文不含明文，同一 Key 两次加密结果不同，可解密还原。"""
     a, b = llm.seal(key_file, KEY), llm.seal(key_file, KEY)
@@ -301,8 +311,10 @@ def test_probe_forwards_decrypted_key_and_stores_result(client: TestClient, db: 
     assert r.status_code == 200 and r.json()["health"] == "ok"
     [request] = seen
     assert request.url.path == "/internal/probe"
+    # 网络位置与总开关状态随请求交给网关，由它按地址实际指向复核（G-02）
     assert json.loads(request.content) == {
-        "base_url": LAN["base_url"], "api_key": KEY, "model": "m", "timeout_s": 7
+        "base_url": LAN["base_url"], "api_key": KEY, "model": "m", "timeout_s": 7,
+        "network": "internal", "block_public": False,
     }  # fmt: skip
     [provider] = client.get("/api/llm/providers").json()["items"]
     assert provider["structured_output"] == "json_object"
@@ -387,3 +399,16 @@ def test_block_public_stops_probing_public_addresses(client: TestClient) -> None
     assert client.post("/api/llm/models", json=body, headers=headers()).status_code == 409
     assert seen == []
     assert client.get(f"/api/llm/providers/{lan}/models").status_code == 200
+    # 内网标签的请求带上开关状态，由网关按地址实际指向复核
+    assert json.loads(seen[0].content)["block_public"] is True
+
+
+def test_gateway_egress_refusal_is_reported(client: TestClient) -> None:
+    """标为内网、实际指向公网的地址被网关拒绝时，原因原样告知管理员，不笼统报"网关出错"。"""
+    lan = create(client, LAN)["id"]
+    client.put("/api/llm/settings", json={"block_public": True}, headers=headers())
+    reason = "已开启全局禁止公网，未向该地址发送请求：标为内网，但实际指向公网地址 203.0.113.7"
+    gateway(client, lambda _: httpx2.Response(409, json={"detail": reason}))
+
+    r = client.get(f"/api/llm/providers/{lan}/models")
+    assert (r.status_code, r.json()["message"]) == (409, reason)

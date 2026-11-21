@@ -1,0 +1,60 @@
+# 旁路部署演示（FR-1001）：make demo-up LINKAGE=1 叠加本文件。边缘主机只听不发，封禁经外部防火墙联动执行。
+#
+# firewall-gateway 扮演"客户的 Linux 网关或防火墙"：真实部署中它运行在流量路径上的另一台设备上，与边缘主机
+# 之间只有一条 TLS 连接。演示只有一台机器，它以宿主网络运行、在宿主的转发路径上封禁（与 privileged-helper
+# 同一镜像、同一协议），只在 linkage-net 的宿主地址上监听；执行器经 linkage-net 送达签名指令。
+# 站点改为 demo/scenarios/site-bypass.yaml（mode: bypass），本机防火墙的 Playbook 不再执行。
+services:
+  playbook-executor:
+    environment:
+      HYD_FIREWALL_ADDRESS: 172.30.13.1:7443
+      HYD_FIREWALL_CA_FILE: /run/secrets/firewall_gateway_cert  # 自签证书即 CA（make demo-up 生成）
+    secrets: [executor_signing_key, firewall_gateway_cert]
+    volumes:
+      - helper-run:/run/hyd-helper
+      - ../../demo/scenarios/site-bypass.yaml:/etc/hyd/site.yaml:ro
+      - ../../playbooks:/etc/hyd/playbooks:ro
+    networks: [core-net, linkage-net]
+
+  api-server:
+    volumes:
+      - ../../demo/scenarios/site-bypass.yaml:/etc/hyd/site.yaml:ro
+
+  firewall-gateway:
+    image: huiyandun/privileged-helper:local
+    build: { context: ../.., dockerfile: services/privileged-helper/Dockerfile }
+    profiles: [linkage]
+    network_mode: host
+    restart: unless-stopped  # linkage-net 的宿主地址就绪前绑定失败，重启后重试
+    read_only: true
+    tmpfs: [/tmp, /run/hyd-helper]  # 本机套接字不与任何容器共享
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    secrets: [helper_public_key, firewall_gateway_cert, firewall_gateway_key]
+    environment:
+      HYD_TCP_LISTEN: 172.30.13.1:7443
+      HYD_TLS_CERT_FILE: /run/secrets/firewall_gateway_cert
+      HYD_TLS_KEY_FILE: /run/secrets/firewall_gateway_key
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('172.30.13.1', 7443), 2).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+
+networks:
+  # 执行器到联动网关的专用网络：internal 无出站；不设 gateway_mode_ipv4: isolated，宿主保有网关地址
+  # 172.30.13.1 供宿主网络中的 firewall-gateway 监听。只有 playbook-executor 接入
+  linkage-net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.13.0/29
+          gateway: 172.30.13.1
+
+secrets:
+  firewall_gateway_cert:
+    file: .secrets/firewall_gateway_cert
+  firewall_gateway_key:
+    file: .secrets/firewall_gateway_key

@@ -36,17 +36,20 @@ def main() -> int:
     # 故意错误的凭据：目标对每次尝试都回 401（这里不是真实口令，仅模拟攻击方的猜测）
     user = os.environ.get("HYD_USER", "admin")
     guess = os.environ.get("HYD_PASSWORD", "wrong-password")
+    # 口令字典（逗号分隔，可选）：依次轮换猜测，演示时看得出在试不同的弱口令；目标从不放行远端读取，每个都回 401
+    wordlist = [w for w in os.environ.get("HYD_WORDLIST", "").split(",") if w] or [guess]
     attempts = int(os.environ.get("HYD_ATTEMPTS", "6"))
     # 两次尝试之间的停顿：低速模式每 20 s 一次，低于 HYD-NET-0001 的阈值（FR-205）
     interval = float(os.environ.get("HYD_INTERVAL_S", "0"))
 
     url = f"rtsp://{host}:{port}/{path}"
-    authorization = "Basic " + base64.b64encode(f"{user}:{guess}".encode()).decode("ascii")
 
     denied = 0
     for cseq in range(1, attempts + 1):
         if cseq > 1:
             time.sleep(interval)
+        password = wordlist[(cseq - 1) % len(wordlist)]
+        authorization = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
         try:
             status = describe(host, port, url, cseq, authorization)
         except OSError as exc:  # 连接被拒/超时：目标已被封禁或不可达
@@ -54,7 +57,7 @@ def main() -> int:
         else:
             if " 401" in status:
                 denied += 1
-        print(f"attempt {cseq}: {status}", file=sys.stderr)
+        print(f"attempt {cseq}: {user}:{password} -> {status}", file=sys.stderr, flush=True)
     print(f"rtsp-bruteforce: {denied}/{attempts} denied by {url}", file=sys.stderr)
     return 0
 

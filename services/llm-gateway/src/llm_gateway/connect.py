@@ -5,11 +5,20 @@
 """
 
 from ipaddress import ip_address
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx2
-from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+)
 from pydantic import BaseModel, ConfigDict, SecretStr
+
+NOT_COMPATIBLE = "返回的不是 OpenAI 兼容格式"
 
 
 class Target(BaseModel):
@@ -20,6 +29,10 @@ class Target(BaseModel):
     api_key: SecretStr | None = None
     model: str | None = None
     timeout_s: float
+    # 全局禁止公网（G-02）：为真时网关按地址实际指向复核，指向公网或无法确认的不发请求（llm_gateway.egress）
+    block_public: bool = False
+    # api-server 给的网络位置标签；测试连接、获取模型列表时用于复核，缺省按内网
+    network: Literal["internal", "public"] = "internal"
 
 
 class ProbeFailure(Exception):
@@ -82,14 +95,20 @@ def explain(e: APIConnectionError | APIStatusError, target: Target) -> ProbeFail
 
 
 def client(target: Target, transport: httpx2.AsyncBaseTransport | None) -> AsyncOpenAI:
+    """地址无法解析（如端口不是数字）时按 ProbeFailure 报出：与连不上同样是这一家的失败，由调用方写进
+    测试结果或转下一家，不成为网关自身的 500。"""
     key = target.api_key.get_secret_value() if target.api_key else ""
-    return AsyncOpenAI(
-        base_url=target.base_url,
-        api_key=key or "none",  # SDK 要求非空；本地服务未设 Key 时忽略该请求头
-        timeout=target.timeout_s,
-        max_retries=0,
-        http_client=httpx2.AsyncClient(transport=transport, follow_redirects=False),
-    )
+    http_client = httpx2.AsyncClient(transport=transport, follow_redirects=False)
+    try:
+        return AsyncOpenAI(
+            base_url=target.base_url,
+            api_key=key or "none",  # SDK 要求非空；本地服务未设 Key 时忽略该请求头
+            timeout=target.timeout_s,
+            max_retries=0,
+            http_client=http_client,
+        )
+    except httpx2.InvalidURL as e:
+        raise ProbeFailure("地址格式不正确", "核对地址，形如 http://192.168.1.50:8080/v1") from e
 
 
 def model_ids(data: object) -> list[str]:
@@ -98,7 +117,7 @@ def model_ids(data: object) -> list[str]:
     if isinstance(data, dict):
         entries = data.get("data") if isinstance(data.get("data"), list) else data.get("models")
     if not isinstance(entries, list):
-        raise ProbeFailure("返回的不是 OpenAI 兼容格式", "核对地址是否以 /v1 等兼容路径结尾")
+        raise ProbeFailure(NOT_COMPATIBLE, "核对地址是否以 /v1 等兼容路径结尾")
     ids = {e.get("id") or e.get("name") or e.get("model") for e in entries if isinstance(e, dict)}
     return sorted(i for i in ids if isinstance(i, str) and i)
 
@@ -109,6 +128,8 @@ async def _get_models(target: Target, transport: httpx2.AsyncBaseTransport | Non
             return model_ids(await c.get("/models", cast_to=object))
         except (APIConnectionError, APIStatusError) as e:
             raise explain(e, target) from e
+        except (APIResponseValidationError, ValueError) as e:  # 200 且声明为 JSON，响应体却不是
+            raise ProbeFailure(NOT_COMPATIBLE, "核对地址是否以 /v1 等兼容路径结尾") from e
 
 
 async def list_models(

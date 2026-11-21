@@ -109,7 +109,6 @@ describe("ProviderEditor", () => {
     expect(test).toHaveBeenCalledWith(SAVED);
     expect(result.textContent).toContain("地址路径不对；改为 https://api.deepseek.com/v1");
 
-    type(field("地址"), "https://api.deepseek.com");
     fireEvent.click(screen.getByRole("button", { name: "采用" }));
     fireEvent.click(screen.getByRole("button", { name: "deepseek-chat" }));
     expect(field("地址").value).toBe("https://api.deepseek.com/v1");
@@ -129,5 +128,56 @@ describe("ProviderEditor", () => {
     open(null);
     expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "保存并测试" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("手动改了地址、Key 或模型后，上次的测试结果不再显示", async () => {
+    vi.spyOn(api, "updateProvider").mockResolvedValue(SAVED);
+    vi.spyOn(api, "testProvider").mockResolvedValue(RESULT);
+    open(SAVED);
+    fireEvent.click(screen.getByRole("button", { name: "保存并测试" }));
+    await screen.findByRole("region", { name: "测试结果" });
+
+    type(screen.getByRole("combobox", { name: "模型" }), "deepseek-reasoner");
+    expect(screen.queryByRole("region", { name: "测试结果" })).toBeNull();
+  });
+
+  it("可清除已保存的 Key：保存时发空串", async () => {
+    const update = vi.spyOn(api, "updateProvider").mockResolvedValue(SAVED);
+    open(SAVED);
+    fireEvent.click(screen.getByRole("button", { name: "清除已保存的 Key" }));
+    expect(screen.getByPlaceholderText("保存后清除已保存的 Key")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0]?.[1]).toMatchObject({ api_key: "" });
+  });
+
+  it("地址换到另一主机而 Key 留空时不可保存：旧 Key 不随之发往新地址", () => {
+    open(SAVED);
+    type(field("地址"), "https://api.moonshot.cn/v1");
+    expect(screen.getByRole("alert").textContent).toContain("请重新填写 Key");
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-new" } });
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(false);
+    // 同一主机下改路径不受影响
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "" } });
+    type(field("地址"), "https://api.deepseek.com/beta");
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("超时清空时不可获取模型列表", () => {
+    open(null);
+    type(screen.getByRole("spinbutton"), "");
+    expect((screen.getByRole("button", { name: "获取列表" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("保存进行中不可关闭：迟到的结果不会关掉之后打开的对话框", () => {
+    vi.spyOn(api, "updateProvider").mockReturnValue(new Promise(() => {}));
+    const { onClose } = open(SAVED);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    const close = screen.getByRole("button", { name: "关闭" }) as HTMLButtonElement;
+    expect(close.disabled).toBe(true);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

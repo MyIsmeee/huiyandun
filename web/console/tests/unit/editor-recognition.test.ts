@@ -45,6 +45,17 @@ describe("从画面生成初稿（FR-909，设计 150 §7）", () => {
     expect(draft(frames, items)).toEqual([]);
   });
 
+  it("按实测底面排开家具：拼在一起的一组桌子放几张，单件只放一张", () => {
+    const [w, d] = CATALOG.get("table")?.footprint ?? [1, 1];
+    const group = { class: "table" as const, polygon: [[10, 10], [10 + 2 * w, 10], [10 + 2 * w, 10 + 2 * d], [10, 10 + 2 * d]], height_m: 0.75 };
+    const single = { class: "table" as const, polygon: [[20, 10], [20 + w, 10], [20 + w, 10 + d], [20, 10 + d]], height_m: 0.75 };
+    const items = draft([{ ...empty, camera_id: "cam-01", objects: [group, single] }]);
+    const near = (x: number) => items.filter((i) => i.asset === "table" && Math.abs(i.x - x) < 5);
+    expect(near(10 + w).length).toBe(4);
+    expect(near(20 + w / 2)).toHaveLength(1);
+    items.forEach((item, i) => expect(overlaps(item, items.slice(0, i), CATALOG)).toBe(false));
+  });
+
   it("面积不足 2 m² 的地面、短于 1 m 的墙不转换", () => {
     const tiny = { ...empty, camera_id: "cam-01", surfaces: [{ class: "grass" as const, polygon: [[1, 1], [2.9, 1], [2.9, 2], [1, 2]] }] };
     const short = { ...empty, camera_id: "cam-01", walls: [{ class: "wall" as const, line: [[5, 5], [5.8, 5]], height_m: 2.8 }] };

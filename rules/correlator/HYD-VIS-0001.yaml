@@ -1,0 +1,18 @@
+# 单域关联（物理域）：镜头被遮挡或挪位即生成关联事件（FR-303）
+# 序号段 VIS 留给只引用画面与行为事件的关联规则。关联事件自动触发存证（命中前后各 30 s 录像入哈希链）；
+# 没有攻击源，不触发封禁。severity 取 medium、不交 AI 值班员研判：挪位与遮挡是视觉模型判定，现场实测
+# （桌面平拍的手机画面）3 小时内误报约 65 次，校准前不升为高等级事件
+# 样本：rules/tests/HYD-VIS-0001/sequences.yaml
+id: HYD-VIS-0001
+version: 1.1.0
+name: 镜头遭遮挡或挪位
+mode: enforce
+window_s: 60
+group_by: device_id
+sequence:
+  - subject: hyd.vision.integrity.v1
+    match: { type: [occlusion, shift] }
+emit:
+  severity: medium
+  title: 摄像头镜头遭遮挡或挪位
+  techniques: [T0815]  # Denial of View（ICS）

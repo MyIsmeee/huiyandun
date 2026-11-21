@@ -11,10 +11,23 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx2
-from openai import APIConnectionError, APIStatusError, BadRequestError, UnprocessableEntityError
+from openai import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APIStatusError,
+    BadRequestError,
+    UnprocessableEntityError,
+)
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from llm_gateway.connect import ProbeFailure, Target, client, explain, list_models
+from llm_gateway.connect import (
+    NOT_COMPATIBLE,
+    ProbeFailure,
+    Target,
+    client,
+    explain,
+    list_models,
+)
 from py_contracts.api import ProviderCheck, ProviderTestResult
 
 SLOW_MS = 3000  # 连通延迟超过即为 slow
@@ -68,6 +81,11 @@ async def _structured_output(
             except (APIConnectionError, APIStatusError) as e:
                 failure = explain(e, target)
                 return _check("structured_output", False, None, failure.reason, failure.hint), None
+            except (APIResponseValidationError, AttributeError, TypeError, ValueError):
+                # 200 但不是 OpenAI 的响应结构（纯文本、非 JSON、message 为 null、数组）：SDK 不严格校验，
+                # 取值时才报错。如实写进这一项，不让测试连接以网关出错收场
+                hint = "核对地址是否为 OpenAI 兼容的 /chat/completions 接口"
+                return _check("structured_output", False, None, NOT_COMPATIBLE, hint), None
             latency = int((time.monotonic() - started) * 1000)
             return _check("structured_output", True, latency, None, None), name
     return (

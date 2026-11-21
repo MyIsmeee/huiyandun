@@ -3,6 +3,8 @@ api-server 自身不访问供应商（C-LLM-01）。
 
 无输出时给出模板原因（FR-502）；审计与当日用量由调用方在业务事务中写入（G-13、D-084）。
 报告与值班员都经 invoke 调用，最近一次的结果记在内存中，供顶栏模型状态使用（V-M8，重启即清空）。
+调用方给出事件等级时，网关按任务的路由策略调整顺序（deploy/configs/llm-tasks.yaml 的 routing）：critical 升阶到
+公网（云端）优先，其余内网（本地）优先；本次的路由与首选供应商记入 Outcome 与审计。
 """
 
 import logging
@@ -18,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from api_server.audit import record
 from api_server.auth import require
-from api_server.llm import providers, unseal
+from api_server.llm import block_public, providers, unseal
 from py_contracts.api import LlmStatus
 
 log = logging.getLogger(__name__)
@@ -35,6 +37,8 @@ class Outcome:
     attempts: list[dict[str, Any]]
     reason: str | None  # 无输出时模板报告的原因
     networks: dict[str, str]  # 供应商 ID → 网络位置，供审计；键序即调用时已启用供应商的顺序
+    route: str = "manual"  # manual 管理员排定的顺序；local_first 本地优先；escalated 升阶到云端优先
+    first: str | None = None  # 路由后首选的供应商 ID；未经网关路由时为 None，即顺序中的第一家
 
 
 router = APIRouter(prefix="/api/llm")
@@ -58,8 +62,11 @@ async def invoke(
     *,
     deadline_s: float | None = None,
     evidence: dict[str, Any] | None = None,
+    severity: str | None = None,
 ) -> Outcome:
-    outcome = await _invoke(state, task, data, deadline_s=deadline_s, evidence=evidence)
+    outcome = await _invoke(
+        state, task, data, deadline_s=deadline_s, evidence=evidence, severity=severity
+    )
     state.llm_last = outcome
     return outcome
 
@@ -71,8 +78,10 @@ async def _invoke(
     *,
     deadline_s: float | None = None,
     evidence: dict[str, Any] | None = None,
+    severity: str | None = None,
 ) -> Outcome:
-    """state 为 app.state；deadline_s 为调用方剩余时间，evidence 为事实回溯依据（缺省为 data）。"""
+    """state 为 app.state；deadline_s 为调用方剩余时间，evidence 为事实回溯依据（缺省为 data）；
+    severity 为所研判事件的等级，供网关按等级路由。"""
     async with state.engine.connect() as conn:
         rows = (
             (
@@ -83,6 +92,8 @@ async def _invoke(
             .mappings()
             .all()
         )
+        # 开启时公网供应商已全部停用；仍随请求交给网关，由它按地址实际指向再复核一次（G-02）
+        blocked = await block_public(conn)
     by_id = {r["id"]: r for r in rows}
     networks = {r["id"]: r["network"] for r in rows}
     if not rows:
@@ -108,7 +119,7 @@ async def _invoke(
         )
     if targets:
         body = {"task": task, "data": data, "providers": targets, "deadline_s": deadline_s,
-                "evidence": evidence}  # fmt: skip
+                "evidence": evidence, "severity": severity, "block_public": blocked}  # fmt: skip
         try:
             res = await state.llm_gateway.post(
                 "/internal/invoke", json=body, timeout=(deadline_s or DEADLINE_S) + MARGIN_S
@@ -118,12 +129,24 @@ async def _invoke(
             log.warning("llm.gateway_unreachable", extra={"error": type(e).__name__})
             return Outcome(None, [], None, attempts, "模型网关暂不可达", networks)
         reply = res.json()
-        attempts = sorted(
-            attempts + reply["attempts"], key=lambda a: by_id[a["provider_id"]]["position"]
-        )
+        route, order = reply.get("route", "manual"), reply.get("order") or []
+        first = order[0] if order else None
+        if route == "manual":
+            attempts = sorted(
+                attempts + reply["attempts"], key=lambda a: by_id[a["provider_id"]]["position"]
+            )
+        else:
+            # 经路由：按实际尝试的先后；未发给网关的（Key 无法解密）排在最后
+            attempts = reply["attempts"] + attempts
         if reply["output"] is not None:
             provider = by_id[reply["provider_id"]]
-            return Outcome(reply["output"], reply["unverified"], provider, attempts, None, networks)
+            return Outcome(
+                reply["output"], reply["unverified"], provider, attempts, None, networks,
+                route, first,
+            )  # fmt: skip
+        failed = "；".join(f"{by_id[a['provider_id']]['name']}（{a['reason']}）" for a in attempts)
+        reason = f"全部模型供应商不可用：{failed}"
+        return Outcome(None, [], None, attempts, reason, networks, route, first)
     failed = "；".join(f"{by_id[a['provider_id']]['name']}（{a['reason']}）" for a in attempts)
     return Outcome(None, [], None, attempts, f"全部模型供应商不可用：{failed}", networks)
 
@@ -163,6 +186,7 @@ async def record_invocation(
         target=target,
         before=None,
         after=details
+        | ({} if outcome.route == "manual" else {"route": outcome.route})
         | {
             "attempts": [
                 {
@@ -198,5 +222,6 @@ async def llm_status(request: Request) -> LlmStatus:
         return LlmStatus(state="normal", provider_name=rows[0].name, reason=None)
     if last.provider is None:
         return LlmStatus(state="template", provider_name=None, reason=last.reason)
-    state = "normal" if last.provider["id"] == rows[0].id else "failover"
+    # 经路由时以路由后的首选为准：升阶到云端并成功不算故障转移
+    state = "normal" if last.provider["id"] == (last.first or rows[0].id) else "failover"
     return LlmStatus(state=state, provider_name=last.provider["name"], reason=None)

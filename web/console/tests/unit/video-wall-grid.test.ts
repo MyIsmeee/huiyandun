@@ -74,3 +74,16 @@ describe("tileSize", () => {
     expect(tileSize(4, 4, wallGrid(9, "9"), 8)).toEqual({ w: 0, h: 0 });
   });
 });
+
+describe("自动布局按画布形状选列数", () => {
+  it("2 路在较高的画布上上下排，格子比左右排更大", () => {
+    const grid = wallGrid(2, "auto", { w: 1000, h: 800, gap: 8 });
+    expect([grid.cols, grid.rows]).toEqual([1, 2]);
+    expect(tileSize(1000, 800, grid, 8).w).toBeGreaterThan(tileSize(1000, 800, wallGrid(2, "auto"), 8).w);
+  });
+
+  it("宽画布上 2 路仍左右排；不给画布尺寸时按 ceil(√n) 列", () => {
+    expect(wallGrid(2, "auto", { w: 1800, h: 600, gap: 8 }).cols).toBe(2);
+    expect(wallGrid(5, "auto").cols).toBe(3);
+  });
+});

@@ -13,8 +13,11 @@ import {
 test.beforeEach(({ page }) => freezeClock(page));
 
 test("主界面分区与空态", async ({ page }) => {
-  await signedIn(page);
+  const sockets = await signedIn(page);
   await page.goto("/");
+  // 收到首帧前告警栏显示"正在载入"；服务端连上即补推设备状态，空站点也在 5 s 内收到心跳
+  await expect.poll(() => sockets.length).toBeGreaterThan(0);
+  sockets[0]?.send(JSON.stringify({ channel: "system", data: { type: "heartbeat" } }));
 
   await expect(page.getByText("演示办公区")).toBeVisible();
   await expect(page.getByRole("list", { name: "关键指标" }).getByText("—")).toHaveCount(4);

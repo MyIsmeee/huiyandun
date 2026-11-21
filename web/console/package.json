@@ -5,12 +5,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "codegen": "openapi-typescript ../../contracts/openapi/api-server.v5.yaml -o src/api/schema.d.ts",
-    "codegen:check": "openapi-typescript ../../contracts/openapi/api-server.v5.yaml -o src/api/schema.d.ts --check",
+    "codegen": "openapi-typescript ../../contracts/openapi/api-server.v6.yaml -o src/api/schema.d.ts",
+    "codegen:check": "openapi-typescript ../../contracts/openapi/api-server.v6.yaml -o src/api/schema.d.ts --check",
     "e2e": "playwright test"
   },
   "dependencies": {
     "1eurofilter": "1.3.0",
+    "@antv/g6": "5.1.1",
     "@react-three/drei": "10.7.9",
     "@react-three/fiber": "9.8.2",
     "class-variance-authority": "0.7.1",

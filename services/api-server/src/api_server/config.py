@@ -1,5 +1,6 @@
 """配置项（CD-05）。"""
 
+from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
 
 from pydantic import Field
@@ -27,6 +28,14 @@ class DbConfig(ServiceConfig):
 
 class ApiConfig(DbConfig):
     port: int = Field(8000, ge=1, le=65535, description="HTTP 监听端口")
+    lan_ip: IPv4Address | IPv6Address = Field(
+        IPv4Address("127.0.0.1"),
+        description="本机局域网地址（ops.md §5，与 web-console 相同）：控制台登录爆破告警的目标地址",
+    )
+    auto_calibration: bool = Field(
+        True,
+        description="自动标定：未做 4 点标定的摄像头，按视觉引擎从画面估出的安装高度、俯角、视角自动写回",
+    )
     display_utc_offset_min: int = Field(
         480,
         ge=-720,
@@ -51,6 +60,10 @@ class ApiConfig(DbConfig):
     )
     ingest_timeout_s: float = Field(
         5.0, gt=0, le=60, description="调用 MediaMTX 控制接口的超时，单位秒（CD-04）"
+    )
+    host_dev_dir: Path = Field(
+        Path("/hostdev"),
+        description="宿主 /dev 的只读挂载，列出 USB 摄像头（v4l/by-id）；只读设备名，不打开设备",
     )
     llm_key_file: Path = Field(
         Path("/run/secrets/llm_key_secret"),
@@ -86,4 +99,11 @@ class ApiConfig(DbConfig):
     attack_file: Path = Field(
         Path("/etc/hyd/attack.json"),
         description="ATT&CK 精简查表 rules/attack/techniques.json，值班员工具 lookup_technique 读取",
+    )
+    demo_quiet: bool = Field(
+        False,
+        description="演示静默：按 demo_quiet_file 不展示易误报的事件；只由 make demo-quiet 打开，生产部署保持关闭",
+    )
+    demo_quiet_file: Path = Field(
+        Path("/etc/hyd/demo-quiet.yaml"), description="演示场景预设 demo/scenarios/demo-quiet.yaml"
     )

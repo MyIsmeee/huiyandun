@@ -12,6 +12,8 @@ type Rot = SceneItem["rot"];
 const TILES = [["road", "road"], ["sidewalk", "plaza"], ["grass", "grass"]] as const;
 const WALLS: Record<string, string> = { wall: "wall", fence: "fence", railing: "fence" };
 const OBJECTS: Record<string, string> = { table: "table", chair: "chair", cabinet: "cabinet", sofa: "sofa", bed: "bed" };
+/** 细分类别（kind）有对应资产时优先：书桌、茶几、转椅、扶手椅 */
+const KIND_ASSETS: Record<string, string> = { desk: "desk", coffee_table: "coffee-table", swivel_chair: "office-chair", armchair: "armchair" };
 const MIN_SURFACE_M2 = 2;
 const MIN_WALL_M = 1;
 /** 识别把盆栽记为 1 m 高的矮树（vision-engine TREE_HEIGHT_M），低于此高度转为盆栽 */
@@ -21,6 +23,10 @@ const COVER = 0.5;
 const SAMPLE_M = 0.5;
 /** 墙脚线外接矩形长边不小于短边的 1.5 倍即视为一段直墙，否则在离两端连线最远处折开 */
 const STRAIGHT = 1.5;
+
+/** 一个方向上排开的件数：实测长度能放下几件（四舍五入），至少 1 件、至多 MAX_REPEAT 件 */
+const MAX_REPEAT = 4;
+const count = (length: number, size: number) => Math.min(MAX_REPEAT, Math.max(1, Math.round(length / size)));
 
 const points = (list: number[][]): Point[] => list.map(([x = 0, y = 0]) => [x, y]);
 
@@ -55,12 +61,19 @@ export function draftFromFrames(
       if (asset) for (const piece of straight(line)) add(wallItem(asset, piece, size, catalog));
     }
     for (const object of frame.objects) {
-      const asset = catalog.get(OBJECTS[object.class] ?? "");
+      const asset = catalog.get(KIND_ASSETS[object.kind ?? ""] ?? "") ?? catalog.get(OBJECTS[object.class] ?? "");
       const [x0, y0, x1, y1] = bounds(points(object.polygon));
       const center: Point = [(x0 + x1) / 2, (y0 + y1) / 2];
       if (!asset || !within(center)) continue;
-      // 长边顺着识别出的底面
-      add(snap(asset, y1 - y0 > x1 - x0 && asset.footprint[0] !== asset.footprint[1] ? 90 : 0, center, size));
+      // 长边顺着识别出的底面；底面量得比一件大时（如几张拼在一起的桌子）按实测长宽排开几件
+      const rot = y1 - y0 > x1 - x0 && asset.footprint[0] !== asset.footprint[1] ? 90 : 0;
+      const [sx, sy] = span(asset, rot);
+      const [nx, ny] = [count(x1 - x0, sx), count(y1 - y0, sy)];
+      for (let i = 0; i < nx; i += 1)
+        for (let j = 0; j < ny; j += 1) {
+          const at: Point = [x0 + ((i + 0.5) * (x1 - x0)) / nx, y0 + ((j + 0.5) * (y1 - y0)) / ny];
+          add(snap(asset, rot, nx * ny === 1 ? center : at, size));
+        }
     }
     for (const { x, y, height_m } of frame.trees) {
       const asset = catalog.get(height_m >= TREE_MIN_M ? "tree" : "potted-plant");
@@ -119,8 +132,13 @@ function wallItem(asset: Asset, line: Point[], size: [number, number], catalog: 
   const alongX = x1 - x0 >= y1 - y0;
   const clamp = ([x, y]: Point): Point => [Math.min(Math.max(x, 0), size[0]), Math.min(Math.max(y, 0), size[1])];
   const across = median(line.map((p) => p[alongX ? 1 : 0]));
-  const item = stroke(asset, clamp(alongX ? [x0, across] : [across, y0]), clamp(alongX ? [x1, across] : [across, y1]));
-  const [length] = asset.footprint;
+  const stroked = stroke(asset, clamp(alongX ? [x0, across] : [across, y0]), clamp(alongX ? [x1, across] : [across, y1]));
+  const [length, width] = asset.footprint;
+  // 横向按占地就近吸附：中线在 floor 与 floor+1 之间时占地覆盖脚线（stroke 先把脚线取整再让半格，会整体偏向正方向），
+  // 并收在区域内，贴区域远边的墙不因占地越界而整段丢弃
+  const limit = size[alongX ? 1 : 0];
+  const center = Math.min(Math.max(Math.round(across - width / 2), 0), Math.max(limit - width, 0)) + width / 2;
+  const item = alongX ? { ...stroked, y: center } : { ...stroked, x: center };
   for (let len = item.len ?? length; len >= length; len -= length) if (inside({ ...item, len }, catalog, size)) return { ...item, len };
   return null;
 }

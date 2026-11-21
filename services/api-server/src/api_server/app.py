@@ -5,11 +5,12 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from http import HTTPStatus
 
 import httpx2
+import yaml
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -22,7 +23,9 @@ from api_server import (
     audit,
     auth,
     cameras,
+    cleared,
     containment,
+    dispositions,
     evidence,
     executions,
     investigator,
@@ -37,13 +40,17 @@ from api_server import (
     video,
     ws,
 )
+from api_server.auto_pose import AutoPose
 from api_server.config import ApiConfig
 from api_server.db import create_engine
 from api_server.devices import Devices
 from api_server.history import History
 from api_server.investigation_tools import Tools
 from api_server.localtime import site_tz
+from api_server.login_guard import LoginGuard
+from api_server.pose_checks import PoseChecks
 from py_common.bus import Bus
+from py_common.demo_quiet import QuietPreset
 from py_common.log import bind_request_id
 
 log = logging.getLogger(__name__)
@@ -131,12 +138,18 @@ def create_app(config: ApiConfig) -> FastAPI:
         await bus.ensure_stream(
             cameras.STREAM, [cameras.SUBJECT], cameras.STREAM_MAX_AGE_S, max_msgs_per_subject=1
         )
+        # 控制台登录爆破告警（HYD-WEB-0001）与网络探针的告警同流；流通常已由 correlator 创建，配置相同时不变
+        await bus.ensure_stream(auth.ALERT_STREAM, [auth.ALERT_SUBJECT], auth.ALERT_MAX_AGE_S)
         tasks = [
             asyncio.create_task(ws.heartbeat(app.state.hub)),
+            # 告警处置记录在审计日志中：后台读回，数据库暂不可达时重试，不推迟服务就绪
+            asyncio.create_task(app.state.dispositions.restore(app.state.engine)),
+            asyncio.create_task(app.state.cleared.restore(app.state.engine)),
             asyncio.create_task(relay.expire(app.state.hub, app.state.devices, app.state.kpis)),
             asyncio.create_task(executions.follow(bus, app.state.engine)),  # G-13
             asyncio.create_task(app.state.investigator.run()),  # TK-116
             asyncio.create_task(app.state.cameras.run()),  # D-101
+            asyncio.create_task(app.state.auto_scenes.run(app.state)),  # 场景自动识别
             asyncio.create_task(
                 relay.follow(
                     bus,
@@ -145,17 +158,28 @@ def create_app(config: ApiConfig) -> FastAPI:
                     app.state.history,
                     app.state.investigator,
                     app.state.kpis,
+                    app.state.quiet,
                 )
             ),
         ]
         try:
-            await relay.start(bus, app.state.hub, app.state.devices)
+            await relay.start(
+                bus,
+                app.state.hub,
+                app.state.devices,
+                app.state.pose_checks,
+                AutoPose(app, app.state.config.auto_calibration).on_check,
+                app.state.quiet,
+            )
             yield
         finally:
             for task in tasks:
                 task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+            # 逐个等待并只忽略取消：此前已因异常结束的后台任务会在这里把异常重新抛出，其后的总线与
+            # 数据库连接就不关了。统一收集，异常记录后照常收尾
+            for result in await asyncio.gather(*tasks, return_exceptions=True):
+                if isinstance(result, Exception):
+                    log.error("api.background_task_failed", exc_info=result)
             await bus.close()
             await app.state.go2rtc.aclose()
             await app.state.ingest.aclose()
@@ -171,9 +195,20 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.state.config = config
     app.state.tz = site_tz(config.display_utc_offset_min)
     app.state.site = site.load(config.site_file)
+    app.state.quiet = None
+    if config.demo_quiet:
+        app.state.quiet = QuietPreset.model_validate(
+            yaml.safe_load(config.demo_quiet_file.read_text(encoding="utf-8"))
+        )
+        log.warning("api.demo_quiet", extra={"preset": app.state.quiet.model_dump()})
     app.state.hub = ws.Hub()
+    app.state.login_guard = LoginGuard(config.lan_ip)
     app.state.devices = Devices(app.state.site.devices)
+    app.state.pose_checks = PoseChecks()
+    app.state.auto_scenes = scene.AutoScenes()
     app.state.history = History()
+    app.state.dispositions = dispositions.Dispositions()
+    app.state.cleared = cleared.Cleared()
     app.state.kpis = kpis.KpiTracker(app.state.devices, app.state.history, datetime.now(UTC))
     app.state.llm_last = None  # 最近一次模型调用的结果（llm_chain.invoke），供顶栏模型状态
     attack = json.loads(config.attack_file.read_text(encoding="utf-8"))
@@ -191,6 +226,8 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(cameras.router)
     app.include_router(audit.router)
     app.include_router(containment.router)
+    app.include_router(dispositions.router)
+    app.include_router(cleared.router)
     app.include_router(evidence.router)
     app.include_router(investigator.router)
     app.include_router(kpis.router)

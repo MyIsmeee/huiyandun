@@ -1,7 +1,7 @@
 import { type Device, useLive } from "../../store/live";
 import { select, useSelection } from "../../store/selection";
 import { AlertList } from "../AlertList/AlertList";
-import { DetailPanel, TargetPanel } from "../DetailPanel/DetailPanel";
+import { Details } from "../DetailPanel/DetailPanel";
 
 const deselect = () => select(null);
 
@@ -16,16 +16,18 @@ export function Inspector(props: {
   onCollapse?: () => void;
   /** 详情中是否显示竖向处置时间线：态势页由底部进度条显示，不重复 */
   timeline?: boolean;
+  /** 详情中是否播放实时画面：监控墙上画面已在墙上，不重复连接 */
+  video?: boolean;
 }) {
-  const { devices, stale, lastFrameAt, onCollapse, timeline } = props;
+  const { devices, stale, lastFrameAt, onCollapse, timeline, video } = props;
   const { selected, target } = useInspected(devices);
   return (
     <>
       <div hidden={selected !== undefined || target !== undefined} className="flex min-h-0 flex-1 flex-col">
         <AlertList stale={stale} lastFrameAt={lastFrameAt} onCollapse={onCollapse} />
       </div>
-      {selected && <DetailPanel device={selected} stale={stale} onClose={deselect} timeline={timeline} />}
-      {target && <TargetPanel target={target} stale={stale} onClose={deselect} />}
+      {/* 设备与目标详情共用一个组件：从设备画面上点选目标时，同一路实时画面不重连 */}
+      <Details device={selected} target={target} stale={stale} onClose={deselect} timeline={timeline} video={video} />
     </>
   );
 }

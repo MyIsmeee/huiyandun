@@ -1,10 +1,15 @@
 """调用链（architecture.md §5、TK-062）：按供应商顺序逐个尝试，全部失败时由调用方执行任务的 terminal。
 
+顺序先经路由（route）：任务配置了 routing 且调用方给出事件等级时，等级在 escalate 内的"升阶"——公网（云端）
+供应商排到前面，其余等级内网（本地）供应商排到前面；同一网络位置内保持管理员排定的先后。排在前面的一家不可达
+或超时，照常转下一家，即云端不可用时降级回本地，全部不可用时落到 terminal。未配置或没有等级时不改顺序。
+
 每家：熔断检查 → 公网脱敏（C-LLM-03）→ 调用 → 剥离推理内容（C-LLM-12）→ 本地 Schema 校验，失败重试 1 次
 （C-LLM-05）→ 还原假名；成功后做事实回溯，未溯源实体随输出返回（C-LLM-06、D-086）。
 熔断借鉴 cc-switch（D-084）：连续失败 4 次的供应商 60 s 内跳过，到期后放行一次，成功即清零。
 """
 
+import asyncio
 import json
 import logging
 import secrets
@@ -17,7 +22,12 @@ from typing import Any, Literal, Self
 
 import httpx2
 import yaml
-from openai import APIConnectionError, APIResponseValidationError, APIStatusError
+from openai import (
+    APIConnectionError,
+    APIResponseValidationError,
+    APIStatusError,
+    APITimeoutError,
+)
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from pydantic import (
     BaseModel,
@@ -28,7 +38,8 @@ from pydantic import (
     model_validator,
 )
 
-from llm_gateway.connect import Target, client, explain
+from llm_gateway.connect import NOT_COMPATIBLE, ProbeFailure, Target, client, explain
+from llm_gateway.egress import Resolver, blocked_reason, public_addresses, resolve
 from llm_gateway.probe import strip_reasoning
 from llm_gateway.redact import Pseudonyms, untraced
 from py_contracts.llm.incident_investigation_v1_schema import IncidentInvestigationTurn
@@ -38,7 +49,6 @@ log = logging.getLogger(__name__)
 
 FAILURES, COOLDOWN = 4, timedelta(seconds=60)
 CONNECT_S = 2.0  # 连不上即转下一家，全部不可用时尽快落模板（FR-502）
-NOT_COMPATIBLE = "返回的不是 OpenAI 兼容格式"
 
 
 class InvestigationTurn(IncidentInvestigationTurn):
@@ -59,6 +69,17 @@ SCHEMAS: dict[str, type[BaseModel]] = {
 }
 
 
+type Severity = Literal["critical", "high", "medium", "low"]
+type Route = Literal["manual", "local_first", "escalated"]
+
+
+class Routing(BaseModel):
+    """按事件等级路由：escalate 内的等级公网（云端）优先，其余等级内网（本地）优先。"""
+
+    model_config = ConfigDict(extra="forbid")
+    escalate: list[Severity]
+
+
 class Task(BaseModel):
     """deploy/configs/llm-tasks.yaml 中的一项（architecture.md §5）。"""
 
@@ -68,6 +89,7 @@ class Task(BaseModel):
     temperature: float
     deadline_s: float
     terminal: Literal["rule-only", "template-only"]
+    routing: Routing | None = None  # 缺省：按管理员排定的顺序
 
     @field_validator("schema_")
     @classmethod
@@ -90,7 +112,7 @@ class Provider(Target):
     id: str
     name: str
     model: str
-    network: Literal["internal", "public"]
+    network: Literal["internal", "public"]  # 调用链中必填
     structured_output: Literal["json_schema", "json_object", "none"] | None
 
 
@@ -107,6 +129,9 @@ class Invocation(BaseModel):
     providers: list[Provider]
     deadline_s: float | None = Field(None, gt=0)
     evidence: dict[str, Any] | None = None
+    severity: Severity | None = None  # 所研判事件的等级，供按等级路由；缺省时不改顺序
+    # 全局禁止公网（G-02）：为真时指向公网或无法确认在内网的供应商一律跳过，不发请求（llm_gateway.egress）
+    block_public: bool = False
 
 
 class Attempt(BaseModel):
@@ -122,7 +147,20 @@ class InvokeResult(BaseModel):
     output: dict[str, Any] | None
     unverified: list[str]
     provider_id: str | None
-    attempts: list[Attempt]
+    attempts: list[Attempt]  # 按实际尝试的先后
+    route: Route = "manual"
+    order: list[str] = []  # 路由后的供应商顺序；首位即本次的首选
+
+
+def route(
+    task: Task, providers: list[Provider], severity: Severity | None
+) -> tuple[Route, list[Provider]]:
+    """路由后的顺序。稳定排序：同一网络位置内保持管理员排定的先后。"""
+    if task.routing is None or severity is None:
+        return "manual", providers
+    first = "public" if severity in task.routing.escalate else "internal"
+    ordered = sorted(providers, key=lambda p: p.network != first)
+    return ("escalated" if first == "public" else "local_first"), ordered
 
 
 class Breaker:
@@ -158,8 +196,10 @@ class Chain:
         prompts_dir: Path,
         techniques: set[str],
         transport: httpx2.AsyncBaseTransport | None = None,
+        resolver: Resolver = resolve,
     ) -> None:
         self.tasks, self._techniques, self._transport = tasks, techniques, transport
+        self._resolver = resolver
         self._prompts = {
             name: (prompts_dir / t.prompt).read_text("utf-8") for name, t in tasks.items()
         }
@@ -203,19 +243,32 @@ class Chain:
         elif provider.structured_output == "json_object":
             extra["response_format"] = {"type": "json_object"}
         tokens = 0
-        async with client(provider, self._transport) as c:
+        try:
+            opened = client(provider, self._transport)
+        except ProbeFailure as e:  # 地址无法解析：这一家失败，转下一家
+            raise CallFailed(e.reason, tokens) from e
+        async with opened as c:
             for _ in range(2):  # 校验失败重试 1 次（C-LLM-05）
-                remaining = min(provider.timeout_s, deadline - time.monotonic())
+                budget = deadline - time.monotonic()
+                remaining = min(provider.timeout_s, budget)
                 if remaining <= 0:
                     raise CallFailed(limit, tokens)
                 try:
-                    completion = await c.chat.completions.create(
-                        model=provider.model,
-                        messages=messages,
-                        temperature=task.temperature,
-                        timeout=httpx2.Timeout(remaining, connect=min(CONNECT_S, remaining)),
-                        **extra,
-                    )
+                    # SDK 的超时是每次读的空闲时长：持续滴字节（如保活空白）的响应永远不触发。另按墙上时钟
+                    # 限定整次调用，总时限才是真正的上限
+                    async with asyncio.timeout(remaining):
+                        completion = await c.chat.completions.create(
+                            model=provider.model,
+                            messages=messages,
+                            temperature=task.temperature,
+                            timeout=httpx2.Timeout(remaining, connect=min(CONNECT_S, remaining)),
+                            **extra,
+                        )
+                except (TimeoutError, APITimeoutError) as e:
+                    # 先用完的是这一家自己的超时，还是任务的总时限
+                    own = provider.timeout_s <= budget
+                    reason = f"{provider.timeout_s:g} 秒内无响应" if own else limit
+                    raise CallFailed(reason, tokens) from e
                 except (APIConnectionError, APIStatusError) as e:
                     raise CallFailed(explain(e, provider).reason, tokens) from e
                 except (APIResponseValidationError, ValueError) as e:  # 200 但响应体不是 JSON
@@ -243,16 +296,32 @@ class Chain:
             f"超出 {max(round(seconds, 1), 0.1):g} 秒总时限",
         )
         attempts: list[Attempt] = []
-        for provider in req.providers:
-            pseudonyms = Pseudonyms() if provider.network == "public" else None
+        routed, providers = route(self.tasks[req.task], req.providers, req.severity)
+        order = [p.id for p in providers]
+        if routed != "manual":
+            log.info(
+                "llm.routed",
+                extra={"task": req.task, "route": routed, "severity": req.severity, "order": order},
+            )
+        for provider in providers:
             skipped = None
             if deadline <= time.monotonic():
                 skipped = limit
             elif (until := self.breaker.blocked_until(provider.id)) is not None:
                 skipped = f"连续失败 {FAILURES} 次，暂停调用至 {until:%H:%M:%S} UTC"
+            else:
+                block = req.block_public or provider.block_public
+                skipped = await blocked_reason(
+                    provider.base_url, provider.network, block, self._resolver
+                )
             if skipped:
                 attempts.append(_attempt(req.task, provider, "skipped", skipped, None, 0, False))
                 continue
+            # 脱敏以地址实际指向为准：标为内网却解析出公网地址的，同样按公网处理（C-LLM-03）
+            public = provider.network == "public" or bool(
+                await public_addresses(provider.base_url, self._resolver)
+            )
+            pseudonyms = Pseudonyms() if public else None
             data = pseudonyms.redact(req.data) if pseudonyms else req.data
             messages = self._messages(req.task, data)
             started = time.monotonic()
@@ -284,8 +353,17 @@ class Chain:
                 unverified=untraced(output, req.evidence or req.data, self._techniques),
                 provider_id=provider.id,
                 attempts=attempts,
+                route=routed,
+                order=order,
             )
-        return InvokeResult(output=None, unverified=[], provider_id=None, attempts=attempts)
+        return InvokeResult(
+            output=None,
+            unverified=[],
+            provider_id=None,
+            attempts=attempts,
+            route=routed,
+            order=order,
+        )
 
 
 def _same(value: Any) -> Any:

@@ -1,5 +1,6 @@
 import { BellRing, Crosshair, LoaderCircle, Lock, type LucideIcon, ShieldAlert, TriangleAlert, WifiOff } from "lucide-react";
 import { StatusIcon, StatusPill, statusTint } from "@/components/StatusPill";
+import { cn } from "@/lib/utils";
 import { type Behavior, useLive } from "../store/live";
 import { useViewpointCamera } from "./camera";
 import { type Camera, deviceLook, type TagIcon } from "./devices";
@@ -14,12 +15,14 @@ export const ICONS: Record<TagIcon, LucideIcon> = {
   contained: Lock,
   notified: BellRing,
 };
-export const BEHAVIOR: Record<Behavior["behavior"], string> = { fall: "跌倒", climb: "攀爬" };
+export const BEHAVIOR: Record<Behavior["behavior"], string> = { fall: "跌倒", climb: "攀爬", still: "长时间静止", fight: "打架" };
 /** 标签底边距机头的高度，单位米 */
 const ABOVE_M = 0.5;
 
 /** 告警与处置状态以定位针呈现；离线、未标定不是告警，仍为中性小标签 */
 const PLAIN = new Set<TagIcon>(["offline", "uncalibrated"]);
+/** 实心标签、加大针头的状态：网络攻击、只通知、已处置 */
+const SOLID = new Set<TagIcon>(["cyber", "notified", "contained"]);
 
 /**
  * 设备状态标注（§5.2 附加列、V-U4）：告警与处置时机身上方一枚定位针（状态色 + 图标，屏幕尺寸固定），
@@ -65,22 +68,31 @@ export function DeviceTags({ cameras, view }: { cameras: Camera[]; view: View })
 function Pin({ tags, detail }: { tags: ReturnType<typeof deviceLook>["tags"]; detail: string[] }) {
   const [first, second] = tags;
   if (!first) return null;
+  // 网络攻击与已处置是演示的主角：标签实心状态色白字、针头加大，攻击中针头向外扩散波纹
+  const solid = SOLID.has(first.icon);
+  const rippling = first.icon === "cyber" || first.icon === "notified";
   return (
     <>
       <span
         role="status"
-        style={{ borderColor: first.color, backgroundColor: statusTint(first.color) }}
-        className="mb-1 rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap text-foreground tabular-nums"
+        style={solid ? { borderColor: first.color, backgroundColor: first.color } : { borderColor: first.color, backgroundColor: statusTint(first.color) }}
+        className={cn(
+          "mb-1 rounded-full border px-2.5 py-0.5 text-xs whitespace-nowrap tabular-nums",
+          solid ? "text-sm font-semibold text-white shadow-lg" : "text-foreground",
+        )}
       >
         {[...tags.map((t) => t.text), ...detail].join(" · ")}
       </span>
-      <span
-        style={{ borderColor: first.color, boxShadow: second ? `0 0 0 2px ${second.color}` : undefined }}
-        className="grid size-7 place-items-center rounded-full border-2 bg-card"
-      >
-        <StatusIcon icon={ICONS[first.icon]} color={first.color} />
+      <span className="relative grid place-items-center">
+        {rippling && <span aria-hidden className="absolute inset-0 animate-ping rounded-full" style={{ backgroundColor: first.color, opacity: 0.6 }} />}
+        <span
+          style={{ borderColor: first.color, boxShadow: second ? `0 0 0 2px ${second.color}` : undefined }}
+          className={cn("relative grid place-items-center rounded-full border-2 bg-card", solid ? "size-9" : "size-7")}
+        >
+          <StatusIcon icon={ICONS[first.icon]} color={first.color} className={solid ? "size-5" : undefined} />
+        </span>
       </span>
-      <span aria-hidden className="h-3 w-0.5" style={{ backgroundColor: first.color }} />
+      <span aria-hidden className={cn("w-0.5", solid ? "h-4" : "h-3")} style={{ backgroundColor: first.color }} />
     </>
   );
 }

@@ -1,8 +1,10 @@
+import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { areaPlacements, normalizedYaw } from "../../src/editor/cameras";
-import { acceptDraft, cameraTool, discardDraft, isDirty, loadDraft, placeCamera, placeItem, placingCamera, proposeDraft, redo, removeCamera, removeItem, replaceItem, savedDraft, selectItem, selectTool, UNDO_LIMIT, undo, useDraft } from "../../src/editor/draft";
+import type { SceneArea } from "../../src/lib/api";
+import { acceptDraft, cameraTool, discardDraft, draftToken, isDirty, loadDraft, MAX_ITEMS, placeCamera, placeItem, placingCamera, proposeDraft, redo, removeCamera, removeItem, replaceItem, savedDraft, selectItem, selectTool, UNDO_LIMIT, undo, useDraft, useDraftSync } from "../../src/editor/draft";
 
-const AREA = { id: "area-01", name: "默认区域", width_m: 40, depth_m: 24, items: [], updated_at: "2026-11-09T00:00:00Z" };
+const AREA: SceneArea = { id: "area-01", name: "默认区域", width_m: 40, depth_m: 24, items: [], updated_at: "2026-11-09T00:00:00Z" };
 const desk = (x: number) => ({ asset: "desk", x, y: 1.5, rot: 0 as const, len: null });
 const count = () => useDraft.getState().items.length;
 const history = () => useDraft.temporal.getState();
@@ -38,7 +40,7 @@ describe("区域草稿的撤销与重做（设计 150 E-6）", () => {
 
   it("载入区域清空历史；保存不算一步，保存后撤销又成为未保存的修改", () => {
     placeItem(desk(1));
-    savedDraft({ ...AREA, items: [desk(1)], updated_at: "2026-11-09T01:00:00Z" }, []);
+    savedDraft({ ...AREA, items: [desk(1)], updated_at: "2026-11-09T01:00:00Z" }, [], draftToken());
     expect(history().pastStates).toHaveLength(1);
     expect(isDirty(useDraft.getState())).toBe(false);
     undo();
@@ -71,7 +73,7 @@ describe("区域草稿的撤销与重做（设计 150 E-6）", () => {
     placeItem(desk(1));
     const sent = useDraft.getState().items;
     placeItem(desk(3)); // 请求发出后、响应到达前
-    savedDraft({ ...AREA, items: sent, updated_at: "2026-11-09T01:00:00Z" }, []);
+    savedDraft({ ...AREA, items: sent, updated_at: "2026-11-09T01:00:00Z" }, [], draftToken());
     expect(count()).toBe(2);
     expect(isDirty(useDraft.getState())).toBe(true);
   });
@@ -132,5 +134,87 @@ describe("从画面生成的初稿（设计 150 §7）", () => {
     proposeDraft([desk(1)]);
     loadDraft({ ...AREA, id: "area-02" }, []);
     expect(useDraft.getState().pending).toEqual([]);
+  });
+});
+
+describe("保存响应与草稿的对应", () => {
+  beforeEach(() => loadDraft(AREA, []));
+
+  it("保存进行中放弃修改重新载入：迟到的响应不写入，旧内容不会被当作已保存", () => {
+    placeItem(desk(1));
+    const token = draftToken();
+    loadDraft(AREA, []); // 放弃修改
+    expect(savedDraft({ ...AREA, items: [desk(1)], updated_at: "2026-11-09T01:00:00Z" }, [], token)).toBe(false);
+    expect(useDraft.getState()).toMatchObject({ updatedAt: AREA.updated_at, saved: [] });
+  });
+
+  it("保存进行中换了区域：响应不写进另一个区域的草稿", () => {
+    placeItem(desk(1));
+    const token = draftToken();
+    loadDraft({ ...AREA, id: "area-02" }, []);
+    expect(savedDraft({ ...AREA, items: [desk(1)], updated_at: "2026-11-09T01:00:00Z" }, [], token)).toBe(false);
+    expect(isDirty(useDraft.getState())).toBe(false);
+  });
+});
+
+describe("无变化的操作不记入撤销历史", () => {
+  beforeEach(() => loadDraft(AREA, [{ id: "cam-01", x: 2, y: 2, yaw_deg: 45 }]));
+
+  it("全部重叠、没有可接受的初稿：只收起初稿，可重做的步骤保留", () => {
+    placeItem(desk(1));
+    undo();
+    proposeDraft([desk(1)]);
+    acceptDraft([]);
+    expect(useDraft.getState().pending).toEqual([]);
+    expect(history().futureStates).toHaveLength(1);
+  });
+
+  it("摄像头放回原位不算一步", () => {
+    placingCamera("cam-01");
+    placeCamera({ id: "cam-01", x: 2, y: 2, yaw_deg: 45 });
+    expect(history().pastStates).toHaveLength(0);
+    expect(useDraft.getState().tool).toBeNull();
+  });
+
+  it(`物体数超过 ${MAX_ITEMS} 时不放置、不接受`, () => {
+    useDraft.setState({ items: Array.from({ length: MAX_ITEMS }, (_, i) => desk(i)) });
+    placeItem(desk(1));
+    expect(count()).toBe(MAX_ITEMS);
+    expect(acceptDraft([desk(2)])).toBe(false);
+    expect(count()).toBe(MAX_ITEMS);
+  });
+});
+
+describe("草稿跟随区域（设计 150 E-7）", () => {
+  const cam = { id: "cam-01", x: 2, y: 2, yaw_deg: 45 };
+  beforeEach(() => loadDraft(AREA, []));
+
+  it("有修改时他人保存了区域，撤销回无修改后换成最新内容", () => {
+    const { rerender } = renderHook(({ area }) => useDraftSync(area, [], ["cam-01"]), { initialProps: { area: AREA } });
+    placeItem(desk(1));
+    const theirs = { ...AREA, items: [desk(7)], updated_at: "2026-11-09T02:00:00Z" };
+    rerender({ area: theirs });
+    expect(useDraft.getState().items).toEqual([desk(1)]); // 有修改时保留
+    undo();
+    rerender({ area: theirs });
+    expect(useDraft.getState()).toMatchObject({ items: [desk(7)], updatedAt: theirs.updated_at });
+  });
+
+  it("本页保存后站点推送尚未到达：不按站点里较旧的区域重新载入", () => {
+    const { rerender } = renderHook(({ area }) => useDraftSync(area, [], []), { initialProps: { area: AREA } });
+    placeItem(desk(1));
+    savedDraft({ ...AREA, items: [desk(1)], updated_at: "2026-11-09T01:00:00Z" }, [], draftToken());
+    rerender({ area: AREA });
+    expect(useDraft.getState().items).toEqual([desk(1)]);
+  });
+
+  it("草稿里放入的摄像头被他人删除：从草稿与撤销历史中去掉", () => {
+    const { rerender } = renderHook(({ ids }) => useDraftSync(AREA, [], ids), { initialProps: { ids: ["cam-01"] } });
+    placeCamera(cam);
+    placeCamera({ ...cam, x: 5 });
+    rerender({ ids: [] });
+    expect(useDraft.getState().cameras).toEqual([]);
+    undo(); // 历史中放入时的那一步同样已去掉
+    expect(useDraft.getState().cameras).toEqual([]);
   });
 });

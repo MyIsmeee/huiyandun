@@ -3,6 +3,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ApiError, api } from "../../lib/api";
+import { usePoster } from "../../store/snapshots";
 import { DetectionOverlay } from "../DetectionOverlay/DetectionOverlay";
 
 /** 连接中 / 播放 / 媒体中断（保留最后画面，等待恢复）/ 不可用 / 设备没有视频流（ui.md） */
@@ -10,14 +11,21 @@ export type VideoStatus =
   | { kind: "connecting" }
   | { kind: "playing"; stream: MediaStream }
   | { kind: "interrupted"; stream: MediaStream }
-  | { kind: "unavailable"; reason: string }
+  | { kind: "unavailable"; reason: string; retrying?: boolean }
   | { kind: "none" };
 
 /** 取得 answer 后超过此时长仍未取得画面即判为不可用；信令本身的超时由 api 客户端负责 */
 const CONNECT_TIMEOUT_MS = 10_000;
+/** 媒体中断（disconnected）超过此时长仍未自行恢复即重建连接，不等浏览器判为 failed（约 30 s） */
+const INTERRUPT_MS = 10_000;
+/** 不可用后自动重试：5 s 起倍增，上限 60 s；页面隐藏时暂停，回到前台再连（无人值守的监控墙须能自愈） */
+const RETRY_MIN_MS = 5_000;
+const RETRY_MAX_MS = 60_000;
 /** go2rtc 的 HTTP 信令不支持增量候选：等候选收集完再提交 offer，最多等此时长 */
 const GATHER_MS = 2_000;
 const NO_MEDIA = "无法取得画面：浏览器须能访问本机 8555 端口";
+/** 曾经播放过的连接失败：网络或视频服务中断，端口说明不适用 */
+const LOST = "连接中断，正在自动重连";
 
 /**
  * 设备实时画面（FR-106）：信令经 api-server 转发，媒体流由 go2rtc 直达（D-02）。人体模糊为 [M1]。
@@ -25,25 +33,37 @@ const NO_MEDIA = "无法取得画面：浏览器须能访问本机 8555 端口";
  */
 export function LiveVideo({ deviceId }: { deviceId: string }) {
   const [status, retry] = useLiveVideo(deviceId);
+  const poster = usePoster(deviceId);
   const root = useRef<HTMLDivElement>(null);
   const video = useCallback(() => root.current?.querySelector("video") ?? null, []);
   // 画面上叠加该路的检测框与骨骼（FR-107）；无跟踪数据的摄像头叠加层不画任何东西
   return (
     <div ref={root}>
-      <LiveVideoView status={status} onRetry={retry}>
+      <LiveVideoView status={status} onRetry={retry} poster={poster}>
         {status.kind === "playing" && <DetectionOverlay cameraId={deviceId} video={video} />}
       </LiveVideoView>
     </div>
   );
 }
 
-/** 建立并维护一路实时画面连接（监控墙瓦片与详情共用）；deviceId 变化时由调用方以 key 重建 */
+/**
+ * 建立并维护一路实时画面连接（监控墙瓦片与详情共用）；deviceId 变化时由调用方以 key 重建。
+ * 不可用时按退避自动重试，手动"重试"立即重连并重置退避
+ */
 export function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
   const [status, setStatus] = useState<VideoStatus>({ kind: "connecting" });
   const [attempt, setAttempt] = useState(0);
-  const retry = () => {
+  /** 连续失败次数：决定下次自动重试的间隔，连通后清零 */
+  const failures = useRef(0);
+  /** 本组件内是否播放过：失败时据此区分"连接中断"与"从未连上" */
+  const played = useRef(false);
+  const reconnect = useCallback(() => {
     setStatus({ kind: "connecting" });
     setAttempt((n) => n + 1);
+  }, []);
+  const retry = () => {
+    failures.current = 0;
+    reconnect();
   };
   useEffect(() => {
     // 不配置 ICE 服务器：只用本机候选，不访问公网 STUN（G-05）
@@ -51,18 +71,40 @@ export function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
     let stream: MediaStream | null = null;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let interrupt: ReturnType<typeof setTimeout> | undefined;
+    let again: ReturnType<typeof setTimeout> | undefined;
+    const onVisible = () => {
+      if (document.hidden) return;
+      document.removeEventListener("visibilitychange", onVisible);
+      reconnect();
+    };
     const fail = (reason: string) => {
       clearTimeout(timer);
+      clearTimeout(interrupt);
       pc.close();
-      if (active) setStatus({ kind: "unavailable", reason });
+      if (!active) return;
+      setStatus({ kind: "unavailable", reason: played.current ? LOST : reason, retrying: true });
+      failures.current += 1;
+      const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** (failures.current - 1));
+      again = setTimeout(() => {
+        if (!document.hidden) reconnect();
+        else document.addEventListener("visibilitychange", onVisible);
+      }, delay);
     };
     const update = () => {
       if (!active || !stream) return;
       if (pc.connectionState === "connected") {
         clearTimeout(timer);
+        clearTimeout(interrupt);
+        interrupt = undefined;
+        failures.current = 0;
+        played.current = true;
         setStatus({ kind: "playing", stream });
       }
-      if (pc.connectionState === "disconnected") setStatus({ kind: "interrupted", stream });
+      if (pc.connectionState === "disconnected") {
+        setStatus({ kind: "interrupted", stream });
+        interrupt ??= setTimeout(() => fail(LOST), INTERRUPT_MS);
+      }
     };
     pc.ontrack = (e) => {
       stream = e.streams[0] ?? new MediaStream([e.track]);
@@ -80,9 +122,12 @@ export function useLiveVideo(deviceId: string): [VideoStatus, () => void] {
     return () => {
       active = false;
       clearTimeout(timer);
+      clearTimeout(interrupt);
+      clearTimeout(again);
+      document.removeEventListener("visibilitychange", onVisible);
       pc.close();
     };
-  }, [deviceId, attempt]);
+  }, [deviceId, attempt, reconnect]);
   return [status, retry];
 }
 
@@ -115,26 +160,40 @@ function gathered(pc: RTCPeerConnection): Promise<void> {
 }
 
 /** 按状态呈现；与连接逻辑分开，供组件展示页截图（V-G3） */
-export function LiveVideoView(props: { status: VideoStatus; onRetry?: () => void; className?: string; children?: ReactNode }) {
-  const { status, onRetry, className, children } = props;
+/** dark：画面底色为黑（监控墙瓦片），状态文字改用浅色，否则深色字落在黑底上看不清 */
+export function LiveVideoView(props: {
+  status: VideoStatus;
+  onRetry?: () => void;
+  className?: string;
+  dark?: boolean;
+  /** 最近一次抓到的画面：连接中与第一帧到达前垫底（store/snapshots.ts） */
+  poster?: string | null;
+  children?: ReactNode;
+}) {
+  const { status, onRetry, className, dark = false, poster = null, children } = props;
   return (
     <div data-video={status.kind} className={cn("relative aspect-video overflow-hidden rounded-md border border-border bg-secondary", className)}>
-      {"stream" in status && <Stream stream={status.stream} />}
+      {"stream" in status && <Stream stream={status.stream} poster={poster} />}
+      {status.kind === "connecting" && poster && (
+        <img src={poster} alt="" className="absolute inset-0 size-full object-contain opacity-60" />
+      )}
       {status.kind === "connecting" && (
-        <Center>
+        <Center dark={dark || poster !== null}>
           <Video aria-hidden className="size-5" />
           正在连接实时画面…
         </Center>
       )}
-      {status.kind === "none" && <Center>该设备没有视频流</Center>}
+      {status.kind === "none" && <Center dark={dark}>该设备没有视频流</Center>}
       {status.kind === "unavailable" && (
-        <Center>
-          <span className="flex items-center gap-1.5 text-foreground">
+        <Center dark={dark}>
+          <span className={cn("flex items-center gap-1.5 font-medium", dark ? "text-white" : "text-foreground")}>
             <VideoOff aria-hidden className="size-4" />
             实时画面不可用
           </span>
           <span className="px-4 text-center text-xs">{status.reason}</span>
-          <Button variant="outline" size="sm" onClick={onRetry} className="mt-1">
+          {status.retrying && <span className="text-xs">稍后自动重试</span>}
+          {/* 按钮底色为浅色：文字色写明，不继承黑底瓦片上的浅色字 */}
+          <Button variant="outline" size="sm" onClick={onRetry} className="mt-1 text-foreground">
             <RotateCw aria-hidden />
             重试
           </Button>
@@ -151,14 +210,19 @@ export function LiveVideoView(props: { status: VideoStatus; onRetry?: () => void
   );
 }
 
-function Stream({ stream }: { stream: MediaStream }) {
+function Stream({ stream, poster }: { stream: MediaStream; poster: string | null }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
-  return <video ref={ref} autoPlay muted playsInline aria-label="实时画面" className="size-full bg-black object-contain" />;
+  // poster 显示到第一帧解码出来为止
+  return <video ref={ref} autoPlay muted playsInline poster={poster ?? undefined} aria-label="实时画面" className="size-full bg-black object-contain" />;
 }
 
-function Center({ children }: { children: ReactNode }) {
-  return <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-subtle-foreground">{children}</div>;
+function Center({ children, dark }: { children: ReactNode; dark: boolean }) {
+  return (
+    <div className={cn("absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm", dark ? "text-white/70" : "text-subtle-foreground")}>
+      {children}
+    </div>
+  );
 }

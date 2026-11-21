@@ -71,8 +71,10 @@ describe("rotated：旋转 90°（设计 150 E-4）", () => {
     expect(rotated(item("desk", 10, 23.5), DESK, CATALOG, [40, 24])).toBeNull();
   });
 
-  it("线状资产绕起点转；转后超出区域时不转", () => {
-    expect(rotated(item("wall", 4, 5.5, 4), WALL, CATALOG, [40, 24])).toEqual({ ...item("wall", 4, 5.5, 4), rot: 90 });
+  it("线状资产绕起点转，再把占地挪回网格（奇数宽的墙原样转过去两边各偏半格）；转后超出区域时不转", () => {
+    const turned = rotated(item("wall", 4, 5.5, 4), WALL, CATALOG, [40, 24]);
+    expect(turned).toEqual({ ...item("wall", 4.5, 6, 4), rot: 90 });
+    expect(turned && extent(turned, CATALOG)).toEqual([4, 6, 5, 10]);
     expect(rotated(item("wall", 4, 22.5, 4), WALL, CATALOG, [40, 24])).toBeNull();
   });
 

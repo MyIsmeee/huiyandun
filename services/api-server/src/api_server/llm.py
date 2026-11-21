@@ -108,7 +108,11 @@ def normalize(base_url: str) -> str:
     for suffix in ENDPOINT_SUFFIXES:
         url = url.removesuffix(suffix)
     url = url.rstrip("/")
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # 端口不是数字或超出范围时在取用时才报错
+    except ValueError as e:  # 如 http://host:abc/v1、http://[::1
+        raise HTTPException(400, "地址格式不正确，形如 http://192.168.1.50:8080/v1") from e
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise HTTPException(400, "地址须为 http:// 或 https:// 开头的 OpenAI 兼容地址")
     return url

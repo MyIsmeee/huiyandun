@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 
 from evidence_verify.verify import verify
@@ -48,7 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         files = read(args.package)
-    except (OSError, zipfile.BadZipFile) as e:
+    except (OSError, zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError) as e:
+        # 压缩流损坏、压缩方式不支持、条目被加密：同样是读不了，不以 traceback 收场
         print(f"无法读取证据包：{e}", file=sys.stderr)
         return 2
 

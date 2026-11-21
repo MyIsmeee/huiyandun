@@ -154,13 +154,13 @@ def test_from_pose_center_pixel_lands_where_optical_axis_meets_ground() -> None:
 
 
 def test_from_pose_follows_yaw_and_left_right() -> None:
-    """朝向 90° 时正前方为平面 +y；画面右侧在朝向的右手边（+x）。"""
+    """朝向 90° 时正前方为平面 +y；画面右侧为 −x：俯视 x 向右、y 向下，面朝 +y（画面下方）时右手边为 −x。"""
     mapping = GroundMapping.from_pose(POSE | {"yaw_deg": 90.0}, 1280, 720)
     assert mapping is not None
     x, y, _ = mapping.locate(640, 360, 0)
     assert (x, y) == pytest.approx((0.0, 3.0), abs=1e-6)
     right, _, _ = mapping.locate(1000, 600, 0)
-    assert right > 0
+    assert right < 0
 
 
 def test_from_pose_error_grows_with_distance() -> None:

@@ -2,8 +2,7 @@ import { type MouseEvent, useState } from "react";
 import type { components } from "../../api/schema";
 import { useCameras } from "../../scene/devices";
 import { CameraTopDown, Footprints } from "../../scene/Scene2D";
-import { useLive } from "../../store/live";
-import type { Snapshot } from "./CameraEditor";
+import { type Snapshot, useSite } from "./CameraEditor";
 
 /** 一组标定点：画面原始分辨率下的像素 (u, v) 与区域内地面坐标 (x, y)，单位米 */
 export type Pair = [u: number, v: number, x: number, y: number];
@@ -65,7 +64,7 @@ export function CalibrationFrame(props: {
  */
 export function GroundPlan(props: { area: SceneArea; pairs: Pair[]; hover: number | null; onPick: (ground: [number, number]) => void }) {
   const { area } = props;
-  const site = useLive((s) => s.site);
+  const site = useSite();
   const cameras = useCameras(site?.devices ?? [], area.id);
   const [pointer, setPointer] = useState<[number, number] | null>(null);
 

@@ -24,10 +24,12 @@ from correlator.service import (
     correlate,
 )
 from py_common.bus import Bus
+from py_common.demo_quiet import Integrity, QuietPreset
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 
 ROOT = Path(__file__).resolve().parents[3]
-RULES = load_rules(ROOT / "rules/correlator")
+# 以跨域规则验证订阅、重放与发布；单域规则对同一批事件另成一条关联事件，会干扰计数
+RULES = [r for r in load_rules(ROOT / "rules/correlator") if r.id == "HYD-X-0001"]
 ATTACK = json.loads((ROOT / "rules/attack/techniques.json").read_text(encoding="utf-8"))
 INTEGRITY = "hyd.vision.integrity.v1"
 VISION_SUBJECTS = ["hyd.vision.behavior.v1", INTEGRITY]
@@ -164,3 +166,28 @@ def test_subscribe_failure_retried_and_restore_covers_longest_window(
     restored_since = bus.subscriptions[1][1]
     assert datetime.now(UTC) - restored_since >= window
     assert any(r.getMessage() == "correlator.subscribe_failed" for r in caplog.records)
+
+
+def test_demo_quiet_integrity_not_correlated(nats_url: str) -> None:
+    """演示静默：被静默的画面完整性事件不参与关联；保留判定的摄像头照常生成关联事件。"""
+    quiet = QuietPreset(integrity=Integrity(hide=["freeze"], keep={"cam-09": ["freeze"]}))
+
+    async def scenario() -> CorrelatorIncidentV1:
+        bus = await Bus.connect(nats_url, name="test", timeout_s=2)
+        await bus.ensure_stream(STREAM, [SUBJECT], STREAM_MAX_AGE_S)
+        await bus.ensure_stream(INCIDENT_STREAM, [INCIDENT_SUBJECT], INCIDENT_MAX_AGE_S)
+        await bus.ensure_stream("HYD_VISION", VISION_SUBJECTS, 3600)
+        received: asyncio.Queue[CorrelatorIncidentV1] = asyncio.Queue()
+        await bus.subscribe(INCIDENT_SUBJECT, CorrelatorIncidentV1, received.put)
+        await correlate(Engine(RULES, ATTACK), bus, timedelta(seconds=1), quiet)
+        t = now_offset()
+        for device in ("cam-08", "cam-09"):
+            await bus.js_publish(SUBJECT, alert(t, device_id=device))
+            await bus.js_publish(INTEGRITY, integrity(t + 1, camera_id=device))
+        incident = await asyncio.wait_for(received.get(), 5)
+        await asyncio.sleep(0.5)
+        assert received.empty()
+        await bus.close()
+        return incident
+
+    assert asyncio.run(scenario()).device_ids == ["cam-09"]

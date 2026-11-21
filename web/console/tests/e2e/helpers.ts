@@ -116,6 +116,8 @@ export const camera = (state: string, id = "cam-01") => ({
     mapping: "calibrated",
     homography: null,
     reproj_error_m: 0.3,
+    climb_lines: [],
+    rules: [],
   },
 });
 

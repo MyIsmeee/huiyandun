@@ -32,7 +32,9 @@ async function send(
 ): Promise<Response> {
   const headers: Record<string, string> = { "X-Request-ID": crypto.randomUUID() };
   if (type) headers["Content-Type"] = type;
-  const res = await fetch(path, { method, headers, body, signal: AbortSignal.timeout(timeoutMs) });
+  // 按表单中的超时算出的时限可能不是有限正数（如超时框被清空）：AbortSignal.timeout 会直接抛错，请求发不出去
+  const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : TIMEOUT_MS;
+  const res = await fetch(path, { method, headers, body, signal: AbortSignal.timeout(limit) });
   if (!res.ok) {
     const error = (await res.json().catch(() => null)) as Partial<Schemas["Error"]> | null;
     // 非契约格式的错误响应来自 api-server 之外（如其不可用时反向代理返回的 502 页面），按连接失败处理
@@ -67,6 +69,15 @@ export const api = {
   /** AI 安全值班员的调查记录（FR-1102）；尚未开始调查时为 404 */
   getInvestigation: (incidentId: string) =>
     request<Schemas["Investigation"]>("GET", `/api/incidents/${encodeURIComponent(incidentId)}/investigation`),
+  /** 单条摄像头告警前后的录像（MP4）：经存证服务向录像服务取，告警刚发生时片段较短 */
+  getAlertClip: async (eventId: string) =>
+    (await send("GET", `/api/alerts/${encodeURIComponent(eventId)}/clip`, undefined, undefined, 40_000)).blob(),
+  /** 告警处置：已确认、误报、已处理；结果另经 dispositions 频道推送给所有控制台 */
+  disposeAlert: (eventId: string, action: Schemas["DispositionAction"], note?: string) =>
+    request<Schemas["AlertDisposition"]>("POST", `/api/alerts/${encodeURIComponent(eventId)}/disposition`, note ? { action, note } : { action }),
+  /** 删除告警：不再列出所给的告警与关联事件，原始记录保留；结果经 cleared 频道推送给所有控制台 */
+  clearAlerts: (eventIds: string[], incidentIds: string[]) =>
+    request<Schemas["AlertsCleared"]>("POST", "/api/alerts/clear", { event_ids: eventIds, incident_ids: incidentIds }),
   /** 确认处置（FR-407）：只提交关联事件 ID，受理后执行结果经 executions 频道推送 */
   confirmContainment: async (incidentId: string) => {
     await send("POST", `/api/incidents/${encodeURIComponent(incidentId)}/confirm-containment`);
@@ -104,6 +115,8 @@ export const api = {
   /** 模型供应商（FR-601～604），只有 admin 可用；顺序即故障转移顺序 */
   /** 摄像头登记表（FR-905，D-101），仅 admin */
   listCameras: () => request<Schemas["CameraList"]>("GET", "/api/cameras"),
+  /** 边缘主机上的 USB 摄像头：每次重新读取，拔插后刷新即可 */
+  listUsbDevices: () => request<Schemas["UsbDeviceList"]>("GET", "/api/cameras/usb-devices"),
   createCamera: (body: Schemas["CameraCreate"]) => request<Schemas["Camera"]>("POST", "/api/cameras", body),
   updateCamera: (id: string, body: Schemas["CameraUpdate"]) =>
     request<Schemas["Camera"]>("PATCH", `/api/cameras/${encodeURIComponent(id)}`, body),
@@ -129,6 +142,9 @@ export const api = {
       undefined,
       RECOGNIZE_TIMEOUT_MS,
     ),
+  /** 场景自动识别的最近结果（后台每 10 分钟识别一次）；尚未识别过时 frames 为空 */
+  getSceneAreaAuto: (id: string) =>
+    request<Schemas["SceneAreaFrames"]>("GET", `/api/scene/areas/${encodeURIComponent(id)}/auto`),
   /** 经 go2rtc 取一帧（V-CAM4）；首帧须等关键帧，api-server 等 8 s，这里再加余量 */
   getCameraSnapshot: async (id: string) =>
     (await send("GET", `/api/cameras/${encodeURIComponent(id)}/snapshot`, undefined, undefined, 12_000)).blob(),

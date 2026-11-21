@@ -24,7 +24,16 @@
   .watermark { position: fixed; inset: -50%; z-index: 10; display: flex; flex-wrap: wrap;
     gap: 96px 160px; align-content: space-around; justify-content: space-around; transform: rotate(-30deg);
     color: #000; opacity: .08; font-size: 32px; font-weight: 700; pointer-events: none; }
-  @media print { body { margin: 0 auto; } section { break-inside: avoid; } }
+  /* 导出 PDF（浏览器打印）：A4 留边；标题不与正文分页，表格行不跨页；吸顶的 AI 标注改回随文排版 */
+  @page { size: A4; margin: 16mm 14mm; }
+  @media print {
+    body { margin: 0 auto; padding: 0; max-width: none; }
+    section { break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
+    tr { break-inside: avoid; }
+    .ai-label { position: static; }
+    .unverified { cursor: auto; }
+  }
 </style>
 </head>
 <body>

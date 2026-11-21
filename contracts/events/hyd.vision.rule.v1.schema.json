@@ -1,0 +1,51 @@
+{
+  "title": "VisionRuleV1",
+  "description": "轨迹规则事件（生产者 vision-engine）：越线为脉冲事件（pulse）；区域入侵为状态事件，同一次进入的 start / update / end 共用 episode_id，持续期间每 30 s 发 update 保持物理告警",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": [
+    "camera_id",
+    "rule_id",
+    "rule_name",
+    "rule_type",
+    "phase",
+    "episode_id",
+    "level",
+    "track_id",
+    "object_class",
+    "x",
+    "y",
+    "uncertainty_m",
+    "since",
+    "mapping",
+    "inferred"
+  ],
+  "properties": {
+    "camera_id": { "type": "string" },
+    "rule_id": { "type": "string" },
+    "rule_name": { "type": "string" },
+    "rule_type": { "enum": ["intrusion", "line_crossing"] },
+    "phase": { "enum": ["pulse", "start", "update", "end"] },
+    "episode_id": { "type": "string", "format": "uuid" },
+    "level": {
+      "enum": ["suspected", "confirmed"],
+      "description": "confirmed 进入物理告警；suspected 只在控制台提示：按安装参数估算的地面映射（位置可能有系统性偏差），或越线发生在遮挡中（inferred）"
+    },
+    "track_id": { "type": "integer", "description": "会话内临时编号，不跨摄像头、不含生物特征（G-04）" },
+    "object_class": { "enum": ["person", "bicycle", "car", "motorcycle", "bus", "truck"] },
+    "x": { "type": "number", "description": "平面坐标（米）：越线为越线时的位置，区域为当前位置" },
+    "y": { "type": "number" },
+    "uncertainty_m": { "type": "number", "minimum": 0 },
+    "since": { "type": "string", "format": "date-time", "description": "状态开始时刻：区域为确认进入时刻，越线为越线时刻" },
+    "direction": {
+      "anyOf": [{ "enum": ["forward", "backward"] }, { "type": "null" }],
+      "description": "越线方向；区域为 null"
+    },
+    "mapping": { "enum": ["calibrated", "estimated"] },
+    "inferred": { "type": "boolean", "description": "越线发生在遮挡中，由消失前后的位置推断" },
+    "end_reason": {
+      "anyOf": [{ "enum": ["exit", "lost"] }, { "type": "null" }],
+      "description": "phase 为 end 时：exit 确认离开，lost 轨迹消失"
+    }
+  }
+}
