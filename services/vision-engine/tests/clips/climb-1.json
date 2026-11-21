@@ -1,0 +1,8 @@
+{
+  "description": "院内走动后翻越院墙（11.6 s 已蹲在墙顶），此后在墙外",
+  "report_only": false,
+  "climb_lines": [[300, 700, 475, 340]],
+  "events": [{"behavior": "climb", "start": 10.0, "end": 13.0}],
+  "ambiguous": [],
+  "source": "依据仓库记录（test_clips.py 注释、models/cards/rtmo-s.md、demo/media/*.meta.yaml），未对照原视频逐帧核对；有原视频后应复核起止时刻：约 10～13 s 翻越院墙；警戒线取自 test_clips.py 的 CLIMB_1_LINE（画面 1026×720 中院墙的墙顶）"
+}

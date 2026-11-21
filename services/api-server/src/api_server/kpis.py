@@ -18,6 +18,7 @@ from api_server.history import History
 from py_contracts.api import Kpi, Kpis
 from py_contracts.events.hyd_playbook_execution_v1_schema import PlaybookExecutionV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 
 HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
@@ -101,10 +102,15 @@ class KpiTracker:
         )
 
     def _active(self, at: datetime) -> int:
-        """at 时仍在保持期内的告警条数，保持时长与设备告警态一致（ui.md §5.1）。"""
+        """at 时仍在保持期内的告警条数，保持时长与设备告警态一致（ui.md §5.1）；疑似跌倒不进入告警态，
+        不计入（TK-160）。"""
         return sum(
-            at - (PHYSICAL_HOLD if isinstance(e, VisionBehaviorV1) else CYBER_HOLD) < e.ts <= at
+            at - (PHYSICAL_HOLD if isinstance(e, VisionBehaviorV1 | VisionRuleV1) else CYBER_HOLD)
+            < e.ts
+            <= at
             for e in self._history.alerts_since(at - CYBER_HOLD)
+            if not (isinstance(e, VisionBehaviorV1 | VisionRuleV1) and e.level == "suspected")
+            and not (isinstance(e, VisionRuleV1) and e.phase in ("update", "end"))
         )
 
     def _contained_between(self, since: datetime, until: datetime) -> int:

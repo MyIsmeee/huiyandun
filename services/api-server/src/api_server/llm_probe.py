@@ -1,7 +1,8 @@
 """测试连接与模型列表（FR-602、V-M6、TK-060）：转交 llm-gateway，api-server 自身不访问供应商（C-LLM-01）。
 
 转交时附上解密后的 Key，只经 llm-net；测试结果写入供应商 last_test，探测到的能力写入 structured_output。
-开启全局禁止公网供应商时，不向公网地址发送任何请求（D-085）。
+开启全局禁止公网供应商时，不向公网地址发送任何请求（D-085）：这里按网络位置标签拦一次，开关状态同时随请求
+交给网关，由它按地址实际指向再复核一次（标为内网却指向公网的同样不发）。
 """
 
 import logging
@@ -34,18 +35,21 @@ async def forward(request: Request, path: str, target: dict[str, Any], calls: in
         raise HTTPException(502, "模型网关暂不可达") from e
     if res.status_code == 502:  # 供应商出错：网关给出"原因；改法"
         raise HTTPException(502, res.json()["message"])
+    if res.status_code == 409:  # 网关按实际地址复核后拒绝出域（G-02）
+        raise HTTPException(409, res.json()["detail"])
     if res.is_error:
         log.warning("llm.gateway_error", extra={"path": path, "status": res.status_code})
         raise HTTPException(502, "模型网关出错")
     return res.json()
 
 
-async def ensure_allowed(request: Request, network: str) -> None:
-    if network != "public":
-        return
+async def ensure_allowed(request: Request, network: str) -> bool:
+    """返回全局禁止公网是否开启；开启且标签为公网时直接拒绝。"""
     async with request.app.state.engine.connect() as conn:
-        if await block_public(conn):
-            raise HTTPException(409, "已开启全局禁止公网供应商，不向公网地址发送请求")
+        blocked = await block_public(conn)
+    if blocked and network == "public":
+        raise HTTPException(409, "已开启全局禁止公网供应商，不向公网地址发送请求")
+    return blocked
 
 
 async def target_of(request: Request, provider_id: str) -> dict[str, Any]:
@@ -57,7 +61,7 @@ async def target_of(request: Request, provider_id: str) -> dict[str, Any]:
         )
     if row is None:
         raise HTTPException(404, "供应商不存在")
-    await ensure_allowed(request, row["network"])  # 管理员改判过的以改判为准
+    blocked = await ensure_allowed(request, row["network"])  # 管理员改判过的以改判为准
     api_key = None
     if row["api_key_enc"] is not None:
         try:
@@ -69,6 +73,8 @@ async def target_of(request: Request, provider_id: str) -> dict[str, Any]:
         "api_key": api_key,
         "model": row["model"],
         "timeout_s": row["timeout_s"],
+        "network": row["network"],
+        "block_public": blocked,
     }
 
 
@@ -98,11 +104,13 @@ async def list_provider_models(provider_id: str, request: Request) -> ModelList:
 @router.post("/models")
 async def discover_models(body: ModelDiscovery, request: Request) -> ModelList:
     base_url = normalize(body.base_url)
-    await ensure_allowed(request, classify(base_url))
+    network = classify(base_url)
     target = {
         "base_url": base_url,
         "api_key": body.api_key.get_secret_value() if body.api_key else None,
         "timeout_s": body.timeout_s or 60,  # 显式传 null 时取契约默认值
+        "network": network,
+        "block_public": await ensure_allowed(request, network),
     }
     return ModelList.model_validate(
         await forward(request, "/internal/models", target, MODELS_CALLS)

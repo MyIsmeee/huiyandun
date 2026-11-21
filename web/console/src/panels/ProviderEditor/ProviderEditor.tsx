@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
 import type { Provider } from "../ProviderList/ProviderList";
@@ -20,6 +20,8 @@ export type EditorForm = {
   model: string;
   timeout_s: number;
   network: "auto" | Schemas["Network"];
+  /** 保存时清除已保存的 Key（PATCH 发空串）；未给出即不清除 */
+  clear_key?: boolean;
 };
 export type Pending = "save" | "test" | "models" | null;
 
@@ -49,7 +51,25 @@ const initialForm = (p: Provider | null): EditorForm => ({
   model: p?.model ?? "",
   timeout_s: p?.timeout_s ?? 60,
   network: p?.network_overridden ? p.network : "auto",
+  clear_key: false,
 });
+
+/** 地址的协议与主机部分；写不成 URL 时按原文比较 */
+const originOf = (url: string) => {
+  try {
+    return new URL(url.trim()).origin;
+  } catch {
+    return url.trim();
+  }
+};
+
+/**
+ * 已保存的 Key 属于原地址的服务：地址换到另一主机而 Key 留空时，保存会让旧 Key 随请求发往新地址，须重新填写或清除
+ */
+export const keyLeaks = (form: EditorForm, provider: Provider | null) =>
+  !!provider?.api_key_last4 && !form.api_key && !form.clear_key && originOf(form.base_url) !== originOf(provider.base_url);
+
+const timeoutOk = (timeout: number) => Number.isInteger(timeout) && timeout >= 1;
 
 /**
  * 添加与编辑供应商（ui.md §7.1）。测试连接只能针对已保存的供应商，故"保存并测试"先保存再测试；
@@ -62,6 +82,14 @@ export function ProviderEditor(props: { provider: Provider | null; onClose: () =
   const [pending, setPending] = useState<Pending>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<TestResult | null>(null);
+  // 保存在途时关闭了对话框：迟到的结果不再关闭（可能是之后打开的另一个）对话框
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   async function attempt(kind: Pending, action: () => Promise<void>) {
     setPending(kind);
@@ -80,13 +108,13 @@ export function ProviderEditor(props: { provider: Provider | null; onClose: () =
       base_url: form.base_url.trim(),
       model: form.model.trim(),
       timeout_s: form.timeout_s,
-      ...(form.api_key ? { api_key: form.api_key } : {}),
+      ...(form.api_key ? { api_key: form.api_key } : form.clear_key && saved ? { api_key: "" } : {}),
       ...(form.network !== "auto" ? { network: form.network } : {}),
     };
     const provider = saved ? await api.updateProvider(saved.id, body) : await api.createProvider(body);
     setSaved(provider);
     // 地址以服务端纠正后的为准；Key 已保存，输入框清空即"不修改"
-    setForm((f) => ({ ...f, base_url: provider.base_url, api_key: "" }));
+    setForm((f) => ({ ...f, base_url: provider.base_url, api_key: "", clear_key: false }));
     props.onSaved();
     return provider;
   }
@@ -113,7 +141,12 @@ export function ProviderEditor(props: { provider: Provider | null; onClose: () =
       pending={pending}
       message={message}
       result={result}
-      onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+      onAdopt={(patch) => setForm((f) => ({ ...f, ...patch }))}
+      onChange={(patch) => {
+        // 手动改了地址、Key、模型，上次测试结果不再适用（与服务端清除 last_test 的条件一致）；采用结果中的建议不清除，可接着采用另一项
+        if ((["base_url", "api_key", "model", "clear_key"] as const).some((k) => k in patch && (patch[k] ?? false) !== (form[k] ?? false))) setResult(null);
+        setForm((f) => ({ ...f, ...patch }));
+      }}
       onPreset={(preset) =>
         setForm((f) => ({
           ...f,
@@ -127,7 +160,7 @@ export function ProviderEditor(props: { provider: Provider | null; onClose: () =
       onSave={() =>
         void attempt("save", async () => {
           await save();
-          props.onClose();
+          if (alive.current) props.onClose();
         })
       }
       onSaveAndTest={() =>
@@ -136,7 +169,7 @@ export function ProviderEditor(props: { provider: Provider | null; onClose: () =
           props.onSaved();
         })
       }
-      onClose={props.onClose}
+      onClose={() => pending !== "save" && pending !== "test" && props.onClose()}
     />
   );
 }
@@ -149,6 +182,8 @@ export function ProviderEditorView(props: {
   message: string | null;
   result: TestResult | null;
   onChange: (patch: Partial<EditorForm>) => void;
+  /** 采用测试结果中的建议地址或模型；未给出时同 onChange */
+  onAdopt?: (patch: Partial<EditorForm>) => void;
   onPreset: (preset: Preset) => void;
   onFetchModels: () => void;
   onSave: () => void;
@@ -156,8 +191,10 @@ export function ProviderEditorView(props: {
   onClose: () => void;
 }) {
   const { form, provider, models, pending, result, onChange } = props;
-  const incomplete = !form.name.trim() || !form.base_url.trim() || !form.model.trim() || !(Number.isInteger(form.timeout_s) && form.timeout_s >= 1);
+  const leaks = keyLeaks(form, provider);
+  const incomplete = !form.name.trim() || !form.base_url.trim() || !form.model.trim() || !timeoutOk(form.timeout_s) || leaks;
   const network = provider && (provider.network === "internal" ? "内网" : "公网");
+  const saving = pending === "save" || pending === "test";
   return (
     <Dialog open onOpenChange={(open) => !open && props.onClose()}>
       {/* 点对话框外不关闭，避免丢掉未保存的填写；Esc 与取消按钮照常关闭 */}
@@ -203,10 +240,25 @@ export function ProviderEditorView(props: {
               type="password"
               autoComplete="off"
               value={form.api_key}
-              placeholder={provider?.api_key_last4 ? `已保存 ••••${provider.api_key_last4}，留空不修改` : "可选"}
-              onChange={(e) => onChange({ api_key: e.target.value })}
+              placeholder={
+                form.clear_key ? "保存后清除已保存的 Key" : provider?.api_key_last4 ? `已保存 ••••${provider.api_key_last4}，留空不修改` : "可选"
+              }
+              onChange={(e) => onChange({ api_key: e.target.value, ...(e.target.value ? { clear_key: false } : {}) })}
             />
           </Label>
+          {provider?.api_key_last4 && !form.api_key && (
+            <p className="col-start-2 flex flex-wrap gap-x-2 text-muted-foreground">
+              {form.clear_key ? "保存后清除已保存的 Key" : null}
+              <button type="button" onClick={() => onChange({ clear_key: !form.clear_key })} className="underline underline-offset-4 hover:text-foreground">
+                {form.clear_key ? "撤销清除" : "清除已保存的 Key"}
+              </button>
+            </p>
+          )}
+          {leaks && (
+            <p role="alert" className="col-start-2 text-muted-foreground">
+              地址已换到另一主机：已保存的 Key 属于原服务，不能随之发往新地址。请重新填写 Key，或清除已保存的 Key
+            </p>
+          )}
           {/* 按钮不放进 label，否则成为输入框名称的一部分 */}
           <Label htmlFor="provider-model">模型</Label>
           <span className="flex gap-2">
@@ -217,7 +269,7 @@ export function ProviderEditorView(props: {
               onChange={(e) => onChange({ model: e.target.value })}
               className="flex-1"
             />
-            <button type="button" onClick={props.onFetchModels} disabled={pending !== null} className={button}>
+            <button type="button" onClick={props.onFetchModels} disabled={pending !== null || !form.base_url.trim() || !timeoutOk(form.timeout_s)} className={button}>
               {pending === "models" ? "获取中…" : "获取列表"}
             </button>
           </span>
@@ -252,7 +304,7 @@ export function ProviderEditorView(props: {
             </SelectContent>
           </Select>
         </div>
-        {result && <Result result={result} onChange={onChange} />}
+        {result && <Result result={result} onChange={props.onAdopt ?? onChange} />}
         {props.message && (
           <p role="alert" className="flex items-start gap-1 text-muted-foreground">
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
@@ -268,7 +320,7 @@ export function ProviderEditorView(props: {
           >
             {pending === "test" ? "测试中…" : "保存并测试"}
           </button>
-          <button type="button" onClick={props.onClose} className={button}>
+          <button type="button" onClick={props.onClose} disabled={saving} className={button}>
             关闭
           </button>
           <button type="submit" disabled={pending !== null || incomplete} className={buttonVariants({ size: "sm" })}>

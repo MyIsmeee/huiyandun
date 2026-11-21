@@ -1,0 +1,19 @@
+# 演示场景预设（演示静默）：现场摄像头（手机、USB）演示期间不展示、不关联已知易误报的事件。
+# make demo-quiet 打开、make demo-normal 关闭（重建 api-server 与 correlator，约 10 s）；make demo-up 恢复为关闭。
+# 被静默的事件照常发布，关闭后可在控制台重新看到。格式见 libs/py-common/src/py_common/demo_quiet.py
+integrity:
+  # 镜头遮挡、挪位、画面冻结、重放：视觉模型判定，现场实测（桌面平拍的手机画面）3 小时内误报约百次，
+  # 不生成 HYD-VIS-0001/0002 与跨域事件 HYD-X-0001。断流（设备离线）是真实状态，不静默
+  hide: [occlusion, shift, freeze, replay]
+  # 仍照常判定的摄像头与类型：靶机画面（本机为 cam-11，演示画面 2）保留冻结与重放，供 make attack-show 的
+  # 画面重放与跨域事件 HYD-X-0001；该素材的挪位误报较多（6 小时约 50 次），挪位、遮挡仍静默。
+  # 靶机重新登记、编号变化时改这里
+  keep:
+    cam-11: [freeze, replay]
+behavior:
+  hide_levels: [suspected]   # 疑似跌倒、疑似打架：只在控制台提示，演示时不出现
+  hide_behaviors: [still]    # 长时间静止：易与伏案久坐混淆（含满 300 s 的确认）
+  # 确认的跌倒（倒地不动满 8 s）与攀爬越线照常告警并生成 HYD-VIS-0003
+alerts:
+  hide_unregistered: true    # 目标不是已登记摄像头的网络告警（演示局域网里其他设备的杂散流量）
+  keep_rules: [HYD-WEB-0001] # 控制台登录爆破的目标是本机，照常告警

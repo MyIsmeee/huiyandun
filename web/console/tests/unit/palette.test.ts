@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import css from "../../src/theme/theme.css?raw";
 import { MATERIALS as SCENE } from "../../src/scene/assets";
 import { BEAM, BODY, CONE, CONE_LAYERS, POLE_COLOR, STATUS } from "../../src/scene/devices";
+import { DAY, NIGHT } from "../../src/scene/palette";
 import { ACCENT, coneOpacity, FILL, MARK_OPACITY } from "../../src/scene/targets";
 
 // 配色校验（V-S5、V-G2、设计 150 §4）：令牌直接取自 theme.css，场景材质取自代码
@@ -10,6 +11,11 @@ const token = (name: string): string => {
   const hex = new RegExp(`--${name}: (#[0-9a-f]{6});`, "i").exec(css)?.[1];
   if (!hex) throw new Error(`theme.css 缺少 --${name}`);
   return hex;
+};
+/** 夜间警戒主题（[data-theme="night"]）的同名令牌；该主题未改写的令牌沿用浅色的取值 */
+const nightToken = (name: string): string => {
+  const block = /\[data-theme="night"\] \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  return new RegExp(`--${name}: (#[0-9a-f]{6});`, "i").exec(block)?.[1] ?? token(name);
 };
 const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
 const linear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
@@ -136,5 +142,45 @@ describe("配色校验（V-S5）", () => {
     expect(contrast("#000000", "#ffffff")).toBeCloseTo(21, 5);
     expect(deltaE2000("#ffffff", "#ffffff")).toBe(0);
     expect(deltaE2000("#ff0000", "#00ff00")).toBeCloseTo(86.6, 0);
+  });
+});
+
+describe("夜间警戒配色", () => {
+  const SURFACES = ["card", "background", "secondary"].map(nightToken);
+
+  it("日间配色表即各处原有的常量，渲染不变", () => {
+    expect(DAY).toMatchObject({ background: token("background").toUpperCase(), ground: SCENE.ground, beam: BEAM, target: FILL });
+    expect(DAY).toMatchObject({ coneGain: 1, statusGain: 1, glow: false });
+  });
+
+  it.each(["foreground", "muted-foreground", "subtle-foreground"])("文字色 %s 在卡片、页面、悬停底上 ≥ 4.5:1", (name) => {
+    for (const surface of SURFACES) expect(contrast(nightToken(name), surface)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("强调色：主按钮文字 ≥ 4.5:1，选中描边对卡片 ≥ 3:1；边框在卡片上可辨", () => {
+    expect(contrast(nightToken("primary-foreground"), nightToken("primary"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(nightToken("primary"), nightToken("card"))).toBeGreaterThanOrEqual(3);
+    expect(deltaE2000(nightToken("border"), nightToken("card"))).toBeGreaterThanOrEqual(5);
+  });
+
+  it.each(Object.entries(STATES))("状态色 %s 的图标与描边对深色的卡片、页面、悬停底 ≥ 3:1", (_, state) => {
+    for (const surface of SURFACES) expect(contrast(state, surface)).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(Object.entries({ ...STATES, uncertain: STATUS.uncertain }))("状态药丸 %s：12%% 底上的浅色字 ≥ 4.5:1", (_, state) => {
+    expect(contrast(nightToken("foreground"), mix(state, 0.12, nightToken("card")))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("场景：背景即页面底色；常态视场、常态目标、区域边线在夜间地面上清晰可辨，且与三个状态色区分得开", () => {
+    expect(NIGHT.background.toLowerCase()).toBe(nightToken("background"));
+    for (const ground of [NIGHT.ground, NIGHT.background]) {
+      expect(contrast(NIGHT.beam, ground)).toBeGreaterThanOrEqual(3);
+      expect(contrast(NIGHT.target, ground)).toBeGreaterThanOrEqual(4.5);
+      expect(deltaE2000(NIGHT.outline, ground)).toBeGreaterThanOrEqual(10);
+    }
+    for (const state of Object.values(STATES)) {
+      expect(deltaE2000(NIGHT.beam, state)).toBeGreaterThanOrEqual(20);
+      expect(deltaE2000(NIGHT.target, state)).toBeGreaterThanOrEqual(20);
+    }
   });
 });

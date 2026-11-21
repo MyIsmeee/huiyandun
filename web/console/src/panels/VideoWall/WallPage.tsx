@@ -29,7 +29,7 @@ export function WallPage(props: { site: Site; admin: boolean; stale: boolean; la
         </div>
       </section>
       <aside aria-label="检查栏" className="flex min-h-0 flex-col border-l bg-card">
-        <Inspector devices={site.devices} stale={stale} lastFrameAt={lastFrameAt} />
+        <Inspector devices={site.devices} stale={stale} lastFrameAt={lastFrameAt} video={false} />
       </aside>
     </div>
   );

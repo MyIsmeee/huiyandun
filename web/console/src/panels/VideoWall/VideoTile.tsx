@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { BEHAVIOR, ICONS } from "../../scene/DeviceTags";
 import { deviceLook } from "../../scene/devices";
 import { type Device, useLive } from "../../store/live";
+import { usePoster } from "../../store/snapshots";
 import { DetectionOverlay } from "../DetectionOverlay/DetectionOverlay";
 import { LiveVideoView, useLiveVideo, type VideoStatus } from "../LiveVideo/LiveVideo";
 
@@ -29,6 +30,7 @@ export interface TileProps {
 /** 监控墙中的一路（V-W2～V-W4）：连接实时画面，只在当前页渲染（V-W3） */
 export function VideoTile(props: Omit<TileProps, "persons" | "vehicles" | "behavior">) {
   const [status, retry] = useLiveVideo(props.device.id);
+  const poster = usePoster(props.device.id);
   const [persons, vehicles] = useLive(
     useShallow((s) => {
       const mine = Object.values(s.targets).filter((t) => t.camera_id === props.device.id);
@@ -46,6 +48,7 @@ export function VideoTile(props: Omit<TileProps, "persons" | "vehicles" | "behav
       overlay={!props.unmapped && <DetectionOverlay cameraId={props.device.id} video={video} />}
       status={status}
       onRetry={retry}
+      poster={poster}
       behavior={behavior && BEHAVIOR[behavior]}
       persons={persons}
       vehicles={vehicles}
@@ -53,13 +56,16 @@ export function VideoTile(props: Omit<TileProps, "persons" | "vehicles" | "behav
   );
 }
 
-export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?: () => void; rootRef?: Ref<HTMLDivElement> }) {
-  const { device, selected, behavior, persons, vehicles, unmapped, onSelect, onZoom, style, status, onRetry, overlay, rootRef } = props;
+export function VideoTileView(
+  props: TileProps & { status: VideoStatus; onRetry?: () => void; rootRef?: Ref<HTMLDivElement>; poster?: string | null },
+) {
+  const { device, selected, behavior, persons, vehicles, unmapped, onSelect, onZoom, style, status, onRetry, overlay, rootRef, poster } = props;
   const look = deviceLook(device.state);
   const offline = device.state === "offline";
   // 告警与处置状态：状态色内描边 + 药丸（V-W2）；离线、未标定不算告警，用文字表达
   const alert = look.tags.find((t) => t.icon !== "offline" && t.icon !== "uncalibrated");
   const ring = selected ? "var(--primary)" : alert?.color;
+  const emphasis = alert !== undefined && EMPHASIZED.has(alert.icon);
   return (
     <div
       ref={rootRef}
@@ -74,7 +80,7 @@ export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?
       style={style}
       className="group relative cursor-pointer overflow-hidden rounded-lg bg-black outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <LiveVideoView status={status} onRetry={onRetry} className={cn("size-full rounded-none border-0 bg-black", offline && "grayscale")} />
+      <LiveVideoView status={status} onRetry={onRetry} poster={poster} dark className={cn("size-full rounded-none border-0 bg-black", offline && "grayscale")} />
       {status.kind === "playing" && overlay}
       {/* 底部渐隐遮罩保证白字对比度（V-W2） */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
@@ -104,8 +110,14 @@ export function VideoTileView(props: TileProps & { status: VideoStatus; onRetry?
           离线
         </p>
       )}
-      {/* 描边不呼吸：画面本身在动（V-W2）；选中为强调色，优先于告警色 */}
-      {ring && <div className="pointer-events-none absolute inset-0 rounded-lg border-2" style={{ borderColor: ring }} />}
+      {/* 选中为强调色，优先于告警色。网络攻击与处置期间加粗描边并向内发光，攻击中呼吸，投屏时远处也能认出被攻击的那一路 */}
+      {ring && (
+        <div
+          data-tile-ring={alert?.icon ?? "selected"}
+          className={cn("pointer-events-none absolute inset-0 rounded-lg", emphasis ? "border-4" : "border-2", alert && ATTACKING.has(alert.icon) && "animate-pulse")}
+          style={{ borderColor: ring, boxShadow: emphasis && alert ? `inset 0 0 36px ${alert.color}` : undefined }}
+        />
+      )}
     </div>
   );
 }
@@ -117,6 +129,11 @@ function StatePill({ icon, color, text }: { icon: keyof typeof ICONS; color: str
     </StatusPill>
   );
 }
+
+/** 加粗描边的状态：网络攻击、处置中、只通知、已处置（ui.md §5.1） */
+const EMPHASIZED: ReadonlySet<string> = new Set(["cyber", "pending", "notified", "contained"]);
+/** 描边呼吸的状态：攻击仍在进行 */
+const ATTACKING: ReadonlySet<string> = new Set(["cyber", "notified"]);
 
 /** 事件来自瓦片内的按钮（如"重试"）：只执行按钮本身，不连带选中或放大该路 */
 const fromControl = (e: SyntheticEvent) => e.target instanceof Element && e.target.closest("button") !== null;

@@ -10,7 +10,7 @@ from functools import partial
 
 import nats
 from sqlalchemy import func, select
-from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError, StatementError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from api_server.audit import audit_log, record
@@ -23,26 +23,37 @@ FIRST_REPLAY = timedelta(hours=24)  # 尚无审计记录时补近 24 小时（TT
 OVERLAP = timedelta(minutes=1)  # 从最近审计时刻前一分钟起重放，重叠部分按事件 ID 跳过
 # 数据库未就绪、写入失败、执行记录的流尚未创建（由 playbook-executor 创建）时按此间隔重试
 RETRY_S = 5.0
+# 重试也不会好的数据库错误的 SQLSTATE 类：22 数据不合类型或长度、23 违反约束、42 语句有误或权限不足。
+# 其余（08 连接异常、53 资源不足、57 数据库启动或关闭中与语句被取消、40 死锁等）等一会儿可恢复
+PERMANENT_SQLSTATE = ("22", "23", "42")
 
 log = logging.getLogger(__name__)
 
 
+def _permanent(error: SQLAlchemyError) -> bool:
+    """重试也不会好的错误。只认明确属于这一类的：asyncpg 方言不把服务端错误细分（数据库启动中、连接数已满、
+    语句被取消都只是 DBAPIError），按异常类型认"连接类"会把它们漏成永久错误，这条审计就此缺失。"""
+    if isinstance(error, DBAPIError):
+        return str(getattr(error.orig, "sqlstate", None) or "").startswith(PERMANENT_SQLSTATE)
+    return isinstance(error, StatementError)  # 语句在发往数据库之前就构造失败
+
+
 async def audit_execution(engine: AsyncEngine, execution: PlaybookExecutionV1) -> None:
-    """连接类失败（数据库暂不可达、连接中断）重试到成功，跳过会让审计出现缺口；权限不足、数据不合约束等
-    重试也不会好的错误记为错误后跳过，不让后续的处置审计全部卡住。"""
+    """权限不足、数据不合约束等重试也不会好的错误记为错误后跳过，不让后续的处置审计全部卡住；其余失败
+    （数据库暂不可达、启动或关闭中、连接中断、取连接超时）重试到成功，跳过会让审计出现缺口。"""
     while True:
         try:
             await _write(engine, execution)
             return
-        except (OperationalError, InterfaceError, OSError) as e:
+        except (SQLAlchemyError, OSError) as e:
+            if isinstance(e, SQLAlchemyError) and _permanent(e):
+                log.exception("api.execution_audit_rejected", extra={"execution_id": execution.id})
+                return
             log.warning(
                 "api.execution_audit_failed",
                 extra={"execution_id": execution.id, "error": repr(e)},
             )
             await asyncio.sleep(RETRY_S)
-        except SQLAlchemyError:
-            log.exception("api.execution_audit_rejected", extra={"execution_id": execution.id})
-            return
 
 
 async def _write(engine: AsyncEngine, execution: PlaybookExecutionV1) -> None:

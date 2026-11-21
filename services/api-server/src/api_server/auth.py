@@ -9,8 +9,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import cache
+from ipaddress import IPv4Address, IPv6Address
 from typing import Annotated
 
+import nats.errors
 from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 from fastapi import APIRouter, Depends, Request, Response
@@ -18,6 +20,7 @@ from sqlalchemy import Column, DateTime, LargeBinary, MetaData, Table, Text, del
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.exceptions import HTTPException
 
+from api_server.login_guard import LoginGuard, client_ip
 from py_contracts.api import LoginRequest, LoginResponse, Session
 
 log = logging.getLogger(__name__)
@@ -114,6 +117,25 @@ def require(min_role: str) -> Callable[[Principal], Awaitable[Principal]]:
 
 router = APIRouter(prefix="/api/auth")
 
+# 与 correlator 发布网络告警的流一致：主题、流名与保留期（365 天，architecture.md §10）
+ALERT_SUBJECT = "hyd.security.alert.v1"
+ALERT_STREAM = "HYD_SECURITY"
+ALERT_MAX_AGE_S = 365 * 86400
+
+
+async def _guard(request: Request, src: IPv4Address | IPv6Address, username: str) -> None:
+    """登录爆破检测（HYD-WEB-0001）：达到阈值时发布网络告警，控制台告警栏随即显示。
+    发布失败只记录，不影响本次登录的应答；告警与网络探针的告警进同一个流，保留期相同。"""
+    guard: LoginGuard = request.app.state.login_guard
+    alert = guard.failed(src, username)
+    if alert is None:
+        return
+    log.warning("auth.login_bruteforce", extra={"src_ip": str(src), "rule_id": alert.rule_id})
+    try:
+        await request.app.state.bus.js_publish(ALERT_SUBJECT, alert)
+    except (nats.errors.Error, TimeoutError) as e:
+        log.warning("auth.alert_publish_failed", extra={"src_ip": str(src), "error": repr(e)})
+
 
 @router.post("/login")
 async def login(body: LoginRequest, request: Request, response: Response) -> LoginResponse:
@@ -127,7 +149,13 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Log
     encoded = row.password_hash if row else await asyncio.to_thread(_dummy_hash)
     valid = await asyncio.to_thread(verify_password, body.password.get_secret_value(), encoded)
     if not (row and valid):
-        log.warning("auth.login_failed", extra={"username": body.username})
+        src = client_ip(request)
+        log.warning(
+            "auth.login_failed",
+            extra={"username": body.username, "src_ip": str(src) if src else None},
+        )
+        if src is not None:
+            await _guard(request, src, body.username)
         raise HTTPException(401, "用户名或口令错误")
 
     ttl_s = request.app.state.config.session_ttl_s

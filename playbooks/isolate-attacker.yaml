@@ -1,9 +1,12 @@
-# 封禁攻击源（FR-401、FR-407）：跨域关联事件的攻击源 IP 经 nftables 封禁，到期自动解除
+# 封禁攻击源（FR-401、FR-407）：关联事件的攻击源 IP 经 nftables 封禁，到期自动解除
+# 1.1：认证爆破（HYD-NET-0101）、推流劫持（HYD-NET-0102）本身即触发，不必等到画面遭篡改；
+# 1.2：低速爆破（HYD-NET-0103，行为模型判定）同样触发，含模型证据须人工确认后执行；
+# 同一攻击源已封禁时后到的关联事件记为跳过（C-BE-04）
 id: isolate-attacker
-version: 1.0.0
+version: 1.2.0
 trigger:
-  rule_ids: [HYD-X-0001]  # 只引用规则引擎输出（C-SEC-02）
-  severity: [critical]
+  rule_ids: [HYD-NET-0101, HYD-NET-0102, HYD-NET-0103, HYD-X-0001]  # 只引用规则引擎输出（C-SEC-02）
+  severity: [critical, high]
 requires_mode: [host_probe]  # 旁路模式下只通知不执行（FR-1001）
 target: incident.source_ip   # 只能引用 Incident 的结构化字段
 # incident.requires_confirmation 为 true 时，收到 hyd.correlator.confirmation.v1 后才执行（FR-407）

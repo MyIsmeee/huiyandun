@@ -15,7 +15,11 @@ export interface Grid {
 /** 自动布局每页最多 4×4 */
 const AUTO_MAX = 16;
 
-export function wallGrid(count: number, layout: WallLayout): Grid {
+/**
+ * area 为画布尺寸与间距：给出时，自动布局在列数 1～4 中挑格子最大的一种——路数少时按画布形状排，
+ * 2 路在较高的画布上上下排，不再左右排成两小格、上下留出大片空白；不给时按 ceil(√n) 列
+ */
+export function wallGrid(count: number, layout: WallLayout, area?: { w: number; h: number; gap: number }): Grid {
   switch (layout) {
     case "1":
       return { cols: 1, rows: 1, capacity: 1, featured: false, fixed: true };
@@ -28,8 +32,18 @@ export function wallGrid(count: number, layout: WallLayout): Grid {
     case "auto": {
       // n 路取列数 ceil(√n)、行数 ceil(n / 列数)；超过 16 路按 4×4 分页
       const n = Math.min(Math.max(count, 1), AUTO_MAX);
-      const cols = Math.ceil(Math.sqrt(n));
-      return { cols, rows: Math.ceil(n / cols), capacity: n, featured: false, fixed: false };
+      const square = Math.ceil(Math.sqrt(n));
+      const grid = (cols: number): Grid => ({ cols, rows: Math.ceil(n / cols), capacity: n, featured: false, fixed: false });
+      if (!area) return grid(square);
+      let best = grid(square);
+      let bestW = tileSize(area.w, area.h, best, area.gap).w;
+      for (let cols = 1; cols <= Math.min(n, 4); cols++) {
+        const candidate = grid(cols);
+        if (candidate.rows > 4) continue;
+        const w = tileSize(area.w, area.h, candidate, area.gap).w;
+        if (w > bestW) [best, bestW] = [candidate, w];
+      }
+      return best;
     }
   }
 }

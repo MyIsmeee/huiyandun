@@ -95,10 +95,20 @@ class Engine:
             key = (incident.rule_id, device)
             self._quiet_until[key] = max(until, self._quiet_until.get(key, until))
 
+    def reset(self) -> None:
+        """演示复位：清空去重期与未完成的命中序列，复位后的事件按全新攻击关联。
+        只在内存中生效：之后若重启，restore 仍按近期关联事件恢复去重期。"""
+        self._hits.clear()
+        self._quiet_until.clear()
+
     def feed(self, subject: str, event: Event) -> list[CorrelatorIncidentV1]:
         device = _key(event)
-        # monitor 告警只显示，不参与关联（D-068）
-        if device is None or (isinstance(event, SecurityAlertV1) and event.mode == "monitor"):
+        # monitor 告警只显示，不参与关联（D-068）；疑似跌倒同样只在控制台提示（TK-160）
+        if (
+            device is None
+            or (isinstance(event, SecurityAlertV1) and event.mode == "monitor")
+            or (isinstance(event, VisionBehaviorV1) and event.level == "suspected")
+        ):
             return []
         incidents = []
         for rule in self._rules:
@@ -121,7 +131,13 @@ class Engine:
             hits.clear()
             self._quiet_until[key] = chain[-1].event.ts + SUPPRESS
             incidents.append(self._incident(rule, device, chain))
-        return incidents
+        # 同一事件同时补全单域与跨域规则（如爆破后画面冻结）：命中路径被另一事件完整包含的不再发布，只留证据更全的
+        # 跨域事件，避免同一次攻击重复存证与研判；被包含的规则照常进入去重期
+        return [
+            i
+            for i in incidents
+            if not any(set(i.hit_path) < set(o.hit_path) for o in incidents if o is not i)
+        ]
 
     def _tactics(self, techniques: list[str]) -> list[str]:
         tactics: set[str] = set()

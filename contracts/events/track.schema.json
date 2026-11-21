@@ -26,7 +26,7 @@
     "uncertainty_m": { "type": "number", "minimum": 0 },
     "heading_deg": {
       "anyOf": [{ "type": "number", "minimum": 0, "exclusiveMaximum": 360 }, { "type": "null" }],
-      "description": "平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null"
+      "description": "平面上的运动方向，0 为 +x 方向、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；起步不足 3 帧或静止时为 null"
     },
     "speed_mps": {
       "anyOf": [{ "type": "number", "minimum": 0 }, { "type": "null" }],

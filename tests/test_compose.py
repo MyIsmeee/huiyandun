@@ -39,9 +39,10 @@ def test_service_has_healthcheck(name: str) -> None:
     assert SERVICES[name].get("healthcheck", {}).get("test")
 
 
-@pytest.mark.parametrize("name", ["vision-engine", "correlator"])
+@pytest.mark.parametrize("name", [n for n in SERVICES if n not in ONESHOT])
 def test_service_restarts_after_exit(name: str) -> None:
-    """#79、TK-041：检测与关联进程退出后自动拉起，演示中不因一次崩溃停止。"""
+    """#79、TK-041：常驻服务退出后自动拉起，演示与值守中不因一次崩溃停止；模型网关与 api-server 同样如此，
+    否则网关崩溃后研判与报告一直落模板，直到有人手动重启。"""
     assert SERVICES[name]["restart"] == "unless-stopped"
 
 
@@ -146,10 +147,49 @@ def test_go2rtc_api_reachable_only_by_its_clients() -> None:
     assert "core-net" not in internal
 
 
-@pytest.mark.parametrize("name", ["web-console", "go2rtc"])
+@pytest.mark.parametrize("name", ["web-console", "go2rtc", "api-server", "playbook-executor"])
 def test_lan_ip_defaults_to_loopback(name: str) -> None:
     """#303：不设 HYD_LAN_IP 时取 127.0.0.1，控制台证书与 WebRTC 候选与只供本机访问时相同。"""
     assert SERVICES[name]["environment"]["HYD_LAN_IP"] == "${HYD_LAN_IP:-127.0.0.1}"
+
+
+def test_demo_reset_off_unless_makefile() -> None:
+    """演示复位会清空去重期：直接用 docker compose 部署时默认关闭，只有经 Makefile 启动的演示栈打开。"""
+    env = SERVICES["correlator"]["environment"]
+    assert env["HYD_DEMO_RESET"] == "${HYD_DEMO_RESET:-false}"
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert (
+        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) docker compose"
+        in makefile
+    )
+
+
+def test_makefile_exports_no_service_variables() -> None:
+    """HYD_* 只经 $(COMPOSE) 交给 docker compose：导出到全部命令时，make test 中读取配置的用例会因未声明的变量失败。"""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert not re.search(r"^\S*:?\s*export\s+HYD_", makefile, re.MULTILINE)
+
+
+@pytest.mark.parametrize("name", ["api-server", "correlator"])
+def test_demo_quiet_off_unless_make_demo_quiet(name: str) -> None:
+    """演示静默会隐藏告警：直接用 docker compose 部署与 make demo-up 时关闭，只有 make demo-quiet 打开。"""
+    service = SERVICES[name]
+    assert service["environment"]["HYD_DEMO_QUIET"] == "${HYD_DEMO_QUIET:-false}"
+    assert "../../demo/scenarios/demo-quiet.yaml:/etc/hyd/demo-quiet.yaml:ro" in service["volumes"]
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "\nHYD_DEMO_QUIET = false\n" in makefile
+    assert "demo-quiet: HYD_DEMO_QUIET = true" in makefile
+
+
+def test_demo_quiet_preset_valid() -> None:
+    """仓库中的演示场景预设可加载；断流与确认的跌倒、攀爬不被静默。"""
+    from py_common.demo_quiet import QuietPreset
+
+    text = (ROOT / "demo/scenarios/demo-quiet.yaml").read_text(encoding="utf-8")
+    preset = QuietPreset.model_validate(yaml.safe_load(text))
+    assert "stream_lost" not in preset.integrity.hide
+    assert "confirmed" not in preset.behavior.hide_levels
+    assert {"fall", "climb"}.isdisjoint(preset.behavior.hide_behaviors)
 
 
 @pytest.mark.parametrize(("module", "network"), [("api", "video-net"), ("rtsp", "demo-net")])
@@ -316,6 +356,10 @@ def test_attack_sim_behavior_registered_in_scenarios() -> None:
     assert 60 // slow["interval_s"] + 1 < 5
     assert (slow["attempts"] - 1) * slow["interval_s"] >= 60
     assert slow["interval_s"] < 30
+    # 推流劫持：一次即触发 HYD-NET-0002；脚本随镜像分发，由 make attack-hijack 以 --entrypoint 选用
+    assert params["hijack"]["attempts"] >= 1
+    dockerfile = (ROOT / "agents/sim/attack-sim/Dockerfile").read_text(encoding="utf-8")
+    assert "rtsp_hijack.py /usr/local/bin/rtsp-hijack" in dockerfile
 
 
 def test_nvr_sim_is_whitelisted_and_allowed_by_address() -> None:
@@ -366,3 +410,86 @@ def test_recorder_playback_reachable_only_by_evidence_service() -> None:
 def test_init_script_executable(script: Path) -> None:
     """不可执行的 .sh 会被 postgres 镜像 source 进自身启动流程，脚本的 set -eu 随之生效。"""
     assert os.access(script, os.X_OK)
+
+
+LINKAGE = yaml.safe_load((ROOT / "deploy/compose/compose.linkage.yaml").read_text(encoding="utf-8"))
+GATEWAY = "firewall-gateway"
+
+
+def test_linkage_gateway_least_privilege() -> None:
+    """旁路部署演示（FR-1001）：联动网关与 privileged-helper 同样只有 NET_ADMIN、根文件系统只读；本机套接字
+    不与任何容器共享，只在 linkage-net 的宿主地址上监听，且必须启用 TLS。"""
+    gateway = LINKAGE["services"][GATEWAY]
+    assert gateway["network_mode"] == "host" and gateway["profiles"] == ["linkage"]
+    assert gateway["read_only"] is True
+    assert gateway["cap_drop"] == ["ALL"] and gateway["cap_add"] == ["NET_ADMIN"]
+    assert "volumes" not in gateway and "ports" not in gateway
+    assert "/run/hyd-helper" in gateway["tmpfs"]
+    assert "executor_signing_key" not in gateway["secrets"]
+    env = gateway["environment"]
+    assert env["HYD_TLS_CERT_FILE"] and env["HYD_TLS_KEY_FILE"]
+    (config,) = LINKAGE["networks"]["linkage-net"]["ipam"]["config"]
+    host, _ = env["HYD_TCP_LISTEN"].rsplit(":", 1)
+    assert host == config["gateway"]
+
+
+def test_only_executor_reaches_linkage_gateway() -> None:
+    """linkage-net 无出站，只有 playbook-executor 接入；执行器连接的地址即网关监听的地址，证书对该地址有效。"""
+    network = LINKAGE["networks"]["linkage-net"]
+    assert network["internal"] is True
+    joined = {n for n, s in LINKAGE["services"].items() if "linkage-net" in s.get("networks", [])}
+    assert joined == {"playbook-executor"}
+    executor = LINKAGE["services"]["playbook-executor"]["environment"]
+    listen = LINKAGE["services"][GATEWAY]["environment"]["HYD_TCP_LISTEN"]
+    assert executor["HYD_FIREWALL_ADDRESS"] == listen
+    host = listen.rsplit(":", 1)[0]
+    assert f"subjectAltName=IP:{host}" in (ROOT / "Makefile").read_text(encoding="utf-8")
+
+
+def test_linkage_overlay_keeps_executor_mounts() -> None:
+    """叠加文件只换站点配置：执行器的套接字卷与 Playbook 目录与 compose.yaml 一致，api-server 读同一站点。"""
+    base = set(SERVICES["playbook-executor"]["volumes"])
+    overlay = set(LINKAGE["services"]["playbook-executor"]["volumes"])
+    site = "../../demo/scenarios/site-bypass.yaml:/etc/hyd/site.yaml:ro"
+    assert {v.split(":")[1] for v in base} == {v.split(":")[1] for v in overlay}
+    assert site in overlay and LINKAGE["services"]["api-server"]["volumes"] == [site]
+
+
+def test_bypass_site_differs_only_in_mode() -> None:
+    """site-bypass.yaml 只改部署模式：摄像头、白名单与 site.yaml 保持一致，不随演示切换漂移。"""
+    scenarios = ROOT / "demo/scenarios"
+    base = yaml.safe_load((scenarios / "site.yaml").read_text(encoding="utf-8"))
+    bypass = yaml.safe_load((scenarios / "site-bypass.yaml").read_text(encoding="utf-8"))
+    assert (base["site"]["mode"], bypass["site"]["mode"]) == ("host_probe", "bypass")
+    bypass["site"]["mode"] = "host_probe"
+    assert bypass == base
+
+
+NOTIFY = yaml.safe_load((ROOT / "deploy/compose/compose.notify.yaml").read_text(encoding="utf-8"))
+
+
+def test_notifier_is_opt_in_and_only_it_reaches_notify_egress() -> None:
+    """告警通知是可选叠加（DP-05 例外）：默认部署中没有 notifier；出站网络只有它接入，它不接入数据库、视频与
+    处置网络，不开放端口，根文件系统只读、去掉全部能力。"""
+    assert "notifier" not in SERVICES
+    notifier = NOTIFY["services"]["notifier"]
+    assert notifier["profiles"] == ["notify"]
+    assert set(notifier["networks"]) == {"core-net", "notify-egress"}
+    joined = {n for n, s in NOTIFY["services"].items() if "notify-egress" in s.get("networks", [])}
+    assert joined == {"notifier"}
+    assert notifier["read_only"] is True and notifier["cap_drop"] == ["ALL"]
+    assert "ports" not in notifier and "volumes" not in notifier
+    assert notifier["secrets"] == ["notify_targets"]
+
+
+def test_usb_cameras_device_access_least_privilege() -> None:
+    """USB 摄像头：只有 ingest 能打开设备，且只放开视频设备（主设备号 81）；api-server 只读设备名，打不开设备。"""
+    assert SERVICES["ingest"]["device_cgroup_rules"] == ["c 81:* rmw"]
+    assert "/dev:/hostdev:ro" in SERVICES["ingest"]["volumes"]
+    assert "/dev:/hostdev:ro" in SERVICES["api-server"]["volumes"]
+    granted = {n for n, s in SERVICES.items() if s.get("device_cgroup_rules") or s.get("devices")}
+    assert granted <= {
+        "ingest",
+        "vision-engine",
+    }  # vision-engine 的 GPU 透传在 compose.gpu.yaml，这里不应出现
+    assert "device_cgroup_rules" not in SERVICES["api-server"]

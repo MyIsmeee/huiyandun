@@ -16,6 +16,29 @@ class Tree(ContractModel):
     height_m: float = Field(..., gt=0.0)
 
 
+class Backdrop(ContractModel):
+    """
+    实景底图（可选）：画面按 cols × rows 网格取点的三维位置与去除人员后的画面，网格点 (i, j) 对应画面归一化坐标 ((j + 0.5) / cols, (i + 0.5) / rows)。只在内存中随识别结果传递，不持久化
+    """
+
+    cols: int = Field(..., ge=2, le=256)
+    rows: int = Field(..., ge=2, le=256)
+    points: list[float]
+    """
+    rows × cols × 3 个数：每点平面 x、离地高度、平面 y（米），行优先
+    """
+    quads: str = Field(..., json_schema_extra={"contentEncoding": "base64"})
+    """
+    (rows−1)×(cols−1) 位的位图，行优先、每字节高位在前：相邻四点围成的格子是否保留（深度突变、超出范围、行人车辆所在处不保留）；不保留的格子用到的点坐标为 0
+    """
+    image: str = Field(
+        ..., json_schema_extra={"contentEncoding": "base64", "contentMediaType": "image/jpeg"}
+    )
+    """
+    去除行人与车辆（按检测框与分割遮去后修补）的画面
+    """
+
+
 class Point(RootModel[list[float]]):
     """
     平面坐标 [x, y]，单位米
@@ -50,11 +73,73 @@ class Wall(ContractModel):
 
 
 class Object(ContractModel):
-    class_: Literal["table", "chair", "cabinet", "sofa", "bed", "furniture", "street_furniture"] = (
-        Field(..., alias="class")
-    )
+    class_: Literal[
+        "table",
+        "chair",
+        "cabinet",
+        "sofa",
+        "bed",
+        "furniture",
+        "street_furniture",
+        "appliance",
+        "box",
+        "fixture",
+    ] = Field(..., alias="class")
     polygon: Polygon
     height_m: float = Field(..., gt=0.0)
+    base_m: float | None = Field(None, ge=0.0)
+    """
+    底部离地高度（米）：放在桌面、柜顶上的小件物品（appliance、box）才有，大屏据此摆放；缺省为落地
+    """
+    kind: (
+        Literal[
+            "table",
+            "desk",
+            "coffee_table",
+            "chair",
+            "armchair",
+            "seat",
+            "swivel_chair",
+            "stool",
+            "cabinet",
+            "shelf",
+            "wardrobe",
+            "chest_of_drawers",
+            "bookcase",
+            "sofa",
+            "bed",
+            "counter",
+            "signboard",
+            "bench",
+            "streetlight",
+            "pole",
+            "traffic_light",
+            "ashcan",
+            "computer",
+            "crt_screen",
+            "monitor",
+            "television",
+            "refrigerator",
+            "washer",
+            "microwave",
+            "oven",
+            "stove",
+            "dishwasher",
+            "lamp",
+            "fan",
+            "box",
+            "bag",
+            "basket",
+            "toilet",
+            "sink",
+            "bathtub",
+            "shower",
+        ]
+        | None
+    ) = None
+    """
+    细分类别：分割模型（ADE20K）在该物体上点数最多的原始类别，如桌子中的书桌、茶几，椅子中的转椅、凳子，柜子中的书架、衣柜、斗柜；缺省时只按 class 与尺寸呈现
+    """
 
 
 class Marking(ContractModel):
@@ -64,7 +149,7 @@ class Marking(ContractModel):
 
 class SceneFrame(ContractModel):
     """
-    摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：只含平面坐标（米）的多边形与线段，不含图像；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
+    摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：平面坐标（米）的多边形与线段，另可附去除人员后的实景底图（backdrop）；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
     """
 
     camera_id: str
@@ -78,7 +163,7 @@ class SceneFrame(ContractModel):
     """
     objects: list[Object]
     """
-    物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块
+    物体的底面轮廓：电器（appliance）、箱包（box）、卫浴（fixture）按细分类别摆放模型库中的对应模型；桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块。自动场景按 kind 与实测长宽高选择画法（书桌、茶几、圆桌、转椅、凳子、书架、衣柜等）
     """
     trees: list[Tree]
     """
@@ -87,4 +172,8 @@ class SceneFrame(ContractModel):
     markings: list[Marking]
     """
     路面区域内的白色标线
+    """
+    backdrop: Backdrop | None = None
+    """
+    实景底图（可选）：画面按 cols × rows 网格取点的三维位置与去除人员后的画面，网格点 (i, j) 对应画面归一化坐标 ((j + 0.5) / cols, (i + 0.5) / rows)。只在内存中随识别结果传递，不持久化
     """

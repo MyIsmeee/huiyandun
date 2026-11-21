@@ -2,7 +2,6 @@ import { LayoutGrid } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Thumbnail } from "../panels/CameraRail/CameraRail";
 import { useSelection } from "../store/selection";
 import { go } from "../store/nav";
 import { toggleZoom, useWall } from "../store/wall";
@@ -12,13 +11,15 @@ import type { View } from "./layout";
 import { ACCENT } from "./targets";
 
 /** 引线卡的宽度，单位像素 */
-const CARD_W = 240;
-/** 画面每 2 s 刷新一次（04 V-I6） */
-const REFRESH_MS = 2_000;
+const CARD_W = 220;
+/** 引线卡的选择器：卡片浮在场景上，落在其上的单击、双击与悬停不算作对场景的操作（SceneViewport） */
+export const CALLOUT = "[data-scene-callout]";
 
 /**
- * 画面引线卡（04 V-I6，借鉴 Dilum Sanjaya 的 Global Geospatial 地点引线）：空间态势中选中摄像头时，
- * 从机头拉一根折线引线到画面小卡，把 3D 中的位置与它拍到的画面连起来；取消选中即消失。
+ * 摄像头引线卡（04 V-I6，借鉴 Dilum Sanjaya 的 Global Geospatial 地点引线）：空间态势中选中摄像头时，
+ * 从机头拉一根折线引线到小卡，标出 3D 中选中的是哪一台；取消选中即消失。
+ * 小卡只写编号、名称与跳到监控墙的入口，不再放截帧缩略图：右侧详情紧接着就播放同一路实时画面，两处同时显示同一画面
+ * 只是重复（产品负责人 2026-11-15 要求精简）。
  * 小卡在指标卡下方、紧靠右侧告警与详情卡的左边，不与其他浮动卡片重叠（设计 150 §3）。
  * 跟随与摄像头视角下不显示（视点即在该摄像头处）。
  */
@@ -56,11 +57,11 @@ export function CameraCallout({ cameras, view }: { cameras: Camera[]; view: View
         ref={box}
         role="group"
         aria-label={`${camera.id} 画面`}
+        data-scene-callout
         style={{ width: CARD_W }}
-        className="floating-card absolute top-36 right-[372px] flex flex-col gap-2 p-2 min-[1600px]:right-[412px]"
+        className="floating-card absolute top-36 right-[372px] p-1.5 min-[1600px]:right-[412px]"
       >
-        <Thumbnail id={camera.id} offline={camera.state === "offline"} refreshMs={REFRESH_MS} />
-        <div className="flex items-center gap-2 px-1">
+        <div className="flex items-center gap-2 pl-1.5">
           <span className="flex min-w-0 items-baseline gap-1 text-xs">
             <span className="font-mono">{camera.id}</span>
             <span className="truncate text-muted-foreground">· {camera.name}</span>

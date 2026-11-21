@@ -25,7 +25,8 @@ export function Overview(props: { site: Site; stale: boolean; lastFrameAt: numbe
   const [collapsed, setCollapsed] = useState(false);
   const { selected, target } = useInspected(site.devices);
   const capsule = collapsed && !selected && !target;
-  const progress = useLive((s) => progressIncident(s.incidents, selected?.id ?? null, area.devices));
+  const incidentId = useSelection((s) => s.incidentId);
+  const progress = useLive((s) => progressIncident(s.incidents, selected?.id ?? null, area.devices, incidentId));
   const [webgl2] = useState(supportsWebGL2);
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -35,7 +36,7 @@ export function Overview(props: { site: Site; stale: boolean; lastFrameAt: numbe
       {/* 止于告警卡左侧 12 px：区域名称过长时截断，不压到告警卡（1366 宽下最紧） */}
       <div className="pointer-events-none absolute top-4 right-[368px] left-4 flex items-start gap-3 min-[1600px]:right-[408px]">
         <KpiRow stale={stale} cards />
-        {area.current && <AreaSwitcher areas={site.areas} current={area.current} alerts={area.alerts} />}
+        {area.current && <AreaSwitcher areas={site.areas} current={area.current} alerts={area.alerts} onEdit={onBuild} />}
       </div>
       <div className="pointer-events-none absolute top-4 right-4 bottom-4 flex w-[340px] flex-col items-end min-[1600px]:w-[380px]">
         {/* 收起时只隐藏不卸载：展开后筛选、展开与滚动位置不丢失 */}

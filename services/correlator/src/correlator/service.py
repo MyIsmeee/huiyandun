@@ -1,6 +1,6 @@
 """correlator：归一化器（TK-032）与关联引擎（TK-041）。
 
-归一化器跟随 Suricata EVE，逐条归一化后发布 hyd.security.alert.v1；每条告警经 JetStream 确认后才记录
+归一化器跟随 Suricata EVE（以及主机探针输出的同格式告警），逐条归一化后发布 hyd.security.alert.v1；每条告警经 JetStream 确认后才记录
 读取位置，发布失败时保留该条，下个周期重试，不丢告警。
 
 关联引擎从 JetStream 订阅告警与视觉事件，生成的关联事件发布到 hyd.correlator.incident.v1。重启时先重放
@@ -19,6 +19,7 @@ from pathlib import Path
 
 import nats
 import nats.js.errors
+import yaml
 from pydantic import Field
 
 from correlator.behavior import WINDOW_S, BehaviorModel, save_state
@@ -28,9 +29,11 @@ from correlator.normalize import Ip, device_index, normalize
 from correlator.rules import MODELS, Event, load_rules
 from py_common.bus import Bus
 from py_common.config import ServiceConfig, load_config
+from py_common.demo_quiet import QuietPreset
 from py_common.log import configure_logging
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
+from py_contracts.events.hyd_demo_reset_v1_schema import DemoResetV1
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 
 SUBJECT = "hyd.security.alert.v1"
@@ -56,6 +59,14 @@ class CorrelatorConfig(ServiceConfig):
         Path("/var/lib/correlator/eve-position.json"),
         description="EVE 已处理位置，须位于持久卷，重启后续读",
     )
+    host_eve_file: Path | None = Field(
+        None,
+        description="主机探针（agents/sensor/host-probe）输出的告警，格式同 EVE，只读挂载；不设则不读",
+    )
+    host_state_file: Path = Field(
+        Path("/var/lib/correlator/host-position.json"),
+        description="主机探针告警已处理位置，须位于持久卷",
+    )
     poll_s: float = Field(0.5, gt=0, le=10, description="读到文件末尾后再次检查的间隔，单位秒")
     heartbeat_file: Path = Field(
         Path("/tmp/hyd-correlator-alive"), description="每个周期更新其修改时间，供健康检查判断"
@@ -80,6 +91,17 @@ class CorrelatorConfig(ServiceConfig):
     )
     behavior_baseline_file: Path | None = Field(
         None, description="预先学好的基线快照：没有可续用的状态时从它开始，免去 10 分钟学习期"
+    )
+    demo_reset: bool = Field(
+        False,
+        description="响应 hyd.demo.reset.v1，清空去重期以便重演攻击；只在演示环境开启，生产部署保持关闭",
+    )
+    demo_quiet: bool = Field(
+        False,
+        description="演示静默：按 demo_quiet_file 跳过易误报事件的关联；只由 make demo-quiet 打开，生产部署保持关闭",
+    )
+    demo_quiet_file: Path = Field(
+        Path("/etc/hyd/demo-quiet.yaml"), description="演示场景预设 demo/scenarios/demo-quiet.yaml"
     )
 
 
@@ -215,8 +237,10 @@ async def follow[T: Event](
         await asyncio.sleep(RESUBSCRIBE_S)
 
 
-async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
-    """建立关联引擎的订阅：先恢复去重状态，再重放并持续接收事件。"""
+async def correlate(
+    engine: Engine, bus: Bus, window: timedelta, quiet: QuietPreset | None = None
+) -> None:
+    """建立关联引擎的订阅：先恢复去重状态，再重放并持续接收事件；演示静默的事件不参与关联。"""
     started = datetime.now(UTC)
 
     async def restore(incident: CorrelatorIncidentV1) -> None:
@@ -228,6 +252,8 @@ async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
     )
 
     async def on_event(subject: str, event: Event) -> None:
+        if quiet is not None and quiet.hides(event):
+            return
         for incident in engine.feed(subject, event):
             await publish_incident(bus, incident)
 
@@ -237,6 +263,21 @@ async def correlate(engine: Engine, bus: Bus, window: timedelta) -> None:
             for subject, model in MODELS.items()
         )
     )
+
+
+RESET_SUBJECT = "hyd.demo.reset.v1"
+
+
+async def follow_reset(engine: Engine, bus: Bus) -> None:
+    """演示复位：普通订阅、不重放，复位只作用于此刻的去重状态（correlator 未运行时发出的复位不补做）。"""
+
+    async def on_reset(event: DemoResetV1) -> None:
+        engine.reset()
+        log.info(
+            "correlator.demo_reset", extra={"actor": event.actor, "request_id": event.request_id}
+        )
+
+    await bus.subscribe(RESET_SUBJECT, DemoResetV1, on_reset)
 
 
 REGISTRY_SUBJECT = "hyd.config.cameras.v1"  # 摄像头登记表，流中只保留最新一条（D-101）
@@ -281,14 +322,27 @@ async def serve(config: CorrelatorConfig) -> None:
         "correlator.started",
         extra={"eve_file": str(config.eve_file), "rules": [r.id for r in rules]},
     )
+    if config.demo_reset:
+        await follow_reset(engine, bus)
     window = timedelta(seconds=max(r.window_s for r in rules))
     devices: dict[Ip, str] = {}
     model: list[BehaviorModel] = []  # 取到登记表后再加载：存盘状态按设备编号恢复
     await follow_registry(bus, devices, model)
+    quiet = None
+    if config.demo_quiet:
+        quiet = QuietPreset.model_validate(
+            yaml.safe_load(config.demo_quiet_file.read_text(encoding="utf-8"))
+        )
+        log.warning("correlator.demo_quiet", extra={"preset": quiet.model_dump()})
     tasks = [
-        correlate(engine, bus, window),
+        correlate(engine, bus, window, quiet),
         run(EveTail(config.eve_file, config.state_file), devices, bus, config),
     ]
+    if config.host_eve_file is not None:
+        # 主机探针的告警与网络探针同格式，经同一归一化进入关联与处置
+        tasks.append(
+            run(EveTail(config.host_eve_file, config.host_state_file), devices, bus, config)
+        )
     if config.behavior_enabled:
         model.append(load_behavior(devices, config))
         tasks.append(

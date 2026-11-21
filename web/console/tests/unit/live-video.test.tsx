@@ -100,7 +100,8 @@ describe("LiveVideo", () => {
     expect(video()).toBe("connecting");
   });
 
-  it("媒体连接中断时保留画面并提示，恢复后继续播放；失败则不可用", async () => {
+  it("媒体连接中断时保留画面并提示，恢复后继续播放；失败后说明连接中断并自动重连", async () => {
+    vi.useFakeTimers();
     vi.spyOn(api, "webrtc").mockResolvedValue("v=0 answer");
     render(<LiveVideo deviceId="cam-01" />);
     await flush();
@@ -112,9 +113,70 @@ describe("LiveVideo", () => {
     expect(video()).toBe("playing");
     act(() => peer().state("failed"));
     expect(video()).toBe("unavailable");
+    // 播放过的连接失败不是端口问题
+    expect(screen.getByText("连接中断，正在自动重连")).toBeTruthy();
+    expect(screen.getByText("稍后自动重试")).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(5_000));
+    await flush();
+    expect(FakePeer.all).toHaveLength(2);
+    expect(video()).toBe("connecting");
   });
 
-  it("超时仍未取得画面即不可用", async () => {
+  it("中断超过 10 s 未自行恢复即重建连接", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(api, "webrtc").mockResolvedValue("v=0 answer");
+    render(<LiveVideo deviceId="cam-01" />);
+    await flush();
+    act(() => peer().play());
+
+    act(() => peer().state("disconnected"));
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(video()).toBe("unavailable");
+    expect(peer().closed).toBe(true);
+    act(() => vi.advanceTimersByTime(5_000));
+    await flush();
+    expect(FakePeer.all).toHaveLength(2);
+  });
+
+  it("自动重试按 5 s 起倍增退避，连通后清零", async () => {
+    vi.useFakeTimers();
+    const signal = vi.spyOn(api, "webrtc").mockRejectedValue(new ApiError(502, "视频服务不可用"));
+    render(<LiveVideo deviceId="cam-01" />);
+    await flush();
+    expect(signal).toHaveBeenCalledTimes(1);
+
+    act(() => vi.advanceTimersByTime(5_000));
+    await flush();
+    expect(signal).toHaveBeenCalledTimes(2);
+    // 第二次失败后等 10 s
+    act(() => vi.advanceTimersByTime(9_000));
+    await flush();
+    expect(signal).toHaveBeenCalledTimes(2);
+    act(() => vi.advanceTimersByTime(1_000));
+    await flush();
+    expect(signal).toHaveBeenCalledTimes(3);
+  });
+
+  it("页面隐藏时暂停自动重试，回到前台再连", async () => {
+    vi.useFakeTimers();
+    let hidden = true;
+    Object.defineProperty(document, "hidden", { get: () => hidden, configurable: true });
+    const signal = vi.spyOn(api, "webrtc").mockRejectedValue(new ApiError(502, "视频服务不可用"));
+    render(<LiveVideo deviceId="cam-01" />);
+    await flush();
+
+    act(() => vi.advanceTimersByTime(60_000));
+    await flush();
+    expect(signal).toHaveBeenCalledTimes(1);
+    hidden = false;
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    await flush();
+    expect(signal).toHaveBeenCalledTimes(2);
+    Object.defineProperty(document, "hidden", { get: () => false, configurable: true });
+  });
+
+  it("超时仍未取得画面即不可用，从未连上时提示端口", async () => {
     vi.useFakeTimers();
     vi.spyOn(api, "webrtc").mockResolvedValue("v=0 answer");
     render(<LiveVideo deviceId="cam-01" />);
@@ -123,6 +185,7 @@ describe("LiveVideo", () => {
     act(() => vi.advanceTimersByTime(10_000));
     expect(video()).toBe("unavailable");
     expect(peer().closed).toBe(true);
+    expect(screen.getByText("无法取得画面：浏览器须能访问本机 8555 端口")).toBeTruthy();
   });
 
   it("卸载时关闭连接，迟到的信令结果不再更新状态", async () => {

@@ -19,6 +19,9 @@ authInternalUsers:
   - user: hyd
     pass: __PUSH_PASS__
     permissions: [{ action: publish }]
+  - user: any
+    ips: ["127.0.0.1", "::1"]  # USB 摄像头：ingest 本机的 ffmpeg 读设备推到同名路径（api_server/usb.py）
+    permissions: [{ action: publish }]
   # 只有 go2rtc（ingest-net 中的固定地址）可读取
   - user: any
     ips: ["172.30.10.2"]

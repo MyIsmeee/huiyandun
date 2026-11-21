@@ -17,7 +17,9 @@ from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
 
 ROOT = Path(__file__).resolve().parents[3]
-RULES = load_rules(ROOT / "rules/correlator")
+ALL_RULES = load_rules(ROOT / "rules/correlator")
+# 引擎行为以跨域规则为例逐项验证；各规则自身的样本见 test_rule_samples
+RULES = [r for r in ALL_RULES if r.id == "HYD-X-0001"]
 ATTACK = json.loads((ROOT / "rules/attack/techniques.json").read_text(encoding="utf-8"))
 T0 = datetime(2026, 11, 8, 2, 0, tzinfo=UTC)
 ALERT, INTEGRITY, BEHAVIOR = (
@@ -46,6 +48,25 @@ def alert(t: float, **fields: Any) -> SecurityAlertV1:
             "source": "rule",
             "confidence": 1.0,
             "summary": "HYD-NET-0001 RTSP authentication brute force",
+        }
+        | fields
+    )
+
+
+def behavior(t: float, **fields: Any) -> VisionBehaviorV1:
+    return VisionBehaviorV1.model_validate(
+        {
+            "schema_version": "1.2.0",
+            "event_id": str(uuid.uuid4()),
+            "ts": (T0 + timedelta(seconds=t)).isoformat(),
+            "camera_id": "cam-02",
+            "track_id": 1,
+            "behavior": "fall",
+            "level": "confirmed",
+            "confidence_avg": 0.9,
+            "duration_s": 8.0,
+            "ts_start": (T0 + timedelta(seconds=t - 8)).isoformat(),
+            "ts_end": (T0 + timedelta(seconds=t)).isoformat(),
         }
         | fields
     )
@@ -154,6 +175,10 @@ def test_behavior_event_requires_confirmation() -> None:
     (incident,) = feed(Engine([rule], ATTACK), (ALERT, alert(0)), (BEHAVIOR, fall))
     assert incident.requires_confirmation
 
+    # 疑似跌倒只在控制台提示，不参与关联（TK-160）
+    suspected = fall.model_copy(update={"schema_version": "1.1.0", "level": "suspected"})
+    assert feed(Engine([rule], ATTACK), (ALERT, alert(0)), (BEHAVIOR, suspected)) == []
+
 
 def test_unregistered_device_alert_ignored() -> None:
     """目标未登记为设备的告警没有关联键，不参与关联。"""
@@ -171,3 +196,55 @@ def test_unknown_technique_logged_and_incident_still_published(
         (incident,) = feed(Engine([rule], ATTACK), (ALERT, alert(0)), (INTEGRITY, integrity(10)))
     assert incident.tactics == ["Credential Access"]
     assert [r.message for r in caplog.records] == ["correlator.technique_unknown"]
+
+
+def test_reset_allows_immediate_replay_of_attack() -> None:
+    """演示复位：去重期内重演同一攻击原本被压下；复位后按全新攻击生成单域与跨域事件。"""
+    engine = Engine(ALL_RULES, ATTACK)
+    assert [i.rule_id for i in feed(engine, (ALERT, alert(0)), (INTEGRITY, integrity(20)))] == [
+        "HYD-NET-0101",
+        "HYD-X-0001",
+    ]
+    assert feed(engine, (ALERT, alert(60))) == []  # 去重期内：只顺延，不生成
+
+    engine.reset()
+
+    assert [i.rule_id for i in feed(engine, (ALERT, alert(70)), (INTEGRITY, integrity(90)))] == [
+        "HYD-NET-0101",
+        "HYD-X-0001",
+    ]
+
+
+def test_reset_drops_partial_sequence() -> None:
+    """复位前的半截序列不与复位后的事件拼成跨域事件：复位前的爆破 + 复位后的冻结只算单域篡改。"""
+    engine = Engine(RULES, ATTACK)
+    feed(engine, (ALERT, alert(0)))  # 只走完第一步
+    engine.reset()
+
+    assert feed(engine, (INTEGRITY, integrity(10))) == []
+
+
+def test_bruteforce_then_tamper_escalates() -> None:
+    """全部规则同时加载：认证爆破先生成 high 的单域事件（即可封禁），画面随后遭篡改再生成 critical 的跨域事件。"""
+    engine = Engine(ALL_RULES, ATTACK)
+
+    (single,) = engine.feed(ALERT, alert(0))
+    assert (single.rule_id, single.severity) == ("HYD-NET-0101", "high")
+    assert single.model_dump(mode="json")["techniques"] == ["T1110"]
+    assert (str(single.source_ip), single.requires_confirmation) == ("172.30.0.100", False)
+
+    # 冻结同时命中单域的 HYD-VIS-0002：命中路径被跨域事件包含，只发布跨域事件
+    (cross,) = engine.feed(INTEGRITY, integrity(120))
+    assert (cross.rule_id, cross.severity) == ("HYD-X-0001", "critical")
+    assert cross.source_ip == single.source_ip  # 同一攻击源：封禁已生效时后到的处置记为跳过
+
+
+def test_tamper_without_network_alert_stays_single_domain() -> None:
+    """全部规则同时加载：没有网络告警在先时，画面冻结只生成物理域事件（HYD-VIS-0002），没有攻击源、不触发封禁；
+    画面判定校准前为 medium，不交 AI 值班员研判。"""
+    (incident,) = Engine(ALL_RULES, ATTACK).feed(INTEGRITY, integrity(0))
+    assert (incident.rule_id, incident.severity, incident.source_ip) == (
+        "HYD-VIS-0002",
+        "medium",
+        None,
+    )

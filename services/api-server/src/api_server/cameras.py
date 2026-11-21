@@ -44,7 +44,7 @@ from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from api_server import scene
+from api_server import scene, usb
 from api_server.audit import record
 from api_server.auth import Principal, require
 from api_server.llm import seal, unseal
@@ -58,6 +58,8 @@ from py_contracts.api import (
     CameraUpdate,
     Device,
     Site,
+    UsbDevice,
+    UsbDeviceList,
     WsFrame,
 )
 from py_contracts.config.site_schema import SiteConfig
@@ -121,6 +123,7 @@ cameras = Table(
     Column("calibration", JSONB),
     Column("calibration_error_m", Float),
     Column("climb_lines", JSONB),
+    Column("rules", JSONB),
     Column("created_at", DateTime(timezone=True)),
     Column("updated_at", DateTime(timezone=True)),
 )
@@ -167,6 +170,7 @@ def view(row: Any) -> Camera:
             "source": (
                 {k: row[k] for k in ("protocol", "host", "port", "path", "relay")} if pull else None
             ),
+            "device": row["path"] if row["ingest"] == "usb" else None,
             "username": row["username"],
             "password_set": row["password_enc"] is not None,
             "area_id": row["area_id"],
@@ -174,6 +178,7 @@ def view(row: Any) -> Camera:
             "calibration": row["calibration"],
             "calibration_error_m": row["calibration_error_m"],
             "climb_lines": row["climb_lines"],
+            "rules": row.get("rules") or [],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -212,6 +217,8 @@ def device(row: Any, mode: str) -> Device:
                 "mapping": "calibrated" if calibrated else "estimated",
                 "homography": None,
                 "reproj_error_m": row["calibration_error_m"] if calibrated else None,
+                "climb_lines": row["climb_lines"] or [],
+                "rules": row.get("rules") or [],
             },
         }
     )
@@ -225,7 +232,11 @@ def registry(rows: list[Any]) -> ConfigCamerasV1:
             "ts": datetime.now(UTC).isoformat(),
             "cameras": [
                 {k: (str(r[k]) if k == "ip" else r[k]) for k in ("id", "name", "ip", "pose")}
-                | {"calibration": r["calibration"], "climb_lines": r["climb_lines"]}
+                | {
+                    "calibration": r["calibration"],
+                    "climb_lines": r["climb_lines"],
+                    "rules": r.get("rules") or [],
+                }
                 for r in rows
             ],
         }
@@ -234,6 +245,8 @@ def registry(rows: list[Any]) -> ConfigCamerasV1:
 
 def _check(values: dict[str, Any]) -> None:
     """契约之外的校验：拉流须有地址且不指向本机，警戒线不能竖直（FR-104）。"""
+    if values["ingest"] == "usb" and not values.get("path"):
+        raise HTTPException(400, "device: USB 方式须选择设备")
     if values["ingest"] == "pull" and values.get("protocol") is None:
         raise HTTPException(400, "source: 拉流方式须填写协议、主机、端口与路径")
     if values["ingest"] == "pull" and _local(values["host"]):
@@ -243,6 +256,26 @@ def _check(values: dict[str, Any]) -> None:
     for i, (u1, _, u2, _) in enumerate(values["climb_lines"]):
         if u1 == u2:
             raise HTTPException(400, f"climb_lines.{i}: 警戒线不能是竖直线段")
+    _check_rules(values.get("rules") or [])
+
+
+MIN_EDGE_M = 0.1  # 规则几何相邻两点的最小间距：重合的点使方向与边界无从定义
+
+
+def _check_rules(rules: list[dict[str, Any]]) -> None:
+    """规则编号唯一；区域至少 3 个顶点、越线至少 2 点；相邻两点不重合。"""
+    seen: set[str] = set()
+    for i, rule in enumerate(rules):
+        if rule["id"] in seen:
+            raise HTTPException(400, f"rules.{i}.id: 规则编号 {rule['id']} 重复")
+        seen.add(rule["id"])
+        points = rule["points"]
+        if rule["type"] == "intrusion" and len(points) < 3:
+            raise HTTPException(400, f"rules.{i}.points: 区域至少要有 3 个顶点")
+        closed = points + points[:1] if rule["type"] == "intrusion" else points
+        for a, b in zip(closed, closed[1:], strict=False):
+            if ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 < MIN_EDGE_M:
+                raise HTTPException(400, f"rules.{i}.points: 相邻两点不能重合（间距至少 0.1 m）")
 
 
 def _local(host: str) -> bool:
@@ -263,11 +296,22 @@ PLACEMENT = ("x", "y", "yaw_deg")  # 场景页也会写的位姿字段（FR-908�
 RELAY_PROTOCOLS = {"rtsp", "rtmp"}  # MediaMTX 能作为来源拉取的协议（D-117）
 
 
-def _source_columns(source: dict[str, Any] | None, ingest: str) -> dict[str, Any]:
-    """推流不保存拉流地址，也没有兼容模式。"""
+def _source_columns(
+    source: dict[str, Any] | None, ingest: str, device: str | None = None
+) -> dict[str, Any]:
+    """推流不保存拉流地址，也没有兼容模式；USB 摄像头的设备标识存于 path。"""
+    if ingest == "usb":
+        return dict.fromkeys(SOURCE_FIELDS) | {"path": device, "relay": False}
     if ingest != "pull" or source is None:
         return dict.fromkeys(SOURCE_FIELDS) | {"relay": False}
     return {k: source[k] for k in SOURCE_FIELDS} | {"relay": bool(source.get("relay"))}
+
+
+def _integrity(e: IntegrityError, ip: Any) -> HTTPException:
+    """IP 唯一性冲突为 409；其余约束（如接入方式与字段不匹配）原先同样报"IP 已被使用"，误导排查，改为 400。"""
+    if "cameras_ip_key" in str(e.orig):
+        return HTTPException(409, f"设备 IP {ip} 已被其他摄像头使用")
+    return HTTPException(400, "摄像头字段与接入方式不匹配")
 
 
 async def _rows(conn: AsyncConnection) -> list[Any]:
@@ -306,6 +350,7 @@ def seeds(site_file: Path, now: datetime) -> list[dict[str, Any]]:
                 "pose": c["pose"],
                 "calibration": c.get("calibration") or [],
                 "climb_lines": c.get("climb_lines") or [],
+                "rules": [],
                 "created_at": now,
                 "updated_at": now,
             }
@@ -417,29 +462,32 @@ class Registry:
         res = await client.get("/v3/config/paths/list")
         res.raise_for_status()
         current = {
-            item["name"]: item.get("source")
+            item["name"]: (item.get("source"), item.get("runOnInit") or "")
             for item in res.json().get("items") or []
             if re.fullmatch(r"cam-\d+", item["name"])
         }
         key_file = self._state.config.device_key_file
-        desired = {}
+        desired: dict[str, dict[str, Any]] = {}
         for r in rows:
             if r["ingest"] == "pull" and r["relay"]:
                 password = unseal(key_file, r["password_enc"]) if r["password_enc"] else None
-                desired[r["id"]] = camera_url(r, password)
+                desired[r["id"]] = {
+                    "source": camera_url(r, password),
+                    "sourceOnDemand": False,
+                    "rtspTransport": "tcp",
+                }
+            elif r["ingest"] == "usb" and r["path"]:
+                # USB 摄像头：ingest 本机 ffmpeg 读设备推到同名路径（usb.py）
+                desired[r["id"]] = usb.ingest_path(r["path"])
         for name in current.keys() - desired.keys():
             (await client.delete(f"/v3/config/paths/delete/{name}")).raise_for_status()
             log.info("cameras.relay_removed", extra={"camera_id": name})
-        for name, url in desired.items():
-            if current.get(name) == url:
+        for name, conf in desired.items():
+            if current.get(name) == (conf["source"], conf.get("runOnInit", "")):
                 continue
-            conf = {"source": url, "sourceOnDemand": False, "rtspTransport": "tcp"}
-            action = "patch" if name in current else "add"
-            res = await client.request(
-                "PATCH" if action == "patch" else "POST",
-                f"/v3/config/paths/{action}/{name}",
-                json=conf,
-            )
+            # 整体替换：兼容模式与 USB 互换时不残留另一种的字段
+            action = "replace" if name in current else "add"
+            res = await client.post(f"/v3/config/paths/{action}/{name}", json=conf)
             res.raise_for_status()
             log.info("cameras.relay_synced", extra={"camera_id": name})
 
@@ -484,18 +532,42 @@ async def _locked(conn: AsyncConnection, camera_id: str) -> Any:
     return row
 
 
+@router.get("/cameras/usb-devices", dependencies=[Depends(require("admin"))])
+async def list_usb_devices(request: Request) -> UsbDeviceList:
+    """边缘主机上的 USB 摄像头；已接入的标出摄像头编号。每次请求重新读取，拔插后刷新即可。"""
+    async with request.app.state.engine.connect() as conn:
+        used = {r["path"]: r["id"] for r in await _rows(conn) if r["ingest"] == "usb"}
+    return UsbDeviceList(
+        items=[
+            UsbDevice(device=device, name=name, camera_id=used.get(device))
+            for device, name in usb.list_devices(request.app.state.config.host_dev_dir)
+        ]
+    )
+
+
 @router.get("/cameras", dependencies=[Depends(require("admin"))])
 async def list_cameras(request: Request) -> CameraList:
+    """附上视觉引擎对安装参数的最新自检（只对按安装参数估算映射的摄像头）。"""
+    checks = request.app.state.pose_checks
     async with request.app.state.engine.connect() as conn:
-        return CameraList(items=[view(r) for r in await _rows(conn)])
+        return CameraList(
+            items=[
+                view(r).model_copy(
+                    update={"pose_check": checks.get(r["id"], len(r["calibration"]))}
+                )
+                for r in await _rows(conn)
+            ]
+        )
 
 
 @router.post("/cameras", status_code=201)
 async def create_camera(body: CameraCreate, request: Request, principal: Admin) -> Camera:
     now = datetime.now(UTC)
+    if body.ip is None and body.ingest != "usb":
+        raise HTTPException(400, "ip: 拉流与推流方式须填写设备 IP")
     values: dict[str, Any] = {
         "name": body.name,
-        "ip": str(body.ip),
+        "ip": str(body.ip) if body.ip is not None else None,
         "ingest": body.ingest,
         "username": body.username.root if body.username and body.username.root else None,
         "password_enc": (
@@ -507,10 +579,15 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         "calibration": [],
         "calibration_error_m": None,
         "climb_lines": [line.root for line in body.climb_lines or []],
+        "rules": [rule.model_dump(mode="json", exclude_none=True) for rule in body.rules or []],
         "area_id": None,  # 在场景页放入区域（FR-908）
         "created_at": now,
         "updated_at": now,
-    } | _source_columns(body.source.model_dump() if body.source else None, body.ingest)
+    } | _source_columns(
+        body.source.model_dump() if body.source else None,
+        body.ingest,
+        body.device.root if body.device else None,
+    )
     _check(values)
     try:
         async with request.app.state.engine.begin() as conn:
@@ -518,6 +595,8 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
             await conn.execute(select(func.pg_advisory_xact_lock(CREATE_LOCK)))
             if len(await _rows(conn)) >= MAX_CAMERAS:
                 raise HTTPException(409, f"最多登记 {MAX_CAMERAS} 路摄像头")
+            if values["ip"] is None:
+                values["ip"] = usb.placeholder_ip({str(r["ip"]) for r in await _rows(conn)})
             values["id"] = await _next_id(conn)
             await conn.execute(insert(cameras).values(values))
             camera = view(values)
@@ -531,7 +610,7 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
                 request_id=request.state.request_id,
             )
     except IntegrityError as e:
-        raise HTTPException(409, f"设备 IP {body.ip} 已被其他摄像头使用") from e
+        raise _integrity(e, values["ip"]) from e
     await request.app.state.cameras.apply()
     return with_push_password(request, camera, camera.ingest == "push")
 
@@ -558,10 +637,14 @@ async def update_camera(
                 values["pose"] = body.pose.model_dump(mode="json")
             if body.climb_lines is not None:
                 values["climb_lines"] = [line.root for line in body.climb_lines]
+            if body.rules is not None:
+                values["rules"] = [r.model_dump(mode="json", exclude_none=True) for r in body.rules]
             values["ingest"] = body.ingest or row["ingest"]
             # 未给出 source 时沿用库中的拉流地址（如只改接入方式）
             source = changes.get("source", None if row["protocol"] is None else dict(row))
-            values |= _source_columns(source, values["ingest"])
+            current_device = row["path"] if row["ingest"] == "usb" else None
+            device_id = body.device.root if body.device else current_device
+            values |= _source_columns(source, values["ingest"], device_id)
             if body.clear_password:
                 values["password_enc"] = None
             elif body.password is not None and body.password.get_secret_value():
@@ -588,7 +671,9 @@ async def update_camera(
                 request_id=request.state.request_id,
             )
     except IntegrityError as e:
-        raise HTTPException(409, f"设备 IP {body.ip} 已被其他摄像头使用") from e
+        raise _integrity(e, values["ip"]) from e
+    if values["pose"] != row["pose"]:
+        request.app.state.pose_checks.forget(camera_id)  # 旧建议是相对旧参数说的
     await request.app.state.cameras.apply()
     return with_push_password(request, camera, camera.ingest == "push" and before.ingest != "push")
 

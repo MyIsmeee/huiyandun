@@ -36,6 +36,19 @@ describe("登录页", () => {
     expect(screen.getByRole("button", { name: "登录" })).toHaveProperty("disabled", false);
   });
 
+  it("上层确认已进入控制台时保持提交中，不提示未生效", async () => {
+    vi.spyOn(api, "login").mockResolvedValue({ role: "viewer", expires_at: "2026-10-27T00:00:00Z" });
+    const onLogin = vi.fn(() => Promise.resolve(true));
+    render(<LoginPage onLogin={onLogin} />);
+
+    submit();
+
+    await vi.waitFor(() => expect(onLogin).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "登录中…" })).toHaveProperty("disabled", true);
+  });
+
   it("用户名或密码错误时提示原因，可再次提交", async () => {
     vi.spyOn(api, "login").mockRejectedValue(new ApiError(401, "用户名或口令错误"));
     const onLogin = vi.fn();

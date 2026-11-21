@@ -61,13 +61,13 @@ components:
     purpose: 构建自研服务镜像时按 uv.lock 安装依赖
     owner: MyIsmeee
     telemetry: 无
-  # CUDA / cuDNN 运行库随 vision-engine 镜像分发：G-08 例外（NVIDIA 许可允许随应用再分发）
+  # CUDA / cuDNN / TensorRT 运行库随 vision-engine 镜像分发：G-08 例外（NVIDIA 许可允许随应用再分发）
   # CUDA 主版本须与 onnxruntime-gpu 一致（C-HW-08）；Windows 侧驱动须支持 CUDA 13（580 及以上）
   - name: NVIDIA CUDA cuDNN runtime
     version: 13.0.3-cudnn-runtime-ubuntu24.04
     image: nvidia/cuda:13.0.3-cudnn-runtime-ubuntu24.04@sha256:14f6d08d1cd4a96effbfe3101d0b56326f552c199d05e4979ee0bd616df5811b
-    license: NVIDIA Deep Learning Container License（CUDA、cuDNN 运行库）
-    purpose: vision-engine 基础镜像，ONNX Runtime CUDA EP 所需运行库（C-HW-07）
+    license: NVIDIA Deep Learning Container License（CUDA、cuDNN 运行库）；构建时安装的 TensorRT 为 NVIDIA TensorRT SLA
+    purpose: vision-engine 基础镜像，ONNX Runtime CUDA EP 所需运行库（C-HW-07）；构建时从镜像自带的 CUDA 源安装 TensorRT 10.16.1 运行库（libnvinfer10、libnvonnxparsers10、libnvinfer-plugin10，Dockerfile 的 TENSORRT），供 TensorRT EP 推理（HYD_TENSORRT）
     owner: MyIsmeee
     telemetry: 无
   # 仅供 make doctor 验证容器内可见 GPU，不随产品分发（G-08 末句）
@@ -274,7 +274,7 @@ assets:
       - { id: wall-window-wide, source: building-kit/wall-window-wide-square }
   - name: Kenney 场景资产 · 家具
     file: web/console/public/models/scene-furniture.glb
-    sha256: 129a40770cd774627fc471c42e90fd4024f84fdd6cffed7060b8cd19cecd852a
+    sha256: 387d982857710d34088583b2161dc3042269d0d352495859c332427ee9cac833
     license: CC0-1.0
     source: Kenney 官网 furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
     purpose: 场景搭建模型库 · 家具（设计 150 §8）
@@ -294,6 +294,56 @@ assets:
       - { id: bed, source: furniture-kit/bedSingle }
       - { id: bed-double, source: furniture-kit/bedDouble }
       - { id: trash-can, source: furniture-kit/trashcan }
+      - { id: bookcase, source: furniture-kit/bookcaseClosed }
+      - { id: bookcase-low, source: furniture-kit/bookcaseOpenLow }
+      - { id: side-table, source: furniture-kit/sideTable }
+      - { id: drawer-cabinet, source: furniture-kit/sideTableDrawers }
+      - { id: table-round, source: furniture-kit/tableRound }
+      - { id: table-glass, source: furniture-kit/tableGlass }
+      - { id: table-cloth, source: furniture-kit/tableCloth }
+      - { id: chair-rounded, source: furniture-kit/chairRounded }
+      - { id: chair-cushion, source: furniture-kit/chairCushion }
+      - { id: chair-modern, source: furniture-kit/chairModernCushion }
+      - { id: stool, source: furniture-kit/stoolBar }
+      - { id: bench, source: furniture-kit/bench }
+      - { id: sofa-long, source: furniture-kit/loungeSofaLong }
+      - { id: sofa-design, source: furniture-kit/loungeDesignSofa }
+      - { id: lounge-chair, source: furniture-kit/loungeChairRelax }
+      - { id: bed-bunk, source: furniture-kit/bedBunk }
+      - { id: coat-rack, source: furniture-kit/coatRackStanding }
+      - { id: box, source: furniture-kit/cardboardBoxClosed }
+      - { id: box-open, source: furniture-kit/cardboardBoxOpen }
+      - { id: plant-small, source: furniture-kit/plantSmall1 }
+      - { id: rug, source: furniture-kit/rugRectangle }
+      - { id: rug-round, source: furniture-kit/rugRound }
+      - { id: kitchen-cabinet, source: furniture-kit/kitchenCabinet }
+      - { id: kitchen-bar, source: furniture-kit/kitchenBar }
+      - { id: kitchen-sink, source: furniture-kit/kitchenSink }
+      - { id: toilet, source: furniture-kit/toilet }
+      - { id: bathroom-sink, source: furniture-kit/bathroomSink }
+      - { id: shower, source: furniture-kit/shower }
+  - name: Kenney 场景资产 · 办公与电器
+    file: web/console/public/models/scene-appliance.glb
+    sha256: 09cbdfb2a234c7f96616e0cc4b7c7a4ba87aa6eded3cb49a72b016288978d302
+    license: CC0-1.0
+    source: Kenney 官网 furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
+    purpose: 场景搭建模型库 · 办公与电器（设计 150 §8）
+    owner: MyIsmeee
+    models:
+      - { id: monitor, source: furniture-kit/computerScreen }
+      - { id: laptop, source: furniture-kit/laptop }
+      - { id: keyboard, source: furniture-kit/computerKeyboard }
+      - { id: tv, source: furniture-kit/televisionModern }
+      - { id: tv-cabinet, source: furniture-kit/cabinetTelevision }
+      - { id: speaker, source: furniture-kit/speaker }
+      - { id: fridge, source: furniture-kit/kitchenFridge }
+      - { id: fridge-small, source: furniture-kit/kitchenFridgeSmall }
+      - { id: microwave, source: furniture-kit/kitchenMicrowave }
+      - { id: coffee-machine, source: furniture-kit/kitchenCoffeeMachine }
+      - { id: washer, source: furniture-kit/washer }
+      - { id: lamp-floor, source: furniture-kit/lampSquareFloor }
+      - { id: lamp-table, source: furniture-kit/lampRoundTable }
+      - { id: ceiling-fan, source: furniture-kit/ceilingFan }
   - name: Kenney 场景资产 · 货架设备
     file: web/console/public/models/scene-equipment.glb
     sha256: 5f37d037eb68b6e2bd6ffb7d1b9731efb038330180f48c66aa15dd59cdf343ab
@@ -324,13 +374,64 @@ assets:
       - { id: potted-plant, source: furniture-kit/pottedPlant }
       - { id: grass, source: city-kit-roads/tile-low }
 
+# 登录页地球贴图（设计见 web/console/src/panels/LoginPage/globe/）：前端本地打包，运行时不联网（G-05）。
+# 源图为 NASA Visible Earth 发布的美国政府作品，属公有领域；与 Voyage 后台同一套，由其
+# scripts/build-earth-textures.py 缩放到 4096×2048 生成。source 记录出处编号，不写成网址（CI-07）
+textures:
+  - name: NASA Blue Marble Next Generation（2004 年 10 月，地形与海底地形）
+    file: web/console/public/textures/earth/day-4k.webp
+    sha256: 9236a4f4dd6e80a02fdbcff43e4e6d5ab7d895b319b2498e5e4068b7151c5b84
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 73000/73826（world.topo.bathy.200410）
+    purpose: 登录页地球白昼贴图
+    owner: MyIsmeee
+  - name: NASA Black Marble 2016
+    file: web/console/public/textures/earth/night-4k.webp
+    sha256: f3a163932526c589670e7869b162b8d59d6f6dd6364abf48cf46e9cd5eec785e
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 144000/144898（BlackMarble_2016_3km）
+    purpose: 登录页地球夜间灯光
+    owner: MyIsmeee
+  - name: NASA Blue Marble 合成云图
+    file: web/console/public/textures/earth/clouds-4k.webp
+    sha256: b4f446e6cdc2617865594a37487e39231a064ab017baebcbc892f62127fb14a9
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 57000/57747（cloud_combined_8192）
+    purpose: 登录页地球云层与俯冲穿云
+    owner: MyIsmeee
+  - name: NASA Blue Marble Next Generation 水体遮罩
+    file: web/console/public/textures/earth/water-4k.png
+    sha256: f2ec000e905accfc48377f02efcb7bb4bcb1dbc1fb2a4f76975319a46f7bd6d6
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 74000/74092（world.200407，按海洋色抠出）
+    purpose: 登录页地球海面高光
+    owner: MyIsmeee
+  - name: GEBCO 2008 陆地高程（NASA Visible Earth 发布）
+    file: web/console/public/textures/earth/height-4k.jpg
+    sha256: 8d9a4382e2f7a38b2417850f6812e0cb5901630ce06802ddf2e0b7617ea0ebd2
+    license: LicenseRef-NASA-Public-Domain
+    source: NASA Visible Earth 图像记录 73000/73934（gebco_08_rev_elev）
+    purpose: 登录页地球地形凹凸
+    owner: MyIsmeee
+
+# 由公开数据集抽取、随前端打包的查表（运行时不联网，G-05）。tzdata 升级时用对应工具重新生成并更新哈希
+datasets:
+  - name: IANA 时区数据库（tzdata）代表城市坐标
+    version: "2026e"  # tzdata.zi 首行
+    file: web/console/src/panels/LoginPage/globe/zones.json
+    sha256: fe6813e8d817e348462c5502cdcdb53c537b31fda7f5c2d54c8f443ad6eaf950
+    license: LicenseRef-Public-Domain  # tzdata 由作者置于公有领域（其 LICENSE 文件）
+    # 由 tools/dev/tz_coordinates.py 从 zone.tab、zone1970.tab 与 tzdata.zi 的 Link 行抽取
+    purpose: 登录页俯冲按浏览器时区定位本地（时区 → 代表城市经纬度）
+    owner: MyIsmeee
+
 # 构建期工具（G-08 末句）：只在 make fetch-models 中转换模型格式，不随产品分发、不进入运行镜像
-# 依赖由 tools/dev/export_efficientvit_seg.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
+# 依赖由 tools/dev/export_efficientvit_seg.py.lock、export_stgcnpp.py.lock、export_videomae_rwf.py.lock 锁定，装进 uv 的临时环境，不进入工作区锁文件
 build_tools:
   - name: PyTorch（CPU）
     version: 2.8.0+cpu
     license: BSD-3-Clause
-    purpose: EfficientViT-Seg 权重转为 ONNX（REUSE-25）
+    purpose: EfficientViT-Seg、STGCN++、VideoMAE 权重转为 ONNX（REUSE-25）
     owner: MyIsmeee
   - name: ONNX
     version: 1.23.2
@@ -341,4 +442,14 @@ build_tools:
     version: de7d7733cc0329f391b33f1f459271562ec27bd5  # git 提交，导出时校验
     license: Apache-2.0
     purpose: 构建 EfficientViT-Seg 网络结构以加载权重；导出时拉取，不入库
+    owner: MyIsmeee
+  - name: mmaction2 模型代码（STGCN++ 主干与图定义）
+    version: 4d6c93474730cad2f25e51109adcf96824efc7a3  # v1.2.0 的 git 提交，导出时校验
+    license: Apache-2.0
+    purpose: 构建 STGCN++ 网络结构以加载权重（tools/dev/export_stgcnpp.py）；导出时拉取，不入库
+    owner: MyIsmeee
+  - name: Hugging Face Transformers
+    version: 4.46.3
+    license: Apache-2.0
+    purpose: 构建 VideoMAE 网络结构以加载打架模型权重（tools/dev/export_videomae_rwf.py）
     owner: MyIsmeee

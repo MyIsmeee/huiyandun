@@ -90,11 +90,11 @@ test("卡片外的区域不拦截指针：区域切换下方的点落在场景�
 
 test("返回与 Esc：详情卡回到告警列表；事件结束后进度条消失", async ({ page }) => {
   const ws = await openIncident(page);
-  await side(page).getByRole("button", { name: /HYD-NET-0001/ }).click();
+  await side(page).getByRole("button", { name: /口令暴力破解/ }).click();
   await side(page).getByRole("button", { name: "返回告警" }).click();
   await expect(side(page).getByRole("heading", { name: "告警" })).toBeVisible();
 
-  await side(page).getByRole("button", { name: /HYD-NET-0001/ }).click();
+  await side(page).getByRole("button", { name: /口令暴力破解/ }).click();
   await page.keyboard.press("Escape");
   await expect(side(page).getByRole("heading", { name: "cam-02" })).toHaveCount(0);
   await expect(progress(page)).toBeVisible();

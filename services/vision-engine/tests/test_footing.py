@@ -112,8 +112,8 @@ def project(points: np.ndarray) -> np.ndarray:
     """与 GroundMapping.from_pose 相同的针孔模型：平面坐标与高度 (N, 3) → 像素 (N, 2)。"""
     yaw, pitch = np.radians(POSE["yaw_deg"]), np.radians(POSE["pitch_deg"])
     forward = np.array([np.cos(pitch) * np.cos(yaw), np.cos(pitch) * np.sin(yaw), np.sin(pitch)])
-    right = np.array([np.sin(yaw), -np.cos(yaw), 0.0])
-    down = np.cross(forward, right)
+    right = np.array([-np.sin(yaw), np.cos(yaw), 0.0])
+    down = np.cross(right, forward)
     f = (WIDTH / 2) / np.tan(np.radians(POSE["hfov_deg"]) / 2)
     rel = points - [POSE["x"], POSE["y"], POSE["height_m"]]
     depth = rel @ forward

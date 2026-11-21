@@ -5,7 +5,7 @@ import { ProgressBar, progressIncident } from "../../src/panels/IncidentTimeline
 import { type Device, type Incident, useLive } from "../../src/store/live";
 
 const incident = (id: string, device: string) =>
-  ({ id, title: `事件 ${id}`, device_ids: [device], hit_path: [], source_ip: "172.30.0.100", created_at: "2026-11-09T02:00:20Z" }) as unknown as Incident;
+  ({ id, rule_id: "HYD-X-0001", title: `事件 ${id}`, device_ids: [device], hit_path: [], source_ip: "172.30.0.100", created_at: "2026-11-09T02:00:20Z" }) as unknown as Incident;
 const device = (id: string, state: Device["state"]) => ({ id, state }) as unknown as Device;
 
 // incidents 新的在前

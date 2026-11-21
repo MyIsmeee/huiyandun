@@ -1,0 +1,8 @@
+{
+  "description": "俯拍：人此前瘫坐于椅中，朝镜头方向在椅旁倒地，其后靠墙坐地",
+  "report_only": true,
+  "climb_lines": [],
+  "events": [],
+  "ambiguous": [],
+  "source": "依据仓库记录（test_clips.py 注释、models/cards/rtmo-s.md、demo/media/*.meta.yaml），未对照原视频逐帧核对；有原视频后应复核起止时刻：二维骨骼无法区分瘫坐与倒地，倒地时刻未标注，只报告不计分（TK-022 #83）"
+}

@@ -17,7 +17,14 @@ class VisionBehaviorV1(EventBase):
 
     camera_id: str
     track_id: int
-    behavior: Literal["fall", "climb"]
+    behavior: Literal["fall", "climb", "still", "fight"]
+    """
+    1.2 起增加 still（长时间静止：未倒地的人原地不动）与 fight（疑似打架：两人伸手可及、手腕快速运动且整体未移动）
+    """
+    level: Literal["suspected", "confirmed"] | None = "confirmed"
+    """
+    1.1 起。suspected 为疑似，只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认，进入物理告警。跌倒：倒地满 2 s 为疑似，倒地且基本不动满 8 s 确认。长时间静止：原地不动满 120 s 为疑似，满 300 s 确认。攀爬只有 confirmed；打架只有 suspected（骨骼几何的启发式判定）。1.0 的事件没有此字段，按 confirmed
+    """
     confidence_avg: float = Field(..., ge=0.0, le=1.0)
     duration_s: float = Field(..., ge=0.0)
     ts_start: AwareDatetime

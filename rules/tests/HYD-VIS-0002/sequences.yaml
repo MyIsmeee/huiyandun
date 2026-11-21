@@ -1,0 +1,23 @@
+# 关联规则样本（C-SEC-01）：按列表顺序送入引擎（即到达顺序），t 为事件发生时刻（秒）
+# 未写的字段由测试补默认值：告警为 enforce、rule 来源的 auth_bruteforce，画面事件为 rule 来源的 freeze
+cases:
+  - name: 画面冻结（确定性判定）
+    events:
+      - { t: 0, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+    incidents: [{ requires_confirmation: false }]
+
+  - name: 画面重放（模型判定）
+    events:
+      - { t: 0, subject: hyd.vision.integrity.v1, camera_id: cam-02, type: replay, source: model }
+    incidents: [{ requires_confirmation: true }]
+
+  - name: 遮挡由 HYD-VIS-0001 处理
+    events:
+      - { t: 0, subject: hyd.vision.integrity.v1, camera_id: cam-02, type: occlusion, source: model }
+    incidents: []
+
+  - name: 冻结持续时不重复生成
+    events:
+      - { t: 0, subject: hyd.vision.integrity.v1, camera_id: cam-02 }
+      - { t: 120, subject: hyd.vision.integrity.v1, camera_id: cam-02, type: replay, source: model }
+    incidents: [{ requires_confirmation: false }]

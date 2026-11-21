@@ -129,6 +129,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scene/areas/{id}/auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description 场景自动识别的最近结果：api-server 后台每 10 分钟对每个区域识别一次（只缓存在内存中）。区域没有手工搭建的
+         *     物体时，态势页按它显示场景。尚未识别过时 frames 为空
+         */
+        get: operations["getSceneAreaAuto"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cameras/usb-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description 插在边缘主机上的 USB 摄像头（只列视频采集节点），供新增摄像头时选择接入；已接入的标出摄像头编号。
+         *     拔插后重新读取即可看到变化，不需要重启
+         */
+        get: operations["listUsbDevices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cameras": {
         parameters: {
             query?: never;
@@ -295,6 +335,67 @@ export interface paths {
          *     发布 hyd.correlator.confirmation.v1 并写审计日志；处置参数仍只取关联事件的结构化字段（G-03）
          */
         post: operations["confirmContainment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/{id}/disposition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description 告警处置：值班员对单条告警（行为事件、轨迹规则事件或网络告警）标记已确认、误报或已处理，写审计日志，
+         *     经 WS dispositions 频道推送给所有控制台。误报与已处理会解除该摄像头的物理告警态（行为与规则事件）；
+         *     已确认只停止响铃与弹窗。告警须在近 24 小时的记录中，否则 404
+         */
+        post: operations["disposeAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description 删除告警：把所列告警与关联事件从所有控制台的告警栏移除，写审计日志，经 WS cleared 频道推送。只是不再列出：
+         *     原始事件、存证、处置执行与审计记录照常保留，服务重启后从审计日志读回近 24 小时的删除记录
+         */
+        post: operations["clearAlerts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/{id}/clip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description 单条摄像头告警前后的录像（MP4），供控制台直接回放：行为事件从开始前 10 s 到确认后 10 s，区域与越线从发生前 10 s 起，
+         *     不超过 45 秒、截止于 2 s 前。经 evidence-service 向 recorder 取，不落盘、不写审计；viewer 本就可观看同一路实时画面
+         */
+        get: operations["getAlertClip"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -645,7 +746,7 @@ export interface components {
         SceneItem: {
             /** @description 资产目录中的编号 */
             asset: string;
-            /** @description 米，区域左下为原点，按网格吸附 */
+            /** @description 米，俯视时区域左上角为原点、x 向右、y 向下，按网格吸附 */
             x: number;
             y: number;
             /**
@@ -744,6 +845,7 @@ export interface components {
         };
         /** @description 禁止攀爬警戒线 [u1, v1, u2, v2]，画面像素坐标（FR-104）；不能是竖直线段 */
         ClimbLine: number[];
+        CameraRule: components["schemas"]["camera_rule.schema"];
         Camera: {
             /** @description cam-NN，也是 go2rtc 与录像中的流名 */
             id: string;
@@ -752,12 +854,14 @@ export interface components {
             name: string;
             ip: string;
             /**
-             * @description pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>
+             * @description pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>；usb 为插在边缘主机上的 USB 摄像头，由 ingest 读取设备
              * @enum {unknown}
              */
-            ingest: "pull" | "push";
-            /** @description 推流时为 null */
+            ingest: "pull" | "push" | "usb";
+            /** @description 推流与 USB 时为 null */
             source: components["schemas"]["CameraSource"] | null;
+            /** @description USB 摄像头的设备标识（/dev/v4l/by-id 下的名字，拔插后不变）；其余接入方式为 null */
+            device: string | null;
             username: string | null;
             /** @description 口令只写不读（C-ST-03） */
             password_set: boolean;
@@ -768,7 +872,11 @@ export interface components {
             calibration: number[][];
             /** @description 保存标定时拟合的均方根重投影误差（米）；未标定或经 site.yaml 导入时为 null */
             calibration_error_m: number | null;
+            /** @description 视觉引擎对安装参数的最新自检结果；已标定、未收到自检或视觉引擎重启后尚未上报时为 null（列表中给出，其余响应不含） */
+            pose_check?: components["schemas"]["pose_check.schema"] | null;
             climb_lines: components["schemas"]["ClimbLine"][];
+            /** @description 轨迹规则（区域入侵、有向越线） */
+            rules: components["schemas"]["camera_rule.schema"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -779,23 +887,27 @@ export interface components {
         };
         CameraCreate: {
             name: string;
-            ip: string;
+            /** @description 设备 IP，拉流与推流时必填；USB 摄像头没有网络地址，省略时自动分配本机占位地址 127.0.1.N */
+            ip?: string;
             /** @enum {unknown} */
-            ingest: "pull" | "push";
+            ingest: "pull" | "push" | "usb";
             /** @description 拉流时必填 */
             source?: components["schemas"]["CameraSource"] | null;
+            device?: components["schemas"]["UsbDeviceId"];
             username?: string | null;
             /** Format: password */
             password?: string;
             pose: components["schemas"]["Pose"];
             climb_lines?: components["schemas"]["ClimbLine"][];
+            rules?: components["schemas"]["camera_rule.schema"][];
         };
         CameraUpdate: {
             name?: string;
             ip?: string;
             /** @enum {unknown} */
-            ingest?: "pull" | "push";
+            ingest?: "pull" | "push" | "usb";
             source?: components["schemas"]["CameraSource"] | null;
+            device?: components["schemas"]["UsbDeviceId"];
             username?: string | null;
             /**
              * Format: password
@@ -805,11 +917,25 @@ export interface components {
             clear_password?: boolean;
             pose?: components["schemas"]["Pose"];
             climb_lines?: components["schemas"]["ClimbLine"][];
+            /** @description 省略表示不修改；给出时整体替换 */
+            rules?: components["schemas"]["camera_rule.schema"][];
+        };
+        /** @description USB 摄像头的设备标识：边缘主机 /dev/v4l/by-id 下的名字（拔插后不变），改为 USB 接入时必填 */
+        UsbDeviceId: string;
+        UsbDevice: {
+            device: components["schemas"]["UsbDeviceId"];
+            /** @description 便于辨认的设备名 */
+            name: string;
+            /** @description 已接入时为对应的摄像头编号 */
+            camera_id: string | null;
+        };
+        UsbDeviceList: {
+            items: components["schemas"]["UsbDevice"][];
         };
         CalibrationInput: {
             /** @description 打开标定对话框时摄像头所在区域；与库中不一致时 409 */
             area_id: string;
-            /** @description 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，区域左下为原点） */
+            /** @description 0 或 4～20 组 [u, v, x, y]：画面原始分辨率下的像素坐标与区域内平面坐标（米，俯视时区域左上角为原点、x 向右、y 向下） */
             points: number[][];
         };
         CalibrationFit: {
@@ -833,13 +959,23 @@ export interface components {
             calibration: number[][];
             homography: number[][] | null;
             reproj_error_m: number | null;
+            /**
+             * @description 禁止攀爬警戒线（像素坐标），供监控墙画到画面上
+             * @default []
+             */
+            climb_lines: components["schemas"]["ClimbLine"][];
+            /**
+             * @description 轨迹规则（区域入侵、有向越线，平面坐标），供监控墙按地面映射画到画面上
+             * @default []
+             */
+            rules: components["schemas"]["camera_rule.schema"][];
         };
         Pose: {
             x: number;
             y: number;
             /** @description 安装高度（米） */
             height_m: number;
-            /** @description 朝向，自平面 x 轴正方向逆时针计（度） */
+            /** @description 朝向，自平面 +x 转向 +y 计（度；俯视 y 向下时为顺时针） */
             yaw_deg: number;
             /** @description 俯角，向下为负（度） */
             pitch_deg: number;
@@ -1070,17 +1206,53 @@ export interface components {
             items: components["schemas"]["AuditLog"][];
         };
         /**
+         * @description acknowledged 已确认（看到了、正在处理）；false_positive 误报；resolved 已处理关闭
+         * @enum {unknown}
+         */
+        DispositionAction: "acknowledged" | "false_positive" | "resolved";
+        AlertDispositionRequest: {
+            action: components["schemas"]["DispositionAction"];
+            /** @description 处置说明，可选 */
+            note?: string;
+        };
+        AlertClearRequest: {
+            /** @description 告警的 event_id */
+            event_ids: string[];
+            /** @description 关联事件的 id */
+            incident_ids: string[];
+        };
+        /** @description 一次删除；控制台不再列出其中的告警与关联事件 */
+        AlertsCleared: {
+            event_ids: string[];
+            incident_ids: string[];
+            /** @description 删除人用户名 */
+            actor: string;
+            /** Format: date-time */
+            ts: string;
+        };
+        /** @description 告警的处置记录；同一告警以最近一次为准 */
+        AlertDisposition: {
+            /** Format: uuid */
+            event_id: string;
+            action: components["schemas"]["DispositionAction"];
+            note: string | null;
+            /** @description 处置人用户名 */
+            actor: string;
+            /** Format: date-time */
+            ts: string;
+        };
+        /**
          * @description WS /ws 推送帧（FR-102、FR-606）。各频道 data 的格式：
          *     tracks 为 VisionTrack；devices 为状态或告警等级变化后的完整 Device，连接建立时先推送全部设备；
-         *     alerts 为 VisionBehavior 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
+         *     alerts 为 VisionBehavior、VisionRule 或 SecurityAlert；incidents 为 Incident；executions 为 PlaybookExecution
          *     （处置执行状态，FR-405）；ai 为 AiInvestigation（值班员调查流，FR-1102）；site 为 Site（摄像头登记表或场景区域
-         *     变化后整体推送，FR-906、FR-908）；system 为系统消息（如心跳）。
+         *     变化后整体推送，FR-906、FR-908）；dispositions 为 AlertDisposition（告警处置）；cleared 为 AlertsCleared（删除告警）；system 为系统消息（如心跳）。
          *     连接建立时另补推近 24 小时的 alerts（最多 200 条）、incidents（最多 50 条）、executions（最多 50 个执行
-         *     各自的最新状态），按发生先后排列（D-077）
+         *     各自的最新状态）、dispositions（各告警最近一次处置）与 cleared（删除记录），按发生先后排列（D-077）
          */
         WsFrame: {
             /** @enum {unknown} */
-            channel: "tracks" | "devices" | "alerts" | "incidents" | "executions" | "ai" | "site" | "system";
+            channel: "tracks" | "devices" | "alerts" | "incidents" | "executions" | "ai" | "site" | "dispositions" | "cleared" | "system";
             data: Record<string, never>;
         };
         AiInvestigation: components["schemas"]["hyd.ai.investigation.v1.schema"];
@@ -1099,8 +1271,39 @@ export interface components {
         VisionTrack: components["schemas"]["hyd.vision.track.v1.schema"];
         VisionScene: components["schemas"]["hyd.vision.scene.v1.schema"];
         VisionBehavior: components["schemas"]["hyd.vision.behavior.v1.schema"];
+        VisionRule: components["schemas"]["hyd.vision.rule.v1.schema"];
         SecurityAlert: components["schemas"]["hyd.security.alert.v1.schema"];
         VisionIntegrity: components["schemas"]["hyd.vision.integrity.v1.schema"];
+        /**
+         * CameraRule
+         * @description 摄像头上的轨迹规则（区域入侵、有向越线）：几何为所在场景区域的平面坐标（米），与目标位置同一坐标系；只在有地面映射的摄像头上判定。按安装参数估算映射的摄像头上，事件一律为 suspected
+         */
+        "camera_rule.schema": {
+            /** @description 同一摄像头内唯一 */
+            id: string;
+            name: string;
+            /** @enum {unknown} */
+            type: "intrusion" | "line_crossing";
+            /** @description 平面坐标 [x, y]（米）：intrusion 为多边形顶点（≥ 3，首尾不重复），line_crossing 为折线（≥ 2） */
+            points: number[][];
+            /**
+             * @description 只用于 line_crossing：沿折线由第一点走向末点，forward 为从前进方向的右侧穿到左侧（平面俯视 x 向右、y 向下）
+             * @default any
+             * @enum {unknown}
+             */
+            direction: "forward" | "backward" | "any";
+            /**
+             * @default [
+             *       "person"
+             *     ]
+             */
+            classes: ("person" | "bicycle" | "car" | "motorcycle" | "bus" | "truck")[];
+            /**
+             * @description 只用于 intrusion：确认在区内满此时长才告警
+             * @default 1
+             */
+            min_duration_s: number;
+        };
         /**
          * EventBase
          * @description 所有事件的公共字段（architecture.md §12、C-BE-02）
@@ -1122,7 +1325,7 @@ export interface components {
         Line: components["schemas"]["Point"][];
         /**
          * SceneFrame
-         * @description 摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：只含平面坐标（米）的多边形与线段，不含图像；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
+         * @description 摄像头画面中识别到的环境，已投影到平面（spec.md FR-909）：平面坐标（米）的多边形与线段，另可附去除人员后的实景底图（backdrop）；只在生成场景初稿时识别一次，不持久化（D-133、architecture.md §12）。地面、物体与标线的多边形合计不超过 64 个
          */
         "scene_frame.schema": {
             camera_id: string;
@@ -1139,12 +1342,19 @@ export interface components {
                 line: components["schemas"]["Line"];
                 height_m: number;
             }[];
-            /** @description 物体的底面轮廓：桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块 */
+            /** @description 物体的底面轮廓：电器（appliance）、箱包（box）、卫浴（fixture）按细分类别摆放模型库中的对应模型；桌、椅、柜、沙发、床以家具模型沿轮廓排开；其余家具（furniture）与街道设施由轮廓挤出 height_m 高的低矮立体块。自动场景按 kind 与实测长宽高选择画法（书桌、茶几、圆桌、转椅、凳子、书架、衣柜等） */
             objects: {
                 /** @enum {unknown} */
-                class: "table" | "chair" | "cabinet" | "sofa" | "bed" | "furniture" | "street_furniture";
+                class: "table" | "chair" | "cabinet" | "sofa" | "bed" | "furniture" | "street_furniture" | "appliance" | "box" | "fixture";
                 polygon: components["schemas"]["Polygon"];
                 height_m: number;
+                /** @description 底部离地高度（米）：放在桌面、柜顶上的小件物品（appliance、box）才有，大屏据此摆放；缺省为落地 */
+                base_m?: number;
+                /**
+                 * @description 细分类别：分割模型（ADE20K）在该物体上点数最多的原始类别，如桌子中的书桌、茶几，椅子中的转椅、凳子，柜子中的书架、衣柜、斗柜；缺省时只按 class 与尺寸呈现
+                 * @enum {unknown}
+                 */
+                kind?: "table" | "desk" | "coffee_table" | "chair" | "armchair" | "seat" | "swivel_chair" | "stool" | "cabinet" | "shelf" | "wardrobe" | "chest_of_drawers" | "bookcase" | "sofa" | "bed" | "counter" | "signboard" | "bench" | "streetlight" | "pole" | "traffic_light" | "ashcan" | "computer" | "crt_screen" | "monitor" | "television" | "refrigerator" | "washer" | "microwave" | "oven" | "stove" | "dishwasher" | "lamp" | "fan" | "box" | "bag" | "basket" | "toilet" | "sink" | "bathtub" | "shower";
             }[];
             /** @description 植被：树干底部中心 */
             trees: {
@@ -1158,6 +1368,17 @@ export interface components {
                 class: "crosswalk" | "lane";
                 polygon: components["schemas"]["Polygon"];
             }[];
+            /** @description 实景底图（可选）：画面按 cols × rows 网格取点的三维位置与去除人员后的画面，网格点 (i, j) 对应画面归一化坐标 ((j + 0.5) / cols, (i + 0.5) / rows)。只在内存中随识别结果传递，不持久化 */
+            backdrop?: {
+                cols: number;
+                rows: number;
+                /** @description rows × cols × 3 个数：每点平面 x、离地高度、平面 y（米），行优先 */
+                points: number[];
+                /** @description (rows−1)×(cols−1) 位的位图，行优先、每字节高位在前：相邻四点围成的格子是否保留（深度突变、超出范围、行人车辆所在处不保留）；不保留的格子用到的点坐标为 0 */
+                quads: string;
+                /** @description 去除行人与车辆（按检测框与分割遮去后修补）的画面 */
+                image: string;
+            };
             $defs: {
                 /** @description 平面坐标 [x, y]，单位米 */
                 Point: number[];
@@ -1177,6 +1398,49 @@ export interface components {
              * @enum {unknown}
              */
             reason: "model_missing" | "no_frame" | "unmapped" | "empty";
+        };
+        /**
+         * PoseCheck
+         * @description 安装参数自检结果（D-102 估算映射的兜底检查）：由画面中站立行人推算安装高度与俯角，只对按安装参数估算地面映射的摄像头给出
+         */
+        "pose_check.schema": {
+            camera_id: string;
+            /**
+             * @description ok：与行人尺度相符；suspect：安装高度、俯角可能填错或人员速度虚高；insufficient：站立行人样本不足，暂不能判断
+             * @enum {unknown}
+             */
+            status: "ok" | "suspect" | "insufficient";
+            /** @description 参与推算的站立行人样本数（全身入镜、腿伸直） */
+            samples: number;
+            /** @description 按当前参数推算的行人身高中位（米）；样本不足时为 null */
+            person_height_m: number | null;
+            /** @description 移动人员速度的 95 分位（米每秒）；移动样本不足时为 null */
+            speed_p95_mps: number | null;
+            /** @description 使行人推算身高符合常人的安装高度（米）；样本不足时为 null */
+            suggested_height_m: number | null;
+            /** @description 使远近行人推算身高一致的俯角（度，向下为负）；行人远近分布不足时为 null */
+            suggested_pitch_deg: number | null;
+            /** @description 给值守人员看的白话说明 */
+            reasons: string[];
+            geometry?: {
+                /** @description 离地高度（米） */
+                height_m: number;
+                /** @description 俯角（度，向下为负） */
+                pitch_deg: number;
+                /** @description 侧倾（度）；地面映射不含侧倾，只用于提示 */
+                roll_deg: number;
+                /** @description 水平视角（度） */
+                hfov_deg: number;
+                /** @description 画面中可见地面的横向范围（米） */
+                floor_width_m: number;
+                /** @description 画面中可见地面的纵深范围（米） */
+                floor_depth_m: number;
+                /**
+                 * @description 尺度来源：model 为模型估计；desk 为按画面中桌面的标准高度校正
+                 * @enum {unknown}
+                 */
+                scale_ref: "model" | "desk";
+            } | null;
         };
         /**
          * Incident
@@ -1281,8 +1545,17 @@ export interface components {
         "hyd.vision.behavior.v1.schema": {
             camera_id: string;
             track_id: number;
-            /** @enum {unknown} */
-            behavior: "fall" | "climb";
+            /**
+             * @description 1.2 起增加 still（长时间静止：未倒地的人原地不动）与 fight（疑似打架：两人伸手可及、手腕快速运动且整体未移动）
+             * @enum {unknown}
+             */
+            behavior: "fall" | "climb" | "still" | "fight";
+            /**
+             * @description 1.1 起。suspected 为疑似，只在控制台提示，不进入物理告警、不参与关联；confirmed 为确认，进入物理告警。跌倒：倒地满 2 s 为疑似，倒地且基本不动满 8 s 确认。长时间静止：原地不动满 120 s 为疑似，满 300 s 确认。攀爬只有 confirmed；打架只有 suspected（骨骼几何的启发式判定）。1.0 的事件没有此字段，按 confirmed
+             * @default confirmed
+             * @enum {unknown}
+             */
+            level: "suspected" | "confirmed";
             confidence_avg: number;
             duration_s: number;
             /** Format: date-time */
@@ -1457,7 +1730,7 @@ export interface components {
             /** @description 平面坐标，单位米 */
             y: number;
             uncertainty_m: number;
-            /** @description 平面上的运动方向，0 为 +x 方向、逆时针为正；起步不足 3 帧或静止时为 null */
+            /** @description 平面上的运动方向，0 为 +x 方向、自 +x 转向 +y 为正（俯视 y 向下时为顺时针）；起步不足 3 帧或静止时为 null */
             heading_deg: number | null;
             /** @description 平面速度，单位米每秒；起步不足 3 帧时为 null */
             speed_mps: number | null;
@@ -1471,6 +1744,47 @@ export interface components {
          * @description 检出目标的位置更新，字段即 Track 实体（生产者 vision-engine）
          */
         "hyd.vision.track.v1.schema": components["schemas"]["event_base.schema"] & components["schemas"]["track.schema"];
+        /**
+         * VisionRuleV1
+         * @description 轨迹规则事件（生产者 vision-engine）：越线为脉冲事件（pulse）；区域入侵为状态事件，同一次进入的 start / update / end 共用 episode_id，持续期间每 30 s 发 update 保持物理告警
+         */
+        "hyd.vision.rule.v1.schema": {
+            camera_id: string;
+            rule_id: string;
+            rule_name: string;
+            /** @enum {unknown} */
+            rule_type: "intrusion" | "line_crossing";
+            /** @enum {unknown} */
+            phase: "pulse" | "start" | "update" | "end";
+            /** Format: uuid */
+            episode_id: string;
+            /**
+             * @description confirmed 进入物理告警；suspected 只在控制台提示：按安装参数估算的地面映射（位置可能有系统性偏差），或越线发生在遮挡中（inferred）
+             * @enum {unknown}
+             */
+            level: "suspected" | "confirmed";
+            /** @description 会话内临时编号，不跨摄像头、不含生物特征（G-04） */
+            track_id: number;
+            /** @enum {unknown} */
+            object_class: "person" | "bicycle" | "car" | "motorcycle" | "bus" | "truck";
+            /** @description 平面坐标（米）：越线为越线时的位置，区域为当前位置 */
+            x: number;
+            y: number;
+            uncertainty_m: number;
+            /**
+             * Format: date-time
+             * @description 状态开始时刻：区域为确认进入时刻，越线为越线时刻
+             */
+            since: string;
+            /** @description 越线方向；区域为 null */
+            direction?: ("forward" | "backward") | null;
+            /** @enum {unknown} */
+            mapping: "calibrated" | "estimated";
+            /** @description 越线发生在遮挡中，由消失前后的位置推断 */
+            inferred: boolean;
+            /** @description phase 为 end 时：exit 确认离开，lost 轨迹消失 */
+            end_reason?: ("exit" | "lost") | null;
+        } & components["schemas"]["event_base.schema"];
     };
     responses: {
         /** @description 缺少 X-Request-ID 或参数不合法 */
@@ -1817,6 +2131,51 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getSceneAreaAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 识别帧与没有识别结果的摄像头及原因 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneAreaFrames"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listUsbDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 设备列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsbDeviceList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listCameras: {
@@ -2184,6 +2543,104 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    disposeAlert: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path: {
+                /** @description 告警的 event_id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertDispositionRequest"];
+            };
+        };
+        responses: {
+            /** @description 处置记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertDisposition"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    clearAlerts: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertClearRequest"];
+            };
+        };
+        responses: {
+            /** @description 删除记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertsCleared"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAlertClip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 告警的 event_id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 录像片段 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description 存证或录像服务暂不可达 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getInvestigation: {

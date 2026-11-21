@@ -1,4 +1,4 @@
-"""跨服务共用的测试夹具：以 compose.yaml 锁定的镜像启动临时 NATS 与 PostgreSQL。"""
+"""跨服务共用的测试夹具：以 compose.yaml 锁定的镜像启动临时 NATS 与 PostgreSQL；联动网关的自签 TLS 证书。"""
 
 import asyncio
 import secrets
@@ -6,12 +6,18 @@ import subprocess
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import nats
 import pytest
 import yaml
 from alembic import command
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
+from cryptography.x509.oid import NameOID
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
@@ -156,3 +162,32 @@ def scratch_db(db: tuple[ApiConfig, ApiConfig]) -> Iterator[tuple[ApiConfig, Api
         yield owner.model_copy(update={"db_name": name}), app.model_copy(update={"db_name": name})
     finally:
         asyncio.run(autocommit(owner, f"DROP DATABASE {name}"))
+
+
+def write_tls(directory: Path) -> tuple[Path, Path]:
+    """localhost 的自签证书（证书, 私钥）：既是联动网关的证书，也是执行器信任的 CA。"""
+    directory.mkdir(parents=True, exist_ok=True)
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.now(UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    cert_file, key_file = directory / "gateway.crt", directory / "gateway.key"
+    cert_file.write_bytes(cert.public_bytes(Encoding.PEM))
+    key_file.write_bytes(key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+    return cert_file, key_file
+
+
+@pytest.fixture
+def tls_files() -> Callable[[Path], tuple[Path, Path]]:
+    return write_tls

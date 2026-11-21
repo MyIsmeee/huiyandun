@@ -1,0 +1,18 @@
+# 单域关联：设备行为模型判定为认证爆破类偏离（低速爆破）即生成关联事件，交 Playbook 封禁攻击源（FR-205、FR-401）
+# 低速爆破把间隔拉长到 Suricata 阈值以下（每 20 s 一次），HYD-NET-0101 不命中；行为模型以失败会话占比偏离基线识别。
+# 证据是模型判定：关联事件 requires_confirmation 为 true，须值班人员确认后才封禁（FR-407）
+# 样本：rules/tests/HYD-NET-0103/sequences.yaml
+id: HYD-NET-0103
+version: 1.0.0
+name: 低速爆破（行为偏离基线）
+mode: enforce
+window_s: 60
+group_by: device_id
+sequence:
+  - subject: hyd.security.alert.v1
+    # 只取失败会话占比偏离基线的判定（technique 为 T1110）：数据外传、陌生访问方等偏离只告警，不封禁
+    match: { category: behavior_anomaly, source: model, technique: T1110 }
+emit:
+  severity: high
+  title: 摄像头遭低速爆破
+  techniques: [T1110]  # Brute Force

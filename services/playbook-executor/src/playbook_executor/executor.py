@@ -9,7 +9,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime, timedelta
-from ipaddress import IPv4Network, IPv6Network, ip_address
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
 from typing import Any
 
 from playbook_executor.action import Action, ActionContext, ActionError
@@ -29,6 +29,9 @@ EXECUTION_NAMESPACE = uuid.UUID("2c4b9e71-5a0d-4f3e-8b6a-9d1c7e2f4a03")
 # 到期等待按墙上时钟分段检查：WSL 等虚拟机里单调时钟可能落后于墙上时钟，一次长睡会晚醒数秒
 WAIT_STEP_S = 1.0
 
+# 适配器在执行原因中的名称
+ADAPTERS = {"nftables": "本机防火墙", "firewall": "外部防火墙联动"}
+
 type Network = IPv4Network | IPv6Network
 type Publish = Callable[[PlaybookExecutionV1], Awaitable[None]]
 
@@ -44,11 +47,14 @@ class Executor:
         whitelist: list[Network],
         publish: Publish,
         ttl_override_s: int | None = None,
+        self_ips: frozenset[IPv4Address | IPv6Address] = frozenset(),
     ) -> None:
         self._playbooks = {p.id: p for p in playbooks}
         self._actions = actions  # 键为 "<adapter>.<action>"
         self._mode = mode
         self._whitelist = whitelist
+        # 边缘主机自身的地址：从本机发起的登录爆破（如在演示机上 ssh 自己）以它为攻击源，封了就切断本机
+        self._self_ips = self_ips
         self._publish = publish
         self._ttl_override = ttl_override_s  # 演示时可缩短封禁时长（FR-404）
         self._executions: dict[str, PlaybookExecutionV1] = {}
@@ -61,22 +67,30 @@ class Executor:
     async def on_incident(self, incident: Incident) -> None:
         if incident.mode != "enforce":  # monitor 只告警不触发处置（C-SEC-04、D-068）
             return
-        for playbook in self._playbooks.values():
-            trigger = playbook.trigger
-            if (
-                incident.rule_id not in trigger.rule_ids
-                or incident.severity not in trigger.severity
-            ):
-                continue
+        matched = [
+            p
+            for p in self._playbooks.values()
+            if incident.rule_id in p.trigger.rule_ids and incident.severity in p.trigger.severity
+        ]
+        runnable = [p for p in matched if self._unavailable(p) is None]
+        if matched and not runnable:
+            # 同一攻击可由多个 Playbook 处置（本机防火墙、外部防火墙联动），按部署模式与已配置的适配器取用；
+            # 一个都执行不了时只通知一次，原因取最具体的：部署模式相符、只缺联动配置的优先
+            playbook = min(matched, key=lambda p: self._mode not in p.requires_mode)
+            execution_id = str(uuid.uuid5(EXECUTION_NAMESPACE, playbook.id + incident.id))
+            if execution_id not in self._executions:
+                await self._update(
+                    self._new(playbook, incident, execution_id),
+                    state="notify_only",
+                    reason=self._unavailable(playbook),
+                )
+            return
+        for playbook in runnable:
             execution_id = str(uuid.uuid5(EXECUTION_NAMESPACE, playbook.id + incident.id))
             if execution_id in self._executions:
                 continue  # 重放的关联事件
             execution = self._new(playbook, incident, execution_id)
-            if self._mode not in playbook.requires_mode:
-                await self._update(
-                    execution, state="notify_only", reason="当前部署模式不支持执行，仅通知"
-                )
-            elif reason := self._skip_reason(incident):
+            if reason := self._skip_reason(incident):
                 await self._update(execution, state="skipped", reason=reason)
             elif incident.requires_confirmation:
                 pending = await self._update(execution, reason="含模型证据，等待人工确认")
@@ -110,20 +124,28 @@ class Executor:
     async def resume(self) -> None:
         now = datetime.now(UTC)
         for execution in list(self._executions.values()):
-            if execution.state == "pending":
-                self._spawn(
-                    execution.id, self._expire(execution, CONFIRM_TIMEOUT - (now - execution.ts))
-                )
-            elif execution.state == "contained" and execution.expires_at is not None:
-                self._active.add(execution.target)
-                self._spawn(execution.id, self._ttl(execution))
-            elif execution.state in ("executing", "verifying"):
-                # 执行到一半时退出：撤销可能已写入的封禁，如实记为失败
-                failed = await self._undo(execution)
-                reason = "执行中断：处置执行器重启"
-                if failed:
-                    reason += f"；回滚失败：{failed}，封禁可能仍在，将于到期时自动解除"
-                await self._update(execution, state="failed", reason=reason)
+            try:
+                await self._resume(execution, now)
+            except Exception:
+                # 一条恢复不了的记录不拖垮整个执行器：否则重放窗口（24 小时）内每次启动都在同一条上失败，
+                # 期间全部处置停摆。记录后继续恢复其余执行
+                log.exception("playbook.resume_failed", extra={"execution_id": execution.id})
+
+    async def _resume(self, execution: PlaybookExecutionV1, now: datetime) -> None:
+        if execution.state == "pending":
+            self._spawn(
+                execution.id, self._expire(execution, CONFIRM_TIMEOUT - (now - execution.ts))
+            )
+        elif execution.state == "contained" and execution.expires_at is not None:
+            self._active.add(execution.target)
+            self._spawn(execution.id, self._ttl(execution))
+        elif execution.state in ("executing", "verifying"):
+            # 执行到一半时退出：撤销可能已写入的封禁，如实记为失败
+            failed = await self._undo(execution)
+            reason = "执行中断：处置执行器重启"
+            if failed:
+                reason += f"；回滚失败：{failed}，封禁可能仍在，将于到期时自动解除"
+            await self._update(execution, state="failed", reason=reason)
 
     # ── 编排 ──────────────────────────────────────────────
 
@@ -147,10 +169,29 @@ class Executor:
             verify_result=None,
         )
 
+    def _unavailable(self, playbook: Playbook) -> str | None:
+        """Playbook 在本部署中执行不了的原因（FR-1001）；可执行时为 None。"""
+        if self._mode not in playbook.requires_mode:
+            return "当前部署模式不支持执行，仅通知"
+        missing = [
+            ADAPTERS.get(s.adapter, s.adapter)
+            for s in playbook.actions
+            if f"{s.adapter}.{s.action}" not in self._actions
+        ]
+        if missing:
+            return f"未配置{'、'.join(dict.fromkeys(missing))}，仅通知"
+        return None
+
     def _skip_reason(self, incident: Incident) -> str | None:
         """白名单（C-SEC-03、FR-403）：未配置时只告警；目标在其中时不处置。"""
         if incident.source_ip is None:
             return "关联事件没有攻击源"
+        ip = incident.source_ip
+        if ip.is_loopback or ip.is_multicast or ip.is_unspecified or ip.is_link_local:
+            # 与 privileged-helper 指令协议拒绝的地址一致（C-SEC-06）：封不了，如实记为不处置
+            return "攻击源是本机或非单播地址，不处置"
+        if ip in self._self_ips:
+            return "攻击源是边缘主机自身地址，不处置"
         if not self._whitelist:
             return "未配置核心业务白名单，只告警不处置"
         if any(incident.source_ip in net for net in self._whitelist):
@@ -162,6 +203,12 @@ class Executor:
         if playbook is None:
             raise ActionError(f"Playbook {execution.playbook_id} 已不存在")
         target = ip_address(execution.target)
+        missing = [
+            s.adapter for s in playbook.actions if f"{s.adapter}.{s.action}" not in self._actions
+        ]
+        if missing:
+            # 执行后改了配置（如撤下联动网关）：按动作失败处理，不让 KeyError 穿过编排
+            raise ActionError(f"未配置{'、'.join(ADAPTERS.get(a, a) for a in missing)}")
         return [
             (
                 self._actions[f"{s.adapter}.{s.action}"],
@@ -300,7 +347,18 @@ class Executor:
 
     def _spawn(self, execution_id: str, coro: Coroutine[Any, Any, None]) -> None:
         self._cancel(execution_id)
-        self._tasks[execution_id] = asyncio.create_task(coro)
+        task = self._tasks[execution_id] = asyncio.create_task(coro)
+        task.add_done_callback(lambda done: self._report(execution_id, done))
+
+    @staticmethod
+    def _report(execution_id: str, task: asyncio.Task[None]) -> None:
+        """编排任务因未预料的异常结束时留下记录：任务的异常没有人等待，不记就无从得知执行为何停住。"""
+        if not task.cancelled() and task.exception() is not None:
+            log.error(
+                "playbook.task_failed",
+                extra={"execution_id": execution_id},
+                exc_info=task.exception(),
+            )
 
     def _cancel(self, execution_id: str) -> None:
         task = self._tasks.pop(execution_id, None)

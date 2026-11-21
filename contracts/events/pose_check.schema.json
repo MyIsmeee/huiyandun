@@ -1,0 +1,59 @@
+{
+  "title": "PoseCheck",
+  "description": "安装参数自检结果（D-102 估算映射的兜底检查）：由画面中站立行人推算安装高度与俯角，只对按安装参数估算地面映射的摄像头给出",
+  "type": "object",
+  "required": [
+    "camera_id",
+    "status",
+    "samples",
+    "person_height_m",
+    "speed_p95_mps",
+    "suggested_height_m",
+    "suggested_pitch_deg",
+    "reasons"
+  ],
+  "properties": {
+    "camera_id": { "type": "string" },
+    "status": {
+      "enum": ["ok", "suspect", "insufficient"],
+      "description": "ok：与行人尺度相符；suspect：安装高度、俯角可能填错或人员速度虚高；insufficient：站立行人样本不足，暂不能判断"
+    },
+    "samples": { "type": "integer", "minimum": 0, "description": "参与推算的站立行人样本数（全身入镜、腿伸直）" },
+    "person_height_m": {
+      "anyOf": [{ "type": "number", "minimum": 0 }, { "type": "null" }],
+      "description": "按当前参数推算的行人身高中位（米）；样本不足时为 null"
+    },
+    "speed_p95_mps": {
+      "anyOf": [{ "type": "number", "minimum": 0 }, { "type": "null" }],
+      "description": "移动人员速度的 95 分位（米每秒）；移动样本不足时为 null"
+    },
+    "suggested_height_m": {
+      "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+      "description": "使行人推算身高符合常人的安装高度（米）；样本不足时为 null"
+    },
+    "suggested_pitch_deg": {
+      "anyOf": [{ "type": "number", "minimum": -90, "maximum": 90 }, { "type": "null" }],
+      "description": "使远近行人推算身高一致的俯角（度，向下为负）；行人远近分布不足时为 null"
+    },
+    "reasons": { "type": "array", "items": { "type": "string" }, "description": "给值守人员看的白话说明" },
+    "geometry": {
+      "anyOf": [
+        {
+          "type": "object",
+          "description": "1.1 起。单目几何模型（MoGe-2）从画面拟合地面得到的安装几何，不依赖行人；近几次估计的中位数。未配置模型或看不到足够地面时为 null",
+          "required": ["height_m", "pitch_deg", "roll_deg", "hfov_deg", "floor_width_m", "floor_depth_m", "scale_ref"],
+          "properties": {
+            "height_m": { "type": "number", "exclusiveMinimum": 0, "description": "离地高度（米）" },
+            "pitch_deg": { "type": "number", "minimum": -90, "maximum": 90, "description": "俯角（度，向下为负）" },
+            "roll_deg": { "type": "number", "minimum": -90, "maximum": 90, "description": "侧倾（度）；地面映射不含侧倾，只用于提示" },
+            "hfov_deg": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 180, "description": "水平视角（度）" },
+            "floor_width_m": { "type": "number", "minimum": 0, "description": "画面中可见地面的横向范围（米）" },
+            "floor_depth_m": { "type": "number", "minimum": 0, "description": "画面中可见地面的纵深范围（米）" },
+            "scale_ref": { "enum": ["model", "desk"], "description": "尺度来源：model 为模型估计；desk 为按画面中桌面的标准高度校正" }
+          }
+        },
+        { "type": "null" }
+      ]
+    }
+  }
+}

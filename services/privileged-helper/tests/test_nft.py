@@ -42,14 +42,38 @@ class FakeNft:
         return self.results.pop(0) if self.results else (0, "", "")
 
 
-def test_setup_creates_table_once() -> None:
-    missing = FakeNft((1, "", "Error: No such file or directory"))
-    asyncio.run(Nft(missing).setup())
-    assert missing.calls == [(["list", "table", "inet", "hyd"], None), (["-f", "-"], SETUP)]
+def test_setup_applies_template_in_one_transaction() -> None:
+    """每次启动都整份写入：一次 nft -f 事务，已有集合保留、规则先清空再写，重复执行不叠加。"""
+    fake = FakeNft()
+    asyncio.run(Nft(fake).setup())
+    asyncio.run(Nft(fake).setup())
+    assert fake.calls == [(["-f", "-"], SETUP)] * 2
 
-    existing = FakeNft((0, "table inet hyd {}", ""))
-    asyncio.run(Nft(existing).setup())
-    assert len(existing.calls) == 1  # 已存在不重建：重复创建会叠加丢弃规则
+
+def test_setup_failure_raises() -> None:
+    fake = FakeNft((1, "", "Error: Operation not permitted"))
+    with pytest.raises(NftError, match="not permitted"):
+        asyncio.run(Nft(fake).setup())
+
+
+def test_template_resets_tcp_before_dropping() -> None:
+    """切断已建立的会话：两条链都先对 TCP 回复 RST、再丢弃其余协议；规则写入前先清空，集合不清空。"""
+    declared, flushes, rules = SETUP.split("flush chain", 1)[0], SETUP.count("flush chain"), {}
+    assert "flush set" not in SETUP and "delete" not in SETUP and flushes == 2
+    assert declared.count("set block") == 2
+    body = SETUP.rsplit("table inet hyd {", 1)[1]
+    for chain in ("forward", "input"):
+        lines = [x.strip() for x in body.split(f"chain {chain} {{")[1].split("}")[0].splitlines()]
+        rules[chain] = [x for x in lines if x]
+    for chain, lines in rules.items():
+        resets = [i for i, x in enumerate(lines) if x.endswith("reject with tcp reset")]
+        drops = [i for i, x in enumerate(lines) if x.endswith("drop")]
+        assert resets and drops and max(resets) < min(drops), chain
+        # 先判协议再查集合：否则非 TCP 报文在复位规则处也被计数一次
+        assert all(lines[i].startswith("meta l4proto tcp ") for i in resets), chain
+    # 设备发往攻击方的报文只出现在转发路径上；本机不对自己发出的报文设规则（否则会丢掉回给攻击方的 RST）
+    assert any("daddr @block4" in x for x in rules["forward"])
+    assert not any("daddr" in x for x in rules["input"]) and "hook output" not in SETUP
 
 
 @pytest.mark.parametrize(

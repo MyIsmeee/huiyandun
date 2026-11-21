@@ -72,6 +72,7 @@ class Chain:
         self.fingerprint = "sha256:" + sha256(public.public_bytes(Encoding.Raw, PublicFormat.Raw))
         (root / "objects").mkdir(parents=True, exist_ok=True)
         self._records: list[dict[str, Any]] = []
+        self._damaged = False  # 追加失败且文件未能截回：文件与内存中的链不一致，不再追加
         if self._file.exists():
             for seq, line in enumerate(self._file.read_bytes().splitlines(), 1):
                 self._check(seq, line)
@@ -95,7 +96,12 @@ class Chain:
 
     def append(self, entries: list[Entry]) -> None:
         """载荷与其目录项先 fsync，记录整批追加后 fsync：断电后链上的记录不会指向不存在的载荷；
-        一个关联事件的记录在链上连续（080 §3.1）。"""
+        一个关联事件的记录在链上连续（080 §3.1）。
+
+        写入或 fsync 失败（存证卷写满、IO 错误）时把文件截回写入前的长度再报错：文件里可能已有半批记录，
+        而内存中的链没有前进，不截回的话下一次追加会接在残行或重复的序号之后，重启时整条链校验不过。"""
+        if self._damaged:
+            raise ChainBroken("上次追加失败后存证链文件未能恢复，重启并校验通过前不再追加")
         prev = self._records[-1]["hash"] if self._records else GENESIS
         added: list[dict[str, Any]] = []
         for entry in entries:
@@ -113,12 +119,29 @@ class Chain:
             added.append(record)
         if any(r["payload_ref"] is not None for r in added):
             _fsync_dir(self._root / "objects")
-        with self._file.open("ab") as f:
-            f.write(b"".join(canonical(r) + b"\n" for r in added))
-            f.flush()
-            os.fsync(f.fileno())
+        self._write(b"".join(canonical(r) + b"\n" for r in added))
         self._records += added
         self.incidents.update(r["incident_id"] for r in added)
+
+    def _write(self, data: bytes) -> None:
+        """整批追加并落盘；失败时截回原长度。不经缓冲写：失败后没有留在缓冲里、关闭时又被写出的数据。"""
+        fd = os.open(self._file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+        try:
+            size = os.fstat(fd).st_size
+            try:
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view) :]
+                os.fsync(fd)
+            except OSError:
+                try:
+                    os.ftruncate(fd, size)
+                    os.fsync(fd)
+                except OSError:
+                    self._damaged = True
+                raise
+        finally:
+            os.close(fd)
 
     def _store(self, entry: Entry) -> str:
         """按内容寻址，写入后只读；同一载荷只存一份。"""

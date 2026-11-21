@@ -1,0 +1,11 @@
+{
+  "title": "DemoResetV1",
+  "description": "演示复位（生产者 api-server 的 hyd-api demo-reset，消费者 correlator）：清空关联引擎的去重期与未完成的命中序列，使同一攻击可在 5 分钟去重期内重演；只有开启 demo_reset 的 correlator 响应",
+  "allOf": [{ "$ref": "event_base.schema.json" }],
+  "type": "object",
+  "required": ["actor", "request_id"],
+  "properties": {
+    "actor": { "type": "string", "description": "发起者，命令行为 demo-reset" },
+    "request_id": { "type": "string", "description": "C-BE-08" }
+  }
+}

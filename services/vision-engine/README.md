@@ -53,4 +53,6 @@ hyd-gpu-check   # 按 HYD_DEVICE 加载全部模型（RTMO、RF-DETR、Efficient
 
 基础镜像为 CUDA 13 cuDNN runtime（C-HW-07），其 CUDA 主版本须与 `onnxruntime-gpu` 一致（C-HW-08）。Windows 侧驱动须支持 CUDA 13（580 及以上）。模型权重不打进镜像，由 `make fetch-models` 下载到 `models/weights/` 后只读挂载。
 
+`HYD_TENSORRT=true`（`compose.gpu.yaml` 默认开启）时，RTMPose、RF-DETR、DINOv2、STGCN++ 以 TensorRT 推理（RTX 4060 上分别快约 3.4、1.35、3.7、1.9 倍，精度对照见 `runtime.py` 的 `TRT_*`），RTMO 与 VideoMAE 仍在 CUDA 上。TensorRT 运行库在构建镜像时从 CUDA 源安装（约 2.5 GB），缺失时启动即报错、不静默退回 CUDA。首次启动按本机显卡构建引擎，约 5 分钟，期间健康检查不通过；引擎缓存在 `trt-cache` 卷（`HYD_TRT_CACHE_DIR`），换显卡、换模型或升级 TensorRT 时自动重建。
+
 onnxruntime 默认在 import 时向 `mobile.events.data.microsoft.com` 发送遥测（抓包确认）。镜像设置 `ORT_DISABLE_TELEMETRY=1` 关闭，测试由 `tests/conftest.py` 关闭（G-05）。本地直接运行 `hyd-gpu-check` 时须自行设置该变量。

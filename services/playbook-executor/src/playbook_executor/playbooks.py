@@ -17,7 +17,8 @@ class Trigger(_Strict):
 
 
 class Step(_Strict):
-    adapter: Literal["nftables"]
+    # nftables：边缘主机本机防火墙；firewall：客户网关或防火墙上的联动网关（旁路模式）
+    adapter: Literal["nftables", "firewall"]
     action: Literal["block_ip"]
     params: dict[str, Any] = {}
 

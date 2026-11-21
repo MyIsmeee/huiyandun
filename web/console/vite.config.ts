@@ -1,12 +1,14 @@
 /// <reference types="vitest/config" />
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
-  // shadcn/ui 生成的组件以 @/ 引用 src（ui.md §2）
-  resolve: { alias: { "@": new URL("./src", import.meta.url).pathname } },
+  // shadcn/ui 生成的组件以 @/ 引用 src（ui.md §2）。fileURLToPath 而非 URL.pathname：后者把路径中的非 ASCII
+  // 字符（如检出目录含中文）保留为百分号编码，别名指向不存在的目录
+  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // e2e 模式另外构建组件展示页，供组件各状态的截图基线使用（V-G3）；产品构建不包含
   build:
     mode === "e2e"

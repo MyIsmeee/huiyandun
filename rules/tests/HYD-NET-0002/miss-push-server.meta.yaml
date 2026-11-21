@@ -1,0 +1,6 @@
+# 合成样本（R-02）：python tools/dev/rtsp_pcap.py rules/tests 生成
+source: 合成
+license: 自研，无第三方内容
+anonymization: 不含真实数据；地址取文档示例网段（RFC 5737）
+description: 向推流接收端（HYD_PUSH_SERVERS）推流：正常接入
+alerts: 0

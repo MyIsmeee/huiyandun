@@ -78,6 +78,7 @@ def test_active_alerts_counted_within_hold(devices: Devices, history: History) -
         at(alert(), NOW - timedelta(seconds=301)),
         at(behavior(), NOW - timedelta(seconds=59)),  # 行为事件保持 1 分钟：计入
         at(behavior(), NOW - timedelta(seconds=61)),
+        at(behavior(level="suspected"), NOW - timedelta(seconds=10)),  # 疑似跌倒不进入告警态
         at(alert(), NOW - HOUR - timedelta(seconds=10)),  # 1 小时前仍在保持期
     ):
         history.add_alert(event)

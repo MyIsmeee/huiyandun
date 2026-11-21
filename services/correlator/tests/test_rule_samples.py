@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 import yaml
-from test_engine import ALERT, ATTACK, RULES, alert, integrity
+from test_engine import ALERT, ATTACK, BEHAVIOR, alert, behavior, integrity
+from test_engine import ALL_RULES as RULES
 
 from correlator.engine import Engine
 from correlator.rules import MODELS
@@ -35,7 +36,8 @@ def test_rule_sample(rule_id: str, case: dict[str, Any]) -> None:
         fields = dict(raw)
         subject, t = fields.pop("subject"), fields.pop("t")
         assert subject in MODELS
-        event = alert(t, **fields) if subject == ALERT else integrity(t, **fields)
+        build = {ALERT: alert, BEHAVIOR: behavior}.get(subject, integrity)
+        event = build(t, **fields)
         incidents += engine.feed(subject, event)
 
     assert [{"requires_confirmation": i.requires_confirmation} for i in incidents] == case[

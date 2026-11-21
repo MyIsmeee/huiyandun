@@ -1,5 +1,6 @@
-import { CircleAlert, LogOut, MapPin, ShieldCheck } from "lucide-react";
+import { CircleAlert, ListChecks, LogOut, MapPin, Waypoints } from "lucide-react";
 import { useEffect, useState } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
@@ -9,16 +10,22 @@ import { api, type Site } from "../../lib/api";
 import { useArea } from "../../scene/areas";
 import { connect, useConnection } from "../../store/connection";
 import { applySite, useLive } from "../../store/live";
-import { type AdminPage, go, type Page, useNav } from "../../store/nav";
+import { type AdminPage, go, isMainPage, type Page, useNav } from "../../store/nav";
 import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AdminFrame } from "../Admin/AdminFrame";
+import { BigScreen } from "../BigScreen/BigScreen";
+import { Alarm } from "../Alarm/Alarm";
 import { CameraPage } from "../CameraList/CameraList";
+import { InvestigationSheet, InvestigationWatcher } from "../InvestigationSheet/InvestigationSheet";
+import { INVESTIGATED, openInvestigation, useSheet } from "../InvestigationSheet/sheet";
 import { ConnectionStatus } from "../ConnectionStatus/ConnectionStatus";
 import { LlmStatusBadge } from "../LlmStatusBadge/LlmStatusBadge";
 import { Overview } from "../Overview/Overview";
 import { ProviderPage } from "../ProviderList/ProviderList";
+import { openRelation, RelationDialog, useRelation } from "../RelationGraph/RelationDialog";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
+import { ThreatBanner } from "../ThreatBanner/ThreatBanner";
 import { WallPage } from "../VideoWall/WallPage";
 
 const deselect = () => select(null);
@@ -26,7 +33,7 @@ const deselect = () => select(null);
 const home = () => go(useNav.getState().main);
 
 /**
- * 主界面（设计 150 §3）：顶栏导航 + 当前页面。态势为默认页（3D 铺满 + 浮动卡片），监控墙为独立视图，二者只挂载当前一个：
+ * 主界面（设计 150 §3）：顶栏导航 + 当前页面。监控墙为默认页，态势（3D 铺满 + 浮动卡片）为辅助总览，二者只挂载当前一个：
  * 监控墙下不占用 3D 渲染，态势页不保持多路实时画面连接。
  * onLogout 完成后若仍渲染本页，说明会话仍有效、退出未成功。
  * 进入即连接 WS；连接被拒时调用 onRejected 核对会话。
@@ -46,6 +53,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
     [],
   );
   const admin = canManageProviders(useSession((s) => s.role));
+  const roleFailed = useSession((s) => s.roleFailed);
   const { open, connecting, lastFrameAt } = useConnection();
   const offline = !open && !connecting;
   useEffect(() => connect(onRejected), [onRejected]);
@@ -59,6 +67,12 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   useEffect(() => {
     if (targetKey && !target) deselect();
   }, [targetKey, target]);
+  // 选中的设备不在站点中（摄像头已删除，仍可从它的旧告警点选）：取消选中，不留下无详情可显示的高亮
+  const deviceId = useSelection((s) => s.deviceId);
+  const known = deviceId === null || site.devices.some((d) => d.id === deviceId);
+  useEffect(() => {
+    if (!known) deselect();
+  }, [known]);
 
   // 场景页有未保存的修改时，顶栏切页与退出先确认（设计 150 E-6）
   const leave = (action: () => void) => (page === "scene" ? guardLeave(action) : action());
@@ -72,18 +86,24 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
   return (
     <div data-live={!offline} className="flex h-full flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-3">
-        <span className="flex items-center gap-2 text-[15px] font-semibold">
-          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <ShieldCheck aria-hidden className="size-4" />
-          </span>
+        <span className="flex shrink-0 items-center gap-2 text-[15px] font-semibold whitespace-nowrap">
+          <BrandMark className="h-7" />
           慧眼盾
         </span>
         <NavBar page={page} admin={admin} onChange={(next) => leave(() => go(next))} />
-        <span className="flex items-center gap-1.5 text-meta text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-1.5 text-meta whitespace-nowrap text-muted-foreground">
           <MapPin aria-hidden className="size-3.5" />
           {site.name}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {roleFailed && (
+            <p role="status" className="flex items-center gap-1 text-meta text-muted-foreground">
+              <CircleAlert aria-hidden className="size-4" />
+              权限信息读取失败，正在重试
+            </p>
+          )}
+          <RelationButton site={site} />
+          <InvestigationButton />
           <LlmStatusBadge />
           <ConnectionStatus />
           {logout === "failed" && (
@@ -99,9 +119,13 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </Button>
         </div>
       </header>
+      {/* 攻防态势：被攻击时整条变红、屏幕边缘红光，AI 防护阻断后变绿 */}
+      <ThreatBanner site={site} />
 
       {main === "wall" ? (
         <WallPage site={site} admin={admin} stale={offline} lastFrameAt={lastFrameAt} />
+      ) : main === "screen" ? (
+        <BigScreen site={site} stale={offline} lastFrameAt={lastFrameAt} />
       ) : (
         <Overview site={site} stale={offline} lastFrameAt={lastFrameAt} onBuild={admin ? () => go("scene") : undefined} />
       )}
@@ -121,23 +145,69 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
           </AdminFrame>
         </div>
       )}
+      {/* 研判面板：高危关联事件实时到达时自动打开，逐步展示 AI 调查过程 */}
+      <InvestigationWatcher />
+      <InvestigationSheet stale={offline} />
+      {/* 关系图：以摄像头为中心的攻击源、关联事件与处置 */}
+      <RelationDialog site={site} />
+      {/* 确认级物理告警：响铃并弹出带当时画面的处置卡片 */}
+      <Alarm />
       {/* 操作结果提示（设计 150 §9A）：保存、删除区域的成功与失败 */}
       <Toaster position="top-center" />
     </div>
   );
 }
 
-const isAdminPage = (page: Page): page is AdminPage => page !== "overview" && page !== "wall";
+/** 顶栏"研判"：打开最近一起在 AI 调查范围内的关联事件；面板已打开时再点收起 */
+function InvestigationButton() {
+  const latest = useLive((s) => s.incidents.find((i) => INVESTIGATED.has(i.severity)));
+  const open = useSheet((s) => s.incidentId !== null);
+  return (
+    <Button
+      variant={open ? "secondary" : "ghost"}
+      size="sm"
+      disabled={!latest && !open}
+      aria-pressed={open}
+      onClick={() => (open ? useSheet.setState({ incidentId: null }) : latest && openInvestigation(latest.id))}
+    >
+      <ListChecks aria-hidden />
+      研判
+    </Button>
+  );
+}
 
 /**
- * 顶栏分段导航（D-106、设计 150 §3）：态势 · 监控墙 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
+ * 顶栏"关系图"：以选中的设备为中心；没有选中时取最近一次被攻击或出现告警的设备，再退回第一台摄像头
+ */
+function RelationButton({ site }: { site: Site }) {
+  const open = useRelation((s) => s.deviceId !== null);
+  const selected = useSelection((s) => s.deviceId);
+  const latest = useLive((s) => {
+    const a = s.alerts[0];
+    return a ? ("camera_id" in a ? a.camera_id : a.device_id) : (s.incidents[0]?.device_ids[0] ?? null);
+  });
+  const known = (id: string | null) => (id && site.devices.some((d) => d.id === id) ? id : null);
+  const target = known(selected) ?? known(latest) ?? site.devices.find((d) => d.type === "camera")?.id ?? site.devices[0]?.id;
+  return (
+    <Button variant={open ? "secondary" : "ghost"} size="sm" disabled={!target} aria-pressed={open} onClick={() => target && openRelation(target)}>
+      <Waypoints aria-hidden />
+      关系图
+    </Button>
+  );
+}
+
+const isAdminPage = (page: Page): page is AdminPage => !isMainPage(page);
+
+/**
+ * 顶栏分段导航（D-106、设计 150 §3）：监控墙 · 态势 · 大屏 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
  * 摄像头、场景、模型供应商在管理页左侧栏切换（产品负责人 2026-11-09 选定，导航不重复）
  */
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
   const { page, admin, onChange } = props;
   const items: { page: Page; label: string; current: boolean }[] = [
-    { page: "overview", label: "态势", current: page === "overview" },
     { page: "wall", label: "监控墙", current: page === "wall" },
+    { page: "overview", label: "态势", current: page === "overview" },
+    { page: "screen", label: "大屏", current: page === "screen" },
   ];
   if (admin) items.push({ page: "cameras", label: "管理", current: isAdminPage(page) });
   return (
@@ -149,7 +219,7 @@ function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => v
           aria-current={item.current ? "page" : undefined}
           onClick={() => !item.current && onChange(item.page)}
           className={cn(
-            "h-7 rounded-sm px-3 text-sm transition-colors",
+            "h-7 rounded-sm px-3 text-sm whitespace-nowrap transition-colors",
             item.current ? "bg-card font-medium text-primary shadow-xs" : "text-muted-foreground hover:text-foreground",
           )}
         >

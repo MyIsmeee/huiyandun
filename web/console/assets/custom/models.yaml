@@ -1,0 +1,16 @@
+# 自制场景模型登记（设计 150 §8）：团队自制（如 Blender 导出）的模型源文件放在本目录，
+# 由 uv run python tools/dev/assets.py --custom 合并为 web/console/public/models/scene-custom.glb 并写入资产目录。
+# 只收团队自制模型；第三方模型须挑选进 tools/dev/assets.py 的 SELECTION 并登记 deploy/third-party.yaml（C-RU-01）。
+# 格式与导出要求见 README.md。id 写入场景数据（SceneItem.asset），只增不改
+#
+# 示例：
+#   - id: gate-barrier          # 资产编号：小写字母、数字、连字符，不与已有编号重复
+#     category: equipment       # 已有类别：building road wall opening furniture equipment greenery
+#     name: 道闸                # 模型库中显示的中文名
+#     palette: furniture        # 重新上色的色板：building road furniture tree grass plaza
+#     author: 张三              # 作者（团队成员）
+#     file: gate-barrier.glb    # 可省略，默认 <id>.glb
+#     scale: 1                  # 可省略，模型单位换算为米；Blender 按米建模时为 1
+#     yaw: 0                    # 可省略，先绕竖直轴转的角度：0 90 180 270
+#     line: false               # 可省略，线状资产（墙、围栏）按长度沿 x 向铺设
+models: []

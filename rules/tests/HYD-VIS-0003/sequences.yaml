@@ -1,0 +1,29 @@
+# 关联规则样本（C-SEC-01）：按列表顺序送入引擎（即到达顺序），t 为事件发生时刻（秒）
+# 未写的字段由测试补默认值：告警为 enforce、rule 来源的 auth_bruteforce，画面事件为 rule 来源的 freeze，
+# 行为事件为确认的跌倒
+cases:
+  - name: 确认跌倒
+    events:
+      - { t: 0, subject: hyd.vision.behavior.v1, camera_id: cam-01 }
+    incidents: [{ requires_confirmation: true }]
+
+  - name: 攀爬越线
+    events:
+      - { t: 0, subject: hyd.vision.behavior.v1, camera_id: cam-01, behavior: climb }
+    incidents: [{ requires_confirmation: true }]
+
+  - name: 疑似跌倒只在控制台提示
+    events:
+      - { t: 0, subject: hyd.vision.behavior.v1, camera_id: cam-01, level: suspected }
+    incidents: []
+
+  - name: 长时间静止不进入关联
+    events:
+      - { t: 0, subject: hyd.vision.behavior.v1, camera_id: cam-01, behavior: still }
+    incidents: []
+
+  - name: 不同人员先后跌倒，5 分钟内只生成一次
+    events:
+      - { t: 0, subject: hyd.vision.behavior.v1, camera_id: cam-01, track_id: 1 }
+      - { t: 90, subject: hyd.vision.behavior.v1, camera_id: cam-01, track_id: 2 }
+    incidents: [{ requires_confirmation: true }]

@@ -1,11 +1,14 @@
-"""跌倒与攀爬判定（FR-103、FR-104、C-CV-04）：以合成骨骼验证几何规则、持续时长与重发。"""
+"""跌倒与攀爬判定（FR-103、FR-104、C-CV-04）：以合成骨骼验证几何规则、持续时长、两级告警与重发。"""
 
 import numpy as np
 import pytest
 
 from vision_engine.behavior import (
+    CONFIRM_S,
+    CONFIRM_UNSEEN_S,
     MIN_DURATION_S,
     REPEAT_S,
+    TRANSITION_S,
     Behavior,
     BehaviorDetector,
     ClimbLine,
@@ -55,10 +58,73 @@ def hold(points: np.ndarray | None, start: float, seconds: float) -> list:
     return [(start + i / FPS, points) for i in range(round(seconds * FPS))]
 
 
-def test_lying_for_two_seconds_is_fall() -> None:
+def kinds(found: list[Behavior]) -> list[tuple[str, float, float]]:
+    """（级别, 开始, 发出时刻）"""
+    return [(b.level, round(b.start, 1), round(b.end, 1)) for b in found]
+
+
+def fall(seconds: float, start: float = 1.0) -> list:
+    """站立 start 秒后倒地 seconds 秒：看到了跌倒过程。"""
+    return hold(pose("stand"), 0, start) + hold(pose("lying"), start, seconds)
+
+
+def test_lying_for_two_seconds_is_suspected_fall() -> None:
     found = run(BehaviorDetector([]), hold(pose("lying"), 0, 3))
 
-    assert found == [Behavior(7, "fall", pytest.approx(0.9), 0.0, MIN_DURATION_S)]
+    assert found == [
+        Behavior(7, "fall", pytest.approx(0.9), 0.0, MIN_DURATION_S, level="suspected")
+    ]
+
+
+def test_falling_and_staying_down_is_confirmed() -> None:
+    """站立后倒地：满 2 s 发疑似，倒地不动满 CONFIRM_S 发确认（TK-160）。"""
+    found = run(BehaviorDetector([]), fall(CONFIRM_S + 2))
+
+    assert kinds(found) == [("suspected", 1.0, 3.0), ("confirmed", 1.0, 1.0 + CONFIRM_S)]
+    assert found[1] == Behavior(7, "fall", pytest.approx(0.9), 1.0, 1.0 + CONFIRM_S)
+
+
+def test_getting_up_before_confirmation_is_only_suspected() -> None:
+    """弯腰捡物、短暂坐地后站起：只有疑似，不进入物理告警。"""
+    frames = fall(CONFIRM_S - 2) + hold(pose("stand"), CONFIRM_S - 1, 5)
+
+    assert [b.level for b in run(BehaviorDetector([]), frames)] == ["suspected"]
+
+
+def test_moving_on_the_ground_is_not_confirmed() -> None:
+    """在地上爬行（髋部每秒移动约 1.5 个躯干长）15 s：不确认；停下后近 STILL_WINDOW_S 内基本不动才确认。"""
+    crawl = [(1 + i / FPS, pose("lying", x=100 + 17 * i)) for i in range(round(15 * FPS))]
+    rest = hold(pose("lying", x=100 + 17 * 75), 16, 6)
+
+    found = run(BehaviorDetector([]), hold(pose("stand", x=100), 0, 1) + crawl + rest)
+
+    assert [b.level for b in found] == ["suspected", "confirmed"]
+    assert found[1].end > 16  # 爬行期间不确认
+
+
+def test_already_lying_needs_longer_confirmation() -> None:
+    """一出现就躺着（没看到跌倒过程，可能是躺卧休息）：确认要等 CONFIRM_UNSEEN_S。"""
+    found = run(BehaviorDetector([]), hold(pose("lying"), 0, CONFIRM_UNSEEN_S + 1))
+
+    assert kinds(found) == [("suspected", 0.0, 2.0), ("confirmed", 0.0, CONFIRM_UNSEEN_S)]
+
+
+def test_upright_long_before_lying_is_not_a_seen_fall() -> None:
+    frames = hold(pose("stand"), 0, 1) + hold(None, 1, TRANSITION_S + 1)
+    frames += hold(pose("lying"), TRANSITION_S + 2, CONFIRM_S + 2)
+
+    assert [b.level for b in run(BehaviorDetector([]), frames)] == ["suspected"]
+
+
+def test_detection_gap_keeps_seen_fall() -> None:
+    """倒地后漏检超过 GAP_S：计时重新开始，但仍算看到了跌倒过程，按 CONFIRM_S 确认。"""
+    frames = fall(3) + hold(None, 4, 2) + hold(pose("lying"), 6, CONFIRM_S + 1)
+
+    assert kinds(run(BehaviorDetector([]), frames)) == [
+        ("suspected", 1.0, 3.0),
+        ("suspected", 6.0, 8.0),
+        ("confirmed", 6.0, 6.0 + CONFIRM_S),
+    ]
 
 
 def test_shorter_than_min_duration_is_not_fall() -> None:
@@ -115,10 +181,15 @@ def test_borderline_frame_before_fall_interrupts() -> None:
     assert run(BehaviorDetector([]), hold(pose("propped"), 0, 3)) == []
 
 
-def test_continuing_fall_repeats_every_interval() -> None:
-    found = run(BehaviorDetector([]), hold(pose("lying"), 0, REPEAT_S + 5))
+def test_continuing_fall_repeats_confirmation_every_interval() -> None:
+    """确认后每 REPEAT_S 重发确认，使设备保持物理告警；疑似不再重发。"""
+    found = run(BehaviorDetector([]), fall(CONFIRM_S + REPEAT_S + 1))
 
-    assert [(b.start, b.end) for b in found] == [(0.0, 2.0), (0.0, 2.0 + REPEAT_S)]
+    assert kinds(found) == [
+        ("suspected", 1.0, 3.0),
+        ("confirmed", 1.0, 1.0 + CONFIRM_S),
+        ("confirmed", 1.0, 1.0 + CONFIRM_S + REPEAT_S),
+    ]
 
 
 def test_ankles_crossing_line_and_staying_is_climb() -> None:
@@ -176,3 +247,25 @@ def test_tracks_are_independent() -> None:
         found += detector.update(np.array([1, 2]), points, np.full((2, 17), 0.9), now)
 
     assert [(b.track_id, b.behavior) for b in found] == [(1, "fall")]
+
+
+def test_long_fall_keeps_running_confidence_without_per_frame_history() -> None:
+    """持续倒地一小时：置信度均值只记累计（不随帧数多存），重发的均值仍是各帧的平均。"""
+    detector = BehaviorDetector([])
+    found = run(detector, fall(3600), score=0.8)
+
+    timer = detector._tracks[7].fall.timer
+    assert timer.count == 3600 * FPS
+    assert not any(isinstance(value, list) for value in vars(timer).values())
+    assert found[-1].confidence_avg == pytest.approx(0.8)
+
+
+def test_running_confidence_equals_builtin_sum_bit_for_bit() -> None:
+    """累计的均值与逐帧存下再用 sum 求均值逐位相同：改为累计不改变任何判定与上报的数值。"""
+    from vision_engine.behavior import _Timer
+
+    scores = np.random.default_rng(0).uniform(0.3, 1.0, 5000).tolist() + [1e-9, 0.1, 0.7, 1e9, 0.2]
+    timer = _Timer()
+    for i, score in enumerate(scores):
+        timer.update(True, score, i * 0.2)
+        assert timer.mean == sum(scores[: i + 1]) / (i + 1)

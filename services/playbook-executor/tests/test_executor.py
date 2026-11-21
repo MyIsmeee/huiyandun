@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any
 
@@ -186,6 +186,18 @@ def test_model_evidence_waits_without_executing() -> None:
         ({"whitelist": []}, {}, "未配置核心业务白名单，只告警不处置"),  # C-SEC-03
         ({}, {"source_ip": "172.30.0.5"}, "目标在核心业务白名单内，不处置"),  # FR-403
         ({}, {"source_ip": None}, "关联事件没有攻击源"),
+        # privileged-helper 的指令协议拒绝的地址：不进入执行（否则封不了还占着目标）
+        ({}, {"source_ip": "127.0.0.1"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "169.254.10.20"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "fe80::1"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "224.0.0.251"}, "攻击源是本机或非单播地址，不处置"),
+        ({}, {"source_ip": "0.0.0.0"}, "攻击源是本机或非单播地址，不处置"),
+        # 在边缘主机上发起的爆破以它的局域网地址为攻击源（2026-11-18 实测封掉了演示机自己）
+        (
+            {"self_ips": frozenset([ip_address("192.168.5.199")])},
+            {"source_ip": "192.168.5.199"},
+            "攻击源是边缘主机自身地址，不处置",
+        ),
     ],
 )
 def test_skipped_with_reason(kwargs: dict[str, Any], changes: dict[str, Any], reason: str) -> None:
@@ -196,19 +208,72 @@ def test_skipped_with_reason(kwargs: dict[str, Any], changes: dict[str, Any], re
 
 
 def test_bypass_mode_only_notifies() -> None:
-    """FR-1001：部署模式不在 requires_mode 内时只通知。"""
+    """FR-1001：旁路模式未配置外部防火墙联动时只通知一次，并写明缺什么。"""
     h = Harness(mode="bypass")
     run(h.executor.on_incident(incident()))
     assert h.states() == ["notify_only"] and h.action.calls == []
+    assert h.reasons() == ["未配置外部防火墙联动，仅通知"]
+    assert h.published[0].playbook_id == "isolate-attacker-linked"
+
+
+class LinkedHarness(Harness):
+    """同时注册本机防火墙与联动网关两个适配器。"""
+
+    def __init__(self, mode: str) -> None:
+        self.local, self.action = FakeAction(), FakeAction()  # action 为联动网关
+        self.published = []
+        self.executor = Executor(
+            PLAYBOOKS,
+            {"nftables.block_ip": self.local, "firewall.block_ip": self.action},
+            mode=mode,
+            whitelist=WHITELIST,
+            publish=self.publish,
+            ttl_override_s=1,
+        )
+
+
+def test_bypass_mode_blocks_through_linked_firewall() -> None:
+    """FR-1001：旁路模式经联动网关封禁，本机防火墙不动，也不再另记"仅通知"。"""
+    h = LinkedHarness("bypass")
+    run(h.executor.on_incident(incident()), settle=1.3)
+    assert h.states() == ["executing", "verifying", "contained", "contained", "rolled_back"]
+    assert {e.playbook_id for e in h.published} == {"isolate-attacker-linked"}
+    assert h.action.calls == ["precheck", "execute", "verify", "rollback"]
+    assert h.local.calls == []
+
+
+def test_host_probe_mode_ignores_linked_firewall() -> None:
+    """主机探针模式只用本机防火墙；配置了联动网关也不重复封禁。"""
+    h = LinkedHarness("host_probe")
+    run(h.executor.on_incident(incident()))
+    assert {e.playbook_id for e in h.published} == {"isolate-attacker"}
+    assert h.local.calls[:3] == ["precheck", "execute", "verify"]
+    assert h.action.calls == []
+
+
+def test_low_and_slow_bruteforce_waits_for_confirmation() -> None:
+    """低速爆破（HYD-NET-0103）由行为模型判定：等待人工确认后才封禁（FR-407）。"""
+    h = Harness()
+    slow = incident(rule_id="HYD-NET-0103", severity="high", requires_confirmation=True)
+    run(h.executor.on_incident(slow))
+    assert h.states() == ["pending"] and h.action.calls == []
 
 
 @pytest.mark.parametrize(
-    "changes", [{"mode": "monitor"}, {"rule_id": "HYD-X-0002"}, {"severity": "high"}]
+    "changes", [{"mode": "monitor"}, {"rule_id": "HYD-X-0002"}, {"severity": "medium"}]
 )
 def test_non_matching_incident_ignored(changes: dict[str, Any]) -> None:
     h = Harness()
     run(h.executor.on_incident(incident(**changes)))
     assert h.published == []
+
+
+def test_bruteforce_alone_is_contained() -> None:
+    """认证爆破的单域关联事件（HYD-NET-0101，high）本身即封禁攻击源，不必等到画面遭篡改。"""
+    h = Harness()
+    run(h.executor.on_incident(incident(rule_id="HYD-NET-0101", severity="high")))
+    assert h.states()[:3] == ["executing", "verifying", "contained"]
+    assert h.published[2].target == "172.30.0.100"
 
 
 def test_replayed_incident_not_executed_twice() -> None:
@@ -428,3 +493,50 @@ def test_resume_with_removed_playbook() -> None:
     run(h.executor.resume())
     final = {e.id: e.state for e in h.published}
     assert final == {"a": "failed", "b": "expired"}
+
+
+def test_resume_survives_record_that_cannot_be_undone(caplog: pytest.LogCaptureFixture) -> None:
+    """一条执行中的记录在恢复时抛出未预料的异常：记录后继续，其余执行照常恢复，执行器不因此起不来。"""
+
+    class Broken(FakeAction):
+        async def rollback(self, ctx: ActionContext) -> None:
+            if str(ctx.target) == "172.30.0.101":
+                raise ValueError("未预料的错误")
+            await super().rollback(ctx)
+
+    h = Harness(Broken())
+    base = {
+        "schema_version": "1.1.0",
+        "event_id": str(uuid.uuid4()),
+        "ts": datetime.now(UTC).isoformat(),
+        "playbook_id": "isolate-attacker",
+        "playbook_version": "1.0.0",
+        "incident_id": "inc-1",
+        "device_ids": ["cam-02"],
+        "reason": None,
+        "ttl_s": 150,
+        "expires_at": None,
+        "verify_result": None,
+        "state": "executing",
+    }
+    for i, target in enumerate(("172.30.0.101", "172.30.0.102")):
+        h.executor.restore(
+            PlaybookExecutionV1.model_validate(base | {"id": f"exe-{i}", "target": target})
+        )
+    run(h.executor.resume())
+
+    assert {e.id: e.state for e in h.published} == {"exe-1": "failed"}
+    assert any(r.getMessage() == "playbook.resume_failed" for r in caplog.records)
+
+
+def test_unexpected_task_error_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    """编排任务没有等待者：未预料的异常须留下记录。"""
+
+    class Broken(FakeAction):
+        async def execute(self, ctx: ActionContext) -> None:
+            raise ValueError("未预料的错误")
+
+    h = Harness(Broken())
+    run(h.executor.on_incident(incident()))
+
+    assert any(r.getMessage() == "playbook.task_failed" for r in caplog.records)

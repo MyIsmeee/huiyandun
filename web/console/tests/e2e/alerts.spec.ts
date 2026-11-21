@@ -62,7 +62,7 @@ test("单击告警选中对应设备并展开详情（V-I3）", async ({ page })
   const sockets = await open(page, [camera("normal", "cam-01"), camera("cyber_alert", "cam-02")]);
   sockets[0]?.send(JSON.stringify({ channel: "alerts", data: ALERTS[0] }));
 
-  await page.getByRole("button", { name: /HYD-NET-0001 RTSP/ }).click();
+  await page.getByRole("button", { name: /口令暴力破解/ }).click();
   await expect(page.getByRole("heading", { name: "cam-02" })).toBeVisible();
 });
 
@@ -78,7 +78,7 @@ test(`处置栏：已处置的拦截证据、剩余时间与解封按钮（TK-05
   const expires_at = new Date(now + 130_000).toISOString();
   sockets[0]?.send(JSON.stringify({ channel: "executions", data: { ...EXECUTION, expires_at } }));
   sockets[0]?.send(JSON.stringify({ channel: "alerts", data: ALERTS[0] }));
-  await page.getByRole("button", { name: /HYD-NET-0001 RTSP/ }).click();
+  await page.getByRole("button", { name: /口令暴力破解/ }).click();
 
   const bar = page.getByRole("region", { name: "处置" });
   await expect(bar.getByRole("button", { name: "立即解封" })).toBeVisible();

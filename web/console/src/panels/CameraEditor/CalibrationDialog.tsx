@@ -1,5 +1,5 @@
 import { CircleAlert, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
@@ -8,8 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { components } from "../../api/schema";
 import { ApiError, api } from "../../lib/api";
-import { useLive } from "../../store/live";
-import type { Snapshot } from "./CameraEditor";
+import { type Snapshot, useSite } from "./CameraEditor";
 import { CalibrationFrame, GroundPlan, type Pair } from "./CalibrationViews";
 
 type Camera = components["schemas"]["Camera"];
@@ -38,7 +37,8 @@ export function CalibrationDialog(props: {
   onSaved: (camera: Camera) => void;
 }) {
   const { camera, areaId } = props;
-  const site = useLive((s) => s.site);
+  // WS 尚未推送站点时读一次 GET /api/site，不因此显示"区域未载入"、无法标定
+  const site = useSite();
   const area = site?.areas.find((a) => a.id === areaId) ?? null;
   const [pairs, setPairs] = useState<Pair[]>(() => camera.calibration as Pair[]);
   const [pending, setPending] = useState<[number, number] | null>(null);
@@ -47,6 +47,18 @@ export function CalibrationDialog(props: {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  /** 地面坐标编辑中的文本，键为"组号/列"：清空或只输入负号时不被改写成 0 */
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  /** 检查失败（如识别服务未响应）后重新检查同一组点 */
+  const [attempt, setAttempt] = useState(0);
+  // 保存在途时关闭了对话框：迟到的结果不再关闭（可能是之后打开的）对话框
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (pairs.length < MIN_PAIRS) return;
@@ -61,7 +73,7 @@ export function CalibrationDialog(props: {
       current = false;
       clearTimeout(timer);
     };
-  }, [camera.id, areaId, pairs]);
+  }, [camera.id, areaId, pairs, attempt]);
 
   async function save(points: Pair[]) {
     setSaving(true);
@@ -70,8 +82,9 @@ export function CalibrationDialog(props: {
       const saved = await api.saveCameraCalibration(camera.id, { area_id: areaId, points });
       toast.success(points.length > 0 ? "已保存标定" : "已清除标定");
       props.onSaved(saved);
-      props.onClose();
+      if (alive.current) props.onClose();
     } catch (e) {
+      if (!alive.current) return;
       setMessage(failure(e)); // 409 等失败时保留已点的点
       setSaving(false);
     }
@@ -95,9 +108,23 @@ export function CalibrationDialog(props: {
     setPending(null);
   }
 
-  function setGround(i: number, k: 2 | 3, value: number) {
+  /** 地面坐标输入：保留原文；能解析为有限数时才改点并重新检查 */
+  function setGround(i: number, k: 2 | 3, text: string) {
+    setTexts((t) => ({ ...t, [`${i}/${k}`]: text }));
+    const value = Number(text);
+    if (text.trim() === "" || !Number.isFinite(value)) return;
     update(pairs.map((p, j) => (j === i ? (p.map((n, m) => (m === k ? value : n)) as Pair) : p)));
   }
+
+  /** 删除一组：后面各组的编号前移，编辑中的文本随之作废 */
+  function remove(i: number) {
+    setTexts({});
+    update(pairs.filter((_, j) => j !== i));
+  }
+
+  const textOf = (i: number, k: 2 | 3) => texts[`${i}/${k}`] ?? String(pairs[i]?.[k] ?? "");
+  const invalid = pairs.some((_, i) => ([2, 3] as const).some((k) => !Number.isFinite(Number(textOf(i, k))) || textOf(i, k).trim() === ""));
+  const close = () => !saving && props.onClose();
 
   // 结果只对检查时的那一版点有效：点有变化时为 null，表示检查中
   const outcome = check?.pairs === pairs ? check.outcome : null;
@@ -107,7 +134,9 @@ export function CalibrationDialog(props: {
   const notice =
     missing > 0
       ? `还差 ${missing} 组`
-      : typeof outcome === "string"
+      : invalid
+        ? "地面坐标须为数字"
+        : typeof outcome === "string"
         ? outcome
         : !fit
           ? "正在检查…"
@@ -118,7 +147,7 @@ export function CalibrationDialog(props: {
               : null;
 
   return (
-    <Dialog open onOpenChange={(open) => !open && props.onClose()}>
+    <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent
         aria-describedby={undefined}
         showCloseButton={false}
@@ -136,7 +165,7 @@ export function CalibrationDialog(props: {
               地面标定 {camera.id}
               {area && ` · ${area.name}`}
             </DialogTitle>
-            <button type="button" aria-label="关闭" onClick={props.onClose} className="grid size-8 place-items-center rounded-full hover:bg-secondary">
+            <button type="button" aria-label="关闭" disabled={saving} onClick={close} className="grid size-8 place-items-center rounded-full hover:bg-secondary disabled:opacity-50">
               <X aria-hidden className="size-4" />
             </button>
           </header>
@@ -165,7 +194,7 @@ export function CalibrationDialog(props: {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pairs.map(([u, v, x, y], i) => (
+              {pairs.map(([u, v], i) => (
                 <TableRow key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} className={i === worst ? "font-semibold" : undefined}>
                   <TableCell>{i + 1}</TableCell>
                   <TableCell className="tabular-nums">
@@ -174,18 +203,18 @@ export function CalibrationDialog(props: {
                   {([2, 3] as const).map((k) => (
                     <TableCell key={k}>
                       <Input
-                        type="number"
-                        step={0.1}
+                        inputMode="decimal"
                         aria-label={`第 ${i + 1} 组地面 ${k === 2 ? "x" : "y"}`}
-                        value={k === 2 ? x : y}
-                        onChange={(e) => setGround(i, k, Number(e.target.value))}
+                        aria-invalid={!Number.isFinite(Number(textOf(i, k))) || textOf(i, k).trim() === ""}
+                        value={textOf(i, k)}
+                        onChange={(e) => setGround(i, k, e.target.value)}
                         className="h-8 w-24"
                       />
                     </TableCell>
                   ))}
                   <TableCell className="tabular-nums">{fit ? `${fit.residuals_m[i]?.toFixed(2)} m` : "—"}</TableCell>
                   <TableCell>
-                    <button type="button" aria-label={`删除第 ${i + 1} 组`} onClick={() => update(pairs.filter((_, j) => j !== i))} className="grid size-7 place-items-center rounded-full hover:bg-secondary">
+                    <button type="button" aria-label={`删除第 ${i + 1} 组`} onClick={() => remove(i)} className="grid size-7 place-items-center rounded-full hover:bg-secondary">
                       <X aria-hidden className="size-3.5" />
                     </button>
                   </TableCell>
@@ -198,6 +227,11 @@ export function CalibrationDialog(props: {
             {fit && `均方根误差 ${fit.reproj_error_m.toFixed(2)} m`}
             {fit && notice && " · "}
             {notice}
+            {typeof outcome === "string" && missing <= 0 && !invalid && (
+              <button type="button" onClick={() => setAttempt((n) => n + 1)} className="ml-2 underline underline-offset-4 hover:text-foreground">
+                重新检查
+              </button>
+            )}
           </p>
           {message && (
             <p role="alert" className="flex items-center gap-1">
@@ -211,10 +245,10 @@ export function CalibrationDialog(props: {
                 清除标定
               </button>
             )}
-            <button type="button" onClick={props.onClose} className={`${button} ml-auto`}>
+            <button type="button" disabled={saving} onClick={close} className={`${button} ml-auto`}>
               取消
             </button>
-            <button type="button" disabled={!fit || saving} onClick={() => void save(pairs)} className={buttonVariants({ size: "sm" })}>
+            <button type="button" disabled={!fit || saving || invalid} onClick={() => void save(pairs)} className={buttonVariants({ size: "sm" })}>
               {saving ? "保存中…" : "保存"}
             </button>
           </footer>

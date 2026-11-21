@@ -1,0 +1,5 @@
+{
+  "title": "VisionPoseCheckV1",
+  "description": "安装参数自检结果，字段即 PoseCheck 实体（生产者 vision-engine，每路每 30 s 一次）。核心 NATS，不持久化：消费方只取每路最新一条",
+  "allOf": [{ "$ref": "event_base.schema.json" }, { "$ref": "pose_check.schema.json" }]
+}

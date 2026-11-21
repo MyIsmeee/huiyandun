@@ -10,6 +10,8 @@ import { cameraTool, placeItem, useDraft } from "./draft";
 import { BLOCKED, extent, inside, overlaps, snap, stroke } from "./placement";
 
 type Rot = SceneItem["rot"];
+/** 线状资产按下后移动不到此距离（米）视为单击：放下一段，与按下前的悬停预览一致 */
+const DRAG_M = 0.5;
 const point = (e: ThreeEvent<PointerEvent | MouseEvent>): [number, number] => [e.point.x, e.point.z];
 
 /**
@@ -26,12 +28,16 @@ export function Placement({ size, items, registry }: { size: [number, number]; i
   const [rot, setRot] = useState<Rot>(0);
   /** 线状资产按下的位置；松开前为拖动中 */
   const [from, setFrom] = useState<[number, number] | null>(null);
-  const preview = asset && (from && hover ? stroke(asset, from, hover) : hover && snap(asset, asset.line ? 0 : rot, hover, size));
+  const dragged = from && hover && Math.hypot(hover[0] - from[0], hover[1] - from[1]) >= DRAG_M;
+  // 按下后尚未拖动时仍按按下处吸附一段：单击放下的就是悬停时看到的那一段
+  const preview = asset && (from && hover && dragged ? stroke(asset, from, hover) : (from ?? hover) && snap(asset, asset.line ? 0 : rot, from ?? hover ?? [0, 0], size));
   const valid = (item: SceneItem) => inside(item, catalog, size) && !overlaps(item, items, catalog);
 
   useEffect(() => {
-    if (asset?.line) return;
+    if (!asset || asset.line) return;
     const onKey = (e: KeyboardEvent) => {
+      // 选中物体时 R 旋转的是选中的物体（SelectionBar），不改下一次放置的方向
+      if (useDraft.getState().selected !== null) return;
       if (e.ctrlKey || e.metaKey || (e.target as Element).closest("input, textarea")) return;
       if (e.key === "r" || e.key === "R") setRot((r) => ((r + 90) % 360) as Rot);
     };

@@ -4,6 +4,7 @@
 from types import SimpleNamespace
 from typing import cast
 
+import cv2
 import numpy as np
 import onnxruntime as ort
 import pytest
@@ -24,6 +25,7 @@ from vision_engine.integrity import (
     View,
     ViewDetector,
     best_match,
+    shrink,
 )
 
 FPS = 4  # 时刻取 1/4 s 的倍数，浮点运算无误差
@@ -191,6 +193,38 @@ def test_embedder_returns_unit_cls_of_whole_frame() -> None:
     assert embedding[:2] == pytest.approx([0.6, 0.8]) and not embedding[2:].any()
 
 
+@pytest.mark.parametrize(
+    "height, width, halvings",
+    [
+        (1080, 1920, 2),
+        (720, 1280, 1),
+        (2160, 3840, 3),
+        (480, 640, 1),
+        (360, 640, 0),
+        (1080, 1921, 0),
+    ],
+)
+def test_shrink_halves_while_even_and_large(height: int, width: int, halvings: int) -> None:
+    """宽高同为偶数、减半后仍不小于输入边长时先逐次减半（整数倍的面积平均），再缩到 224 见方。"""
+    frame = np.random.default_rng(0).integers(0, 256, (height, width, 3), np.uint8)
+    expected = frame
+    for i in range(halvings):
+        size = (width >> (i + 1), height >> (i + 1))
+        expected = cv2.resize(expected, size, interpolation=cv2.INTER_AREA)
+    expected = cv2.resize(expected, (224, 224), interpolation=cv2.INTER_AREA)
+
+    assert np.array_equal(shrink(frame), expected)
+
+
+def test_shrink_stays_close_to_single_step_area_average() -> None:
+    """分步与一步到位都是面积平均：平滑画面上逐像素相差不到 2 个灰度级。"""
+    ys, xs = np.mgrid[0:1080, 0:1920]
+    frame = np.stack([xs / 8, ys / 5, (xs + ys) / 12], axis=-1).astype(np.uint8)
+    direct = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_AREA)
+
+    assert np.abs(shrink(frame).astype(int) - direct.astype(int)).max() <= 2
+
+
 # 挪位与遮挡（FR-308）：参考画面取前 10 s；之后嵌入换成另一画面（另一随机种子）即为改变
 def calm(seconds: float, seed: int = 0) -> np.ndarray:
     """运动成分小的画面：与自身均值的相似度约 0.97。"""
@@ -247,3 +281,18 @@ def test_shift_after_recovery_reported_again() -> None:
     embeddings = np.vstack(parts)
 
     assert len(views(embeddings, [textured()] * len(embeddings))) == 2
+
+
+def test_lasting_shift_does_not_accumulate_similarities() -> None:
+    """挪位持续多久只在上报前累计相似度：上报后不再记录，长时间挪位不占用越来越多的内存。"""
+    normal, turned = calm(REFERENCE_S + 5, seed=0), calm(120, seed=3)
+    embeddings = np.vstack([normal, turned])
+    detector = ViewDetector()
+    found = [
+        view
+        for i, e in enumerate(embeddings)
+        if (view := detector.update(e, textured(), i / SAMPLE_FPS))
+    ]
+
+    assert len(found) == 1
+    assert len(detector._similarities) <= VIEW_S * SAMPLE_FPS + 1

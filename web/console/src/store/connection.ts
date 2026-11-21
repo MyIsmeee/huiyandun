@@ -17,15 +17,26 @@ interface ConnectionState {
   connecting: boolean;
   /** 最后收到数据的时刻（毫秒时间戳）；连上时记为当前时刻 */
   lastFrameAt: number | null;
+  /**
+   * 第几次连上：每次连上（含重连）递增，整页内不回退。ai 频道不在连接补推之内，断线期间的调查进展只能重新读取，
+   * 依赖它的面板据此在连上后重读；退出再登录后同样大于此前任何一次，不会命中上一个会话的缓存
+   */
+  epoch: number;
+  /** 本次登录后是否已收到过推送：连上后服务端先补推近 24 小时的记录，收到首帧前列表为空不等于没有告警 */
+  synced: boolean;
 }
 
 export const useConnection = create<ConnectionState>()(() => ({
   open: false,
   connecting: true,
   lastFrameAt: null,
+  epoch: 0,
+  synced: false,
 }));
 
-export function freshness({ open, connecting, lastFrameAt }: ConnectionState, now: number): Freshness {
+let opens = 0;
+
+export function freshness({ open, connecting, lastFrameAt }: Pick<ConnectionState, "open" | "connecting" | "lastFrameAt">, now: number): Freshness {
   if (!open) return connecting ? "connecting" : "offline";
   return lastFrameAt !== null && now - lastFrameAt <= STALE_MS ? "live" : "delayed";
 }
@@ -51,11 +62,11 @@ export function connect(onRejected: () => void): () => void {
     socket.onopen = () => {
       opened = true;
       retryMs = RETRY_MIN_MS;
-      useConnection.setState({ open: true, connecting: false, lastFrameAt: Date.now() });
+      useConnection.setState({ open: true, connecting: false, lastFrameAt: Date.now(), epoch: ++opens });
     };
     socket.onmessage = (event: MessageEvent<string>) => {
       const now = Date.now();
-      useConnection.setState({ lastFrameAt: now });
+      useConnection.setState({ lastFrameAt: now, synced: true });
       receive(JSON.parse(event.data), now);
     };
     socket.onclose = (event) => {
@@ -74,7 +85,8 @@ export function connect(onRejected: () => void): () => void {
     clearInterval(pruner);
     socket.close();
     // 重新登录后不沿用上次会话的最后更新时刻、场景实体与选中的设备
-    useConnection.setState(useConnection.getInitialState());
+    // epoch 同样前进：重新登录后、连上之前的读取也不命中上一个会话的缓存
+    useConnection.setState({ ...useConnection.getInitialState(), epoch: ++opens });
     useLive.setState(useLive.getInitialState());
     useSelection.setState(useSelection.getInitialState());
   };

@@ -22,11 +22,13 @@ from py_contracts.events.event_base_schema import EventBase
 from py_contracts.events.hyd_security_alert_v1_schema import SecurityAlertV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_integrity_v1_schema import VisionIntegrityV1
+from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 
 MAX_ITEMS = 20
 TIMEOUT_S = 2.0  # 单次工具执行的上限（借鉴 DeepSeek Harness）
 TAIL_BYTES = 4 * 1024 * 1024  # conn.log 只读末尾，演示期间的会话足够覆盖 60 分钟
-BEHAVIOR = {"fall": "跌倒", "climb": "攀爬"}
+BEHAVIOR = {"fall": "跌倒", "climb": "攀爬", "still": "长时间静止", "fight": "疑似打架"}
+RULE = {"intrusion": "区域入侵", "line_crossing": "越线"}
 SOURCE = {"rule": "规则", "model": "模型"}
 
 
@@ -89,7 +91,12 @@ def _alert_item(event: EventBase, tz: timezone) -> dict[str, Any]:
         )  # fmt: skip
     if isinstance(event, VisionBehaviorV1):
         return {"kind": "behavior", "ts": ts} | event.model_dump(
-            mode="json", include={"camera_id", "behavior", "confidence_avg", "duration_s"}
+            mode="json", include={"camera_id", "behavior", "level", "confidence_avg", "duration_s"}
+        )
+    if isinstance(event, VisionRuleV1):
+        return {"kind": "rule", "ts": ts} | event.model_dump(
+            mode="json",
+            include={"camera_id", "rule_name", "rule_type", "phase", "level", "direction"},
         )
     assert isinstance(event, VisionIntegrityV1)
     return {"kind": "integrity", "ts": ts} | event.model_dump(
@@ -101,7 +108,11 @@ def _describe(item: dict[str, Any]) -> str:
     if item["kind"] == "security_alert":
         return f"{item['summary']}（{item['src_ip']} → {item['dst_ip']}）"
     if item["kind"] == "behavior":
-        return BEHAVIOR[item["behavior"]]
+        suspected = "疑似" if item.get("level") == "suspected" else ""
+        return suspected + BEHAVIOR[item["behavior"]]
+    if item["kind"] == "rule":
+        suspected = "疑似" if item.get("level") == "suspected" else ""
+        return f"{suspected}{RULE[item['rule_type']]}「{item['rule_name']}」"
     return f"{item['type']}（{SOURCE[item['source']]}，可信度 {item['confidence']:.2f}）"
 
 
@@ -127,11 +138,16 @@ def _read_conn_log(path: Path, since: float, ip: str) -> list[dict[str, Any]]:
         lines = f.read().decode("utf-8", errors="replace").splitlines()
     if size > TAIL_BYTES:
         lines = lines[1:]  # 从中间读起的第一行不完整
+    quoted = f'"{ip}"'  # 与该地址无关的行不必解析：4 MB 约 1 万行，逐行解析实测 50～70 ms
     sessions = []
     for line in lines:
+        if quoted not in line:
+            continue
         try:
             s = json.loads(line)
         except ValueError:
+            continue
+        if not isinstance(s, dict):  # 合法 JSON 但不是一条会话
             continue
         if s.get("ts", 0) >= since and ip in (s.get("id.orig_h"), s.get("id.resp_h")):
             sessions.append(s)
@@ -181,6 +197,9 @@ class Tools:
                 data, summary = await fn(parsed)
         except TimeoutError:
             return ToolResult(shown, {"error": f"查询超过 {TIMEOUT_S:g} 秒"}, "查询超时")
+        except OSError:
+            # 日志或基线文件在检查之后被轮转、删除或暂时读不了：如实告诉模型，不让整次调查以出错结束
+            return ToolResult(shown, {"error": "数据源暂时读不了"}, "数据源读取失败")
         return ToolResult(shown, data, summary)
 
     async def _list_alerts(self, a: AlertsArgs) -> tuple[dict[str, Any], str]:
@@ -188,8 +207,11 @@ class Tools:
 
         def match(e: EventBase) -> bool:
             if isinstance(e, SecurityAlertV1):
-                return ip in (str(e.src_ip), str(e.dst_ip)) or device == e.device_id
-            return isinstance(e, VisionBehaviorV1) and device == e.camera_id
+                # 按地址查时 device 为 None：不得与目标未登记（device_id 为 null）的告警相等而全部混入
+                return ip in (str(e.src_ip), str(e.dst_ip)) or (
+                    device is not None and device == e.device_id
+                )
+            return isinstance(e, VisionBehaviorV1 | VisionRuleV1) and device == e.camera_id
 
         events = [e for e in self._history.events_since(_since(a.minutes)) if match(e)]
         return _listing(events, a.minutes, "告警", self._tz)

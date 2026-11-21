@@ -24,7 +24,8 @@ const execution = (changes: Partial<Execution> = {}): Execution => ({
   verify_result: { passed: true, reason: "封禁规则已生效，已拦截 8 个数据包" },
   ...changes,
 });
-const push = (e: Execution) =>
+// 推送的执行事件另带事件时刻 ts（hyd.playbook.execution.v1）
+const push = (e: Execution & { ts?: string }) =>
   act(() => receive({ channel: "executions", data: e } as unknown as Frame, NOW));
 
 function show(role: Role | null) {
@@ -57,6 +58,15 @@ describe("ActionBar", () => {
     expect(screen.getByText("剩余 2:13")).toBeTruthy();
     act(() => vi.advanceTimersByTime(1000));
     expect(screen.getByText("剩余 2:12")).toBeTruthy();
+  });
+
+  it("面板打开很久后才生效：进入已处置即按当前时刻显示剩余时间", () => {
+    push(execution({ state: "pending", expires_at: null, verify_result: null }));
+    show("operator");
+    act(() => vi.advanceTimersByTime(600_000));
+    push(execution({ expires_at: new Date(NOW + 600_000 + 133_000).toISOString() }));
+    act(() => vi.advanceTimersByTime(0));
+    expect(screen.getByText("剩余 2:13")).toBeTruthy();
   });
 
   it.each([
@@ -100,14 +110,40 @@ describe("ActionBar", () => {
 
   it("连续两次解封失败且原因相同：第二次的结果推送后即可再点", async () => {
     vi.spyOn(api, "rollback").mockResolvedValue(execution());
-    const failed = execution({ reason: "解封失败：privileged-helper 不可达，将于到期时自动解除" });
+    // 每次更新带新的事件时刻 ts（hyd.playbook.execution.v1）
+    const failed = { ...execution({ reason: "解封失败：privileged-helper 不可达，将于到期时自动解除" }), ts: "2026-11-08T02:00:10Z" };
     push(failed);
     show("operator");
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "立即解封" })));
-    push({ ...failed });
+    push({ ...failed, ts: "2026-11-08T02:00:20Z" });
     expect(screen.getByRole("button", { name: "立即解封" }).hasAttribute("disabled")).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("解封请求进行中收到拦截证据补注或重连补推的同一次更新：仍为解封中", async () => {
+    vi.spyOn(api, "rollback").mockResolvedValue(execution());
+    const contained = { ...execution({ verify_result: { passed: true, reason: null } }), ts: "2026-11-08T02:00:10Z" };
+    push(contained);
+    show("operator");
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "立即解封" })));
+    push({ ...contained }); // 重连补推：同一次更新
+    push({ ...contained, ts: "2026-11-08T02:00:30Z", verify_result: { passed: true, reason: "封禁规则已生效，已拦截 8 个数据包" } });
+
+    expect(screen.getByRole("button", { name: "解封中…" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("请求被拒的提示不被随后的拦截证据补注清掉", async () => {
+    vi.spyOn(api, "rollback").mockRejectedValue(new ApiError(503, "执行器不可用"));
+    const contained = { ...execution({ verify_result: { passed: true, reason: null } }), ts: "2026-11-08T02:00:10Z" };
+    push(contained);
+    show("operator");
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "立即解封" })));
+    push({ ...contained, ts: "2026-11-08T02:00:30Z", verify_result: { passed: true, reason: "封禁规则已生效，未观察到攻击流量" } });
+
+    expect(screen.getByRole("alert").textContent).toContain("执行器不可用");
   });
 
   it("执行器推送已解除后按钮消失", async () => {

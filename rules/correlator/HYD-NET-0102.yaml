@@ -1,0 +1,17 @@
+# 单域关联：设备收到推流请求（ANNOUNCE / RECORD）即生成关联事件，交 Playbook 封禁攻击源（FR-401）
+# 样本：rules/tests/HYD-NET-0102/sequences.yaml
+id: HYD-NET-0102
+version: 1.0.0
+name: RTSP 推流劫持
+# 上线即 enforce：只引用规则告警 HYD-NET-0002（特征是协议方法本身，无阈值），不接受模型来源的告警；
+# 只对登记的摄像头成立——发往其他地址的推流请求没有 device_id，引擎不关联
+mode: enforce
+window_s: 60
+group_by: device_id
+sequence:
+  - subject: hyd.security.alert.v1
+    match: { category: stream_hijack, source: rule }
+emit:
+  severity: high
+  title: 摄像头遭推流劫持
+  techniques: [T0832]  # Manipulation of View（ICS）

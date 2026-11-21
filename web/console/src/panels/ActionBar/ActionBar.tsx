@@ -45,6 +45,19 @@ export function useDeviceExecution(deviceId: string): Execution | undefined {
   );
 }
 
+/** 推送的是 hyd.playbook.execution.v1，每次更新带新的事件时刻 ts；重连补推的是同一次更新，ts 不变 */
+const tsOf = (e: Execution) => (e as { ts?: string }).ts;
+
+/**
+ * 解封请求发起后，执行是否已推送了它的结果：状态或原因变了（已解除、解封失败），或同一状态又来了一次只改了 ts 的更新
+ * （连续两次解封失败且原因相同）。只改拦截证据的补注、重连补推的同一次更新都不算
+ */
+export function answered(before: Execution, now: Execution): boolean {
+  if (now.state !== before.state || now.reason !== before.reason) return true;
+  const evidence = (e: Execution) => JSON.stringify(e.verify_result ?? null);
+  return tsOf(now) !== tsOf(before) && evidence(now) === evidence(before);
+}
+
 function remaining(expiresAt: string, now: number): string {
   const s = Math.max(0, Math.round((Date.parse(expiresAt) - now) / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -57,8 +70,9 @@ function remaining(expiresAt: string, now: number): string {
 export function ActionBar(props: { deviceId: string }) {
   const execution = useDeviceExecution(props.deviceId);
   const role = useSession((s) => s.role);
-  // 请求记在发起时收到的那条执行推送上：受理后保持不可点，直到执行器推送新结果（每次推送都是新对象；解封后按钮
-  // 消失，解封失败时可再次解封，D-075，原因与上次相同也能识别）；换了一个执行即不再显示上一次的结果
+  // 请求记在发起时收到的那条执行推送上：受理后保持不可点，直到执行器推送它的结果（answered；解封后按钮消失，
+  // 解封失败时可再次解封，D-075，原因与上次相同也能识别）。拦截证据补注与重连补推不清掉请求状态；
+  // 换了一个执行即不再显示上一次的结果
   const [request, setRequest] = useState<{
     execution: Execution;
     status: "pending" | "failed";
@@ -68,11 +82,17 @@ export function ActionBar(props: { deviceId: string }) {
   const contained = execution?.state === "contained";
   useEffect(() => {
     if (!contained) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    const tick = () => setNow(Date.now());
+    // 进入已处置即取当前时刻：面板打开很久后才生效的封禁，首秒不显示按打开时刻算出的剩余时间
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
   }, [contained]);
   if (!execution) return null;
-  const current = request?.execution === execution ? request : null;
+  const current = request && request.execution.id === execution.id && !answered(request.execution, execution) ? request : null;
 
   // 已处置时另有拦截证据；原因（如解封失败，D-075）在前
   const details = [execution.reason, contained ? execution.verify_result?.reason : null].filter(Boolean);

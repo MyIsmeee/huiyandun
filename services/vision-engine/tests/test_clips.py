@@ -50,12 +50,17 @@ def test_target_action_detected_and_nothing_before(
     assert all(b.behavior == behavior and b.start >= start_s[0] for b in found), summary
 
 
-def test_fall_2_one_track_one_event() -> None:
-    """#134：同一倒地者只有一条轨迹、一条 fall 事件（片段约 20 s，短于重发间隔），
+def test_fall_2_one_track_suspected_then_confirmed() -> None:
+    """#134：同一倒地者只有一条轨迹，先疑似、后确认各一条（片段约 20 s，短于重发间隔；TK-160），
     其轨迹从倒地起持续 ≥ 10 s、中间不断（漏检不超过 GAP_S）。"""
     found = replay("fall-2", [])
 
-    assert [b.behavior for b in found] == ["fall"], [(b.track_id, round(b.start, 1)) for b in found]
+    summary = [(b.level, b.track_id, round(b.start, 1)) for b in found]
+    assert [(b.behavior, b.level) for b in found] == [
+        ("fall", "suspected"),
+        ("fall", "confirmed"),
+    ], summary
+    assert found[0].track_id == found[1].track_id, summary
     data = np.load(CLIPS / "fall-2.npz")
     t = data["t"][data["track_id"] == found[0].track_id]
     after = t[t >= found[0].start]

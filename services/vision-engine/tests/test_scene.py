@@ -69,9 +69,15 @@ def blank(value: int = 100) -> np.ndarray:
 
 def snapshot(name: str) -> tuple[np.ndarray, tuple[int, int]]:
     data = np.load(SCENES / f"{name}.npz")
-    # 类别名或 ADE20K 编号映射任一变化，录制结果即失效
-    assert data["classes"].tolist() == CLASSES, "映射表已变化，须重新录制"
-    assert (data["lut"] == LUT).all(), "映射表已变化，须重新录制"
+    # 已有类别名或其 ADE20K 编号映射变化，录制结果即失效；只在末尾追加的新类别不影响：录制时它们记为未识别（0），
+    # 快照仍是旧映射下的正确结果（新类别的检出由 test_scene3d 等合成数据覆盖）
+    recorded = data["classes"].tolist()
+    assert CLASSES[: len(recorded)] == recorded, "映射表已变化，须重新录制"
+    lut = data["lut"]
+    assert (LUT[lut > 0] == lut[lut > 0]).all(), "映射表已变化，须重新录制"
+    assert ((LUT[lut == 0] == 0) | (LUT[lut == 0] > len(recorded))).all(), (
+        "映射表已变化，须重新录制"
+    )
     return data["labels"], tuple(data["shape"].tolist())
 
 
@@ -347,6 +353,27 @@ def test_segmenter_maps_classes_and_drops_low_confidence_and_dark() -> None:
     assert (labels[:, GRID // 2 :] == 0).all()
 
 
+class ObjectSession(FakeSession):
+    """左半边路面；右半边椅子（ADE20K 19），最大概率约 0.4：低于地面门槛、高于物体门槛。"""
+
+    def run(self, names: None, feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        (logits,) = super().run(names, feed)
+        logits[0, 19, :, GRID // 2 :] = np.log(0.4 / 0.6 * 149)
+        return [logits]
+
+
+def test_segmenter_keeps_dark_objects_with_lower_confidence() -> None:
+    """黑皮椅、黑屏显示器：物体类别按较低的置信度门槛保留，且不受明暗过滤；地面在暗处仍滤掉。"""
+    frame = blank(128)
+    frame[: SIZE // 4] = 10  # 上方 1/4 过暗
+
+    labels = Segmenter(cast(Any, ObjectSession()))(frame)
+
+    assert (labels[:, GRID // 2 :] == label("chair")).all()
+    assert (labels[: GRID // 4, : GRID // 2] == 0).all()
+    assert (labels[GRID // 4 :, : GRID // 2] == label("road")).all()
+
+
 class CountingSession(FakeSession):
     """记下同时在跑的推理数。"""
 
@@ -420,7 +447,7 @@ class Reader:
     def is_alive(self) -> bool:
         return False
 
-    def latest(self) -> tuple[int, np.ndarray] | None:
+    def peek(self) -> tuple[int, np.ndarray] | None:
         if self._camera_id == "cam-02":
             return None
         return 1, blank(0 if self._camera_id == "cam-04" else 100)

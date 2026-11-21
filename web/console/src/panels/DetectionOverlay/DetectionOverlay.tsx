@@ -1,10 +1,11 @@
-import { type MouseEvent, useEffect, useRef } from "react";
-import { smoothed, smoothers } from "../../scene/smoothing";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { release, retain, smoothed } from "../../scene/smoothing";
 import { ACCENT, CLASS_LABEL } from "../../scene/targets";
 import { useConnection } from "../../store/connection";
-import { type Target, useLive } from "../../store/live";
+import { type Device, type Mark, type Target, useLive } from "../../store/live";
 import { selectTarget, useSelection } from "../../store/selection";
-import { contentRect, hitTarget, isFresh, type Rect, SKELETON, toPixel } from "./overlay";
+import { blink, contentRect, hitTarget, isFresh, markText, type Rect, SKELETON, toPixel } from "./overlay";
+import { type Zone, zones } from "./zones";
 
 const BOX = "rgb(255 255 255 / 0.8)";
 const BONE = "rgb(255 255 255 / 0.6)";
@@ -12,6 +13,12 @@ const BONE = "rgb(255 255 255 / 0.6)";
 const SELECTED = ACCENT;
 const LABEL_BG = "rgb(19 19 22 / 0.8)";
 const LABEL_TEXT = "#FFFFFF";
+/** 告警标记：确认的为红色闪烁，疑似的为琥珀色常亮（与物理告警状态色一致） */
+const ALERT = "#D03B3B";
+const SUSPECT = "#FAB219";
+/** 警戒线与区域：琥珀色虚线；区域内有人触发告警时转为红色闪烁 */
+const ZONE = "rgb(250 178 25 / 0.9)";
+const ZONE_FILL = "rgb(250 178 25 / 0.08)";
 
 /**
  * 实时画面上的检测框与骨骼（FR-107、04 V-W5）：取与 3D 人形同一份滤波后的检测框与关键点（V-A8），
@@ -25,12 +32,25 @@ export function DetectionOverlay({ cameraId, video }: { cameraId: string; video:
   // 设备离线或推送断开（V-U3）时不画：没有实时的跟踪数据
   const offline = useLive((s) => s.devices[cameraId]?.state === "offline");
   const disconnected = useConnection((s) => !s.open);
+  // 平滑状态与 3D 场景、其他叠加共用（smoothing.ts）：本叠加只声明本路的目标，卸载时撤销
+  const [owner] = useState(() => ({}));
+  useEffect(() => () => release(owner), [owner]);
 
   useEffect(() => {
     let frame = 0;
-    let painted = true;
+    // 上次静态重画时的画布与画面尺寸；逐帧重画期间为空串（下一帧必然重画）
+    let painted = "";
+    let drawn: Zone[] | null = null;
+    let layout: { camera: Device["camera"] | null; size: string; zones: Zone[] } = { camera: null, size: "", zones: [] };
+    let claimed: object | null = null;
     const draw = () => {
       frame = requestAnimationFrame(draw);
+      // 目标集合变化时重新声明本路仍在跟踪的目标：已离开画面的随即释放，监控墙常开时不累积
+      const { targets } = useLive.getState();
+      if (targets !== claimed) {
+        claimed = targets;
+        retain(owner, new Set(mine(cameraId).map(([key]) => key)));
+      }
       const el = canvas.current;
       const ctx = el?.getContext("2d");
       if (!el || !ctx) return;
@@ -39,29 +59,36 @@ export function DetectionOverlay({ cameraId, video }: { cameraId: string; video:
       if (el.width !== Math.round(w * ratio)) el.width = Math.round(w * ratio);
       if (el.height !== Math.round(h * ratio)) el.height = Math.round(h * ratio);
       const v = video();
-      const aspect = v && v.videoWidth > 0 ? v.videoWidth / v.videoHeight : 16 / 9;
+      const ready = v !== null && v.videoWidth > 0;
+      const aspect = ready ? v.videoWidth / v.videoHeight : 16 / 9;
       rect.current = contentRect(w, h, aspect);
       const now = Date.now();
       const fresh = offline || disconnected ? [] : mine(cameraId).filter(([, t]) => isFresh(t, now));
-      // 上一帧与这一帧都没有可画的目标：不必清屏重画
-      if (!painted && fresh.length === 0) return;
+      // 警戒线与区域按画面像素尺寸投影，视频未就绪时不画；登记信息或画面尺寸变化时才重算
+      const { devices, marks } = useLive.getState();
+      const camera = devices[cameraId]?.camera ?? null;
+      const size = ready ? `${v.videoWidth}x${v.videoHeight}` : "";
+      if (camera !== layout.camera || size !== layout.size) layout = { camera, size, zones: camera && ready ? zones(camera, [v.videoWidth, v.videoHeight]) : [] };
+      // 区域内有人触发确认告警时该区域闪烁
+      const active = new Set(Object.values(marks).flatMap((m) => (m.camera_id === cameraId && m.name && m.level === "confirmed" ? [m.name] : [])));
+      // 有目标或有闪烁的区域时逐帧重画；否则只在画面尺寸或区域变化后画一次
+      const animate = fresh.length > 0 || active.size > 0;
+      const signature = `${w}x${h}/${size}`;
+      if (!animate && painted === signature && layout.zones === drawn) return;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, w, h);
-      painted = fresh.length > 0;
+      painted = animate ? "" : signature;
+      drawn = layout.zones;
+      for (const zone of layout.zones) outline(ctx, zone, rect.current, active.has(zone.name) ? blink(now) : null);
       const selected = useSelection.getState().targetKey;
       for (const [key, target] of fresh) {
         const shape = smoothed(key, target).pose(Number.POSITIVE_INFINITY);
-        if (shape) paint(ctx, target, shape, rect.current, key === selected);
+        if (shape) paint(ctx, target, shape, rect.current, key === selected, marks[key], now);
       }
     };
     frame = requestAnimationFrame(draw);
-    return () => {
-      cancelAnimationFrame(frame);
-      // 释放本路已离开画面的目标的平滑状态；其他摄像头的由各自叠加或 3D 场景管理
-      const alive = new Set(mine(cameraId).map(([key]) => key));
-      for (const key of smoothers.keys()) if (key.startsWith(`${cameraId}/`) && !alive.has(key)) smoothers.delete(key);
-    };
-  }, [cameraId, video, offline, disconnected]);
+    return () => cancelAnimationFrame(frame);
+  }, [cameraId, video, offline, disconnected, owner]);
 
   const onClick = (e: MouseEvent<HTMLCanvasElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
@@ -80,16 +107,39 @@ export function DetectionOverlay({ cameraId, video }: { cameraId: string; video:
 
 const mine = (cameraId: string) => Object.entries(useLive.getState().targets).filter(([, t]) => t.camera_id === cameraId);
 
-/** 画一个目标的检测框、骨骼与标签；组件展示页也直接调用（V-G3） */
-export function paint(ctx: CanvasRenderingContext2D, target: Target, shape: { bbox: number[]; keypoints: Target["keypoints"] }, rect: Rect, selected: boolean) {
+/**
+ * 画一个目标的检测框、骨骼与标签；组件展示页也直接调用（V-G3）。
+ * 带告警标记（mark）的人：框加粗改为告警色，确认的闪烁、框内淡淡铺色，标签换成"行为 · 已持续秒数"
+ */
+export function paint(
+  ctx: CanvasRenderingContext2D,
+  target: Target,
+  shape: { bbox: number[]; keypoints: Target["keypoints"] },
+  rect: Rect,
+  selected: boolean,
+  mark?: Mark,
+  now = Date.now(),
+) {
   const [x1 = 0, y1 = 0, x2 = 0, y2 = 0] = shape.bbox;
   const [left, top] = toPixel(x1, y1, rect);
   const [right, bottom] = toPixel(x2, y2, rect);
-  const width = selected ? 3 : 1.5;
-  ctx.strokeStyle = selected ? SELECTED : BOX;
+  const color = mark ? (mark.level === "confirmed" ? ALERT : SUSPECT) : null;
+  const width = color ? 3 : selected ? 3 : 1.5;
+  ctx.save();
+  if (color) {
+    ctx.globalAlpha = mark?.level === "confirmed" ? blink(now) : 1;
+    ctx.fillStyle = color;
+    ctx.globalAlpha *= 0.15;
+    ctx.fillRect(left, top, right - left, bottom - top);
+    ctx.globalAlpha /= 0.15;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+  }
+  ctx.strokeStyle = color ?? (selected ? SELECTED : BOX);
   ctx.lineWidth = width;
   ctx.strokeRect(left, top, right - left, bottom - top);
   corners(ctx, left, top, right, bottom, width * 2);
+  ctx.restore();
 
   // 骨骼：只连两端都可见的关节（滤波后的分数已按滞回化为 0 / 1）
   const points = shape.keypoints;
@@ -115,17 +165,61 @@ export function paint(ctx: CanvasRenderingContext2D, target: Target, shape: { bb
     }
   }
 
-  // 标签胶囊"类别 #跟踪号"，贴在框的左上方；框贴近画面顶边时放进框内
-  const text = `${CLASS_LABEL[target.object_class]} #${target.track_id}`;
-  ctx.font = "12px system-ui, sans-serif";
+  // 标签胶囊"类别 #跟踪号"，贴在框的左上方；框贴近画面顶边时放进框内。告警标记的标签为告警色底、加粗
+  const text = mark ? `${markText(mark, now)}  #${target.track_id}` : `${CLASS_LABEL[target.object_class]} #${target.track_id}`;
+  ctx.font = mark ? "600 13px system-ui, sans-serif" : "12px system-ui, sans-serif";
+  const lh = mark ? 20 : 18;
   const tw = ctx.measureText(text).width + 12;
-  const ty = top - 20 >= rect.y ? top - 20 : top + 2;
-  ctx.fillStyle = LABEL_BG;
+  const ty = top - lh - 2 >= rect.y ? top - lh - 2 : top + 2;
+  ctx.fillStyle = color ?? LABEL_BG;
   ctx.beginPath();
-  ctx.roundRect(left, ty, tw, 18, 9);
+  ctx.roundRect(left, ty, tw, lh, lh / 2);
   ctx.fill();
-  ctx.fillStyle = LABEL_TEXT;
-  ctx.fillText(text, left + 6, ty + 13);
+  ctx.fillStyle = mark?.level === "suspected" ? "#131316" : LABEL_TEXT;
+  ctx.fillText(text, left + 6, ty + lh - 5);
+}
+
+/** 画一条警戒线或一个规则区域：琥珀色虚线与名称；alpha 非空时为告警中，改为红色按 alpha 闪烁 */
+function outline(ctx: CanvasRenderingContext2D, zone: Zone, rect: Rect, alpha: number | null) {
+  const [stroke, fill] = alpha === null ? [ZONE, ZONE_FILL] : [ALERT, "rgb(208 59 59 / 0.18)"];
+  ctx.save();
+  ctx.globalAlpha = alpha ?? 1;
+  ctx.strokeStyle = stroke;
+  ctx.fillStyle = fill;
+  ctx.lineWidth = 2;
+  ctx.setLineDash(zone.kind === "line_crossing" ? [] : [8, 5]);
+  for (const path of zone.paths) {
+    ctx.beginPath();
+    path.forEach(([u, v], i) => (i === 0 ? ctx.moveTo(...toPixel(u, v, rect)) : ctx.lineTo(...toPixel(u, v, rect))));
+    if (zone.kind === "intrusion") {
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  if (zone.arrow) {
+    const [[u1, v1], [u2, v2]] = zone.arrow;
+    const [a, b] = [toPixel(u1, v1, rect), toPixel(u2, v2, rect)];
+    const angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    ctx.beginPath();
+    ctx.moveTo(...a);
+    ctx.lineTo(...b);
+    for (const side of [-1, 1]) {
+      ctx.moveTo(...b);
+      ctx.lineTo(b[0] - 8 * Math.cos(angle + side * 0.5), b[1] - 8 * Math.sin(angle + side * 0.5));
+    }
+    ctx.stroke();
+  }
+  // 名称贴在第一段的起点旁，超出画面的不画
+  const [u, v] = zone.paths[0]?.[0] ?? [Number.NaN, Number.NaN];
+  const [px, py] = toPixel(u, v, rect);
+  if (px >= rect.x && px <= rect.x + rect.w - 20 && py >= rect.y + 14 && py <= rect.y + rect.h) {
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillStyle = stroke;
+    ctx.fillText(zone.name, px + 4, py - 4);
+  }
+  ctx.restore();
 }
 
 /** 四角加粗（与 3D 选中括框同一语言） */

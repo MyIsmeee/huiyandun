@@ -246,12 +246,24 @@ describe("跟随与摄像头机位", () => {
 });
 
 describe("bounds：总览按场景区域尺寸取景（设计 150 §9）", () => {
-  it("区域以左下为原点，宽沿 x、深沿 y；总览与 2D 视图都以区域中心为取景中心", () => {
+  it("区域俯视时以左上角为原点，宽沿 x（向右）、深沿 y（向下）；总览与 2D 视图都以区域中心为取景中心", () => {
     const area = framing({ width_m: 30, depth_m: 20 });
     expect(area).toEqual({ x0: 0, y0: 0, width_m: 30, height_m: 20 });
     const [cx, cy] = planView(area, SIZE).project([15, 0, 10]);
     expect(cx).toBeCloseTo(AREA.left + (AREA.right - AREA.left) / 2);
     expect(cy).toBeCloseTo(AREA.top + (AREA.bottom - AREA.top) / 2);
     expect(overviewShot(area, SIZE).shot.look).toEqual([15, 0, 10]);
+  });
+});
+
+describe("摄像头视角：正下视（俯角 −90°）", () => {
+  it.each([0, 90, 210])("朝向 %i° 时投影有限，画面右方仍由朝向决定（平面 (−sin, cos)）", (yaw) => {
+    const pose = { x: 10, y: 10, height_m: 6, yaw_deg: yaw, pitch_deg: -90, hfov_deg: 90 };
+    const view = sceneView(cameraShot(pose, SIZE), SIZE);
+    const r = (yaw * Math.PI) / 180;
+    const right = view.project([10 - Math.sin(r), 0, 10 + Math.cos(r)]);
+    const left = view.project([10 + Math.sin(r), 0, 10 - Math.cos(r)]);
+    expect(right && Number.isFinite(right[0]) && Number.isFinite(right[1])).toBe(true);
+    expect((right?.[0] ?? 0) - (left?.[0] ?? 0)).toBeGreaterThan(0);
   });
 });
