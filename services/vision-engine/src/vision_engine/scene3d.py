@@ -80,7 +80,6 @@ ALIGN_RANGE = (0.5, 2.0)  # 缩放倍数超出此范围不对齐：多半地面�
 ALIGN_MAX_TURN_DEG = 30.0  # 朝向差超过此值不改朝向，只缩放
 
 WALLS = list(WALL_HEIGHT_M)
-OBJECTS = list(OBJECT_SIZE_M)
 _rng = np.random.default_rng(0)
 
 

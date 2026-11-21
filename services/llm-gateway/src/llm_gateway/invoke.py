@@ -317,9 +317,11 @@ class Chain:
             if skipped:
                 attempts.append(_attempt(req.task, provider, "skipped", skipped, None, 0, False))
                 continue
-            # 脱敏以地址实际指向为准：标为内网却解析出公网地址的，同样按公网处理（C-LLM-03）
-            public = provider.network == "public" or bool(
-                await public_addresses(provider.base_url, self._resolver)
+            # 脱敏以地址实际指向为准：标为内网却解析出公网地址、或解析不出无法确认在内网的，同样按公网处理
+            # （C-LLM-03）：连接时的再次解析可能指向公网
+            public = (
+                provider.network == "public"
+                or (await public_addresses(provider.base_url, self._resolver)) != []
             )
             pseudonyms = Pseudonyms() if public else None
             data = pseudonyms.redact(req.data) if pseudonyms else req.data

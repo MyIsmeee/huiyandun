@@ -12,13 +12,11 @@
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
 
 import nats
-import nats.js.errors
 import yaml
 from pydantic import Field
 
@@ -27,7 +25,7 @@ from correlator.engine import SUPPRESS, Engine
 from correlator.eve import EveTail, Line
 from correlator.normalize import Ip, device_index, normalize
 from correlator.rules import MODELS, Event, load_rules
-from py_common.bus import Bus
+from py_common.bus import Bus, js_subscribe_retrying
 from py_common.config import ServiceConfig, load_config
 from py_common.demo_quiet import QuietPreset
 from py_common.log import configure_logging
@@ -221,22 +219,6 @@ async def publish_incident(bus: Bus, incident: CorrelatorIncidentV1) -> None:
         return
 
 
-async def follow[T: Event](
-    bus: Bus, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]], since: datetime
-) -> None:
-    """订阅并重放 since 之后的事件；流尚未创建（如未启动 vision-engine）或建立订阅失败时记录并重试，
-    不让关联部分的错误连累同一进程里的告警归一化。"""
-    while True:
-        try:
-            await bus.js_subscribe(subject, model, handler, since)
-            return
-        except nats.js.errors.NotFoundError:
-            log.warning("correlator.stream_missing", extra={"subject": subject})
-        except (nats.errors.Error, TimeoutError) as e:
-            log.warning("correlator.subscribe_failed", extra={"subject": subject, "error": repr(e)})
-        await asyncio.sleep(RESUBSCRIBE_S)
-
-
 async def correlate(
     engine: Engine, bus: Bus, window: timedelta, quiet: QuietPreset | None = None
 ) -> None:
@@ -247,8 +229,13 @@ async def correlate(
         engine.restore(incident)
 
     # 窗口内的事件会被重放，近期关联事件须覆盖同样的时长才能全部去重
-    await follow(
-        bus, INCIDENT_SUBJECT, CorrelatorIncidentV1, restore, started - max(SUPPRESS, window)
+    await js_subscribe_retrying(
+        bus,
+        INCIDENT_SUBJECT,
+        CorrelatorIncidentV1,
+        restore,
+        started - max(SUPPRESS, window),
+        RESUBSCRIBE_S,
     )
 
     async def on_event(subject: str, event: Event) -> None:
@@ -259,7 +246,9 @@ async def correlate(
 
     await asyncio.gather(
         *(
-            follow(bus, subject, model, partial(on_event, subject), started - window)
+            js_subscribe_retrying(
+                bus, subject, model, partial(on_event, subject), started - window, RESUBSCRIBE_S
+            )
             for subject, model in MODELS.items()
         )
     )

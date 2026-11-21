@@ -6,7 +6,7 @@
 """
 
 import re
-from ipaddress import IPv4Address, IPv4Network
+from ipaddress import IPv4Network
 from pathlib import Path
 from typing import Any
 
@@ -61,10 +61,3 @@ def placeholder_ip(used: set[str]) -> str:
         if str(host) not in used:
             return str(host)
     raise ValueError("USB 摄像头的占位地址已用完")
-
-
-def is_placeholder(ip: str) -> bool:
-    try:
-        return IPv4Address(ip) in PLACEHOLDER_NET
-    except ValueError:
-        return False
