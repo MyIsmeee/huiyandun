@@ -166,6 +166,24 @@ class _Device:
         return out
 
 
+def _attacker(sessions: list[_Session], new: list[str]) -> _Session:
+    """攻击方在本次偏离中的首个会话。攻击方：会话最多的新访问方；没有新访问方时取失败会话最多的访问方。"""
+    counts: dict[str, int] = {}
+    for s in sessions:
+        if s.peer in new or not new:
+            counts[s.peer] = counts.get(s.peer, 0) + (1 if new else s.failed)
+    src = max(sorted(counts), key=counts.__getitem__)
+    return min((s for s in sessions if s.peer == src), key=lambda s: s.ts)
+
+
+def _technique(sigmas: list[float], new: list[str]) -> str:
+    if sigmas[FAILED] >= MIN_SIGMA:
+        return T_BRUTE_FORCE
+    if sigmas[BYTES_OUT] >= MIN_SIGMA:
+        return T_EXFILTRATION
+    return T_VIDEO_CAPTURE if new else T_BRUTE_FORCE
+
+
 def _new_model() -> HalfSpaceTrees:
     # 参考窗口 10 个（5 分钟），学习期内即完成两轮；种子固定，同一状态重建出同一模型
     return HalfSpaceTrees(n_trees=50, height=8, window_size=10, seed=42)
@@ -242,15 +260,8 @@ class BehaviorModel:
 
     def _alert(self, device: _Device) -> SecurityAlertV1:
         streak = device.streak
-        sessions = [s for w in streak for s in w.sessions]
         new = sorted({p for w in streak for p in w.new_peers})
-        # 攻击方：会话最多的新访问方；没有新访问方时取失败会话最多的访问方
-        counts: dict[str, int] = {}
-        for s in sessions:
-            if s.peer in new or not new:
-                counts[s.peer] = counts.get(s.peer, 0) + (1 if new else s.failed)
-        src = max(sorted(counts), key=counts.__getitem__)
-        first = min((s for s in sessions if s.peer == src), key=lambda s: s.ts)
+        first = _attacker([s for w in streak for s in w.sessions], new)
         x = [fmean(w.x[i] for w in streak) for i in range(len(FEATURES))]
         sigmas = device.sigmas(x)
         baseline = [fmean(h[i] for h in device.history) for i in range(len(FEATURES))]
@@ -263,14 +274,6 @@ class BehaviorModel:
                 f"{PLAIN[i][0]} {PLAIN[i][1](x[i])}（平时 {PLAIN[i][1](baseline[i])}）" for i in top
             )
         )
-        if sigmas[FAILED] >= MIN_SIGMA:
-            technique = T_BRUTE_FORCE
-        elif sigmas[BYTES_OUT] >= MIN_SIGMA:
-            technique = T_EXFILTRATION
-        elif new:
-            technique = T_VIDEO_CAPTURE
-        else:
-            technique = T_BRUTE_FORCE
         return SecurityAlertV1(
             schema_version=SCHEMA_VERSION,
             event_id=uuid.uuid5(EVENT_NAMESPACE, f"{device.id}/{streak[0].start}"),
@@ -282,10 +285,10 @@ class BehaviorModel:
             mode="enforce",
             category="behavior_anomaly",
             severity="medium",
-            src_ip=ip_address(src),
+            src_ip=ip_address(first.peer),
             dst_ip=ip_address(device.ip),
             device_id=device.id,
-            technique=technique,
+            technique=_technique(sigmas, new),
             evidence_ref=f"zeek:conn/{first.uid}",
             source="model",
             confidence=round(min(1.0, max(w.score for w in streak)), 2),
