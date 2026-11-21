@@ -19,6 +19,7 @@
 输出与 scene.py 相同的 SceneFrame 结构，前端不变。
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 import cv2
@@ -79,7 +80,6 @@ ALIGN_RANGE = (0.5, 2.0)  # 缩放倍数超出此范围不对齐：多半地面�
 ALIGN_MAX_TURN_DEG = 30.0  # 朝向差超过此值不改朝向，只缩放
 
 WALLS = list(WALL_HEIGHT_M)
-OBJECTS = list(OBJECT_SIZE_M)
 _rng = np.random.default_rng(0)
 
 
@@ -122,8 +122,7 @@ def align(
     target = mapping.to_plane(pixels) - project.camera
     measured = project(rec.cloud[idx[:, 0], idx[:, 1]])[0] - project.camera
     a, b = np.linalg.norm(measured, axis=1), np.linalg.norm(target, axis=1)
-    reach = REACH_M
-    ok = np.isfinite(b) & (a >= ALIGN_MIN_M) & (b >= ALIGN_MIN_M) & (b <= reach)
+    ok = np.isfinite(b) & (a >= ALIGN_MIN_M) & (b >= ALIGN_MIN_M) & (b <= REACH_M)
     if ok.sum() < ALIGN_MIN_POINTS:
         return rec, pose, None
     factor = float(np.median(b[ok] / a[ok]))
@@ -138,6 +137,20 @@ def align(
     return rec.scaled(factor, "mapping"), pose | {"yaw_deg": pose["yaw_deg"] + turn}, factor
 
 
+type Polygon = tuple[float, str, dict[str, Any]]  # (面积, 场景键, 条目)：按面积取前 MAX_POLYGONS 个
+
+
+@dataclass(frozen=True)
+class _Points:
+    """一个类别在可及范围内的点：平面位置 (N, 2)、离地高度 (N,)、是否近乎竖直的面 (N,)，
+    以及 ADE20K 原始类别编号 (N,)（未给出时为 None）。"""
+
+    plane: np.ndarray
+    above: np.ndarray
+    vertical: np.ndarray
+    ade: np.ndarray | None
+
+
 def layout(
     labels: np.ndarray,
     rec: Reconstruction,
@@ -150,72 +163,119 @@ def layout(
     grid = cv2.resize(labels, (width, height), interpolation=cv2.INTER_NEAREST)
     raw = None if ade is None else cv2.resize(ade, (width, height), interpolation=cv2.INTER_NEAREST)
     project = Projector(rec, pose)
-    reach = REACH_M
     solid = rec.valid & ~_flying(rec.cloud[..., 2])
-    upness = np.abs(rec.normals @ _camera_up(rec))
+    classes = _classes(rec, project, grid, raw, solid)
+    walls, dominant = _walls(classes, rec, project, grid, solid)
+    polygons = _surfaces(classes) + _objects(classes, project.camera, dominant)
+    polygons.sort(key=lambda p: -p[0])
+    scene: dict[str, list[dict[str, Any]]] = {
+        "surfaces": [],
+        "walls": walls,
+        "objects": [],
+        "trees": _trees(classes),
+        "markings": [],
+    }
+    for _, kind, item in polygons[:MAX_POLYGONS]:
+        scene[kind].append(item)
+    return scene
+
+
+def _classes(
+    rec: Reconstruction,
+    project: Projector,
+    grid: np.ndarray,
+    raw: np.ndarray | None,
+    solid: np.ndarray,
+) -> dict[str, _Points]:
+    """各类别腐蚀后、剔除飞点、在 REACH_M 内的点；点数不足的类别不列出。"""
+    upness = np.abs(rec.normals @ rec.floor.up)
     kernel = np.ones((2 * ERODE_PX + 1, 2 * ERODE_PX + 1), np.uint8)
-    plane, above, vertical, kinds = {}, {}, {}, {}
+    classes = {}
     for name in ADE20K:
         region = cv2.erode((grid == label(name)).astype(np.uint8), kernel).astype(bool)
         mask = region & solid
         if mask.sum() < (MIN_SMALL_POINTS if name in SMALL_CLASSES else MIN_POINTS):
             continue
         p, h = project(rec.cloud[mask])
-        near = np.linalg.norm(p - project.camera, axis=1) <= reach
-        plane[name], above[name] = p[near], h[near]
-        vertical[name] = upness[mask][near] <= WALL_NORMAL_MAX
-        if raw is not None:
-            kinds[name] = raw[mask][near]
+        near = np.linalg.norm(p - project.camera, axis=1) <= REACH_M
+        classes[name] = _Points(
+            p[near],
+            h[near],
+            upness[mask][near] <= WALL_NORMAL_MAX,
+            None if raw is None else raw[mask][near],
+        )
+    return classes
 
-    polygons: list[tuple[float, str, dict[str, Any]]] = []
+
+def _surfaces(classes: dict[str, _Points]) -> list[Polygon]:
+    """地面类别：贴地的点栅格化后取外轮廓。"""
+    polygons: list[Polygon] = []
     for name in SURFACES:
-        if name in plane:
-            flat = np.abs(above[name]) <= FLOOR_TOL_M
-            for outline in _outlines(plane[name][flat]):
-                polygons += _polygon("surfaces", name, outline)
-    found_lines: list[tuple[str, np.ndarray, float]] = []
+        if (c := classes.get(name)) is None:
+            continue
+        flat = np.abs(c.above) <= FLOOR_TOL_M
+        for outline in _outlines(c.plane[flat]):
+            polygons += _polygon("surfaces", name, outline)
+    return polygons
+
+
+def _walls(
+    classes: dict[str, _Points],
+    rec: Reconstruction,
+    project: Projector,
+    grid: np.ndarray,
+    solid: np.ndarray,
+) -> tuple[list[dict[str, Any]], float | None]:
+    """立面类别拟合出的墙线与高度，以及墙的主方向（家具据此贴齐）。"""
+    found: list[tuple[str, np.ndarray, float]] = []
     ground = np.isin(grid, [label(n) for n in SURFACES]) & solid
     for name in WALLS:
         points, heights = [], []
-        if name in plane:
-            keep = (above[name] >= WALL_MIN_H) & (above[name] <= WALL_MAX_H) & vertical[name]
-            points.append(plane[name][keep])
-            heights.append(above[name][keep])
+        if (c := classes.get(name)) is not None:
+            keep = (c.above >= WALL_MIN_H) & (c.above <= WALL_MAX_H) & c.vertical
+            points.append(c.plane[keep])
+            heights.append(c.above[keep])
         base = _wall_base(rec, ground, grid == label(name))
         if len(base):
             p, _ = project(base)
-            near = np.linalg.norm(p - project.camera, axis=1) <= reach
+            near = np.linalg.norm(p - project.camera, axis=1) <= REACH_M
             points.append(p[near])
             heights.append(np.zeros(int(near.sum())))  # 墙脚不参与上沿；上沿不足时取类别默认值
-        if not points:
-            continue
-        found_lines += [
-            (name, line, top)
-            for line, top in _lines(np.concatenate(points), np.concatenate(heights))
-        ]
-    dominant = _dominant([line for _, line, _ in found_lines])
-    walls = []
-    for name, line, top in _merge(found_lines, dominant):
-        walls.append(
-            {
-                "class": name,
-                "line": _round(line),
-                "height_m": round(
-                    max(top, WALL_HEIGHT_M[name]) if name != "board" else WALL_HEIGHT_M[name], 2
-                ),
-            }
-        )
+        if points:
+            found += [
+                (name, line, top)
+                for line, top in _lines(np.concatenate(points), np.concatenate(heights))
+            ]
+    dominant = _dominant([line for _, line, _ in found])
+    walls = [
+        {
+            "class": name,
+            "line": _round(line),
+            "height_m": round(
+                max(top, WALL_HEIGHT_M[name]) if name != "board" else WALL_HEIGHT_M[name], 2
+            ),
+        }
+        for name, line, top in _merge(found, dominant)
+    ]
+    return walls, dominant
+
+
+def _objects(
+    classes: dict[str, _Points], camera: np.ndarray, dominant: float | None
+) -> list[Polygon]:
+    """物体类别：按栅格连通聚类，一簇一件，底面取最小外接矩形并贴齐主方向，高度实测。"""
+    polygons: list[Polygon] = []
     for name, (depth, _) in OBJECT_SIZE_M.items():
-        if name not in plane:
+        if (c := classes.get(name)) is None:
             continue
-        keep = (above[name] >= ABOVE_FLOOR_M) & (above[name] <= MAX_HEIGHT_M)
-        points, heights_all = plane[name][keep], above[name][keep]
+        keep = (c.above >= ABOVE_FLOOR_M) & (c.above <= MAX_HEIGHT_M)
+        points, heights_all = c.plane[keep], c.above[keep]
         for member in _members(points, MIN_SMALL_POINTS if name in SMALL_CLASSES else MIN_POINTS):
             cluster, heights = points[member], heights_all[member]
-            footprint = _footprint(cluster, project.camera, depth, dominant)
+            footprint = _footprint(cluster, camera, depth, dominant)
             top = float(np.clip(np.percentile(heights, 95), *HEIGHT_RANGE_M))
             item = {"class": name, "polygon": _round(footprint), "height_m": round(top, 2)}
-            if name in kinds and (kind := _kind(kinds[name][keep][member])):
+            if c.ade is not None and (kind := _kind(c.ade[keep][member])):
                 item["kind"] = kind
             # 底部离地高度：放在桌面、柜顶上的小件物品（显示器、微波炉、纸箱）按它摆放，不落到地面。只给小件：
             # 桌子的点集中在桌面，5 分位也在桌面高度，给出会让桌子悬空
@@ -225,11 +285,16 @@ def layout(
             least = MIN_SMALL_AREA_M2 if name in SMALL_AREA_CLASSES else MIN_AREA_M2
             if (area := _area(footprint)) >= least:
                 polygons.append((area, "objects", item))
+    return polygons
+
+
+def _trees(classes: dict[str, _Points]) -> list[dict[str, Any]]:
+    """植被：取最低点的平面位置，高度实测。"""
     trees = []
     for name, tree_h in TREE_HEIGHT_M.items():
-        if name not in plane:
+        if (c := classes.get(name)) is None:
             continue
-        for cluster, heights in _clusters(plane[name], above[name]):
+        for cluster, heights in _clusters(c.plane, c.above):
             base = cluster[heights <= np.percentile(heights, 10)].mean(axis=0)
             top = max(float(np.percentile(heights, 95)), 0.5)
             trees.append(
@@ -239,21 +304,7 @@ def layout(
                     "height_m": round(min(top, tree_h * 2), 2),
                 }
             )
-    polygons.sort(key=lambda p: -p[0])
-    scene: dict[str, list[dict[str, Any]]] = {
-        "surfaces": [],
-        "walls": walls,
-        "objects": [],
-        "trees": trees,
-        "markings": [],
-    }
-    for _, kind, item in polygons[:MAX_POLYGONS]:
-        scene[kind].append(item)
-    return scene
-
-
-def _camera_up(rec: Reconstruction) -> np.ndarray:
-    return rec.floor.up
+    return trees
 
 
 def _wall_base(rec: Reconstruction, ground: np.ndarray, wall: np.ndarray) -> np.ndarray:

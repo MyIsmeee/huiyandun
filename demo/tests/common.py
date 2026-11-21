@@ -15,7 +15,6 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 
 import requests  # noqa: TID251 - 演示用的命令行测试脚本，不在服务的请求路径上
@@ -181,11 +180,3 @@ class Listener:
                 return None, 0
             time.sleep(0.2)
         return None, 0
-
-
-def parse_ts(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)

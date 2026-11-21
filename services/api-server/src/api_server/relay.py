@@ -5,8 +5,8 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import Any
 
-import nats
 from pydantic import BaseModel
 
 from api_server.devices import Devices
@@ -15,7 +15,7 @@ from api_server.investigator import Investigator
 from api_server.kpis import KpiTracker
 from api_server.pose_checks import PoseChecks
 from api_server.ws import Hub
-from py_common.bus import Bus
+from py_common.bus import Bus, js_subscribe_retrying
 from py_common.demo_quiet import QuietPreset
 from py_contracts.api import Device, WsFrame
 from py_contracts.events.event_base_schema import EventBase
@@ -135,28 +135,17 @@ async def follow(
             _push(hub, device)
 
     since = datetime.now(UTC) - WINDOW
+    subscriptions: list[tuple[str, type[EventBase], Callable[[Any], Awaitable[None]]]] = [
+        ("hyd.security.alert.v1", SecurityAlertV1, on_alert),
+        ("hyd.vision.behavior.v1", VisionBehaviorV1, on_alert),
+        ("hyd.vision.rule.v1", VisionRuleV1, on_alert),
+        ("hyd.vision.integrity.v1", VisionIntegrityV1, on_integrity),
+        ("hyd.correlator.incident.v1", CorrelatorIncidentV1, on_incident),
+        ("hyd.playbook.execution.v1", PlaybookExecutionV1, on_execution),
+    ]
     await asyncio.gather(
-        _subscribe(bus, "hyd.security.alert.v1", SecurityAlertV1, on_alert, since),
-        _subscribe(bus, "hyd.vision.behavior.v1", VisionBehaviorV1, on_alert, since),
-        _subscribe(bus, "hyd.vision.rule.v1", VisionRuleV1, on_alert, since),
-        _subscribe(bus, "hyd.vision.integrity.v1", VisionIntegrityV1, on_integrity, since),
-        _subscribe(bus, "hyd.correlator.incident.v1", CorrelatorIncidentV1, on_incident, since),
-        _subscribe(bus, "hyd.playbook.execution.v1", PlaybookExecutionV1, on_execution, since),
+        *(js_subscribe_retrying(bus, s, m, h, since, RESUBSCRIBE_S) for s, m, h in subscriptions)
     )
-
-
-async def _subscribe[T: EventBase](
-    bus: Bus, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]], since: datetime
-) -> None:
-    while True:
-        try:
-            await bus.js_subscribe(subject, model, handler, since)
-            return
-        except (nats.errors.Error, TimeoutError) as e:
-            log.warning(
-                "api.history_subscribe_failed", extra={"subject": subject, "error": repr(e)}
-            )
-            await asyncio.sleep(RESUBSCRIBE_S)
 
 
 async def expire(hub: Hub, devices: Devices, kpis: KpiTracker) -> None:
