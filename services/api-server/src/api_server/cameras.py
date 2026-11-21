@@ -23,7 +23,7 @@ import httpx2
 import nats
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import (
     Boolean,
     Column,
@@ -60,6 +60,7 @@ from py_contracts.api import (
     Site,
     UsbDevice,
     UsbDeviceList,
+    Username,
     WsFrame,
 )
 from py_contracts.config.site_schema import SiteConfig
@@ -569,12 +570,8 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         "name": body.name,
         "ip": str(body.ip) if body.ip is not None else None,
         "ingest": body.ingest,
-        "username": body.username.root if body.username and body.username.root else None,
-        "password_enc": (
-            seal(request.app.state.config.device_key_file, body.password.get_secret_value())
-            if body.password and body.password.get_secret_value()
-            else None
-        ),
+        "username": _username(body.username),
+        "password_enc": _sealed(request.app.state.config.device_key_file, body.password),
         "pose": body.pose.model_dump(mode="json"),
         "calibration": [],
         "calibration_error_m": None,
@@ -615,42 +612,56 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
     return with_push_password(request, camera, camera.ingest == "push")
 
 
+def _username(username: Username | None) -> str | None:
+    """空串按未设置。"""
+    return (username.root if username else None) or None
+
+
+def _sealed(key_file: Path, password: SecretStr | None) -> str | None:
+    """加密后的设备密码；未给出或为空时为 None。"""
+    secret = password.get_secret_value() if password else ""
+    return seal(key_file, secret) if secret else None
+
+
+def _updated(row: Any, body: CameraUpdate, key_file: Path) -> dict[str, Any]:
+    """库中的一行按 PATCH 请求合并后的列值（尚未校验）。"""
+    changes = body.model_dump(exclude_unset=True)
+    values: dict[str, Any] = dict(row)
+    if body.name is not None:
+        values["name"] = body.name
+    if body.ip is not None:
+        values["ip"] = str(body.ip)
+    if "username" in changes:
+        values["username"] = _username(body.username)
+    if body.pose is not None:
+        values["pose"] = body.pose.model_dump(mode="json")
+    if body.climb_lines is not None:
+        values["climb_lines"] = [line.root for line in body.climb_lines]
+    if body.rules is not None:
+        values["rules"] = [r.model_dump(mode="json", exclude_none=True) for r in body.rules]
+    values["ingest"] = body.ingest or row["ingest"]
+    # 未给出 source 时沿用库中的拉流地址（如只改接入方式）
+    source = changes.get("source", None if row["protocol"] is None else dict(row))
+    current_device = row["path"] if row["ingest"] == "usb" else None
+    device_id = body.device.root if body.device else current_device
+    values |= _source_columns(source, values["ingest"], device_id)
+    if body.clear_password:
+        values["password_enc"] = None
+    elif (sealed := _sealed(key_file, body.password)) is not None:
+        values["password_enc"] = sealed
+    return values
+
+
 @router.patch("/cameras/{camera_id}")
 async def update_camera(
     camera_id: str, body: CameraUpdate, request: Request, principal: Admin
 ) -> Camera:
-    changes = body.model_dump(exclude_unset=True)
     try:
         async with request.app.state.engine.begin() as conn:
             await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
             row = await _locked(conn, camera_id)
             before = view(row)
-            values: dict[str, Any] = dict(row)
-            if body.name is not None:
-                values["name"] = body.name
-            if body.ip is not None:
-                values["ip"] = str(body.ip)
-            if "username" in changes:
-                values["username"] = body.username.root if body.username else None
-                values["username"] = values["username"] or None
-            if body.pose is not None:
-                values["pose"] = body.pose.model_dump(mode="json")
-            if body.climb_lines is not None:
-                values["climb_lines"] = [line.root for line in body.climb_lines]
-            if body.rules is not None:
-                values["rules"] = [r.model_dump(mode="json", exclude_none=True) for r in body.rules]
-            values["ingest"] = body.ingest or row["ingest"]
-            # 未给出 source 时沿用库中的拉流地址（如只改接入方式）
-            source = changes.get("source", None if row["protocol"] is None else dict(row))
-            current_device = row["path"] if row["ingest"] == "usb" else None
-            device_id = body.device.root if body.device else current_device
-            values |= _source_columns(source, values["ingest"], device_id)
-            if body.clear_password:
-                values["password_enc"] = None
-            elif body.password is not None and body.password.get_secret_value():
-                values["password_enc"] = seal(
-                    request.app.state.config.device_key_file, body.password.get_secret_value()
-                )
+            values = _updated(row, body, request.app.state.config.device_key_file)
             _check(values)
             values["updated_at"] = datetime.now(UTC)
             if row["area_id"] and any(values["pose"][k] != row["pose"][k] for k in PLACEMENT):
