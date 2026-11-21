@@ -3,13 +3,16 @@
 import time
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 from test_containment import audited, login
 
 from api_server.app import create_app
+from api_server.cleared import WINDOW, Cleared
 from api_server.config import ApiConfig
+from py_contracts.api import AlertsCleared
 
 
 @pytest.fixture
@@ -64,3 +67,16 @@ def test_rejects_unknown_fields(client: TestClient, password: str) -> None:
     body = {"event_ids": [], "incident_ids": [], "all": True}
     r = client.post("/api/alerts/clear", json=body, headers={"X-Request-ID": "c2"})
     assert r.status_code == 400
+
+
+def test_records_older_than_window_are_dropped() -> None:
+    """超过补推窗口的删除记录不再补推，也不留在内存中。"""
+    cleared = Cleared()
+    for ts in (datetime.now(UTC) - WINDOW * 2, datetime.now(UTC)):
+        cleared.add(
+            AlertsCleared.model_validate(
+                {"event_ids": [str(uuid.uuid4())], "incident_ids": [], "actor": "op", "ts": ts}
+            )
+        )
+    assert len(cleared.snapshot()) == 1
+    assert len(cleared._records) == 1

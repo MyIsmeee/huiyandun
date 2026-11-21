@@ -35,6 +35,9 @@ GRACE_S = 10.0  # 删除后等待新文件出现的时长（轮转时改名与�
 POLL_S = 1.0
 HEARTBEAT = Path("/tmp/hyd-host-probe-alive")  # 每个周期更新，供容器健康检查
 HEAD_BYTES = 256  # 用于辨认"同一份日志的拷贝"的开头长度
+# 文件 ctime 早于此刻这么久即视为静止：内核的 ctime 按粗粒度时钟记录，刚写过的文件在同一刻度内再改可能不变，
+# 静止之后的任何写入（含原地改写）必然改变 ctime，此时 ctime 未变即可跳过已读部分的复核
+SETTLE_NS = 1_000_000_000
 
 # 登录失败 → 来源地址
 FAILED = [
@@ -101,6 +104,7 @@ class Watched:
     partial: bytes = b""
     missing_since: float | None = None
     unreadable: bool = False  # 无权读取：只提示一次，不判篡改
+    settled_ctime: int | None = None  # 已复核且静止时的 ctime（纳秒）；未变即内容与已读部分都没变
 
 
 def _hash(path: Path, size: int) -> str | None:
@@ -136,6 +140,7 @@ class Probe:
 
     def _reset(self, w: Watched, read_existing: bool) -> None:
         w.inode, w.offset, w.digest, w.head, w.partial = None, 0, hashlib.sha256(), b"", b""
+        w.settled_ctime = None
         try:
             st = w.path.stat()
         except FileNotFoundError:
@@ -189,7 +194,15 @@ class Probe:
         found: list[dict] = []
         for w in self.files:
             found += self._check(w)
+        self._forget(self.clock())
         return found
+
+    def _forget(self, now: float) -> None:
+        """丢弃窗口外不再活跃、也不在去重期内的来源：常驻进程的内存只随近期来源数增长。"""
+        for ip in [ip for ip, q in self.failures.items() if not q or now - q[-1] > WINDOW_S]:
+            if now >= self.quiet_until.get(ip, 0):
+                del self.failures[ip]
+                self.quiet_until.pop(ip, None)
 
     def _check(self, w: Watched) -> list[dict]:
         now = self.clock()
@@ -226,6 +239,8 @@ class Probe:
             return self._consume(w)
         if st.st_ino != w.inode:
             return self._replaced(w)
+        if st.st_ctime_ns == w.settled_ctime:
+            return []
         if st.st_size < w.offset:
             read = w.offset
             self._reset(w, read_existing=True)
@@ -239,7 +254,10 @@ class Probe:
         if _hash(w.path, w.offset) != w.digest.hexdigest():
             self._reset(w, read_existing=True)
             return [self._emit("HYD-HOST-0002", self.host_ip, f"{w.path} rewritten in place")]
-        return self._consume(w)
+        found = self._consume(w)
+        if time.time_ns() - st.st_ctime_ns > SETTLE_NS:
+            w.settled_ctime = st.st_ctime_ns
+        return found
 
     def _replaced(self, w: Watched) -> list[dict]:
         """换了文件：开头相同说明是同一份日志的拷贝——已读部分须原样保留，否则视为篡改；开头不同为正常轮转。"""
@@ -251,7 +269,7 @@ class Probe:
         if w.head and head == w.head:
             intact = _hash(w.path, w.offset) == w.digest.hexdigest()
             if intact:  # 原样拷贝后继续写：沿用已读位置
-                w.inode = w.path.stat().st_ino
+                w.inode, w.settled_ctime = w.path.stat().st_ino, None
                 return self._consume(w)
             self._reset(w, read_existing=True)
             return [

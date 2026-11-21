@@ -270,6 +270,15 @@ def test_mislabeled_public_address_is_redacted_when_not_blocked() -> None:
     assert result.output == REAL and result.attempts[0].redacted
 
 
+def test_unresolvable_internal_label_is_redacted_when_not_blocked() -> None:
+    """无法确认在内网（主机名解析不出）时同样按公网脱敏：连接时的解析可能指向公网（C-LLM-03）。"""
+    p = Providers({"unknown": None}, unknown=ok(REPORT))
+    result = p.invoke(provider("unknown"))
+    sent = json.dumps(p.seen["unknown"][0]["messages"], ensure_ascii=False)
+    assert "172.30.0.100" not in sent and "HOST_001" in sent
+    assert result.output == REAL and result.attempts[0].redacted
+
+
 def test_all_failed_returns_every_reason() -> None:
     p = Providers(a=lambda _: httpx2.Response(500), b=ok({"summary": "缺字段"}))
     result = p.invoke(provider("a"), provider("b"))
