@@ -15,12 +15,11 @@ from pathlib import Path
 from typing import Any
 
 import httpx2
-import nats
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from notifier.messages import Kind, Notice, notice, request
-from py_common.bus import Bus
+from py_common.bus import Bus, js_subscribe_retrying
 from py_common.config import ServiceConfig, load_config
 from py_common.log import configure_logging
 from py_contracts.events.event_base_schema import EventBase
@@ -139,18 +138,6 @@ class Notifier:
         self.names = {c.id: c.name or c.id for c in event.cameras}
 
 
-async def _subscribe[T: EventBase](
-    bus: Bus, subject: str, model: type[T], handler: Any, since: datetime
-) -> None:
-    while True:
-        try:
-            await bus.js_subscribe(subject, model, handler, since)
-            return
-        except (nats.errors.Error, TimeoutError) as e:
-            log.warning("notifier.subscribe_failed", extra={"subject": subject, "error": repr(e)})
-            await asyncio.sleep(RESUBSCRIBE_S)
-
-
 async def serve(config: NotifierConfig) -> None:
     targets = load_targets(config.targets_file)
     if not targets:
@@ -162,17 +149,20 @@ async def serve(config: NotifierConfig) -> None:
         now = datetime.now(UTC)
         tasks = [
             asyncio.create_task(
-                _subscribe(
+                js_subscribe_retrying(
                     bus,
                     REGISTRY_SUBJECT,
                     ConfigCamerasV1,
                     notifier.on_registry,
                     datetime.fromtimestamp(0, UTC),
+                    RESUBSCRIBE_S,
                 )
             )
         ]
         tasks += [
-            asyncio.create_task(_subscribe(bus, s, m, notifier.on_event, now))
+            asyncio.create_task(
+                js_subscribe_retrying(bus, s, m, notifier.on_event, now, RESUBSCRIBE_S)
+            )
             for s, m in SUBJECTS.items()
         ]
         log.info("notifier.started", extra={"targets": [t.kind for t in targets]})
