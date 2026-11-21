@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -143,3 +144,20 @@ def test_platform_rejection_is_logged_not_raised(caplog: pytest.LogCaptureFixtur
     )
     run(notifier, fall())
     assert any(r.message == "notifier.rejected" for r in caplog.records)
+
+
+@pytest.mark.parametrize("status", [200, 502])
+def test_malformed_json_reply_is_logged_not_raised(
+    status: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """回复声明为 JSON 而内容损坏（如代理错误页）：无法确认送达，不论状态码都按平台拒收记录，
+    不让异常穿出推送。"""
+    notifier, _ = make(
+        lambda _: httpx2.Response(
+            status, text="<html>bad gateway", headers={"content-type": "application/json"}
+        )
+    )
+    with caplog.at_level(logging.INFO):
+        run(notifier, fall())
+    messages = [r.message for r in caplog.records]
+    assert "notifier.rejected" in messages and "notifier.sent" not in messages

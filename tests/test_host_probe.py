@@ -178,3 +178,30 @@ def test_unreadable_log_is_not_tamper(log: Path, monkeypatch: pytest.MonkeyPatch
     assert p.poll() == []  # 恢复可读：不把期间写入的内容判为爆破或篡改
     append(log, FAIL * hp.THRESHOLD)
     assert rules(p.poll()) == ["HYD-HOST-0001"]
+
+
+def test_inactive_sources_are_forgotten(log: Path) -> None:
+    """不再活跃的来源整条删除：常驻进程的内存只随近期来源数增长。"""
+    p, clock = probe(log)
+    append(log, "".join(FAIL.replace("198.51.100.7", f"198.51.100.{i}") for i in range(50)))
+    p.poll()
+    assert len(p.failures) == 50
+    clock.now += hp.WINDOW_S + 1
+    p.poll()
+    assert p.failures == {} and p.quiet_until == {}
+
+
+def test_settled_log_is_not_rehashed(log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """已静止的日志 ctime 不变时不再重读已读部分；之后的任何写入都会改变 ctime，篡改照常检出。"""
+    real = hp.time.time_ns
+    monkeypatch.setattr(hp.time, "time_ns", lambda: real() + 10**10)  # 日志 10 秒前写过
+    hashed: list[Path] = []
+    original = hp._hash
+    monkeypatch.setattr(hp, "_hash", lambda path, size: hashed.append(path) or original(path, size))
+    p, _ = probe(log)
+    assert p.poll() == [] and len(hashed) == 1
+    assert p.poll() == [] and len(hashed) == 1
+    data = log.read_bytes()
+    with log.open("r+b") as f:
+        f.write(data[:100].replace(b"listening", b"LISTENING"))
+    assert rules(p.poll()) == ["HYD-HOST-0002"]

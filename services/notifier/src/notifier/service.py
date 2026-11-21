@@ -113,13 +113,19 @@ class Notifier:
         url, body = request(target.kind, target.url, target.secret, n, self._config.console_url)
         try:
             res = await self._client.post(url, json=body)
-            reply: Any = (
-                res.json()
-                if res.headers.get("content-type", "").startswith("application/json")
-                else {}
-            )
+            reply: Any = {}
+            malformed = False
+            if res.headers.get("content-type", "").startswith("application/json"):
+                try:
+                    reply = res.json()
+                except ValueError:  # 声明为 JSON 而内容损坏（如代理的错误页）：无法确认送达
+                    reply, malformed = res.text, True
             # 企业微信、钉钉出错时也回 200，以 errcode 区分
-            if res.status_code >= 400 or (isinstance(reply, dict) and reply.get("errcode", 0) != 0):
+            if (
+                malformed
+                or res.status_code >= 400
+                or (isinstance(reply, dict) and reply.get("errcode", 0) != 0)
+            ):
                 log.warning(
                     "notifier.rejected",
                     extra={
