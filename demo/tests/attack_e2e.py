@@ -57,7 +57,9 @@ def run(cmd: list[str], label: str, timeout: int = 180) -> bool:
         cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout
     )
     for line in proc.stdout.splitlines():
-        if line.strip() and not line.strip().startswith(("make[", "docker compose", "Container ")):
+        if line.strip() and not line.strip().startswith(
+            ("make[", "env HYD_DEMO_", "docker compose", "Container ")
+        ):
             print(paint(f"    │ {line}", "2"))
     if proc.returncode != 0:
         print(paint(f"  {label}失败（退出码 {proc.returncode}）", "1;31"))

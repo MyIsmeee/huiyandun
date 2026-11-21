@@ -15,16 +15,19 @@ from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorInci
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 
-NOW = datetime.now(UTC)
+
+def now() -> str:
+    """事件时刻取构造时：服务丢弃 2 分钟前的事件，模块导入时取的时刻在全量运行中会过期。"""
+    return datetime.now(UTC).isoformat()
 
 
 def fall(level: str = "confirmed", camera: str = "cam-05") -> VisionBehaviorV1:
     return VisionBehaviorV1.model_validate(
         {
-            "schema_version": "1.2.0", "event_id": str(uuid.uuid4()), "ts": NOW.isoformat(),
+            "schema_version": "1.2.0", "event_id": str(uuid.uuid4()), "ts": now(),
             "camera_id": camera, "track_id": 3, "behavior": "fall", "level": level,
             "confidence_avg": 0.9, "duration_s": 8, "ts_start": "2026-11-17T08:00:00+00:00",
-            "ts_end": NOW.isoformat(),
+            "ts_end": now(),
         }
     )  # fmt: skip
 
@@ -32,11 +35,11 @@ def fall(level: str = "confirmed", camera: str = "cam-05") -> VisionBehaviorV1:
 def zone(phase: str) -> VisionRuleV1:
     return VisionRuleV1.model_validate(
         {
-            "schema_version": "1.0.0", "event_id": str(uuid.uuid4()), "ts": NOW.isoformat(),
+            "schema_version": "1.0.0", "event_id": str(uuid.uuid4()), "ts": now(),
             "camera_id": "cam-05", "rule_id": "yard", "rule_name": "库区", "rule_type": "intrusion",
             "phase": phase, "episode_id": str(uuid.uuid4()), "level": "confirmed", "track_id": 2,
             "object_class": "person", "x": 1, "y": 2, "uncertainty_m": 0.3,
-            "since": NOW.isoformat(), "direction": None, "mapping": "calibrated",
+            "since": now(), "direction": None, "mapping": "calibrated",
             "inferred": False, "end_reason": None,
         }
     )  # fmt: skip
@@ -45,12 +48,12 @@ def zone(phase: str) -> VisionRuleV1:
 def incident(severity: str) -> CorrelatorIncidentV1:
     return CorrelatorIncidentV1.model_validate(
         {
-            "schema_version": "1.2.0", "event_id": str(uuid.uuid4()), "ts": NOW.isoformat(),
+            "schema_version": "1.2.0", "event_id": str(uuid.uuid4()), "ts": now(),
             "id": "inc-1", "rule_id": "HYD-NET-0001", "rule_version": "1.0.0", "mode": "enforce",
             "title": "摄像头遭口令暴力破解", "severity": severity, "device_ids": ["cam-05"],
             "source_ip": "172.30.0.100", "techniques": [], "tactics": [], "evidence_refs": [],
             "hit_path": [], "requires_confirmation": False, "status": "open",
-            "created_at": NOW.isoformat(),
+            "created_at": now(),
         }
     )  # fmt: skip
 
@@ -130,7 +133,7 @@ def test_cooldown_per_camera_and_kind_and_rate_limit() -> None:
 
 def test_replayed_old_events_are_not_pushed() -> None:
     notifier, posted = make(lambda _: httpx2.Response(200, json={"errcode": 0}))
-    run(notifier, fall().model_copy(update={"ts": NOW - timedelta(minutes=10)}))
+    run(notifier, fall().model_copy(update={"ts": datetime.now(UTC) - timedelta(minutes=10)}))
     assert posted == []
 
 

@@ -158,7 +158,16 @@ def test_demo_reset_off_unless_makefile() -> None:
     env = SERVICES["correlator"]["environment"]
     assert env["HYD_DEMO_RESET"] == "${HYD_DEMO_RESET:-false}"
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "export HYD_DEMO_RESET = true" in makefile
+    assert (
+        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) docker compose"
+        in makefile
+    )
+
+
+def test_makefile_exports_no_service_variables() -> None:
+    """HYD_* 只经 $(COMPOSE) 交给 docker compose：导出到全部命令时，make test 中读取配置的用例会因未声明的变量失败。"""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert not re.search(r"^\S*:?\s*export\s+HYD_", makefile, re.MULTILINE)
 
 
 @pytest.mark.parametrize("name", ["api-server", "correlator"])
@@ -168,8 +177,8 @@ def test_demo_quiet_off_unless_make_demo_quiet(name: str) -> None:
     assert service["environment"]["HYD_DEMO_QUIET"] == "${HYD_DEMO_QUIET:-false}"
     assert "../../demo/scenarios/demo-quiet.yaml:/etc/hyd/demo-quiet.yaml:ro" in service["volumes"]
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "export HYD_DEMO_QUIET = false" in makefile
-    assert "demo-quiet: export HYD_DEMO_QUIET = true" in makefile
+    assert "\nHYD_DEMO_QUIET = false\n" in makefile
+    assert "demo-quiet: HYD_DEMO_QUIET = true" in makefile
 
 
 def test_demo_quiet_preset_valid() -> None:

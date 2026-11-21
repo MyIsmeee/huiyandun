@@ -37,11 +37,12 @@ GPU ?= 1
 LINKAGE ?= 0
 # NOTIFY=1：告警推送到企业微信、钉钉群机器人（compose.notify.yaml）；机器人地址写在 .secrets/notify_targets
 NOTIFY ?= 0
-# 演示栈的 correlator 响应 make demo-reset（compose.yaml 中默认关闭，直接用 docker compose 部署时不生效）
-export HYD_DEMO_RESET = true
 # 演示静默（demo/scenarios/demo-quiet.yaml）：make demo-quiet 打开；make demo-up、make demo-normal 恢复为关闭
-export HYD_DEMO_QUIET = false
-COMPOSE =docker compose -f deploy/compose/compose.yaml \
+HYD_DEMO_QUIET = false
+# HYD_DEMO_*只交给 docker compose，不导出给其他命令：服务配置不接受未声明的 HYD_* 变量，导出会让 make test 中
+# 读取配置的用例失败。HYD_DEMO_RESET：演示栈的 correlator 响应 make demo-reset（compose.yaml 中默认关闭，
+# 直接用 docker compose 部署时不生效）
+COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) docker compose -f deploy/compose/compose.yaml \
 	$(if $(filter 0,$(GPU)),,-f deploy/compose/compose.gpu.yaml) \
 	$(if $(filter 1,$(LINKAGE)),-f deploy/compose/compose.linkage.yaml --profile linkage) \
 	$(if $(filter 1,$(NOTIFY)),-f deploy/compose/compose.notify.yaml --profile notify) \
@@ -214,7 +215,7 @@ demo-story: demo-reset
 
 # 演示场景预设：现场摄像头演示前打开，不展示、不关联遮挡挪位冻结重放、疑似跌倒、长时间静止与未登记目标的网络告警；
 # 只重建 api-server 与 correlator（约 10 s，控制台自动重连），其余容器不动。演示结束后 make demo-normal
-demo-quiet: export HYD_DEMO_QUIET = true
+demo-quiet: HYD_DEMO_QUIET = true
 demo-quiet demo-normal:
 	$(COMPOSE) up -d --wait --no-build --no-deps api-server correlator
 	@echo "演示静默：$$($(COMPOSE) exec -T api-server printenv HYD_DEMO_QUIET)"
