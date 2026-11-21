@@ -6,7 +6,7 @@ test.beforeEach(({ page }) => freezeClock(page));
 const scene = (page: Page) => page.getByRole("region", { name: "场景" });
 const SCENE_CHUNK = "**/assets/Scene3D-*.js";
 
-// 设计 150 §4：空区域只有渐隐地面，不画区域边框、网格，也不自动补墙；提示尚未搭建
+// ui.md §5.2：空区域只有渐隐地面，不画区域边框、网格，也不自动补墙；提示尚未搭建
 test("空区域：只有渐隐地面，提示该区域还没有搭建场景", async ({ page }) => {
   await signedIn(page);
   await page.goto("/");
@@ -194,9 +194,9 @@ test.describe("相机控件", () => {
 });
 
 // §5.1 L1、§8 PerceivedScene：街道 / 室内 / 未标定 / 陈旧 / 断线。
-// D-120、设计 150 §9：当前区域管理员搭建的场景，同一资产的全部实例合并绘制
+// D-120、ui.md §5.2：当前区域管理员搭建的场景，同一资产的全部实例合并绘制
 test.describe("搭建场景", () => {
-  /** 少量物体：路、墙、小办公楼、树、一组桌椅（设计 150 §4 要求的"只有少量物体的区域"） */
+  /** 少量物体：路、墙、小办公楼、树、一组桌椅（截图基线的"只有少量物体的区域"） */
   const FEW = [
     { asset: "road", x: 0, y: 20, rot: 0, len: 40 },
     { asset: "wall", x: 12, y: 2, rot: 90, len: 8 },

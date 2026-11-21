@@ -1,4 +1,4 @@
-"""场景资产库脚本（设计 150 §8）：重新上色与占地格数的换算。"""
+"""场景资产库脚本（architecture.md §9）：重新上色与占地格数的换算。"""
 
 import importlib.util
 import json
@@ -29,7 +29,7 @@ def test_recolor_maps_lightness_into_palette() -> None:
 
 
 def test_palettes_are_scene_materials() -> None:
-    """色板两端只用设计 150 §4 的场景材质色（配色校验 V-S5 已覆盖这些颜色）。"""
+    """色板两端只用 ui.md §5.2 的场景材质色（配色校验 V-S5 已覆盖这些颜色）。"""
     materials = {
         "#EEF0F3", "#DCDFE5", "#FFFFFF", "#E6E8EC", "#DDE5DA",
         "#E5E7EB", "#CBD5E1", "#D4D4D8", "#B7C4B0",

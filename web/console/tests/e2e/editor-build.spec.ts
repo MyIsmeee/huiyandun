@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { canvas, DESK, dragOnGround, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
 import { AREA, camera, expectToast, freezeClock, openAdmin, sceneSettled, SITE } from "./helpers";
 
-// 场景页搭建（设计 150 E-2、E-7，FR-908）：从模型库选模型吸附网格放到地面上，整体保存，态势页随推送更新
+// 场景页搭建（V-SC7、V-SC10，FR-908）：从模型库选模型吸附网格放到地面上，整体保存，态势页随推送更新
 test.beforeEach(({ page }) => freezeClock(page));
 
 const SAVED_AT = "2026-11-09T06:00:00Z";
@@ -104,7 +104,7 @@ test("放置点超出区域等错误（400）：显示服务端指出的原因",
   await expect(editor(page).getByRole("button", { name: "保存" })).toBeEnabled(); // 修改保留
 });
 
-test("撤销与重做：按钮与 Ctrl+Z / Ctrl+Shift+Z（设计 150 E-6）", async ({ page }) => {
+test("撤销与重做：按钮与 Ctrl+Z / Ctrl+Shift+Z（V-SC10）", async ({ page }) => {
   await openEditor(page);
   const button = (name: string) => editor(page).getByRole("button", { name, exact: true });
   const [save, undoButton, redoButton] = [button("保存"), button("撤销"), button("重做")];
@@ -170,7 +170,7 @@ test("放弃修改后换区域；返回时同样先确认，没有修改时直�
   await expect(editor(page)).toHaveCount(0);
 });
 
-test("墙按下拖动画线，按网格分段；普通物体放置前按 R 旋转（设计 150 E-3）", async ({ page }) => {
+test("墙按下拖动画线，按网格分段；普通物体放置前按 R 旋转（V-SC7）", async ({ page }) => {
   await openEditor(page);
   await library(page).getByRole("button", { name: /^墙与围栏/ }).click();
   await library(page).getByRole("group", { name: "模型" }).getByRole("button", { name: /^墙 / }).click();
@@ -188,7 +188,7 @@ test("墙按下拖动画线，按网格分段；普通物体放置前按 R 旋�
   ]);
 });
 
-test("有未保存的修改时，顶栏切页与退出先确认；放弃后切页（设计 150 E-6）", async ({ page }) => {
+test("有未保存的修改时，顶栏切页与退出先确认；放弃后切页（V-SC10）", async ({ page }) => {
   await openEditor(page, [], [LOBBY]);
   await switchTo(page, "一号楼大厅");
   await editorReady(page);

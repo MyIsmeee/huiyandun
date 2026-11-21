@@ -9,7 +9,7 @@ import { VideoWall } from "./VideoWall";
 import { WallControls } from "./WallControls";
 
 /**
- * 监控墙页（设计 150 §3、D-122）：摄像头栏 + 监控墙 + 检查栏，分区位置固定（V-L1）。
+ * 监控墙页（ui.md §4、D-122）：摄像头栏 + 监控墙 + 检查栏，分区位置固定（V-L1）。
  * 检查栏未选中时为告警列表，选中设备或目标时换成详情。断线时画面饱和度降至 50%，底部居中提示（V-U3）
  */
 export function WallPage(props: { site: Site; admin: boolean; stale: boolean; lastFrameAt: number | null }) {

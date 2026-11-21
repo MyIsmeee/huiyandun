@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, type WebSocketRoute } from "@playwright/test";
 
-/** 首次启动按 site.yaml 尺寸建的默认区域（设计 150 §5），尚未搭建 */
+/** 首次启动按 site.yaml 尺寸建的默认区域（architecture.md §12），尚未搭建 */
 export const AREA = { id: "area-01", name: "默认区域", width_m: 40, depth_m: 24, items: [], updated_at: "2026-10-27T06:00:00Z" };
 
 // 与 demo/scenarios/site.yaml 一致
@@ -25,7 +25,7 @@ export async function expectNoOverflow(page: Page): Promise<void> {
   expect(overflowing).toEqual([]);
 }
 
-/** 打开管理页（admin）：顶栏"管理"进入，再在左侧栏选择（设计 150 §9A） */
+/** 打开管理页（admin）：顶栏"管理"进入，再在左侧栏选择（ui.md §4） */
 export async function openAdmin(page: Page, name: "摄像头" | "场景" | "模型供应商"): Promise<void> {
   await page.getByRole("navigation", { name: "导航" }).getByRole("button", { name: "管理" }).click();
   await page.getByRole("navigation", { name: "管理" }).getByRole("button", { name }).click();
@@ -134,7 +134,7 @@ export async function open(page: Page, devices: object[], state: "ready" | "2d" 
   return sockets;
 }
 
-/** 浮动卡片两两不重叠（设计 150 §3） */
+/** 浮动卡片两两不重叠（V-L3） */
 export async function expectApart(cards: Locator[]): Promise<void> {
   const boxes = await Promise.all(cards.map((c) => c.boundingBox()));
   for (const [i, a] of boxes.entries())

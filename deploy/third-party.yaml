@@ -215,7 +215,7 @@ assets:
     sha256: 32b401c0e2fa2dab2b5f914d25055b956d1f624311b71340464eec556d20f16b
     license: CC0-1.0
     source: Kenney 官网 city-kit-commercial 2.1、city-kit-industrial 2.0、city-kit-suburban 2.0（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 建筑（设计 150 §8）
+    purpose: 场景搭建模型库 · 建筑（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: office-small, source: city-kit-commercial/building-a }
@@ -235,7 +235,7 @@ assets:
     sha256: 4ffafcc9fba733ee61e94614af34b466a032a418922be906643bea5312307d2d
     license: CC0-1.0
     source: Kenney 官网 city-kit-roads 2.2（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 道路（设计 150 §8）
+    purpose: 场景搭建模型库 · 道路（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: road, source: city-kit-roads/road-straight }
@@ -251,7 +251,7 @@ assets:
     sha256: d6ee6f83f699561f66e3aaeafbfd468874985ca4e3d84440a9d8b3f0856c4add
     license: CC0-1.0
     source: Kenney 官网 building-kit 1.0、city-kit-roads 2.2、city-kit-suburban 2.0、factory-kit 3.0（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 墙与围栏（设计 150 §8）
+    purpose: 场景搭建模型库 · 墙与围栏（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: wall, source: building-kit/wall }
@@ -265,7 +265,7 @@ assets:
     sha256: 7ca4da4e13a42061fbc9dd23dfd15ca2f7026984ad030281bf6f2cba8ba1f1aa
     license: CC0-1.0
     source: Kenney 官网 building-kit 1.0（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 门窗（设计 150 §8）
+    purpose: 场景搭建模型库 · 门窗（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: wall-door, source: building-kit/wall-doorway-square }
@@ -277,7 +277,7 @@ assets:
     sha256: 387d982857710d34088583b2161dc3042269d0d352495859c332427ee9cac833
     license: CC0-1.0
     source: Kenney 官网 furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 家具（设计 150 §8）
+    purpose: 场景搭建模型库 · 家具（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: desk, source: furniture-kit/desk }
@@ -327,7 +327,7 @@ assets:
     sha256: 09cbdfb2a234c7f96616e0cc4b7c7a4ba87aa6eded3cb49a72b016288978d302
     license: CC0-1.0
     source: Kenney 官网 furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 办公与电器（设计 150 §8）
+    purpose: 场景搭建模型库 · 办公与电器（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: monitor, source: furniture-kit/computerScreen }
@@ -349,7 +349,7 @@ assets:
     sha256: 5f37d037eb68b6e2bd6ffb7d1b9731efb038330180f48c66aa15dd59cdf343ab
     license: CC0-1.0
     source: Kenney 官网 factory-kit 3.0、furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 货架设备（设计 150 §8）
+    purpose: 场景搭建模型库 · 货架设备（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: shelf, source: furniture-kit/bookcaseOpen }
@@ -365,7 +365,7 @@ assets:
     sha256: 8d94b143f0b93829f850c0bd069b8625d52d58ddfd739e7108ebdd0eb9eae7b0
     license: CC0-1.0
     source: Kenney 官网 city-kit-roads 2.2、city-kit-suburban 2.0、furniture-kit 2.0（tools/dev/assets.py 归中、重新上色、合并）
-    purpose: 场景搭建模型库 · 绿化（设计 150 §8）
+    purpose: 场景搭建模型库 · 绿化（architecture.md §9）
     owner: MyIsmeee
     models:
       - { id: tree, source: city-kit-suburban/tree-large }

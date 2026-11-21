@@ -32,7 +32,7 @@ export interface ScenePalette {
   glow: boolean;
 }
 
-/** 日间（D-111、设计 150 §4）：取值即各处原有的常量，渲染结果不变 */
+/** 日间（D-111、ui.md §5.2）：取值即各处原有的常量，渲染结果不变 */
 export const DAY: ScenePalette = {
   background: "#F4F5F7",
   ground: MATERIALS.ground,

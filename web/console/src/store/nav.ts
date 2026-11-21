@@ -1,13 +1,13 @@
 import { create } from "zustand";
 
 /**
- * 顶栏导航的页面（设计 150 §3）：监控墙为默认页（画面上直接标出告警，值班员最直观），态势为 3D 总览（D-122），
+ * 顶栏导航的页面（ui.md §4）：监控墙为默认页（画面上直接标出告警，值班员最直观），态势为 3D 总览（D-122），
  * 大屏为全区域的态势大屏（展示用）；其余为管理页
  */
 export type Page = MainPage | AdminPage;
 /** 主页面：管理页盖在其上 */
 export type MainPage = "overview" | "wall" | "screen";
-/** 管理页（admin）：顶栏的"管理"进入，左侧栏切换（设计 150 §9A） */
+/** 管理页（admin）：顶栏的"管理"进入，左侧栏切换（ui.md §4） */
 export type AdminPage = "cameras" | "scene" | "providers";
 
 /**

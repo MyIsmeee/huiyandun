@@ -22,7 +22,7 @@ const ITEMS: [AdminPage, string, typeof Camera][] = [
 ];
 
 /**
- * 管理页外框（设计 150 §9A，借鉴 shadcn sidebar-07）：左侧可收起为图标栏的侧栏列出摄像头、场景、模型供应商，右侧为当前管理页；
+ * 管理页外框（ui.md §4，借鉴 shadcn sidebar-07）：左侧可收起为图标栏的侧栏列出摄像头、场景、模型供应商，右侧为当前管理页；
  * 位于顶栏之下。只对 admin 渲染（C-FE-07），由调用方保证。切换前经 onNavigate（场景页有未保存修改时先确认）
  */
 export function AdminFrame(props: { page: AdminPage; onNavigate: (page: AdminPage) => void; children: ReactNode }) {

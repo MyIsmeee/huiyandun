@@ -15,7 +15,7 @@ import { RuleLayer } from "./RuleLayer";
 import { EditableScene } from "./Selection";
 import type { EditorView } from "./view";
 
-/** 俯视 45°（设计 150 E-1），方位与态势页默认的东南机位一致：相机在 (+x, +z) 方向 */
+/** 俯视 45°（V-SC2），方位与态势页默认的东南机位一致：相机在 (+x, +z) 方向 */
 const TILT = Math.PI / 4;
 const AZIMUTH = Math.PI / 4;
 /** 每次放大、缩小改变视距的倍数 */
@@ -26,7 +26,7 @@ const FIT = 0.95;
 const { ACTION } = CameraControlsImpl;
 
 /**
- * 场景页的 3D 编辑视图（设计 150 §6 E-1）：与态势页同一套场景、光照与设备外观，地面加 1 m 网格。
+ * 场景页的 3D 编辑视图（V-SC2）：与态势页同一套场景、光照与设备外观，地面加 1 m 网格。
  * 右键拖动平移（沿地面）、中键拖动旋转、滚轮缩放；左键留给放置与选中。平移不超出区域
  */
 export default function EditorCanvas(props: {
@@ -107,7 +107,7 @@ function Controls(props: { width: number; depth: number; onView: (view: EditorVi
   );
 }
 
-/** 区域内的 1 m 网格（只在场景页出现，设计 150 §4）；略高于地面，不接收点选 */
+/** 区域内的 1 m 网格（只在场景页出现，V-SC2）；略高于地面，不接收点选 */
 function GridLines({ width, depth }: { width: number; depth: number }) {
   const geometry = useMemo(() => {
     const points: number[] = [];

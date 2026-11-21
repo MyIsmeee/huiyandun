@@ -6,7 +6,7 @@ import { formatOffset, nodeLook, pick, type TimelineNode, useTimeline } from "./
 const ONGOING: ReadonlySet<Device["state"]> = new Set(["cyber_alert", "both", "pending_action", "contained", "notify_only"]);
 
 /**
- * 底部进度条显示的关联事件（设计 150 §3）：告警栏点选的关联事件，否则选中设备最近一个关联事件；未选中或该设备没有关联事件时，
+ * 底部进度条显示的关联事件（ui.md §4）：告警栏点选的关联事件，否则选中设备最近一个关联事件；未选中或该设备没有关联事件时，
  * 为最近一个进行中的（所涉设备仍处于网络攻击或封禁状态）；都没有时为 undefined，不显示
  */
 export function progressIncident(
@@ -22,7 +22,7 @@ export function progressIncident(
 }
 
 /**
- * 处置进度条（设计 150 §3、FR-304、D-106）：首次告警 → 关联事件 → AI 判定 → 处置生效 → 解除，横向五节点，
+ * 处置进度条（ui.md §4、FR-304、D-106）：首次告警 → 关联事件 → AI 判定 → 处置生效 → 解除，横向五节点，
  * 各节点显示时刻与距首次告警的时长；浮在态势页底部
  */
 export function ProgressBar({ incident }: { incident: Incident }) {

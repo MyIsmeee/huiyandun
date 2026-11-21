@@ -24,7 +24,7 @@ const TARGET_R = 0.4;
 const ARC_STEPS = 8;
 
 /**
- * 无 WebGL2 时的 2D 俯视视图（C-FE-08、设计 150 §9）：区域内物体的占地、摄像头与视场、检出目标，配色同 3D 场景；
+ * 无 WebGL2 时的 2D 俯视视图（C-FE-08、ui.md §5.2）：区域内物体的占地、摄像头与视场、检出目标，配色同 3D 场景；
  * 画出区域边线、不画网格（与 3D 一致），随相机旋转与缩放
  */
 export function Scene2D({ items, cameras, view, area }: { items: SceneItem[]; cameras: Camera[]; view: PlanView; area?: Area }) {

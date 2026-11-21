@@ -21,7 +21,7 @@ const item = (asset: string, x: number, y: number, rot: 0 | 90 | 180 | 270 = 0, 
 /** 实例矩阵把模型局部点 p 放到的场景位置 */
 const place = (m: Matrix4, p: [number, number, number]) => new Vector3(...p).applyMatrix4(m).toArray().map((v) => Math.round(v * 1000) / 1000 + 0);
 
-describe("footprints：放置点约定（设计 150 §5）", () => {
+describe("footprints：放置点约定（architecture.md §12）", () => {
   it("普通物体以 (x, y) 为占地中心，长宽取目录的占地格数", () => {
     expect(footprints([item("office", 20, 10, 90)], CATALOG)).toMatchObject([{ x: 20, y: 10, length: 17, width: 11, rot: 90 }]);
   });
@@ -61,7 +61,7 @@ describe("instances：同一资产的实例合为一组（V-P1）", () => {
   });
 });
 
-describe("fadeTexture：地面在区域外渐隐，看不到边（设计 150 §4）", () => {
+describe("fadeTexture：地面在区域外渐隐，看不到边（ui.md §5.2）", () => {
   it("区域内不透明，区域外 15 m 处完全透明，其间单调下降", () => {
     const texture = fadeTexture(10, 10);
     const { data, width } = texture.image as { data: Uint8Array; width: number };

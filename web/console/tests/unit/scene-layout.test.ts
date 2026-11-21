@@ -16,7 +16,7 @@ import {
 
 const SITE: Area = { x0: 0, y0: 0, width_m: 40, height_m: 24 };
 const SIZE = { width: 1100, height: 700 };
-// 与 layout.ts 的 INSET 一致：让开上方指标卡、右侧告警与详情卡、底部处置进度条（设计 150 §3）
+// 与 layout.ts 的 INSET 一致：让开上方指标卡、右侧告警与详情卡、底部处置进度条（ui.md §4）
 const AREA = { left: 24, top: 132, right: SIZE.width - 412, bottom: SIZE.height - 168 };
 
 function bounds(points: (readonly [number, number])[]) {
@@ -245,7 +245,7 @@ describe("跟随与摄像头机位", () => {
   });
 });
 
-describe("bounds：总览按场景区域尺寸取景（设计 150 §9）", () => {
+describe("bounds：总览按场景区域尺寸取景（V-I1）", () => {
   it("区域俯视时以左上角为原点，宽沿 x（向右）、深沿 y（向下）；总览与 2D 视图都以区域中心为取景中心", () => {
     const area = framing({ width_m: 30, depth_m: 20 });
     expect(area).toEqual({ x0: 0, y0: 0, width_m: 30, height_m: 20 });

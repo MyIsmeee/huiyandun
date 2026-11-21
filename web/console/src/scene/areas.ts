@@ -28,7 +28,7 @@ export function areaAlerts(devices: Device[]): Map<string, AreaAlerts> {
   return result;
 }
 
-/** 区域切换的列表顺序（设计 150 §3）：有告警的区域置顶，其余保持原顺序 */
+/** 区域切换的列表顺序（ui.md §4）：有告警的区域置顶，其余保持原顺序 */
 export function sortAreas(areas: Area[], alerts: Map<string, AreaAlerts>): Area[] {
   return [...areas.filter((a) => alerts.has(a.id)), ...areas.filter((a) => !alerts.has(a.id))];
 }

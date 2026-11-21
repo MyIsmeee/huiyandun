@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { AREA, camera, expectApart, expectNoOverflow, freezeClock, mockKpis, mockLlmStatus, mockSocket, presetMotion, SITE, sceneSettled, UNAUTHORIZED } from "./helpers";
 
-// 态势页区域切换与告警胶囊（设计 150 §3、D-124）
+// 态势页区域切换与告警胶囊（ui.md §4、D-124）
 test.beforeEach(async ({ page }) => {
   await presetMotion(page, true);
   await freezeClock(page);

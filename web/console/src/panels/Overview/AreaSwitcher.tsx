@@ -12,7 +12,7 @@ import {
 import { type Area, type AreaAlerts, showArea, sortAreas } from "../../scene/areas";
 
 /**
- * 区域切换（设计 150 §3、D-124）：下拉列出全部区域，有告警的置顶，各区域旁为告警中的设备数（图标 + 数字，V-S3）；
+ * 区域切换（ui.md §4、D-124）：下拉列出全部区域，有告警的置顶，各区域旁为告警中的设备数（图标 + 数字，V-S3）；
  * 按钮上另标出其他区域的告警，提示切过去查看。onEdit 只对 admin 传入：进入场景页编辑当前区域的物体、名称与尺寸
  */
 export function AreaSwitcher(props: { areas: Area[]; current: Area; alerts: Map<string, AreaAlerts>; onEdit?: () => void }) {

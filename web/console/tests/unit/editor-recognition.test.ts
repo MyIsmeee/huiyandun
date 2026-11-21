@@ -16,7 +16,7 @@ const assets = (items: SceneItem[]) => new Set(items.map((i) => i.asset));
 const category = (item: SceneItem) => CATALOG.get(item.asset)?.category;
 const empty: Omit<SceneFrame, "camera_id"> = { surfaces: [], walls: [], objects: [], trees: [], markings: [] };
 
-describe("从画面生成初稿（FR-909，设计 150 §7）", () => {
+describe("从画面生成初稿（FR-909，architecture.md §9）", () => {
   it("街道：路面铺道路、人行道铺广场地块，建筑立面转为一个建筑块", () => {
     const items = draft([frame("street-1")]);
 

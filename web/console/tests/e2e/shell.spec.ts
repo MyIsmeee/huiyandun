@@ -43,14 +43,14 @@ test("关键指标显示数值与变化（D-100）", async ({ page }) => {
   const kpis = page.getByRole("list", { name: "关键指标" });
   await expect(kpis.getByTitle("较上一次")).toHaveText("↓ 2.6");
   await sceneSettled(page);
-  // V-P3：最窄的 1366 宽下，指标卡一排完整显示，不与右侧告警卡重叠（设计 150 §3）
+  // V-P3：最窄的 1366 宽下，指标卡一排完整显示，不与右侧告警卡重叠（ui.md §4）
   const [row, side] = await Promise.all([kpis.boundingBox(), page.getByRole("complementary", { name: "告警与详情" }).boundingBox()]);
   expect((row?.x ?? 0) + (row?.width ?? 0)).toBeLessThan(side?.x ?? 0);
   await expectNoOverflow(page);
   await expect(kpis).toHaveScreenshot("kpis.png");
 });
 
-// 设计 150 §3、V-L2：场景铺满顶栏以下；指标卡下方、告警卡左侧不被卡片遮挡的部分占视口一半以上
+// ui.md §4、V-L2：场景铺满顶栏以下；指标卡下方、告警卡左侧不被卡片遮挡的部分占视口一半以上
 for (const [width, height] of [
   [1920, 1080],
   [1366, 768],

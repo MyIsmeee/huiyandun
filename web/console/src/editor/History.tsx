@@ -8,7 +8,7 @@ import type { Device } from "../store/live";
 import { areaPlacements } from "./cameras";
 import { isDirty, loadDraft, redo, undo, useDraft } from "./draft";
 
-/** 撤销、重做（设计 150 E-6）：Ctrl+Z / Ctrl+Shift+Z（macOS 为 ⌘）；焦点在输入框时保留浏览器自己的撤销 */
+/** 撤销、重做（V-SC10）：Ctrl+Z / Ctrl+Shift+Z（macOS 为 ⌘）；焦点在输入框时保留浏览器自己的撤销 */
 export function HistoryButtons() {
   const canUndo = useStore(useDraft.temporal, (s) => s.pastStates.length > 0);
   const canRedo = useStore(useDraft.temporal, (s) => s.futureStates.length > 0);
@@ -38,7 +38,7 @@ export function HistoryButtons() {
 const useLeave = create<{ action: (() => void) | null }>(() => ({ action: null }));
 
 /**
- * 离开场景页或换区域前过一道确认（设计 150 E-6）：没有未保存的修改时直接执行；有修改时弹出"放弃未保存的修改？"，
+ * 离开场景页或换区域前过一道确认（V-SC10）：没有未保存的修改时直接执行；有修改时弹出"放弃未保存的修改？"，
  * 放弃后再执行。场景页的返回、换区域，以及顶栏切页、退出都经过这里
  */
 export function guardLeave(action: () => void): void {

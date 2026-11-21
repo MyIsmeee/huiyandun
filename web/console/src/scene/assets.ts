@@ -4,7 +4,7 @@ import type { components } from "../api/schema";
 
 export type SceneItem = components["schemas"]["SceneItem"];
 
-/** 资产目录的一项（设计 150 §8）：由 tools/dev/assets.py 写出，与模型文件同源加载（G-05） */
+/** 资产目录的一项（architecture.md §9）：由 tools/dev/assets.py 写出，与模型文件同源加载（G-05） */
 export interface Asset {
   id: string;
   category: string;
@@ -24,7 +24,7 @@ export interface Asset {
 export const CATALOG_URL = "/models/catalog.json";
 
 /**
- * 场景材质色（设计 150 §4，V-S5）：模型颜色已由 tools/dev/assets.py 按同一组色值烘焙进资产，
+ * 场景材质色（ui.md §5.2，V-S5）：模型颜色已由 tools/dev/assets.py 按同一组色值烘焙进资产，
  * 这里供地面与 2D 俯视使用，并参与配色校验
  */
 export const MATERIALS = {

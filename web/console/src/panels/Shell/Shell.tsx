@@ -33,7 +33,7 @@ const deselect = () => select(null);
 const home = () => go(useNav.getState().main);
 
 /**
- * 主界面（设计 150 §3）：顶栏导航 + 当前页面。监控墙为默认页，态势（3D 铺满 + 浮动卡片）为辅助总览，二者只挂载当前一个：
+ * 主界面（ui.md §4）：顶栏导航 + 当前页面。监控墙为默认页，态势（3D 铺满 + 浮动卡片）为辅助总览，二者只挂载当前一个：
  * 监控墙下不占用 3D 渲染，态势页不保持多路实时画面连接。
  * onLogout 完成后若仍渲染本页，说明会话仍有效、退出未成功。
  * 进入即连接 WS；连接被拒时调用 onRejected 核对会话。
@@ -74,7 +74,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
     if (!known) deselect();
   }, [known]);
 
-  // 场景页有未保存的修改时，顶栏切页与退出先确认（设计 150 E-6）
+  // 场景页有未保存的修改时，顶栏切页与退出先确认（V-SC10）
   const leave = (action: () => void) => (page === "scene" ? guardLeave(action) : action());
 
   async function handleLogout() {
@@ -152,7 +152,7 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
       <RelationDialog site={site} />
       {/* 确认级物理告警：响铃并弹出带当时画面的处置卡片 */}
       <Alarm />
-      {/* 操作结果提示（设计 150 §9A）：保存、删除区域的成功与失败 */}
+      {/* 操作结果提示（V-SC3）：保存、删除区域的成功与失败 */}
       <Toaster position="top-center" />
     </div>
   );
@@ -199,7 +199,7 @@ function RelationButton({ site }: { site: Site }) {
 const isAdminPage = (page: Page): page is AdminPage => !isMainPage(page);
 
 /**
- * 顶栏分段导航（D-106、设计 150 §3）：监控墙 · 态势 · 大屏 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
+ * 顶栏分段导航（D-106、ui.md §4）：监控墙 · 态势 · 大屏 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
  * 摄像头、场景、模型供应商在管理页左侧栏切换（产品负责人 2026-11-09 选定，导航不重复）
  */
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
