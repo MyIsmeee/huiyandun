@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx2
-import nats
 import uvicorn
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
@@ -18,7 +17,7 @@ from pydantic import Field
 
 from evidence_service.recording import Evidence, sync_recorder
 from evidence_service.store import Chain
-from py_common.bus import Bus
+from py_common.bus import Bus, js_subscribe_retrying
 from py_common.config import ServiceConfig, load_config
 from py_common.log import configure_logging
 from py_contracts.events.event_base_schema import EventBase
@@ -93,8 +92,13 @@ async def follow_registry(
         registered.set()
         await sync()
 
-    await _subscribe(
-        bus, REGISTRY_SUBJECT, ConfigCamerasV1, on_registry, datetime.fromtimestamp(0, UTC)
+    await js_subscribe_retrying(
+        bus,
+        REGISTRY_SUBJECT,
+        ConfigCamerasV1,
+        on_registry,
+        datetime.fromtimestamp(0, UTC),
+        RESUBSCRIBE_S,
     )
     while True:
         await asyncio.sleep(RECORDER_SYNC_S)
@@ -107,12 +111,18 @@ async def follow(evidence: Evidence, bus: Bus, registered: asyncio.Event) -> Non
     收到摄像头登记表之后才订阅关联事件：存证只追加，按空摄像头表处理的事件会永久缺录像。"""
     since = datetime.now(UTC) - REPLAY
     events = [
-        asyncio.create_task(_subscribe(bus, subject, model, _cacher(evidence, kind), since))
+        asyncio.create_task(
+            js_subscribe_retrying(
+                bus, subject, model, _cacher(evidence, kind), since, RESUBSCRIBE_S
+            )
+        )
         for subject, (kind, model) in EVENTS.items()
     ]
     await asyncio.wait(events, timeout=SUBSCRIBE_WAIT_S)
     await registered.wait()
-    await _subscribe(bus, INCIDENT_SUBJECT, CorrelatorIncidentV1, evidence.on_incident, since)
+    await js_subscribe_retrying(
+        bus, INCIDENT_SUBJECT, CorrelatorIncidentV1, evidence.on_incident, since, RESUBSCRIBE_S
+    )
     await asyncio.gather(*events)
 
 
@@ -121,18 +131,6 @@ def _cacher(evidence: Evidence, kind: str) -> Callable[[EventBase], Awaitable[No
         evidence.cache(kind, event)
 
     return handler
-
-
-async def _subscribe[T: EventBase](
-    bus: Bus, subject: str, model: type[T], handler: Callable[[T], Awaitable[None]], since: datetime
-) -> None:
-    while True:
-        try:
-            await bus.js_subscribe(subject, model, handler, since)
-            return
-        except (nats.errors.Error, TimeoutError) as e:
-            log.warning("evidence.subscribe_failed", extra={"subject": subject, "error": repr(e)})
-            await asyncio.sleep(RESUBSCRIBE_S)
 
 
 def create_app(evidence: Evidence) -> FastAPI:

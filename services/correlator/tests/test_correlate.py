@@ -108,7 +108,7 @@ def test_missing_vision_stream_retried_until_created(
     with caplog.at_level(logging.WARNING):
         incident = asyncio.run(scenario())
     assert incident.rule_id == "HYD-X-0001"
-    assert any(r.getMessage() == "correlator.stream_missing" for r in caplog.records)
+    assert any(r.getMessage() == "bus.subscribe_failed" for r in caplog.records)
 
 
 class FakeBus:
@@ -165,7 +165,7 @@ def test_subscribe_failure_retried_and_restore_covers_longest_window(
     assert subjects[:2] == [INCIDENT_SUBJECT, INCIDENT_SUBJECT]  # 第一次超时后重试
     restored_since = bus.subscriptions[1][1]
     assert datetime.now(UTC) - restored_since >= window
-    assert any(r.getMessage() == "correlator.subscribe_failed" for r in caplog.records)
+    assert any(r.getMessage() == "bus.subscribe_failed" for r in caplog.records)
 
 
 def test_demo_quiet_integrity_not_correlated(nats_url: str) -> None:

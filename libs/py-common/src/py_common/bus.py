@@ -5,6 +5,7 @@
   由生产者启动时以 ensure_stream 创建；
 - subscribe：消息按模型校验；非法消息与 handler 异常记录错误后跳过，不中断订阅；
 - js_subscribe：从指定时刻起重放流中的消息后持续接收新消息，重启后据此恢复窗口内的状态；
+  js_subscribe_retrying 在流尚未创建或连接暂不可用时按间隔重试，直到订阅建立；
 - request / serve：核心 NATS 请求/应答，用于按需取一次结果（如场景初稿的环境识别）。
 """
 
@@ -203,6 +204,25 @@ class Bus:
         self._client._pending.clear()
         self._client._pending_data_size = 0
         await self._client.close()
+
+
+async def js_subscribe_retrying[T: EventBase](
+    bus: "Bus",
+    subject: str,
+    model: type[T],
+    handler: Callable[[T], Awaitable[None]],
+    since: datetime,
+    retry_s: float,
+) -> None:
+    """bus.js_subscribe，失败时每 retry_s 秒重试直到成功：流由生产者创建，生产者尚未启动时 JetStream 报
+    NotFoundError；订阅失败时未留下订阅（见 js_subscribe），重试不会重复处理。"""
+    while True:
+        try:
+            await bus.js_subscribe(subject, model, handler, since)
+            return
+        except (errors.Error, TimeoutError) as e:
+            log.warning("bus.subscribe_failed", extra={"subject": subject, "error": repr(e)})
+            await asyncio.sleep(retry_s)
 
 
 def _on_message[T: EventBase](
