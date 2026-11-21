@@ -1,12 +1,13 @@
 # api-server 对外接口（architecture.md §12、C-BE-01）
 # 主版本编码在文件名中；破坏性变更须升主版本并改文件名（CI-08）
 # v5：站点去掉平面图墙体、门洞与 zones，改为场景区域（D-124、TK-152）
+# v6：摄像头接入方式增加 usb、行为事件增加 still 与 fight（响应中的枚举新增值，D-138）
 # x-min-role：最低角色（C-BE-07）；写操作要求 X-Request-ID（C-BE-08）
 # 会话凭证只经 HttpOnly Cookie 传递，浏览器脚本不可读（C-FE-06、DP-12）
 openapi: 3.1.0
 info:
   title: 慧眼盾 api-server
-  version: 5.0.0
+  version: 6.0.0
 security:
   - session: []
 
