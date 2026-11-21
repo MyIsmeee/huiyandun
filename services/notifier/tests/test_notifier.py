@@ -143,3 +143,14 @@ def test_platform_rejection_is_logged_not_raised(caplog: pytest.LogCaptureFixtur
     )
     run(notifier, fall())
     assert any(r.message == "notifier.rejected" for r in caplog.records)
+
+
+def test_malformed_json_reply_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
+    """回复声明为 JSON 而内容损坏（如代理错误页）：按平台拒收记录，不让异常穿出推送。"""
+    notifier, _ = make(
+        lambda _: httpx2.Response(
+            502, text="<html>bad gateway", headers={"content-type": "application/json"}
+        )
+    )
+    run(notifier, fall())
+    assert any(r.message == "notifier.rejected" for r in caplog.records)
