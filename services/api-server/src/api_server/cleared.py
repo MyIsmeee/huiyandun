@@ -69,12 +69,10 @@ class Cleared:
         self._records.append(cleared)
 
     def snapshot(self) -> list[WsFrame]:
+        """窗口内的删除记录；窗口外的同时丢弃，不随运行时长累积。"""
         since = datetime.now(UTC) - WINDOW
-        return [
-            WsFrame(channel="cleared", data=c.model_dump(mode="json"))
-            for c in self._records
-            if c.ts >= since
-        ]
+        self._records = [c for c in self._records if c.ts >= since]
+        return [WsFrame(channel="cleared", data=c.model_dump(mode="json")) for c in self._records]
 
 
 router = APIRouter(prefix="/api")
