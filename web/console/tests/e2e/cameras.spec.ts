@@ -33,7 +33,7 @@ test("摄像头列表：空态", async ({ page }) => {
   await expect(page).toHaveScreenshot("cameras-empty.png");
 });
 
-// 管理页外框（设计 150 §9A）：顶栏"管理"进入，左侧栏切换管理页，可收起为图标栏
+// 管理页外框（ui.md §4）：顶栏"管理"进入，左侧栏切换管理页，可收起为图标栏
 test("管理页侧栏：切换页面、标示当前项、收起为图标栏", async ({ page }) => {
   await page.route("/api/llm/providers", (route) => route.fulfill({ json: { items: [] } }));
   await page.route("/api/llm/settings", (route) => route.fulfill({ json: { block_public: false } }));

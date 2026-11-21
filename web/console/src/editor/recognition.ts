@@ -8,7 +8,7 @@ export type SceneFrame = Omit<components["schemas"]["scene_frame.schema"], "$def
 type Point = [number, number];
 type Rot = SceneItem["rot"];
 
-/** 识别类别 → 资产（设计 150 §7）；地板、泥地、黑板、其余家具与街道设施不转换 */
+/** 识别类别 → 资产（architecture.md §9）；地板、泥地、黑板、其余家具与街道设施不转换 */
 const TILES = [["road", "road"], ["sidewalk", "plaza"], ["grass", "grass"]] as const;
 const WALLS: Record<string, string> = { wall: "wall", fence: "fence", railing: "fence" };
 const OBJECTS: Record<string, string> = { table: "table", chair: "chair", cabinet: "cabinet", sofa: "sofa", bed: "bed" };
@@ -31,7 +31,7 @@ const count = (length: number, size: number) => Math.min(MAX_REPEAT, Math.max(1,
 const points = (list: number[][]): Point[] => list.map(([x = 0, y = 0]) => [x, y]);
 
 /**
- * 用识别帧一次性生成场景草稿（FR-909，设计 150 §7）：地面按资产大小的网格栅格化，墙脚线拉直后按网格分段，
+ * 用识别帧一次性生成场景草稿（FR-909，architecture.md §9）：地面按资产大小的网格栅格化，墙脚线拉直后按网格分段，
  * 建筑按墙脚线长度取最接近的建筑块、放在背向摄像头一侧，物体与树按中心吸附网格。
  * 只放在区域内，且不与 existing（页面上已有的物体，含未保存的）及先生成的草稿同层重叠
  */

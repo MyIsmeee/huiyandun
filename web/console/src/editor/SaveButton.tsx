@@ -17,7 +17,7 @@ async function reload(areaId: string) {
 }
 
 /**
- * 保存（设计 150 E-7）：整体 PUT 名称、尺寸、物体与草稿中本区域全部摄像头的位置朝向（未列出的移出区域），带回载入时的 updated_at。
+ * 保存（V-SC10）：整体 PUT 名称、尺寸、物体与草稿中本区域全部摄像头的位置朝向（未列出的移出区域），带回载入时的 updated_at。
  * 409 提示"场景已被其他人修改"并可重新载入；放置点超出区域等 400 原样显示服务端指出的原因（D-125）
  */
 export function SaveButton({ area }: { area: SceneArea }) {

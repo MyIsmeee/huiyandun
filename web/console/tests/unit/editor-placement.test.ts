@@ -20,7 +20,7 @@ const WALL = asset("wall", "wall", [2, 1], true);
 const CATALOG = new Map([DESK, TREE, GRASS, PLAZA, WALL].map((a) => [a.id, a]));
 const item = (id: string, x: number, y: number, len: number | null = null) => ({ asset: id, x, y, rot: 0 as const, len });
 
-describe("snap：放置点吸附 1 m 网格（设计 150 E-2）", () => {
+describe("snap：放置点吸附 1 m 网格（V-SC7）", () => {
   it("占地边缘落在网格上：偶数边长的中心在整米，奇数边长的中心在半米", () => {
     expect(snap(DESK, 0, [10.3, 10.4], [40, 24])).toEqual(item("desk", 10, 10.5));
     expect(snap(TREE, 0, [5.6, 5.4], [40, 24])).toEqual(item("tree", 6, 5));
@@ -35,13 +35,13 @@ describe("snap：放置点吸附 1 m 网格（设计 150 E-2）", () => {
     expect(snap(DESK, 90, [10.3, 10.4], [40, 24])).toMatchObject({ x: 10.5, y: 10, rot: 90 });
   });
 
-  it("线状资产先放一段：放置点为起点，长度为一段资产长度（设计 150 §5）", () => {
+  it("线状资产先放一段：放置点为起点，长度为一段资产长度（architecture.md §12）", () => {
     expect(snap(WALL, 0, [10.3, 10.4], [40, 24])).toEqual(item("wall", 9, 10.5, 2));
     expect(snap(WALL, 90, [10.3, 10.4], [40, 24])).toEqual({ asset: "wall", x: 10.5, y: 9, rot: 90, len: 2 });
   });
 });
 
-describe("overlaps：与同一层已有物体重叠时禁止放置（设计 150 E-2）", () => {
+describe("overlaps：与同一层已有物体重叠时禁止放置（V-SC7）", () => {
   it("占地相交为重叠，只接触边缘不算", () => {
     const placed = [item("desk", 10, 10.5)];
     expect(overlaps(item("desk", 11, 10.5), placed, CATALOG)).toBe(true);
@@ -62,7 +62,7 @@ describe("overlaps：与同一层已有物体重叠时禁止放置（设计 150 
   });
 });
 
-describe("rotated：旋转 90°（设计 150 E-4）", () => {
+describe("rotated：旋转 90°（V-SC8）", () => {
   it("普通物体绕占地中心转，长宽奇偶不同时中心挪半格吸附网格", () => {
     expect(rotated(item("desk", 10, 10.5), DESK, CATALOG, [40, 24])).toEqual({ ...item("desk", 10.5, 11), rot: 90 });
   });
@@ -84,7 +84,7 @@ describe("rotated：旋转 90°（设计 150 E-4）", () => {
   });
 });
 
-describe("stroke：线状资产按下拖动画线（设计 150 E-3）", () => {
+describe("stroke：线状资产按下拖动画线（V-SC7）", () => {
   it("沿位移较大的坐标轴铺设，长度取资产长度的整数倍；起点为按下处的网格交点，奇数宽时中线让开半格", () => {
     expect(stroke(WALL, [5.2, 4.9], [12.3, 5.4])).toEqual({ asset: "wall", x: 5, y: 5.5, rot: 0, len: 8 });
     expect(stroke(WALL, [20, 3], [20.4, 9.6])).toEqual({ asset: "wall", x: 20.5, y: 3, rot: 90, len: 6 });

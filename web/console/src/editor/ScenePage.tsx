@@ -40,7 +40,7 @@ const EditorCanvas = lazy(() => import("./EditorCanvas"));
 const refresh = () => api.getSite().then(applySite, () => undefined);
 
 /**
- * 场景页（设计 150 §6，FR-908），只对 admin 渲染入口（C-FE-07）：选择、新建、删除区域，从模型库选模型放到地面上，整体保存。
+ * 场景页（ui.md §7.3，FR-908），只对 admin 渲染入口（C-FE-07）：选择、新建、删除区域，从模型库选模型放到地面上，整体保存。
  * 区域数据取自站点（GET /api/site 与 WS site 频道），保存后各浏览器 5 s 内更新
  */
 export function ScenePage({ site, onClose }: { site: Site; onClose: () => void }) {
@@ -154,7 +154,7 @@ function RulesButton() {
   );
 }
 
-/** 区域切换（设计 150 §3）：列出全部区域，末尾为删除当前区域 */
+/** 区域切换（V-SC1）：列出全部区域，末尾为删除当前区域 */
 function AreaMenu(props: { areas: SceneArea[]; current: SceneArea; onSelect: (id: string) => void; onEdit: () => void; onDelete: () => void }) {
   return (
     <DropdownMenu>
@@ -263,7 +263,7 @@ function AreaView({ area, devices }: { area: SceneArea; devices: Device[] }) {
   );
 }
 
-/** 视角控件（设计 150 §3）：缩小、放大、旋转 90°、返回总览，位于左下角，与态势页同一样式 */
+/** 视角控件（V-SC2）：缩小、放大、旋转 90°、返回总览，位于左下角，与态势页同一样式 */
 function ViewTools({ view }: { view: EditorView }) {
   const animate = useAnimate();
   const tools: [string, typeof Plus, (v: EditorView) => void][] = [

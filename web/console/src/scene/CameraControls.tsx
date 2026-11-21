@@ -19,7 +19,7 @@ export function useAnimate(): () => boolean {
 }
 
 /**
- * 视角控件（V-I1、V-I5，设计 150 §3）：放大、缩小、旋转 90°、返回总览，竖排浮在场景右下、告警与详情卡左侧
+ * 视角控件（V-I1、V-I5，ui.md §4）：放大、缩小、旋转 90°、返回总览，竖排浮在场景右下、告警与详情卡左侧
  * （1366 宽下顶部一行已被指标卡与区域切换占满）
  */
 export function CameraControls({ photo = false }: { photo?: boolean }) {

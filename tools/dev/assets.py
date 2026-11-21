@@ -1,4 +1,4 @@
-"""场景资产库（设计 150 §8，REUSE-13）：从 Kenney 的 CC0 压缩包挑选模型，按 §4 材质色重新上色，
+"""场景资产库（architecture.md §9，REUSE-13）：从 Kenney 的 CC0 压缩包挑选模型，按 ui.md §5.2 的材质色重新上色，
 按类别合并为 glb，写出目录 web/console/public/models/catalog.json。
 
 用法：
@@ -13,7 +13,7 @@
 不经前端发布），归中、上色方式与 Kenney 模型相同，合并为单独的 scene-custom.glb，类别取已有类别。
 只放团队自制的模型；第三方模型须挑选进 SELECTION 并登记 deploy/third-party.yaml（C-RU-01）。
 清单格式与导出要求见该目录的 README.md。
-glTF 的归中、合并、去重由 @gltf-transform/cli 完成（设计 150 §9A），本脚本只改颜色与写目录。
+glTF 的归中、合并、去重由 @gltf-transform/cli 完成（architecture.md §9），本脚本只改颜色与写目录。
 最后打印 deploy/third-party.yaml 的登记条目（C-RU-01），核对后替换其中的 Kenney 条目。
 
 目录每项：id（场景数据中的资产编号）、category、name（中文名）、file（所在 glb，场景名即 id）、
@@ -45,7 +45,7 @@ YAWS = (0, 90, 180, 270)
 TIMEOUT_S = 120  # 单次 gltf-transform 调用上限
 FIELDS = ("id", "category", "name", "file", "footprint", "scale", "yaw", "line")  # 目录每项的字段
 
-# 类别：编号、中文名（场景页模型库的分组，设计 150 §6）
+# 类别：编号、中文名（场景页模型库的分组，V-SC6）
 CATEGORIES = {
     "building": "建筑",
     "road": "道路",
@@ -57,7 +57,7 @@ CATEGORIES = {
     "greenery": "绿化",
 }
 
-# 色板：(暗端, 亮端)，取自设计 150 §4 场景材质；原色按明度在两端之间取色，保留明暗层次、去掉色相
+# 色板：(暗端, 亮端)，取自 ui.md §5.2 场景材质；原色按明度在两端之间取色，保留明暗层次、去掉色相
 PALETTES = {
     "building": ("#CBD5E1", "#FFFFFF"),  # 屋顶 → 白墙
     "road": ("#DCDFE5", "#FFFFFF"),  # 路面 → 标线
@@ -465,7 +465,7 @@ def registry(versions: dict[str, str], categories: list[str]) -> str:
             "    source: Kenney 官网 "
             + "、".join(f"{p} {versions[p]}" for p in packs)
             + "（tools/dev/assets.py 归中、重新上色、合并）",
-            f"    purpose: 场景搭建模型库 · {label}（设计 150 §8）",
+            f"    purpose: 场景搭建模型库 · {label}（architecture.md §9）",
             "    owner: MyIsmeee",
             "    models:",
             *(f"      - {{ id: {s[0]}, source: {s[3]}/{s[4]} }}" for s in picked),

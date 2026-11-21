@@ -18,7 +18,7 @@ import { footprints, instances, type SceneItem, useCatalog } from "./assets";
 import type { Area } from "./layout";
 import { useScenePalette } from "./palette";
 
-/** 地面在区域外渐隐到页面底色的距离，单位米：看不到地面的边（设计 150 §4） */
+/** 地面在区域外渐隐到页面底色的距离，单位米：看不到地面的边（ui.md §5.2） */
 const FADE_M = 15;
 /** 渐隐贴图每米的像素数 */
 const FADE_PX_PER_M = 2;
@@ -32,10 +32,10 @@ interface Part {
 }
 
 /**
- * 当前区域的搭建场景（D-120、设计 150 §9）：管理员放置的成品模型，同一资产的全部实例合并为一次绘制（V-P1）。
+ * 当前区域的搭建场景（D-120、ui.md §5.2）：管理员放置的成品模型，同一资产的全部实例合并为一次绘制（V-P1）。
  * 只用实体材质与固定光照（D-111），模型自带的调色板贴图保留明暗层次
  */
-/** 场景页按下物体时：该物体在 items 中的下标与原始事件（设计 150 E-4） */
+/** 场景页按下物体时：该物体在 items 中的下标与原始事件（V-SC8） */
 export type OnPick = (index: number, event: ThreeEvent<PointerEvent>) => void;
 
 export function AreaScene({ area, items, onPick }: { area: Area; items: SceneItem[]; onPick?: OnPick }) {
@@ -48,7 +48,7 @@ export function AreaScene({ area, items, onPick }: { area: Area; items: SceneIte
   );
 }
 
-/** 一组物体的模型，不含地面；ghost 为场景页放置时的半透明预览（设计 150 E-2），不投射阴影 */
+/** 一组物体的模型，不含地面；ghost 为场景页放置时的半透明预览（V-SC7），不投射阴影 */
 export function AssetModels({ items, ghost = false, onPick }: { items: SceneItem[]; ghost?: boolean; onPick?: OnPick }) {
   const catalog = useCatalog();
   const groups = useMemo(() => instances(footprints(items, catalog)), [items, catalog]);

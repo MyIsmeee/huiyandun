@@ -17,7 +17,7 @@ function groundPoint(e: ThreeEvent<PointerEvent>): [number, number] | null {
 }
 
 /**
- * 可选中、拖动的区域场景（设计 150 E-4）：未在放置时，按下物体即选中，按住拖动按整米移动；
+ * 可选中、拖动的区域场景（V-SC8）：未在放置时，按下物体即选中，按住拖动按整米移动；
  * 松开时位置变了且不与其他物体重叠才算一步，重叠时回到原处。选中的物体四角显示强调色括框，重叠时转灰
  */
 export function EditableScene({ area, items }: { area: Area; items: SceneItem[] }) {

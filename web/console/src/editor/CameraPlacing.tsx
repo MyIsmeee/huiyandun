@@ -14,7 +14,7 @@ const YAW_STEP = 5;
 const point = (e: ThreeEvent<PointerEvent>): [number, number] => [e.point.x, e.point.z];
 
 /**
- * 放置摄像头（设计 150 E-5）：按下处为安装位置（按 0.5 m 吸附，留在区域内），按住拖动的方向为朝向，松开即放下；
+ * 放置摄像头（V-SC9）：按下处为安装位置（按 0.5 m 吸附，留在区域内），按住拖动的方向为朝向，松开即放下；
  * 预览为该摄像头的机身与视场
  */
 export function CameraPlacing({ camera, size }: { camera: Camera; size: [number, number] }) {

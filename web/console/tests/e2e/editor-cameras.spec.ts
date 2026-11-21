@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { dragOnGround, editor, library, openEditor, pointAt, savedCameras } from "./editor-helpers";
 import { camera, expectToast, freezeClock } from "./helpers";
 
-// 场景页放置摄像头（设计 150 E-5）：位置与朝向随区域整体保存写回登记表
+// 场景页放置摄像头（V-SC9）：位置与朝向随区域整体保存写回登记表
 test.beforeEach(({ page }) => freezeClock(page));
 
 const CAM01 = { id: "cam-01", x: 16, y: 14, yaw_deg: 300 };

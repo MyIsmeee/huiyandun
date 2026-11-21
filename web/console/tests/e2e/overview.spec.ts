@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { camera, expectApart, expectNoOverflow, freezeClock, open, presetMotion, withoutWebGL2 } from "./helpers";
 
-// TK-156 验收（设计 150 §3、§11）：态势页浮动卡片的选中、返回、Esc；1366×768 与 1920×1080 下互不遮挡、不溢出（V-P3）
+// TK-156 验收（ui.md §4）：态势页浮动卡片的选中、返回、Esc；1366×768 与 1920×1080 下互不遮挡、不溢出（V-P3）
 test.beforeEach(async ({ page }) => {
   await presetMotion(page, true);
   await freezeClock(page);

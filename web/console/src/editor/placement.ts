@@ -1,7 +1,7 @@
 import { type Asset, type Footprint, footprints, type SceneItem } from "../scene/assets";
 
 type Rot = SceneItem["rot"];
-/** 预览占地与选中括框在重叠时的颜色（可放置时为强调色，设计 150 E-2、E-4） */
+/** 预览占地与选中括框在重叠时的颜色（可放置时为强调色，V-SC7、V-SC8） */
 export const BLOCKED = "#94A3B8";
 const EPS = 1e-6;
 
@@ -12,8 +12,8 @@ export function span(asset: Asset, rot: Rot): [number, number] {
 }
 
 /**
- * 指针所在的地面点吸附为放置点（设计 150 E-2）：占地边缘落在 1 m 网格上，整块留在区域内。
- * 线状资产先放一段，放置点为起点（设计 150 §5），长度取一段资产长度
+ * 指针所在的地面点吸附为放置点（V-SC7）：占地边缘落在 1 m 网格上，整块留在区域内。
+ * 线状资产先放一段，放置点为起点（architecture.md §12），长度取一段资产长度
  */
 export function snap(asset: Asset, rot: Rot, [px, py]: [number, number], [width, depth]: [number, number]): SceneItem {
   const [sx, sy] = span(asset, rot);
@@ -39,7 +39,7 @@ function box({ x, y, length, width, rot }: Footprint): [number, number, number, 
 }
 
 /**
- * 线状资产按下 from、拖到 to（设计 150 E-3）：沿位移较大的坐标轴铺设，长度为资产长度的整数倍（至少一段）；
+ * 线状资产按下 from、拖到 to（V-SC7）：沿位移较大的坐标轴铺设，长度为资产长度的整数倍（至少一段）；
  * 起点为按下处最近的网格交点，资产宽为奇数格时中线让开半格，使边缘落在网格上
  */
 export function stroke(asset: Asset, from: [number, number], to: [number, number]): SceneItem {
@@ -73,7 +73,7 @@ export function inside(item: SceneItem, catalog: Map<string, Asset>, [width, dep
 }
 
 /**
- * 旋转 90°（设计 150 E-4）：普通物体绕占地中心转，再吸附网格（长宽奇偶不同时中心挪半格）；线状资产绕起点转，
+ * 旋转 90°（V-SC8）：普通物体绕占地中心转，再吸附网格（长宽奇偶不同时中心挪半格）；线状资产绕起点转，
  * 再把占地的外接矩形挪到网格上——奇数宽的墙原样转过去中线落在整米上，占地两边各偏半格，之后按整米拖动也回不到网格。
  * 不挪回区域内：转后超出区域时返回 null，由调用方提示
  */
@@ -90,7 +90,7 @@ export function rotated(item: SceneItem, asset: Asset, catalog: Map<string, Asse
   return inside(next, catalog, size) ? next : null;
 }
 
-/** 放下 item 是否与同一层已有物体的占地重叠（只接触边缘不算），重叠时禁止放置（设计 150 E-2）；except 为移动、旋转中的物体自身 */
+/** 放下 item 是否与同一层已有物体的占地重叠（只接触边缘不算），重叠时禁止放置（V-SC7）；except 为移动、旋转中的物体自身 */
 export function overlaps(item: SceneItem, items: SceneItem[], catalog: Map<string, Asset>, except?: number): boolean {
   const placed = footprints(items.filter((_, i) => i !== except), catalog);
   return footprints([item], catalog).some((mine) => {

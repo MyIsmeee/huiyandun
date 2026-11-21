@@ -18,11 +18,11 @@ const ICONS: Record<string, LucideIcon> = {
   equipment: Package,
   greenery: Trees,
 };
-/** 选中项蓝色描边（设计 150 §9A，借鉴 uiverse Yaya12085/silent-liger-85 的图标卡片式单选，MIT） */
+/** 选中项蓝色描边（V-SC6，借鉴 uiverse Yaya12085/silent-liger-85 的图标卡片式单选，MIT） */
 const OPTION =
   "flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-secondary aria-pressed:border-primary aria-pressed:bg-card";
 
-/** 模型库（设计 150 §6）：顶部为摄像头（E-5）；按类别或名称查找模型，选中后在地面上放置（E-2），再点一次取消 */
+/** 模型库（V-SC6）：顶部为摄像头（V-SC9）；按类别或名称查找模型，选中后在地面上放置（V-SC7），再点一次取消 */
 export function Library({ devices }: { devices: Device[] }) {
   const catalog = useCatalog();
   const categories = useCategories();
@@ -78,7 +78,7 @@ export function Library({ devices }: { devices: Device[] }) {
 }
 
 /**
- * 摄像头（设计 150 E-5）：未放入任何区域的摄像头点选后在地面上按下即放置，拖动方向为朝向；
+ * 摄像头（V-SC9）：未放入任何区域的摄像头点选后在地面上按下即放置，拖动方向为朝向；
  * 本区域的摄像头可重新放置或移出区域；移出时提示保存后标定（D-134）与轨迹规则清除。安装高度、俯角、视场角在摄像头页编辑
  */
 /** 移出已标定摄像头时的提示，按摄像头编号去重，放回后撤掉 */

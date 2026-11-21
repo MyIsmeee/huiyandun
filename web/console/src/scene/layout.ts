@@ -8,7 +8,7 @@ export const WALL_HEIGHT_M = 2.8;
 /** 相机远裁剪面距离，单位米：远超任何机位的可见范围 */
 export const GROUND_M = 1000;
 /**
- * 取景时让开浮动卡片（设计 150 §3）：上方的指标卡、右侧的告警与详情卡（宽 340～380）、底部的处置进度条、视角控件与断线提示（V-U3），
+ * 取景时让开浮动卡片（ui.md §4）：上方的指标卡、右侧的告警与详情卡（宽 340～380）、底部的处置进度条、视角控件与断线提示（V-U3），
  * 另留四周边距，单位像素。进度条不显示时同样留出，取景不随之跳动
  */
 const INSET = { top: 132, right: 412, bottom: 168, left: 24 };
@@ -20,7 +20,7 @@ export interface Area {
   width_m: number;
   height_m: number;
 }
-/** 场景区域的取景范围（设计 150 §9）：俯视时区域左上角为原点，宽沿 x（向右）、深沿 y（向下） */
+/** 场景区域的取景范围（V-I1）：俯视时区域左上角为原点，宽沿 x（向右）、深沿 y（向下） */
 export function bounds(area: { width_m: number; depth_m: number }): Area {
   return { x0: 0, y0: 0, width_m: area.width_m, height_m: area.depth_m };
 }

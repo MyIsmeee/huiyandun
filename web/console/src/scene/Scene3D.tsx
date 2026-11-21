@@ -26,7 +26,7 @@ const FOG_M = 50;
 const SHADOW_MARGIN_M = 4;
 
 /**
- * 空间态势（D-120、D-111、设计 150 §9）：当前区域管理员搭建的场景与渐隐地面，叠加设备、视场与检出目标；
+ * 空间态势（D-120、D-111、ui.md §5.2）：当前区域管理员搭建的场景与渐隐地面，叠加设备、视场与检出目标；
  * 只显示阴影的承接面让物体落地。
  * 固定的半球光 + 平行主光，投射软阴影，不随时间变化；夜间警戒时换为深色背景与冷色弱光（palette.ts）。按需渲染（frameloop="demand"）：无常驻动效（V-A3），
  * 只有对应真实告警的动效持续请求重绘。flat 关闭色调映射，色值与规范一致。
@@ -74,7 +74,7 @@ function Repaint({ palette }: { palette: ScenePalette }) {
 
 /**
  * 半球光 + 平行主光；主光的阴影相机贴合区域，阴影清晰且不浪费贴图。
- * 日间光照强度（palette.DAY）：朝上的受光面总辐照约为 π，Lambert 材质在受光面呈现规定的材质色（设计 150 §4）
+ * 日间光照强度（palette.DAY）：朝上的受光面总辐照约为 π，Lambert 材质在受光面呈现规定的材质色（ui.md §5.2）
  */
 export function Lights({ area, palette = DAY }: { area: Area; palette?: ScenePalette }) {
   const [sky, floor, hemiIntensity] = palette.hemi;
@@ -113,7 +113,7 @@ export function Lights({ area, palette = DAY }: { area: Area; palette?: ScenePal
 
 /**
  * 只显示阴影的承接面：区域加边距，略高于地面，不接收点选。
- * 不透明度（设计 150 §4）：只显示阴影，其余完全透明；浅色地面上约 25% 即清晰可见
+ * 不透明度（ui.md §5.2）：只显示阴影，其余完全透明；浅色地面上约 25% 即清晰可见
  */
 export function ShadowCatcher({ area, opacity = DAY.shadow }: { area: Area; opacity?: number }) {
   const [w, h] = [area.width_m + SHADOW_MARGIN_M * 2, area.height_m + SHADOW_MARGIN_M * 2];

@@ -6,7 +6,7 @@ import type { SceneArea } from "../lib/api";
 import type { SceneItem } from "../scene/assets";
 import type { CameraPlacement } from "./cameras";
 
-/** 场景页正在编辑的区域草稿（设计 150 §6）：修改只在本页，保存为整体 PUT（E-7） */
+/** 场景页正在编辑的区域草稿（ui.md §7.3）：修改只在本页，保存为整体 PUT（V-SC10） */
 interface Draft {
   areaId: string | null;
   /** 载入时的 updated_at，保存时原样带回，防止覆盖他人的修改 */
@@ -21,7 +21,7 @@ interface Draft {
   tool: string | null;
   /** 选中的物体在 items 中的下标（E-4） */
   selected: number | null;
-  /** 从画面生成、尚未接受的初稿（设计 150 §7）：只在本页叠加预览，不随保存提交，不记入撤销历史 */
+  /** 从画面生成、尚未接受的初稿（V-SC11）：只在本页叠加预览，不随保存提交，不记入撤销历史 */
   pending: SceneItem[];
   /** 载入代次：每次载入（换区域、放弃修改、重新载入）加一。保存请求返回时据此判断草稿是否还是发起时那一份 */
   generation: number;
@@ -32,7 +32,7 @@ export const MAX_ITEMS = 2000;
 export const tooMany = (count: number) => count > MAX_ITEMS;
 const TOO_MANY = `区域最多 ${MAX_ITEMS} 件物体`;
 
-/** 撤销、重做的步数上限（设计 150 E-6） */
+/** 撤销、重做的步数上限（V-SC10） */
 export const UNDO_LIMIT = 50;
 
 const CAMERA_TOOL = "camera:";
@@ -139,7 +139,7 @@ export const isDirty = (s: Draft) => JSON.stringify(s.items) !== JSON.stringify(
 const newer = (area: SceneArea, draft: Draft) => Date.parse(area.updated_at) > Date.parse(draft.updatedAt);
 
 /**
- * 草稿跟随区域（设计 150 E-7）：换区域时载入；他人保存了同一区域（updated_at 变化）而本页没有未保存的修改时，
+ * 草稿跟随区域（V-SC10）：换区域时载入；他人保存了同一区域（updated_at 变化）而本页没有未保存的修改时，
  * 换成最新内容；有未保存的修改时保留，保存时由服务端以 409 拒绝——之后撤销回无修改时同样换成最新内容。
  * 未接受的初稿按旧场景与摄像头位置生成，随之丢弃并提示。
  * registered 为登记表中的全部摄像头编号：草稿里已被他人删除的摄像头从草稿与撤销历史中去掉，否则保存永远 400
