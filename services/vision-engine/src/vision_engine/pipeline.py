@@ -348,6 +348,31 @@ class FrameReader(threading.Thread):
             self._stopping.wait(RECONNECT_S)
 
 
+# 一名人员：(画面框 xyxy, 跟踪编号, 关键点 (17, 2), 关键点置信度 (17,))
+type Person = tuple[np.ndarray, Any, np.ndarray, np.ndarray]
+# 地面位置：(x, y, 不确定度 m, 朝向°, 速度 m/s)
+type Place = tuple[float, float, float, float | None, float | None]
+
+
+def _no_poses() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """没有人员时交给行为判定的空输入：(编号, 关键点, 关键点置信度)。"""
+    return np.array([], int), np.empty((0, 17, 2)), np.empty((0, 17))
+
+
+def _people(tracked: sv.Detections) -> list[Person]:
+    if not len(tracked):  # 空结果不含关键点数据
+        return []
+    return list(
+        zip(
+            tracked.xyxy,
+            tracked.tracker_id,
+            tracked.data["keypoints"],
+            tracked.data["keypoint_scores"],
+            strict=True,
+        )
+    )
+
+
 class CameraPipeline:
     """单路的门控、检测与跟踪；状态只在本路串行调用的 process 中使用。"""
 
@@ -505,103 +530,38 @@ class CameraPipeline:
 
     def process(self, frame: np.ndarray, timestamp: float) -> list[VisionEvent]:
         # 画面可信度判定先于运动门控：定格画面没有运动，门控会跳过推理（C-CV-09）
-        integrity: list[VisionIntegrityV1] = []
+        events: list[VisionEvent] = []
         # 画面嵌入（DINOv2）与检测互不依赖：先交给推理线程，与下面的门控、检测同时进行
         embedding_pending = (
             INFER_POOL.submit(self._embedder, frame) if self._embedder is not None else None
         )
         if self._freeze.update(frame, timestamp):
-            integrity.append(self._integrity("freeze", FREEZE_S, "rule", 1.0, None))
+            events.append(self._integrity("freeze", FREEZE_S, "rule", 1.0, None))
         tracked, vehicles = self.track(frame, timestamp)
         if embedding_pending is not None:
-            embedding = embedding_pending.result()
-            replay = self._replay.update(embedding, timestamp)
-            if replay is not None:
-                # 只写相对时刻：界面与报告按站点时区显示，这里写 UTC 钟点会与之对不上（D-106）
-                detail = f"画面与 {replay.ago_s:.0f} s 前的片段重复"
-                integrity.append(
-                    self._integrity("replay", REPLAY_S, "model", replay.confidence, detail)
-                )
-            view = self._view.update(embedding, frame, timestamp)
-            if view is not None:
-                detail = f"与参考画面的相似度降至 {view.similarity:.2f}"
-                if view.kind == "occlusion":
-                    detail = f"画面纹理消失，{detail}"
-                integrity.append(
-                    self._integrity(view.kind, VIEW_S, "model", view.confidence, detail)
-                )
+            events += self._embedding_events(embedding_pending.result(), frame, timestamp)
         height, width = frame.shape[:2]
         if not len(tracked) and not len(vehicles):
             # 无目标时同样推进：消失的轨迹按时结束，原地消失按时判定
-            vanished = self._behavior_events(
-                np.array([], int),
-                np.empty((0, 17, 2)),
-                np.empty((0, 17)),
-                timestamp,
-                (width, height),
-            )
             return (
-                integrity
-                + vanished
+                events
+                + self._behavior_events(*_no_poses(), timestamp, (width, height))
                 + self._violence_events(frame, timestamp, [])
                 + self._rule_events([], timestamp)
             )
-        if self._mapping is None and self._pose is not None:
-            self._mapping = GroundMapping.from_pose(self._pose, width, height)
-            if self._mapping is not None:
-                self._checker = PoseChecker(self._pose, (width, height))
-            self._pose = None
-        mapping = self._mapping
-        people = (
-            list(
-                zip(
-                    tracked.xyxy,
-                    tracked.tracker_id,
-                    tracked.data["keypoints"],
-                    tracked.data["keypoint_scores"],
-                    strict=True,
-                )
-            )
-            if len(tracked)  # 空结果不含关键点数据
-            else []
-        )
+        mapping = self._ground(width, height)
+        people = _people(tracked)
         if self._checker is not None:
             for (_, by1, _, by2), i, points, scores in people:
                 self._checker.add(int(i), points, scores, float(by2 - by1), timestamp)
-        # 先算位置再续接，行为判定用续接后的编号；没有地面映射时不续接、用跟踪编号（FR-911、C-CV-05）
-        positions = [
-            None
-            if mapping is None
-            else mapping.locate(*self._footing.foot(int(i), tuple(box), points, scores, timestamp))
-            for box, i, points, scores in people
-        ]
-        ids = (
-            [int(i) for _, i, _, _ in people]
-            if mapping is None
-            else self._relinker.assign(
-                timestamp,
-                [(int(p[1]), located) for p, located in zip(people, positions, strict=True)],
-            )
-        )
-        now = datetime.now(UTC)
+        positions, ids = self._identify(mapping, people, timestamp)
         # 未标定摄像头同样判定行为：只输出设备级告警（C-CV-05）。画面中只有车辆时同样调用，原地消失按时判定
-        events: list[VisionEvent] = integrity + (
-            self._behavior_events(
-                np.array(ids),
-                tracked.data["keypoints"],
-                tracked.data["keypoint_scores"],
-                timestamp,
-                (width, height),
-            )
+        poses = (
+            (np.array(ids), tracked.data["keypoints"], tracked.data["keypoint_scores"])
             if people
-            else self._behavior_events(
-                np.array([], int),
-                np.empty((0, 17, 2)),
-                np.empty((0, 17)),
-                timestamp,
-                (width, height),
-            )
+            else _no_poses()
         )
+        events += self._behavior_events(*poses, timestamp, (width, height))
         events += self._violence_events(
             frame,
             timestamp,
@@ -612,6 +572,67 @@ class CameraPipeline:
         )
         if mapping is None:
             return events  # 没有地面映射不输出坐标（FR-902）
+        observations, tracks = self._tracks(
+            mapping, people, ids, positions, vehicles, timestamp, (width, height)
+        )
+        return events + tracks + self._rule_events(observations, timestamp)
+
+    def _embedding_events(
+        self, embedding: np.ndarray, frame: np.ndarray, timestamp: float
+    ) -> list[VisionEvent]:
+        """按画面嵌入判定的重放、挪位与遮挡（C-CV-09）。"""
+        events: list[VisionEvent] = []
+        replay = self._replay.update(embedding, timestamp)
+        if replay is not None:
+            # 只写相对时刻：界面与报告按站点时区显示，这里写 UTC 钟点会与之对不上（D-106）
+            detail = f"画面与 {replay.ago_s:.0f} s 前的片段重复"
+            events.append(self._integrity("replay", REPLAY_S, "model", replay.confidence, detail))
+        view = self._view.update(embedding, frame, timestamp)
+        if view is not None:
+            detail = f"与参考画面的相似度降至 {view.similarity:.2f}"
+            if view.kind == "occlusion":
+                detail = f"画面纹理消失，{detail}"
+            events.append(self._integrity(view.kind, VIEW_S, "model", view.confidence, detail))
+        return events
+
+    def _ground(self, width: int, height: int) -> GroundMapping | None:
+        """地面映射；未标定时取到首帧后按安装参数估算一次（D-102），成立时同时建立安装参数自检。"""
+        if self._mapping is None and self._pose is not None:
+            self._mapping = GroundMapping.from_pose(self._pose, width, height)
+            if self._mapping is not None:
+                self._checker = PoseChecker(self._pose, (width, height))
+            self._pose = None
+        return self._mapping
+
+    def _identify(
+        self, mapping: GroundMapping | None, people: list[Person], timestamp: float
+    ) -> tuple[list[tuple[float, float, float] | None], list[int]]:
+        """各人员的地面位置与输出编号。先算位置再续接，行为判定用续接后的编号；没有地面映射时不续接、
+        用跟踪编号（FR-911、C-CV-05）。"""
+        if mapping is None:
+            return [None] * len(people), [int(i) for _, i, _, _ in people]
+        positions = [
+            mapping.locate(*self._footing.foot(int(i), tuple(box), points, scores, timestamp))
+            for box, i, points, scores in people
+        ]
+        ids = self._relinker.assign(
+            timestamp, [(int(p[1]), located) for p, located in zip(people, positions, strict=True)]
+        )
+        return positions, ids
+
+    def _tracks(
+        self,
+        mapping: GroundMapping,
+        people: list[Person],
+        ids: list[int],
+        positions: list[tuple[float, float, float] | None],
+        vehicles: sv.Detections,
+        timestamp: float,
+        size: tuple[int, int],
+    ) -> tuple[list[Observation], list[VisionEvent]]:
+        """地面坐标下的人员与车辆轨迹（FR-911），以及交给轨迹规则的观测。"""
+        width, height = size
+        now = datetime.now(UTC)
         scale = np.array([width, height], dtype=np.float32)
         targets = [
             (output_id, "person", box, (points, scores), located)
@@ -626,33 +647,21 @@ class CameraPipeline:
                 else []
             )
         ]
-        observations: list[Observation] = []
         current = set(vehicles.tracker_id.tolist()) if len(vehicles) else set()
         self._votes = {i: v for i, v in self._votes.items() if i in current}
+        observations: list[Observation] = []
+        events: list[VisionEvent] = []
         for track_id, object_class, (bx1, by1, bx2, by2), skeleton, located in targets:
-            if skeleton is not None:  # 人员取站立的脚点（FR-911）
-                if located is None:
-                    continue
-                points, scores = skeleton
-                x, y, uncertainty = self._steady.update(
-                    track_id, (bx1, by1, bx2, by2), points, scores, located, timestamp
-                )
-                heading, speed = self._motion.update(track_id, timestamp, x, y)
-                if self._checker is not None:
-                    self._checker.add_speed(speed)
+            box = (bx1, by1, bx2, by2)
+            if skeleton is None:
+                place = self._vehicle_place(mapping, track_id, object_class, box, timestamp)
+            elif located is None:
+                continue
             else:
-                # 车辆：朝向与速度按框底边中点映射的近端点估计，再沿视线外移到车身中心（FR-911）。
-                # 不按外移后的位置估计：外移量随朝向变化，会反过来扰动朝向
-                u = (bx1 + bx2) / 2
-                located = mapping.locate(u, by2, FOOT_ERROR_RATIO * (by2 - by1))
-                outward = mapping.outward(u, by2)
-                if located is None or outward is None:
-                    continue
-                near_x, near_y, uncertainty = located
-                heading, speed = self._motion.update(track_id, timestamp, near_x, near_y)
-                offset = vehicle_offset(object_class, heading, outward)
-                x, y = near_x + float(offset[0]), near_y + float(offset[1])
-                uncertainty += VEHICLE_ERROR_RATIO * float(np.hypot(*offset))
+                place = self._person_place(track_id, box, skeleton, located, timestamp)
+            if place is None:
+                continue
+            x, y, uncertainty, heading, speed = place
             observations.append(Observation(track_id, object_class, x, y, uncertainty))
             keypoints = (
                 None if skeleton is None else np.column_stack([skeleton[0] / scale, skeleton[1]])
@@ -676,7 +685,46 @@ class CameraPipeline:
                     keypoints=None if keypoints is None else np.clip(keypoints, 0, 1).tolist(),
                 )
             )
-        return events + self._rule_events(observations, timestamp)
+        return observations, events
+
+    def _person_place(
+        self,
+        track_id: int,
+        box: tuple[float, float, float, float],
+        skeleton: tuple[np.ndarray, np.ndarray],
+        located: tuple[float, float, float],
+        timestamp: float,
+    ) -> Place:
+        """人员取站立的脚点（FR-911）；不动的人锁定地面位置（steady.py）。"""
+        points, scores = skeleton
+        x, y, uncertainty = self._steady.update(track_id, box, points, scores, located, timestamp)
+        heading, speed = self._motion.update(track_id, timestamp, x, y)
+        if self._checker is not None:
+            self._checker.add_speed(speed)
+        return x, y, uncertainty, heading, speed
+
+    def _vehicle_place(
+        self,
+        mapping: GroundMapping,
+        track_id: int,
+        object_class: str,
+        box: tuple[float, float, float, float],
+        timestamp: float,
+    ) -> Place | None:
+        """车辆：朝向与速度按框底边中点映射的近端点估计，再沿视线外移到车身中心（FR-911）。
+        不按外移后的位置估计：外移量随朝向变化，会反过来扰动朝向。"""
+        bx1, by1, bx2, by2 = box
+        u = (bx1 + bx2) / 2
+        located = mapping.locate(u, by2, FOOT_ERROR_RATIO * (by2 - by1))
+        outward = mapping.outward(u, by2)
+        if located is None or outward is None:
+            return None
+        near_x, near_y, uncertainty = located
+        heading, speed = self._motion.update(track_id, timestamp, near_x, near_y)
+        offset = vehicle_offset(object_class, heading, outward)
+        x, y = near_x + float(offset[0]), near_y + float(offset[1])
+        uncertainty += VEHICLE_ERROR_RATIO * float(np.hypot(*offset))
+        return x, y, uncertainty, heading, speed
 
     def _rule_events(self, observations: list[Observation], timestamp: float) -> list[VisionRuleV1]:
         """轨迹规则（区域入侵、有向越线）；没有规则或没有地面映射时为空。"""
