@@ -39,7 +39,7 @@ from pydantic import (
 )
 
 from llm_gateway.connect import NOT_COMPATIBLE, ProbeFailure, Target, client, explain
-from llm_gateway.egress import Resolver, blocked_reason, public_addresses, resolve
+from llm_gateway.egress import Resolver, assess, resolve
 from llm_gateway.probe import strip_reasoning
 from llm_gateway.redact import Pseudonyms, untraced
 from py_contracts.llm.incident_investigation_v1_schema import IncidentInvestigationTurn
@@ -304,25 +304,19 @@ class Chain:
                 extra={"task": req.task, "route": routed, "severity": req.severity, "order": order},
             )
         for provider in providers:
-            skipped = None
+            skipped, public = None, True
             if deadline <= time.monotonic():
                 skipped = limit
             elif (until := self.breaker.blocked_until(provider.id)) is not None:
                 skipped = f"连续失败 {FAILURES} 次，暂停调用至 {until:%H:%M:%S} UTC"
             else:
                 block = req.block_public or provider.block_public
-                skipped = await blocked_reason(
+                skipped, public = await assess(
                     provider.base_url, provider.network, block, self._resolver
                 )
             if skipped:
                 attempts.append(_attempt(req.task, provider, "skipped", skipped, None, 0, False))
                 continue
-            # 脱敏以地址实际指向为准：标为内网却解析出公网地址、或解析不出无法确认在内网的，同样按公网处理
-            # （C-LLM-03）：连接时的再次解析可能指向公网
-            public = (
-                provider.network == "public"
-                or (await public_addresses(provider.base_url, self._resolver)) != []
-            )
             pseudonyms = Pseudonyms() if public else None
             data = pseudonyms.redact(req.data) if pseudonyms else req.data
             messages = self._messages(req.task, data)

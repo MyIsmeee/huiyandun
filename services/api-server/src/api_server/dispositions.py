@@ -72,6 +72,9 @@ class Dispositions:
                 )
 
     def add(self, disposition: AlertDisposition) -> None:
+        """记下一条处置，同时丢掉超出补推窗口的旧记录。"""
+        since = datetime.now(UTC) - WINDOW
+        self._latest = {k: d for k, d in self._latest.items() if d.ts >= since}
         self._latest[str(disposition.event_id)] = disposition
 
     def get(self, event_id: str) -> AlertDisposition | None:

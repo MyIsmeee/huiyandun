@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from llm_gateway.connect import ProbeFailure, Target, list_models
-from llm_gateway.egress import Resolver, blocked_reason, resolve
+from llm_gateway.egress import Resolver, assess, resolve
 from llm_gateway.invoke import Chain, Invocation, InvokeResult, load_tasks
 from llm_gateway.probe import probe
 from py_common.config import ServiceConfig, load_config
@@ -57,9 +57,9 @@ def create_app(
 
     async def ensure_allowed(target: Target) -> None:
         """全局禁止公网开启时，测试连接与获取模型列表同样不向公网地址发请求（G-02）。"""
-        reason = await blocked_reason(
-            target.base_url, target.network, target.block_public, resolver
-        )
+        if not target.block_public:
+            return
+        reason, _ = await assess(target.base_url, target.network, True, resolver)
         if reason:
             raise HTTPException(409, reason)
 
