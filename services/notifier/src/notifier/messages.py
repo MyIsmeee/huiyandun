@@ -18,6 +18,7 @@ RULE = {"intrusion": "区域入侵", "line_crossing": "越线"}
 SEVERITY = {"critical": "严重", "high": "高", "medium": "中", "low": "低"}
 
 Kind = Literal["wecom", "dingtalk", "webhook"]
+type Alert = VisionBehaviorV1 | VisionRuleV1 | CorrelatorIncidentV1
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ def _local(t: datetime, offset_min: int) -> str:
 
 
 def notice(
-    event: VisionBehaviorV1 | VisionRuleV1 | CorrelatorIncidentV1,
+    event: Alert,
     names: dict[str, str],
     offset_min: int,
 ) -> Notice | None:

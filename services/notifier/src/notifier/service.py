@@ -18,11 +18,10 @@ import httpx2
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from notifier.messages import Kind, Notice, notice, request
+from notifier.messages import Alert, Kind, Notice, notice, request
 from py_common.bus import Bus, js_subscribe_retrying
 from py_common.config import ServiceConfig, load_config
 from py_common.log import configure_logging
-from py_contracts.events.event_base_schema import EventBase
 from py_contracts.events.hyd_config_cameras_v1_schema import ConfigCamerasV1
 from py_contracts.events.hyd_correlator_incident_v1_schema import CorrelatorIncidentV1
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
@@ -30,7 +29,7 @@ from py_contracts.events.hyd_vision_rule_v1_schema import VisionRuleV1
 
 RATE_PER_MIN = 18
 RESUBSCRIBE_S = 5.0
-SUBJECTS: dict[str, type[EventBase]] = {
+SUBJECTS: dict[str, type[Alert]] = {
     "hyd.vision.behavior.v1": VisionBehaviorV1,
     "hyd.vision.rule.v1": VisionRuleV1,
     "hyd.correlator.incident.v1": CorrelatorIncidentV1,
@@ -92,11 +91,11 @@ class Notifier:
         self._last[n.key] = now
         return True
 
-    async def on_event(self, event: EventBase) -> None:
+    async def on_event(self, event: Alert) -> None:
         # 重放的历史事件不推：只推订阅建立之后发生的
         if datetime.now(UTC) - event.ts > timedelta(minutes=2):
             return
-        n = notice(event, self.names, self._config.display_utc_offset_min)  # type: ignore[arg-type]
+        n = notice(event, self.names, self._config.display_utc_offset_min)
         if n is None or not self.due(n, time.monotonic()):
             return
         await asyncio.gather(*(self._send(t, n) for t in self._targets))
