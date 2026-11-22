@@ -42,7 +42,10 @@ HYD_DEMO_QUIET = false
 # HYD_DEMO_*只交给 docker compose，不导出给其他命令：服务配置不接受未声明的 HYD_* 变量，导出会让 make test 中
 # 读取配置的用例失败。HYD_DEMO_RESET：演示栈的 correlator 响应 make demo-reset（compose.yaml 中默认关闭，
 # 直接用 docker compose 部署时不生效）
-COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) docker compose -f deploy/compose/compose.yaml \
+# HYD_LAN_IP：本机局域网地址（D-143、ops.md §5），首次用到时探测一次；.env 中显式写的优先，同样只交给 docker compose
+HYD_LAN_IP = $(eval HYD_LAN_IP := $$(shell uv run python tools/dev/lan_ip.py))$(HYD_LAN_IP)
+COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) HYD_LAN_IP=$(HYD_LAN_IP) \
+	docker compose -f deploy/compose/compose.yaml \
 	$(if $(filter 0,$(GPU)),,-f deploy/compose/compose.gpu.yaml) \
 	$(if $(filter 1,$(LINKAGE)),-f deploy/compose/compose.linkage.yaml --profile linkage) \
 	$(if $(filter 1,$(NOTIFY)),-f deploy/compose/compose.notify.yaml --profile notify) \
@@ -109,6 +112,7 @@ demo-up: $(DB_SECRETS) $(HELPER_KEY) $(LLM_KEY) $(DEVICE_KEY) $(PUSH_PASS) $(EVI
 		$(if $(LINKAGE_SECRETS),$(GATEWAY_CERT) $(SECRETS)/firewall_gateway_key) \
 		$(NOTIFY_SECRETS)
 	$(COMPOSE) up -d --build
+	@echo "控制台：https://$(HYD_LAN_IP)"
 
 # 按 demo/media/*.meta.yaml 剪接演示视频（DM-12、FR-306）；原始片段放在 demo/media/src/
 demo-media:

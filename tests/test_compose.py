@@ -159,7 +159,7 @@ def test_demo_reset_off_unless_makefile() -> None:
     assert env["HYD_DEMO_RESET"] == "${HYD_DEMO_RESET:-false}"
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert (
-        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) docker compose"
+        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) HYD_LAN_IP=$(HYD_LAN_IP)"
         in makefile
     )
 
