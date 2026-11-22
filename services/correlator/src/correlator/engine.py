@@ -110,27 +110,11 @@ class Engine:
             or (isinstance(event, VisionBehaviorV1) and event.level == "suspected")
         ):
             return []
-        incidents = []
-        for rule in self._rules:
-            steps = [i for i, s in enumerate(rule.sequence) if _matches(s, subject, event)]
-            if not steps:
-                continue
-            key = (rule.id, device)
-            quiet = self._quiet_until.get(key)
-            if quiet is not None and event.ts < quiet:
-                # 攻击仍在持续：顺延去重期（只顺延、不提前），攻击停止 5 分钟后再次出现才算新事件（D-067）
-                self._quiet_until[key] = max(quiet, event.ts + SUPPRESS)
-                continue
-            hits = self._hits[key]
-            hits += [_Hit(i, subject, event) for i in steps]
-            newest = max(h.event.ts for h in hits)
-            hits[:] = [h for h in hits if h.event.ts >= newest - timedelta(seconds=rule.window_s)]
-            chain = _chain(rule, hits)
-            if chain is None:
-                continue
-            hits.clear()
-            self._quiet_until[key] = chain[-1].event.ts + SUPPRESS
-            incidents.append(self._incident(rule, device, chain))
+        incidents = [
+            incident
+            for rule in self._rules
+            if (incident := self._advance(rule, subject, event, device)) is not None
+        ]
         # 同一事件同时补全单域与跨域规则（如爆破后画面冻结）：命中路径被另一事件完整包含的不再发布，只留证据更全的
         # 跨域事件，避免同一次攻击重复存证与研判；被包含的规则照常进入去重期
         return [
@@ -138,6 +122,30 @@ class Engine:
             for i in incidents
             if not any(set(i.hit_path) < set(o.hit_path) for o in incidents if o is not i)
         ]
+
+    def _advance(
+        self, rule: Rule, subject: str, event: Event, device: str
+    ) -> CorrelatorIncidentV1 | None:
+        """把事件记入该规则在该设备上的命中序列；补全命中路径时返回关联事件。"""
+        steps = [i for i, s in enumerate(rule.sequence) if _matches(s, subject, event)]
+        if not steps:
+            return None
+        key = (rule.id, device)
+        quiet = self._quiet_until.get(key)
+        if quiet is not None and event.ts < quiet:
+            # 攻击仍在持续：顺延去重期（只顺延、不提前），攻击停止 5 分钟后再次出现才算新事件（D-067）
+            self._quiet_until[key] = max(quiet, event.ts + SUPPRESS)
+            return None
+        hits = self._hits[key]
+        hits += [_Hit(i, subject, event) for i in steps]
+        newest = max(h.event.ts for h in hits)
+        hits[:] = [h for h in hits if h.event.ts >= newest - timedelta(seconds=rule.window_s)]
+        chain = _chain(rule, hits)
+        if chain is None:
+            return None
+        hits.clear()
+        self._quiet_until[key] = chain[-1].event.ts + SUPPRESS
+        return self._incident(rule, device, chain)
 
     def _tactics(self, techniques: list[str]) -> list[str]:
         tactics: set[str] = set()
