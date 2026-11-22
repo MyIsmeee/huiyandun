@@ -119,6 +119,26 @@ def standing(
     return ankle, shoulder
 
 
+def _round(value: float | None, digits: int) -> float | None:
+    return None if value is None else round(value, digits)
+
+
+def _advice(
+    height: float, pitch: float, suggested: float | None, best_pitch: float | None
+) -> tuple[bool, list[str]]:
+    """（建议的高度或俯角与当前相差过大，提示）；best_pitch 为 None 表示远近分布不足、不判断俯角。"""
+    off, reasons = False, []
+    if suggested is not None and abs(math.log(suggested / height)) > math.log(HEIGHT_TOLERANCE):
+        off = True
+        reasons.append(f"安装高度可能应为约 {suggested:.1f} m（当前 {height:g} m）")
+    if best_pitch is None:
+        reasons.append("行人在画面中远近分布不足，暂不能判断俯角")
+    elif abs(best_pitch - pitch) > PITCH_TOLERANCE_DEG:
+        off = True
+        reasons.append(f"俯角可能应为约 {best_pitch:.0f}°（当前 {pitch:g}°）")
+    return off, reasons
+
+
 class PoseChecker:
     """单路摄像头的样本累积与自检；只在该路串行调用中使用。"""
 
@@ -146,73 +166,71 @@ class PoseChecker:
             self._speeds.append(speed)
 
     def check(self) -> PoseCheck:
-        pose = self._pose
-        height, pitch, hfov = (
-            float(pose["height_m"]),
-            float(pose["pitch_deg"]),
-            float(pose["hfov_deg"]),
-        )
+        height, pitch, hfov = (float(self._pose[k]) for k in ("height_m", "pitch_deg", "hfov_deg"))
         speed_p95 = (
             float(np.percentile(list(self._speeds), 95)) if len(self._speeds) >= 10 else None
         )
-        reasons: list[str] = []
-        if speed_p95 is not None and speed_p95 > MAX_WALK_MPS:
-            reasons.append(f"人员移动速度 95 分位 {speed_p95:.1f} m/s，远超步行速度")
+        fast = speed_p95 is not None and speed_p95 > MAX_WALK_MPS
+        reasons = [f"人员移动速度 95 分位 {speed_p95:.1f} m/s，远超步行速度"] if fast else []
         n = len(self._samples)
         if n < MIN_SAMPLES:
-            status: Status = "suspect" if reasons else "insufficient"
-            if not reasons:
+            if not fast:
                 reasons.append(
                     f"站立行人样本 {n} 个，至少需要 {MIN_SAMPLES} 个（需要全身入镜、腿伸直）"
                 )
+            status: Status = "suspect" if fast else "insufficient"
             return PoseCheck(status, n, None, speed_p95, None, None, reasons)
 
         ankles = np.array([a for a, _ in self._samples], dtype=np.float64)
         shoulders = np.array([s for _, s in self._samples], dtype=np.float64)
-        current = shoulder_heights(ankles, shoulders, height, pitch, hfov, self._size)
-        valid = current[np.isfinite(current) & (current > 0)]
-        person = (
-            float(np.median(valid)) / SHOULDER_ABOVE_ANKLE_M * STANDARD_HEIGHT_M
-            if len(valid)
+        person = self._person_height(ankles, shoulders, height, pitch, hfov)
+        spread = float(np.ptp(ankles[:, 1])) / self._size[1]
+        best_pitch = (
+            self._best_pitch(ankles, shoulders, height, pitch, hfov)
+            if spread >= MIN_SPREAD
             else None
         )
-
-        best_pitch = pitch
-        spread = float(np.ptp(ankles[:, 1])) / self._size[1]
-        if spread >= MIN_SPREAD:
-            best, best_cost = None, math.inf
-            for candidate in PITCH_GRID:
-                h = shoulder_heights(ankles, shoulders, height, float(candidate), hfov, self._size)
-                ok = np.isfinite(h) & (h > 0)
-                if ok.mean() < MIN_VALID:
-                    continue
-                cost = float(np.var(np.log(h[ok])))
-                if cost < best_cost:
-                    best, best_cost = float(candidate), cost
-            if best is not None:
-                best_pitch = best
-        suggested = self._height_for(ankles, shoulders, height, best_pitch, hfov)
+        suggested = self._height_for(
+            ankles, shoulders, height, pitch if best_pitch is None else best_pitch, hfov
+        )
 
         if person is not None:
             reasons.insert(0, f"按当前参数推算行人身高约 {person:.1f} m")
-        suspect = speed_p95 is not None and speed_p95 > MAX_WALK_MPS
-        if suggested is not None and abs(math.log(suggested / height)) > math.log(HEIGHT_TOLERANCE):
-            suspect = True
-            reasons.append(f"安装高度可能应为约 {suggested:.1f} m（当前 {height:g} m）")
-        if spread >= MIN_SPREAD and abs(best_pitch - pitch) > PITCH_TOLERANCE_DEG:
-            suspect = True
-            reasons.append(f"俯角可能应为约 {best_pitch:.0f}°（当前 {pitch:g}°）")
-        if spread < MIN_SPREAD:
-            reasons.append("行人在画面中远近分布不足，暂不能判断俯角")
+        off, advice = _advice(height, pitch, suggested, best_pitch)
         return PoseCheck(
-            "suspect" if suspect else "ok",
+            "suspect" if fast or off else "ok",
             n,
-            None if person is None else round(person, 2),
-            None if speed_p95 is None else round(speed_p95, 2),
-            None if suggested is None else round(suggested, 2),
-            round(best_pitch, 1) if spread >= MIN_SPREAD else None,
-            reasons,
+            _round(person, 2),
+            _round(speed_p95, 2),
+            _round(suggested, 2),
+            _round(best_pitch, 1),
+            reasons + advice,
         )
+
+    def _person_height(
+        self, ankles: np.ndarray, shoulders: np.ndarray, height: float, pitch: float, hfov: float
+    ) -> float | None:
+        """按给定参数推算的站立身高中位；没有一个样本的脚踝视线落地时为 None。"""
+        h = shoulder_heights(ankles, shoulders, height, pitch, hfov, self._size)
+        valid = h[np.isfinite(h) & (h > 0)]
+        if not len(valid):
+            return None
+        return float(np.median(valid)) / SHOULDER_ABOVE_ANKLE_M * STANDARD_HEIGHT_M
+
+    def _best_pitch(
+        self, ankles: np.ndarray, shoulders: np.ndarray, height: float, pitch: float, hfov: float
+    ) -> float:
+        """俯角网格上各样本推算肩高（对数）方差最小者；没有一个俯角能让足够多的样本落地时为当前俯角。"""
+        best, best_cost = pitch, math.inf
+        for candidate in PITCH_GRID:
+            h = shoulder_heights(ankles, shoulders, height, float(candidate), hfov, self._size)
+            ok = np.isfinite(h) & (h > 0)
+            if ok.mean() < MIN_VALID:
+                continue
+            cost = float(np.var(np.log(h[ok])))
+            if cost < best_cost:
+                best, best_cost = float(candidate), cost
+        return best
 
     def _height_for(
         self, ankles: np.ndarray, shoulders: np.ndarray, height: float, pitch: float, hfov: float
