@@ -53,13 +53,13 @@ def detect() -> str | None:
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", QUERY],
             capture_output=True,
-            text=True,
             timeout=TIMEOUT_S,
             check=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return pick(result.stdout)
+    # 不解码 stderr：中文 Windows 上它是 GBK；stdout 中所需的"开销 地址"只含 ASCII，其余字符替换后由 pick 跳过
+    return pick(result.stdout.decode("ascii", "replace"))
 
 
 def main() -> None:
