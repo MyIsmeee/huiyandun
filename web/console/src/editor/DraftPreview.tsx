@@ -6,7 +6,7 @@ import { ACCENT } from "../scene/targets";
 import { useDraft } from "./draft";
 import { extent } from "./placement";
 
-/** 未接受的初稿（设计 150 §7）：半透明模型 + 强调色虚线占地轮廓，不投射阴影、不接收点选 */
+/** 未接受的初稿（V-SC11）：半透明模型 + 强调色虚线占地轮廓，不投射阴影、不接收点选 */
 export function DraftPreview() {
   const pending = useDraft((s) => s.pending);
   const catalog = useCatalog();

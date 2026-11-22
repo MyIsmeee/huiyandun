@@ -62,7 +62,7 @@ export function detectingByCamera(targets: Record<string, Target>): Record<strin
   return counts;
 }
 
-/** 人员与车辆默认中性深灰哑光，在浅色场景上清晰，带中性细描边（§5.1 L4、D-111、设计 150 §4） */
+/** 人员与车辆默认中性深灰哑光，在浅色场景上清晰，带中性细描边（§5.1 L4、D-111、ui.md §5.2） */
 export const FILL = "#374151";
 /** 点缀色（D-111）：选中括框与轨迹取强调色 --primary（D-121），不表达任何状态 */
 export const ACCENT = "#2563EB";

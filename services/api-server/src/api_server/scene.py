@@ -125,7 +125,7 @@ async def touch(conn: AsyncConnection, area_id: str, now: datetime) -> None:
 
 async def ensure_default_area(conn: AsyncConnection, width_m: float, height_m: float) -> None:
     """首次启动（含从无区域的版本升级）：按 site.yaml 的尺寸建默认区域，现有摄像头放入其中、坐标不变
-    （设计 150 §5）。标志与区域在同一事务内写入，失败时一并回滚；之后管理员删光区域也不再重建。"""
+    （architecture.md §12）。标志与区域在同一事务内写入，失败时一并回滚；之后管理员删光区域也不再重建。"""
     claim = (
         update(scene_bootstrap)
         .where(scene_bootstrap.c.default_area_done.is_(False))

@@ -9,7 +9,7 @@ const desk = (x: number) => ({ asset: "desk", x, y: 1.5, rot: 0 as const, len: n
 const count = () => useDraft.getState().items.length;
 const history = () => useDraft.temporal.getState();
 
-describe("区域草稿的撤销与重做（设计 150 E-6）", () => {
+describe("区域草稿的撤销与重做（V-SC10）", () => {
   beforeEach(() => loadDraft(AREA, []));
 
   it("每次放置为一步，可撤销、重做；选模型不算一步", () => {
@@ -96,7 +96,7 @@ describe("区域草稿的撤销与重做（设计 150 E-6）", () => {
   });
 });
 
-describe("区域内摄像头的放置点（设计 150 E-5）", () => {
+describe("区域内摄像头的放置点（V-SC9）", () => {
   it("取登记表中 area_id 为该区域的摄像头，朝向归一到 [0, 360)", () => {
     const pose = { x: 3, y: 4, height_m: 3, yaw_deg: -90, pitch_deg: -30, hfov_deg: 90, range_m: 6 };
     const device = (id: string, area_id: string | null) => ({ id, camera: { area_id, pose } }) as never;
@@ -105,7 +105,7 @@ describe("区域内摄像头的放置点（设计 150 E-5）", () => {
   });
 });
 
-describe("从画面生成的初稿（设计 150 §7）", () => {
+describe("从画面生成的初稿（V-SC11）", () => {
   beforeEach(() => loadDraft(AREA, []));
 
   it("预览不算修改、不进撤销历史、不随保存提交", () => {
@@ -185,7 +185,7 @@ describe("无变化的操作不记入撤销历史", () => {
   });
 });
 
-describe("草稿跟随区域（设计 150 E-7）", () => {
+describe("草稿跟随区域（V-SC10）", () => {
   const cam = { id: "cam-01", x: 2, y: 2, yaw_deg: 45 };
   beforeEach(() => loadDraft(AREA, []));
 

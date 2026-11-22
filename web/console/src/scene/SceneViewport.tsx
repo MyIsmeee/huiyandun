@@ -110,7 +110,7 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
   const hasBackdrop = measured?.some((f) => f.backdrop) ?? false;
   const mode = useSceneMode((s) => s.mode);
   const photo = hasBackdrop && mode === "photo";
-  // 总览按区域尺寸取景（设计 150 §9）；目标与告警不影响取景
+  // 总览按区域尺寸取景（V-I1）；目标与告警不影响取景
   const [width, depth] = [scene?.width_m ?? NO_AREA.width_m, scene?.depth_m ?? NO_AREA.depth_m];
   const area = useMemo(() => bounds({ width_m: width, depth_m: depth }), [width, depth]);
   const animate = useAnimate();
@@ -245,7 +245,7 @@ export function SceneViewport({ site, scene, onBuild }: { site: Site; scene: Are
         </p>
       )}
       {(state === "ready" || state === "2d") && !items.length && !measured?.length && (
-        // 不自动补全场景（设计 150 §4）：只显示摄像头与视场，并说明尚未搭建。一行小字提示，不做成醒目的大卡片：
+        // 不自动补全场景（ui.md §5.2）：只显示摄像头与视场，并说明尚未搭建。一行小字提示，不做成醒目的大卡片：
         // 区域边线已标出范围，这里只提醒并给 admin 入口（产品负责人 2026-11-15 要求收敛）
         <p className="floating-card pointer-events-none absolute top-36 left-4 flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground">
           {scene ? "该区域还没有搭建场景" : "还没有场景区域"}

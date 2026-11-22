@@ -5,7 +5,7 @@ import { BEAM, BODY, CONE, CONE_LAYERS, POLE_COLOR, STATUS } from "../../src/sce
 import { DAY, NIGHT } from "../../src/scene/palette";
 import { ACCENT, coneOpacity, FILL, MARK_OPACITY } from "../../src/scene/targets";
 
-// 配色校验（V-S5、V-G2、设计 150 §4）：令牌直接取自 theme.css，场景材质取自代码
+// 配色校验（V-S5、V-G2、ui.md §3、§5.2）：令牌直接取自 theme.css，场景材质取自代码
 
 const token = (name: string): string => {
   const hex = new RegExp(`--${name}: (#[0-9a-f]{6});`, "i").exec(css)?.[1];

@@ -20,7 +20,7 @@ function rotateSelected(catalog: ReturnType<typeof useCatalog>, size: [number, n
 }
 
 /**
- * 选中物体的工具条（设计 150 E-4）：名称、旋转、删除；R 旋转 90°，Delete 删除，Esc 取消选中。
+ * 选中物体的工具条（V-SC8）：名称、旋转、删除；R 旋转 90°，Delete 删除，Esc 取消选中。
  * 焦点在输入框时不响应快捷键
  */
 export function SelectionBar({ width, depth }: { width: number; depth: number }) {

@@ -153,7 +153,7 @@ export function AlertListView(props: {
   lastFrameAt: number | null;
   /** 本次登录后尚未收到推送：连上后先补推近 24 小时的记录，此前为空不等于没有告警 */
   loading?: boolean;
-  /** 态势页可把告警卡收起为胶囊（设计 150 §3）；未传入时不显示收起按钮 */
+  /** 态势页可把告警卡收起为胶囊（ui.md §4）；未传入时不显示收起按钮 */
   onCollapse?: () => void;
 }) {
   const { alerts, incidents, executions, stale, lastFrameAt, loading = false, onCollapse } = props;

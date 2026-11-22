@@ -26,7 +26,7 @@ export function KpiTile(props: {
   since?: string;
   /** 数值与变化量的显示格式，默认原样 */
   format?: (value: number) => string;
-  /** 态势页的浮动指标卡（设计 150 §9A，借鉴 shadcn dashboard-01 的 section-cards）：小标签 + 趋势徽标、大数字、一行脚注 */
+  /** 态势页的浮动指标卡（ui.md §4，借鉴 shadcn dashboard-01 的 section-cards）：小标签 + 趋势徽标、大数字、一行脚注 */
   card?: boolean;
 }) {
   const { label, unit, data, since = "较 1 小时前", format = plain, card = false } = props;

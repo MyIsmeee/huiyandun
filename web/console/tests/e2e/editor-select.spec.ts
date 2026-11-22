@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { canvas, DESK, editor, openEditor, pointAt, savedItems } from "./editor-helpers";
 import { expectToast, freezeClock } from "./helpers";
 
-// 场景页选中、移动、旋转、删除（设计 150 E-4）
+// 场景页选中、移动、旋转、删除（V-SC8）
 test.beforeEach(({ page }) => freezeClock(page));
 
 /** 办公桌桌面的高度：按在桌面上才点中办公桌，地面点的射线会从桌下穿过 */

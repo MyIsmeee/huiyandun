@@ -3,7 +3,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { canvas, editor, editorReady, LOBBY, library, openEditor, pickDesk, pointAt, savedItems, settle } from "./editor-helpers";
 import { AREA, camera, expectToast, freezeClock, SITE } from "./helpers";
 
-// 从画面生成初稿（设计 150 §7，FR-909）：区域内摄像头的识别帧转换为半透明草稿，接受后随整体保存提交
+// 从画面生成初稿（V-SC11，FR-909）：区域内摄像头的识别帧转换为半透明草稿，接受后随整体保存提交
 test.beforeEach(({ page }) => freezeClock(page));
 
 const FRAMES = `/api/scene/areas/${AREA.id}/frames`;

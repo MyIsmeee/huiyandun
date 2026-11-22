@@ -8,7 +8,7 @@ type Point = readonly [number, number];
 export const OUTSIDE_M = 3;
 
 /**
- * 攻击者只有 IP、没有位置（D-076）：取离设备最近的当前区域边缘（设计 150 §9），在其外侧 OUTSIDE_M 处放"外部攻击源"。
+ * 攻击者只有 IP、没有位置（D-076）：取离设备最近的当前区域边缘（ui.md §5.2），在其外侧 OUTSIDE_M 处放"外部攻击源"。
  */
 export function attackerAnchor([x, y]: Point, area: Area): Point {
   const [left, top] = [area.x0, area.y0];

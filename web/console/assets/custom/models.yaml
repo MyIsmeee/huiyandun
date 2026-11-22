@@ -1,4 +1,4 @@
-# 自制场景模型登记（设计 150 §8）：团队自制（如 Blender 导出）的模型源文件放在本目录，
+# 自制场景模型登记（architecture.md §9）：团队自制（如 Blender 导出）的模型源文件放在本目录，
 # 由 uv run python tools/dev/assets.py --custom 合并为 web/console/public/models/scene-custom.glb 并写入资产目录。
 # 只收团队自制模型；第三方模型须挑选进 tools/dev/assets.py 的 SELECTION 并登记 deploy/third-party.yaml（C-RU-01）。
 # 格式与导出要求见 README.md。id 写入场景数据（SceneItem.asset），只增不改

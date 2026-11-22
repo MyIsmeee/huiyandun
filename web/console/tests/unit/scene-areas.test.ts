@@ -6,7 +6,7 @@ const device = (id: string, state: Device["state"], area_id: string | null) =>
   ({ id, state, camera: { area_id } }) as unknown as Device;
 const area = (id: string) => ({ id, name: id, width_m: 10, depth_m: 10, items: [], updated_at: "2026-11-09T00:00:00Z" });
 
-describe("区域告警计数（设计 150 §3）", () => {
+describe("区域告警计数（ui.md §4）", () => {
   it("按区域数告警中的设备，物理与网络分开；both 两边各计一次", () => {
     const alerts = areaAlerts([
       device("cam-01", "physical_alert", "area-01"),

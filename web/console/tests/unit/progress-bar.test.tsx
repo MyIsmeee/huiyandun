@@ -11,7 +11,7 @@ const device = (id: string, state: Device["state"]) => ({ id, state }) as unknow
 // incidents 新的在前
 const INCIDENTS = [incident("inc-3", "cam-03"), incident("inc-2", "cam-02"), incident("inc-1", "cam-01")];
 
-describe("进度条显示的关联事件（设计 150 §3）", () => {
+describe("进度条显示的关联事件（ui.md §4）", () => {
   it("选中设备时为该设备最近一个关联事件，不论是否仍在进行", () => {
     expect(progressIncident(INCIDENTS, "cam-01", [device("cam-01", "normal")])?.id).toBe("inc-1");
   });

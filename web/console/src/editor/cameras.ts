@@ -7,7 +7,7 @@ export type CameraPlacement = components["schemas"]["CameraPlacement"];
 /** 朝向归一到 [0, 360)：保存接口只接受这个范围 */
 export const normalizedYaw = (deg: number) => ((deg % 360) + 360) % 360;
 
-/** 登记表中位于该区域的摄像头的位置与朝向（设计 150 E-5） */
+/** 登记表中位于该区域的摄像头的位置与朝向（V-SC9） */
 export function areaPlacements(devices: Device[], areaId: string): CameraPlacement[] {
   return devices.flatMap(({ id, camera }) =>
     camera?.area_id === areaId ? [{ id, x: camera.pose.x, y: camera.pose.y, yaw_deg: normalizedYaw(camera.pose.yaw_deg) }] : [],

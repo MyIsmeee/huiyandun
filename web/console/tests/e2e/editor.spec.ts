@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { AREA, camera, expectNoOverflow, expectToast, freezeClock, openAdmin, presetMotion, sceneSettled, signedIn, SITE, withoutWebGL2 } from "./helpers";
 
-// 场景页（设计 150 §6，FR-908）：区域的选择、新建、删除与 3D 编辑视图
+// 场景页（ui.md §7.3，FR-908）：区域的选择、新建、删除与 3D 编辑视图
 test.beforeEach(({ page }) => freezeClock(page));
 
 const EDITOR_CHUNK = "**/assets/EditorCanvas-*.js";

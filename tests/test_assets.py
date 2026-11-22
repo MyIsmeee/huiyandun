@@ -1,4 +1,4 @@
-"""前端场景资产（REUSE-13，设计 150 §8）：web/console/public/models/ 下的模型逐一登记于
+"""前端场景资产（REUSE-13，architecture.md §9）：web/console/public/models/ 下的模型逐一登记于
 deploy/third-party.yaml，资产目录 catalog.json 与模型文件一致。"""
 
 import hashlib
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODELS = ROOT / "web/console/public/models"
 CATALOG = json.loads((MODELS / "catalog.json").read_text(encoding="utf-8"))
 REGISTRY = yaml.safe_load((ROOT / "deploy/third-party.yaml").read_text(encoding="utf-8"))
-MAX_BYTES = 8 * 1024 * 1024  # 资产随代码提交，总量 ≤ 8 MB（设计 150 §8）
+MAX_BYTES = 8 * 1024 * 1024  # 资产随代码提交，总量 ≤ 8 MB（architecture.md §9）
 ASSET_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")  # 契约 SceneItem.asset
 # 团队自制模型（web/console/assets/custom/）合并为单独的文件，按其清单校验，不是第三方资产、不登记
 CUSTOM_DIR = ROOT / "web/console/assets/custom"
