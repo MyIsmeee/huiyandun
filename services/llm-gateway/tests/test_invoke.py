@@ -91,6 +91,7 @@ class Providers:
     def __init__(self, addresses: dict[str, str | None] | None = None, **handlers: Handler) -> None:
         self.handlers = handlers
         self.addresses = addresses or {}
+        self.lookups: list[str] = []
         self.seen: dict[str, list[dict[str, Any]]] = {k: [] for k in handlers}
         self.chain = Chain(
             TASKS,
@@ -101,6 +102,7 @@ class Providers:
         )
 
     async def resolve(self, host: str) -> list[str]:
+        self.lookups.append(host)
         address = self.addresses.get(host.removesuffix(".lan"), "192.168.1.50")
         if address is None:
             raise OSError("录制的解析失败")
@@ -250,6 +252,14 @@ def test_block_public_never_calls_addresses_outside_site() -> None:
     reasons = [a.reason for a in result.attempts[:3]]
     assert all(r.startswith("已开启全局禁止公网") for r in reasons)
     assert "203.0.113.7" in reasons[1] and "解析不出" in reasons[2]
+
+
+def test_each_internal_provider_resolved_once() -> None:
+    """出域复核与脱敏判定共用一次解析；标为公网的不解析。"""
+    for block_public in (True, False):
+        p = Providers(cloud=lambda _: httpx2.Response(500), local=ok(REPORT))
+        p.invoke(CLOUD, LOCAL, block_public=block_public)
+        assert [h.removesuffix(".lan") for h in p.lookups] == ["local"]
 
 
 def test_block_public_with_literal_addresses() -> None:

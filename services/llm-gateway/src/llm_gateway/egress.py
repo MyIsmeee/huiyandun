@@ -74,17 +74,20 @@ def _literal(host: str) -> bool:
     return True
 
 
-async def blocked_reason(
+async def assess(
     base_url: str, network: str, block_public: bool, resolver: Resolver = resolve
-) -> str | None:
-    """全局禁止公网开启时不得调用这一家的原因；可以调用为 None。"""
-    if not block_public:
-        return None
+) -> tuple[str | None, bool]:
+    """（全局禁止公网开启时不得调用这一家的原因，可以调用为 None；是否按公网脱敏）。标为内网时解析一次主机名。
+
+    脱敏以地址实际指向为准（C-LLM-03）：标为内网却解析出公网地址、或解析不出无法确认在内网的，同样按公网处理。
+    """
     if network == "public":
-        return BLOCKED
+        return (BLOCKED if block_public else None), True
     outside = await public_addresses(base_url, resolver)
+    if not block_public:
+        return None, outside != []
     if outside is None:
-        return f"{BLOCKED}：无法确认该地址在内网（主机名解析不出）"
+        return f"{BLOCKED}：无法确认该地址在内网（主机名解析不出）", True
     if outside:
-        return f"{BLOCKED}：标为内网，但实际指向公网地址 {outside[0]}"
-    return None
+        return f"{BLOCKED}：标为内网，但实际指向公网地址 {outside[0]}", True
+    return None, False

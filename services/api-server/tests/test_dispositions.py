@@ -13,6 +13,8 @@ from test_containment import audited, login
 from api_server import evidence
 from api_server.app import create_app
 from api_server.config import ApiConfig
+from api_server.dispositions import Dispositions
+from py_contracts.api import AlertDisposition
 from py_contracts.events.hyd_vision_behavior_v1_schema import VisionBehaviorV1
 
 
@@ -144,3 +146,22 @@ def test_alert_clip_is_fetched_through_evidence_service(client: TestClient, pass
     assert (r.status_code, r.headers["content-type"], r.content) == (200, "video/mp4", b"mp4")
     assert asked[0].url.path == f"/internal/clips/{state.site.devices[0].id}"
     assert client.get(f"/api/alerts/{uuid.uuid4()}/clip").status_code == 404
+
+
+def test_dispositions_past_window_are_dropped() -> None:
+    """超出 24 小时补推窗口的处置记录不再留在内存（只增不减会随人工处置无限增长）。"""
+    store = Dispositions()
+    old, new = uuid.uuid4(), uuid.uuid4()
+    for event_id, age in ((old, timedelta(hours=25)), (new, timedelta(0))):
+        store.add(
+            AlertDisposition.model_validate(
+                {
+                    "event_id": event_id,
+                    "action": "resolved",
+                    "note": None,
+                    "actor": "operator",
+                    "ts": datetime.now(UTC) - age,
+                }
+            )
+        )
+    assert store.get(str(old)) is None and store.get(str(new)) is not None
