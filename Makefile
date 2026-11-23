@@ -221,11 +221,12 @@ demo-story: demo-reset
 	@echo "约 15 s 后识别出画面重放，生成跨域事件 HYD-X-0001；结束后执行 make demo-reset"
 
 # 演示场景预设：现场摄像头演示前打开，不展示、不关联遮挡挪位冻结重放、疑似跌倒、长时间静止与未登记目标的网络告警；
-# 重建 api-server 与 correlator（约 10 s，控制台自动重连）；换网络后本机地址变了时，用到它的 web-console、go2rtc、
-# playbook-executor 也换新地址（地址未变时 compose 不重建它们），其余容器不动。演示结束后 make demo-normal
+# 只重建 api-server 与 correlator（约 10 s，控制台自动重连），其余容器不动。演示结束后 make demo-normal。
+# 不重建 playbook-executor 等：不带 LINKAGE=1 时会按无联动的配置重建它，静默关掉旁路部署（FR-1001）；
+# 换网络后先 make demo-up（ops.md §5）
 demo-quiet: HYD_DEMO_QUIET = true
 demo-quiet demo-normal:
-	$(COMPOSE) up -d --wait --no-build --no-deps api-server correlator web-console go2rtc playbook-executor
+	$(COMPOSE) up -d --wait --no-build --no-deps api-server correlator
 	@echo "演示静默：$$($(COMPOSE) exec -T api-server printenv HYD_DEMO_QUIET)"
 
 # 录屏用的攻击演示：复位与预热后等待回车，再分步骤展示锁定目标、弱口令爆破（被封禁后连接被切断）、画面重放。
