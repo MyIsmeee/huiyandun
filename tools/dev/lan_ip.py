@@ -26,9 +26,11 @@ TIMEOUT_S = 20
 
 
 def configured(env: str) -> str | None:
-    """.env 中显式写的 HYD_LAN_IP。"""
-    match = re.search(r"^\s*HYD_LAN_IP\s*=\s*(\S+)\s*$", env, re.MULTILINE)
-    return match.group(1) if match else None
+    """.env 中显式写的 HYD_LAN_IP；与 docker compose 一致，去掉引号，空白后的 # 起为行尾注释。"""
+    match = re.search(
+        r"""^\s*HYD_LAN_IP\s*=\s*(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+#.*)?\s*$""", env, re.MULTILINE
+    )
+    return next(v for v in match.groups() if v) if match else None
 
 
 def pick(lines: str) -> str | None:
