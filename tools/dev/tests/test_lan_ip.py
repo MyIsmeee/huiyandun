@@ -38,6 +38,18 @@ def test_env_value_takes_precedence() -> None:
     assert lan_ip.configured("# HYD_LAN_IP=10.1.2.3\n") is None
 
 
+def test_env_value_with_trailing_comment() -> None:
+    """行尾注释不能让显式值被识别不出、静默换成探测结果（D-143）。"""
+    assert lan_ip.configured("HYD_LAN_IP=10.1.2.3  # 现场固定\n") == "10.1.2.3"
+    assert lan_ip.configured("HYD_LAN_IP=10.1.2.3 #\n") == "10.1.2.3"
+
+
+def test_env_value_quoted() -> None:
+    """与 docker compose 一致去掉引号，否则控制台地址等处会带上引号。"""
+    assert lan_ip.configured('HYD_LAN_IP="10.1.2.3"  # 现场固定\n') == "10.1.2.3"
+    assert lan_ip.configured("HYD_LAN_IP='10.1.2.3'\n") == "10.1.2.3"
+
+
 GBK_ERROR = "找不到网卡".encode("gbk")
 
 

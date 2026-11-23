@@ -71,7 +71,7 @@ class ExecutorConfig(ServiceConfig):
     )
     lan_ip: IPv4Address | IPv6Address | None = Field(
         None,
-        description="边缘主机在局域网中的地址（deploy/compose/.env 的 HYD_LAN_IP）：攻击源是它时不处置，避免封掉本机",
+        description="边缘主机在局域网中的地址（HYD_LAN_IP，make demo-up 自动探测，D-143）：攻击源是它时不处置，避免封掉本机",
     )
     heartbeat_file: Path = Field(
         Path("/tmp/hyd-playbook-alive"), description="事件循环每秒更新其修改时间，供健康检查判断"
