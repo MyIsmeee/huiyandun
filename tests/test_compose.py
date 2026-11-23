@@ -3,6 +3,7 @@
 import ipaddress
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -153,14 +154,42 @@ def test_lan_ip_defaults_to_loopback(name: str) -> None:
     assert SERVICES[name]["environment"]["HYD_LAN_IP"] == "${HYD_LAN_IP:-127.0.0.1}"
 
 
+def make_dry_run(target: str, *args: str) -> list[str]:
+    """make -n 打印的命令；其中的 $(shell) 仍会执行，HYD_LAN_IP 被探测时会出现在命令中。"""
+    result = subprocess.run(
+        ["make", "-n", "--no-print-directory", "-C", str(ROOT), target, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return result.stdout.splitlines()
+
+
+@pytest.mark.parametrize("target", ["demo-down", "demo-reset"])
+def test_lan_ip_not_probed_without_creating_containers(target: str) -> None:
+    """#321：探测约 4 s，exec、down 等不建容器的目标用不到本机地址，不探测。"""
+    assert not [line for line in make_dry_run(target) if "HYD_LAN_IP" in line]
+
+
+@pytest.mark.parametrize("target", ["demo-up", "demo-quiet", "demo-normal"])
+def test_lan_ip_passed_when_creating_containers(target: str) -> None:
+    """#321：换网络后直接 demo-quiet，用到本机地址的服务都换新地址；地址未变时 compose 不重建它们。"""
+    up = [line for line in make_dry_run(target, "HYD_LAN_IP=10.9.9.9") if " up -d " in line]
+    assert len(up) == 1
+    assert "HYD_LAN_IP=10.9.9.9 " in up[0]
+    if target != "demo-up":
+        users = {n for n, s in SERVICES.items() if "HYD_LAN_IP" in s.get("environment", {})}
+        assert users | {"api-server", "correlator"} <= set(up[0].split())
+
+
 def test_demo_reset_off_unless_makefile() -> None:
     """演示复位会清空去重期：直接用 docker compose 部署时默认关闭，只有经 Makefile 启动的演示栈打开。"""
     env = SERVICES["correlator"]["environment"]
     assert env["HYD_DEMO_RESET"] == "${HYD_DEMO_RESET:-false}"
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert (
-        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) HYD_LAN_IP=$(HYD_LAN_IP)"
-        in makefile
+        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) $(LAN_ENV)" in makefile
     )
 
 

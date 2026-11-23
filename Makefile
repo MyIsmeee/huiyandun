@@ -42,9 +42,12 @@ HYD_DEMO_QUIET = false
 # HYD_DEMO_*只交给 docker compose，不导出给其他命令：服务配置不接受未声明的 HYD_* 变量，导出会让 make test 中
 # 读取配置的用例失败。HYD_DEMO_RESET：演示栈的 correlator 响应 make demo-reset（compose.yaml 中默认关闭，
 # 直接用 docker compose 部署时不生效）
-# HYD_LAN_IP：本机局域网地址（D-143、ops.md §5），首次用到时探测一次；.env 中显式写的优先，同样只交给 docker compose
+# HYD_LAN_IP：本机局域网地址（D-143、ops.md §5），首次用到时探测一次；.env 中显式写的优先，同样只交给 docker compose。
+# 探测约 4 s，只在建容器的目标交给 compose（LAN_ENV）；exec、down 等用不到
 HYD_LAN_IP = $(eval HYD_LAN_IP := $$(shell uv run python tools/dev/lan_ip.py))$(HYD_LAN_IP)
-COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) HYD_LAN_IP=$(HYD_LAN_IP) \
+LAN_ENV =
+demo-up demo-quiet demo-normal: LAN_ENV = HYD_LAN_IP=$(HYD_LAN_IP)
+COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) $(LAN_ENV) \
 	docker compose -f deploy/compose/compose.yaml \
 	$(if $(filter 0,$(GPU)),,-f deploy/compose/compose.gpu.yaml) \
 	$(if $(filter 1,$(LINKAGE)),-f deploy/compose/compose.linkage.yaml --profile linkage) \
@@ -218,10 +221,11 @@ demo-story: demo-reset
 	@echo "约 15 s 后识别出画面重放，生成跨域事件 HYD-X-0001；结束后执行 make demo-reset"
 
 # 演示场景预设：现场摄像头演示前打开，不展示、不关联遮挡挪位冻结重放、疑似跌倒、长时间静止与未登记目标的网络告警；
-# 只重建 api-server 与 correlator（约 10 s，控制台自动重连），其余容器不动。演示结束后 make demo-normal
+# 重建 api-server 与 correlator（约 10 s，控制台自动重连）；换网络后本机地址变了时，用到它的 web-console、go2rtc、
+# playbook-executor 也换新地址（地址未变时 compose 不重建它们），其余容器不动。演示结束后 make demo-normal
 demo-quiet: HYD_DEMO_QUIET = true
 demo-quiet demo-normal:
-	$(COMPOSE) up -d --wait --no-build --no-deps api-server correlator
+	$(COMPOSE) up -d --wait --no-build --no-deps api-server correlator web-console go2rtc playbook-executor
 	@echo "演示静默：$$($(COMPOSE) exec -T api-server printenv HYD_DEMO_QUIET)"
 
 # 录屏用的攻击演示：复位与预热后等待回车，再分步骤展示锁定目标、弱口令爆破（被封禁后连接被切断）、画面重放。
