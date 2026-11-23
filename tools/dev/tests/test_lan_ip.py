@@ -50,6 +50,12 @@ def test_env_value_quoted() -> None:
     assert lan_ip.configured("HYD_LAN_IP='10.1.2.3'\n") == "10.1.2.3"
 
 
+def test_env_value_empty_falls_back_to_detection() -> None:
+    """值为空时回退到探测，不能把下一行当成地址（compose 同样视为空值）。"""
+    assert lan_ip.configured("HYD_LAN_IP=\nHYD_DEMO_QUIET=true\n") is None
+    assert lan_ip.configured("HYD_LAN_IP=  # 待填\nFOO=1\n") is None
+
+
 GBK_ERROR = "找不到网卡".encode("gbk")
 
 
