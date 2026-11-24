@@ -24,8 +24,8 @@ function dayStart(): string {
   return day.toISOString();
 }
 
-/** 每 5 s 拉取一次关键指标，上一次返回后再计时，请求不会叠加；failed 为最近一次拉取失败（态势大屏同样使用） */
-export function useKpis(): { kpis: Kpis | null; failed: boolean } {
+/** 每 5 s 拉取一次关键指标，上一次返回后再计时，请求不会叠加；failed 为最近一次拉取失败 */
+function useKpis(): { kpis: Kpis | null; failed: boolean } {
   const [kpis, setKpis] = useState<Kpis | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {

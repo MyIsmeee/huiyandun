@@ -110,7 +110,7 @@ export function CameraListView(props: {
           添加
         </button>
       </header>
-      <p className="text-subtle-foreground">保存后立即生效：大屏出现视场光束，视觉引擎开始识别，网络告警按设备 IP 关联。</p>
+      <p className="text-subtle-foreground">保存后立即生效：态势页出现视场光束，视觉引擎开始识别，网络告警按设备 IP 关联。</p>
       {notice && (
         <p role="alert" className="flex items-center gap-1">
           <CircleAlert aria-hidden className="size-4" />

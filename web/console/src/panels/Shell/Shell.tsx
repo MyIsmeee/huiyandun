@@ -14,7 +14,6 @@ import { type AdminPage, go, isMainPage, type Page, useNav } from "../../store/n
 import { select, useSelection } from "../../store/selection";
 import { canManageProviders, useSession } from "../../store/session";
 import { AdminFrame } from "../Admin/AdminFrame";
-import { BigScreen } from "../BigScreen/BigScreen";
 import { Alarm } from "../Alarm/Alarm";
 import { CameraPage } from "../CameraList/CameraList";
 import { InvestigationSheet, InvestigationWatcher } from "../InvestigationSheet/InvestigationSheet";
@@ -124,8 +123,6 @@ export function Shell(props: { site: Site; onLogout: () => Promise<void>; onReje
 
       {main === "wall" ? (
         <WallPage site={site} admin={admin} stale={offline} lastFrameAt={lastFrameAt} />
-      ) : main === "screen" ? (
-        <BigScreen site={site} stale={offline} lastFrameAt={lastFrameAt} />
       ) : (
         <Overview site={site} stale={offline} lastFrameAt={lastFrameAt} onBuild={admin ? () => go("scene") : undefined} />
       )}
@@ -199,7 +196,7 @@ function RelationButton({ site }: { site: Site }) {
 const isAdminPage = (page: Page): page is AdminPage => !isMainPage(page);
 
 /**
- * 顶栏分段导航（D-106、ui.md §4）：监控墙 · 态势 · 大屏 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
+ * 顶栏分段导航（D-106、ui.md §4）：监控墙 · 态势 · 管理。"管理"只对 admin 渲染（C-FE-07），进入摄像头页，
  * 摄像头、场景、模型供应商在管理页左侧栏切换（产品负责人 2026-11-09 选定，导航不重复）
  */
 function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => void }) {
@@ -207,7 +204,6 @@ function NavBar(props: { page: Page; admin: boolean; onChange: (page: Page) => v
   const items: { page: Page; label: string; current: boolean }[] = [
     { page: "wall", label: "监控墙", current: page === "wall" },
     { page: "overview", label: "态势", current: page === "overview" },
-    { page: "screen", label: "大屏", current: page === "screen" },
   ];
   if (admin) items.push({ page: "cameras", label: "管理", current: isAdminPage(page) });
   return (

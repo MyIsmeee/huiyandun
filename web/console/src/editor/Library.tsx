@@ -34,7 +34,7 @@ export function Library({ devices }: { devices: Device[] }) {
 
   return (
     <aside aria-label="模型库" className="flex w-64 min-h-0 flex-col gap-3 border-r bg-card p-3">
-      {/* 摄像头放在最上面：没放入区域的摄像头在大屏上不出现，放置入口不能藏在模型列表底下 */}
+      {/* 摄像头放在最上面：没放入区域的摄像头在态势页上不出现，放置入口不能藏在模型列表底下 */}
       <Cameras devices={devices} />
       <label className="relative">
         <Search aria-hidden className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-subtle-foreground" />
@@ -123,7 +123,7 @@ function Cameras({ devices }: { devices: Device[] }) {
           <li key={d.id} className="flex items-center gap-2 rounded-md bg-card px-2 py-1.5">
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate">{d.name}</span>
-              <span className="text-xs text-subtle-foreground">未放置 · 大屏不显示</span>
+              <span className="text-xs text-subtle-foreground">未放置 · 态势不显示</span>
             </span>
             <Button
               variant={placing === d.id ? "default" : "outline"}
