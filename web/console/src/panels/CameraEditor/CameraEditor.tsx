@@ -381,7 +381,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
         <fieldset className="flex flex-col gap-2 border-t border-border pt-3">
           <legend className="pr-2 font-medium">安装参数</legend>
           <p className="text-xs text-subtle-foreground">
-            朝向自平面 +x 转向 +y 计（俯视场景时为顺时针）；俯角向下为负。保存后大屏按此画出视场锥体，并估算人员位置。
+            朝向自平面 +x 转向 +y 计（俯视场景时为顺时针）；俯角向下为负。保存后态势页按此画出视场锥体，并估算人员位置。
             {calibrated && "已标定：位置按标定换算，安装参数只用于画视场；摄像头转动过请重新标定。"}
           </p>
           <div className="grid grid-cols-4 gap-x-3 gap-y-2">
