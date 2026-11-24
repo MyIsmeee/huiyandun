@@ -3,6 +3,7 @@
 import ipaddress
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -153,14 +154,53 @@ def test_lan_ip_defaults_to_loopback(name: str) -> None:
     assert SERVICES[name]["environment"]["HYD_LAN_IP"] == "${HYD_LAN_IP:-127.0.0.1}"
 
 
+def make_dry_run(target: str, *args: str) -> list[str]:
+    """make -n 打印的命令；其中的 $(shell) 仍会执行，HYD_LAN_IP 被探测时会出现在命令中。
+
+    依赖宿主有 make。Makefile 中目前只有探测地址一处 $(shell)，需要建容器的用例传 HYD_LAN_IP 绕过探测；
+    以后新增 $(shell) 时，这组用例会一并执行它，注意不要引入耗时或依赖本机环境的命令。
+    """
+    result = subprocess.run(
+        ["make", "-n", "--no-print-directory", "-C", str(ROOT), target, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return result.stdout.splitlines()
+
+
+@pytest.mark.parametrize("target", ["demo-down", "demo-reset"])
+def test_lan_ip_not_probed_without_creating_containers(target: str) -> None:
+    """#323：探测约 4 s，exec、down 等不建容器的目标用不到本机地址，不探测。"""
+    assert not [line for line in make_dry_run(target) if "HYD_LAN_IP" in line]
+
+
+@pytest.mark.parametrize("target", ["demo-up", "demo-quiet", "demo-normal"])
+def test_lan_ip_passed_when_creating_containers(target: str) -> None:
+    """#323：建容器的目标把本机地址交给 compose。"""
+    up = [line for line in make_dry_run(target, "HYD_LAN_IP=10.9.9.9") if " up -d " in line]
+    assert len(up) == 1
+    assert "HYD_LAN_IP=10.9.9.9 " in up[0]
+
+
+@pytest.mark.parametrize("linkage", ["0", "1"])
+@pytest.mark.parametrize("target", ["demo-quiet", "demo-normal"])
+def test_demo_quiet_rebuilds_only_api_server_and_correlator(target: str, linkage: str) -> None:
+    """#323：不带 LINKAGE=1 时重建 playbook-executor 会按无联动的配置重建它，静默关掉旁路部署（FR-1001）。"""
+    lines = make_dry_run(target, f"LINKAGE={linkage}", "HYD_LAN_IP=10.9.9.9")
+    (up,) = [line for line in lines if " up -d " in line]
+    assert up.split("--no-deps")[1].split() == ["api-server", "correlator"]
+    assert ("compose.linkage.yaml" in up) == (linkage == "1")
+
+
 def test_demo_reset_off_unless_makefile() -> None:
     """演示复位会清空去重期：直接用 docker compose 部署时默认关闭，只有经 Makefile 启动的演示栈打开。"""
     env = SERVICES["correlator"]["environment"]
     assert env["HYD_DEMO_RESET"] == "${HYD_DEMO_RESET:-false}"
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert (
-        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) HYD_LAN_IP=$(HYD_LAN_IP)"
-        in makefile
+        "COMPOSE =env HYD_DEMO_RESET=true HYD_DEMO_QUIET=$(HYD_DEMO_QUIET) $(LAN_ENV)" in makefile
     )
 
 
