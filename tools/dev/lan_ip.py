@@ -26,9 +26,14 @@ TIMEOUT_S = 20
 
 
 def configured(env: str) -> str | None:
-    """.env 中显式写的 HYD_LAN_IP；与 docker compose 一致，去掉引号，空白后的 # 起为行尾注释。"""
+    """.env 中显式写的 HYD_LAN_IP；与 docker compose 一致，去掉引号，空白后的 # 起为行尾注释，空值视为未写。
+
+    值两侧只跳过空格与制表符：用 \\s 会跨过换行，值为空时把下一行当成地址。
+    """
     match = re.search(
-        r"""^\s*HYD_LAN_IP\s*=\s*(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+#.*)?\s*$""", env, re.MULTILINE
+        r"""^[ \t]*HYD_LAN_IP[ \t]*=[ \t]*(?:"([^"\n]+)"|'([^'\n]+)'|(\S+))(?:[ \t]+#.*)?[ \t\r]*$""",
+        env,
+        re.MULTILINE,
     )
     return next(v for v in match.groups() if v) if match else None
 
