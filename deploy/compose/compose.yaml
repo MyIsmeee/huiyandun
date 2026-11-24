@@ -280,7 +280,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data  # 本地 CA：重建容器后浏览器已导入的根证书仍有效
-    environment: { HYD_LAN_IP: "${HYD_LAN_IP:-127.0.0.1}" }  # 本机局域网地址，在 deploy/compose/.env 设置（ops.md §5）
+    environment: { HYD_LAN_IP: "${HYD_LAN_IP:-127.0.0.1}" }  # 本机局域网地址，make demo-up 自动探测（D-143，ops.md §5）
     ports: ["443:8443"]
     depends_on: { api-server: { condition: service_healthy } }
     networks: [core-net, edge-net]
