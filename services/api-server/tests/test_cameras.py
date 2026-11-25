@@ -1256,3 +1256,71 @@ def test_ingest_restart_expires_video_file_cameras(
     assert not (videos_dir(client) / video).exists()
     assert camera_id not in ingest.paths
     assert [c.id for c in published[-1].cameras] == ["cam-01", "cam-02"]
+
+
+class DownGo2rtc(FakeGo2rtc):
+    """go2rtc 不可达：任何请求都连不上。"""
+
+    async def get(self, path: str, **_: Any) -> Any:
+        raise httpx2.ConnectError("go2rtc")
+
+
+def test_expiry_detected_under_scene_lock_does_not_deadlock(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    ingest: FakeIngest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """场景自动调整持有场景锁时调用 apply()，其间判定视频文件摄像头失效：apply 不取场景锁、不卡住，
+    登记表即不含它；释放场景锁后由 run 删除（FR-915）。原先 apply 持 _lock 再取场景锁，与之互相等待。"""
+    state = cast(Any, client.app).state
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    camera_id = camera_id.json()["id"]
+    published: list[Any] = []
+
+    async def capture(subject: str, event: Any) -> None:
+        published.append(event)
+
+    monkeypatch.setattr(state.bus, "js_publish", capture)
+    monkeypatch.setattr(state, "go2rtc", FakeGo2rtc({}))
+    ingest.paths.clear()  # ingest 重启
+
+    async def fit_like() -> None:
+        async with state.engine.begin() as conn:
+            await scene.lock(conn)
+            await asyncio.wait_for(state.cameras.apply(), timeout=5)
+            assert [c.id for c in published[-1].cameras] == ["cam-01", "cam-02"]
+
+    portal = client.portal
+    assert portal is not None
+    portal.call(fit_like)
+    wait_gone(db[1], camera_id)
+    assert latest(db[1], "camera.expired")["target"] == camera_id
+
+
+def test_expiry_republished_when_go2rtc_down(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    ingest: FakeIngest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """定期比对判定失效后 go2rtc 不可达：照样删除并重新下发不含该摄像头的站点与登记表（FR-915）。
+    原先比对抛出后到不了重新下发，下一轮库中已无此行、不再判定，WS 与登记表一直保留它。"""
+    state = cast(Any, client.app).state
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    camera_id = camera_id.json()["id"]
+    published: list[Any] = []
+
+    async def capture(subject: str, event: Any) -> None:
+        published.append(event)
+
+    monkeypatch.setattr(state.bus, "js_publish", capture)
+    monkeypatch.setattr(state, "go2rtc", DownGo2rtc({}))
+    ingest.paths.clear()
+    portal = client.portal
+    assert portal is not None
+    with pytest.raises(httpx2.ConnectError):
+        portal.call(state.cameras.reconcile)
+    wait_gone(db[1], camera_id)
+    assert [c.id for c in published[-1].cameras] == ["cam-01", "cam-02"]
+    assert camera_id not in [d.id for d in state.site.devices]
