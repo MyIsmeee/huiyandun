@@ -23,7 +23,7 @@ from py_contracts.api import (
 )
 
 SPEC = yaml.safe_load(
-    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v6.yaml").read_text()
+    (Path(__file__).resolve().parents[1] / "contracts/openapi/api-server.v7.yaml").read_text()
 )
 WRITE_METHODS = {"post", "put", "patch", "delete"}
 
@@ -61,6 +61,7 @@ ENDPOINTS = [
     ("post", "/api/alerts/{id}/disposition", "operator"),  # 告警处置：确认、误报、已处理
     ("post", "/api/alerts/clear", "operator"),  # 删除告警：不再列出，原始记录保留
     ("get", "/api/cameras/usb-devices", "admin"),  # 边缘主机上的 USB 摄像头
+    ("post", "/api/cameras/video-files", "admin"),  # 视频文件摄像头的上传（D-145）
     ("get", "/api/alerts/{id}/clip", "viewer"),  # 单条告警前后的录像回放
     ("post", "/api/incidents/{id}/evidence/export", "operator"),
     ("get", "/api/llm/providers", "admin"),

@@ -16,6 +16,7 @@ const CAM: Camera = {
   source: { protocol: "rtsp", host: "192.168.8.39", port: 554, path: "/live", relay: false },
   username: null,
   device: null,
+  file_name: null,
   password_set: false,
   area_id: "area-01",
   pose: POSE,

@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import delete, select, text, update
 
-from api_server import cameras, scene
+from api_server import cameras, scene, video_file
 from api_server.app import create_app
 from api_server.audit import audit_log
 from api_server.config import ApiConfig
@@ -505,6 +505,7 @@ def test_ingest_down_does_not_block_go2rtc(key_file: Path) -> None:
         config=SimpleNamespace(site_file=site_file, device_key_file=key_file),
         go2rtc=go2rtc,
         ingest=DownIngest({}),
+        videos=video_file.VideoFiles(key_file.parent),  # 定期比对顺带清理未引用的上传
         bus=SimpleNamespace(js_publish=js_publish),
         hub=SimpleNamespace(broadcast=lambda _: None),
         devices=SimpleNamespace(sync=lambda *_: None),

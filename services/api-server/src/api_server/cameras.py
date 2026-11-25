@@ -115,7 +115,8 @@ cameras = Table(
     Column("protocol", Text),
     Column("host", Text),
     Column("port", Integer),
-    Column("path", Text),
+    Column("path", Text),  # 拉流的流路径；USB 为设备标识，视频文件为上传编号
+    Column("file_name", Text),
     Column("username", Text),
     Column("password_enc", LargeBinary),
     Column("relay", Boolean),
@@ -172,6 +173,7 @@ def view(row: Any) -> Camera:
                 {k: row[k] for k in ("protocol", "host", "port", "path", "relay")} if pull else None
             ),
             "device": row["path"] if row["ingest"] == "usb" else None,
+            "file_name": row.get("file_name"),
             "username": row["username"],
             "password_set": row["password_enc"] is not None,
             "area_id": row["area_id"],
@@ -403,7 +405,7 @@ class Registry:
                 log.exception("cameras.sync_failed")
 
     async def reconcile(self) -> None:
-        """定期比对：按库补齐 ingest 的中继路径与 go2rtc 的流。"""
+        """定期比对：按库补齐 ingest 的中继路径与 go2rtc 的流，删除未被引用的上传视频（D-145）。"""
         async with self._lock:
             rows = await self._load()
             try:
@@ -412,6 +414,7 @@ class Registry:
                 # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
                 log.exception("cameras.ingest_unavailable")
             await self._sync_go2rtc(rows)
+            await self._state.videos.prune({r["path"] for r in rows if r["ingest"] == "file"})
 
     async def _load(self) -> list[Any]:
         async with self._state.engine.connect() as conn:
