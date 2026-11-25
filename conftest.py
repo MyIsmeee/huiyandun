@@ -110,7 +110,9 @@ def db_secrets(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
 
 
 @pytest.fixture(scope="session")
-def db(db_secrets: dict[str, Path], nats_url: str) -> Iterator[tuple[ApiConfig, ApiConfig]]:
+def db(
+    db_secrets: dict[str, Path], nats_url: str, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[tuple[ApiConfig, ApiConfig]]:
     """返回（属主配置，应用配置），数据库已迁移至最新版本；配置同时指向临时 NATS。"""
     owner_pw, app_pw = db_secrets["owner"], db_secrets["app"]
     container = docker(
@@ -130,6 +132,8 @@ def db(db_secrets: dict[str, Path], nats_url: str) -> Iterator[tuple[ApiConfig, 
             "site_file": SITE,
             "attack_file": ATTACK,
             "nats_url": nats_url,
+            # api-server 启动时清空：各用例共用一个临时目录，不碰默认的卷路径
+            "camera_video_dir": tmp_path_factory.mktemp("camera-videos"),
         }
         owner = ApiConfig.model_validate(
             base | {"db_user": "postgres", "db_password_file": owner_pw}

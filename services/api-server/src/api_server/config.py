@@ -65,6 +65,10 @@ class ApiConfig(DbConfig):
         Path("/hostdev"),
         description="宿主 /dev 的只读挂载，列出 USB 摄像头（v4l/by-id）；只读设备名，不打开设备",
     )
+    camera_video_dir: Path = Field(
+        Path("/var/lib/hyd/camera-videos"),
+        description="视频文件摄像头上传的视频（卷 camera-videos，ingest 只读挂载），api-server 启动时清空（D-145）",
+    )
     llm_key_file: Path = Field(
         Path("/run/secrets/llm_key_secret"),
         description="加密供应商 API Key 的 32 字节密钥（base64），不入库（C-ST-03、G-14）",

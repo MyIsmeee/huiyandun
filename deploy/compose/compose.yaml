@@ -69,6 +69,7 @@ services:
       - correlator-state:/var/lib/correlator:ro
       - ../../rules/attack/techniques.json:/etc/hyd/attack.json:ro
       - ../../demo/scenarios/demo-quiet.yaml:/etc/hyd/demo-quiet.yaml:ro  # 演示场景预设
+      - camera-videos:/var/lib/hyd/camera-videos  # 视频文件摄像头上传的视频，启动时清空（D-145）
     environment:
       # 本机局域网地址（ops.md §5）：控制台登录爆破告警（HYD-WEB-0001）的目标地址
       HYD_LAN_IP: "${HYD_LAN_IP:-127.0.0.1}"
@@ -333,6 +334,7 @@ services:
       # USB 摄像头（api_server/usb.py）：宿主 /dev 只读挂载，整个挂而非只挂 /dev/v4l——没插摄像头时该目录不存在，
       # 插上后才由 udev 创建，挂整个 /dev 才能热插拔。设备权限只放开视频设备（主设备号 81）
       - /dev:/hostdev:ro
+      - camera-videos:/videos:ro  # 视频文件摄像头：本机 ffmpeg 循环播放 api-server 收到的上传（D-145）
     device_cgroup_rules: ["c 81:* rmw"]
     ports: ["8554:8554/tcp"]
     # video-net：控制接口只监听此固定地址、只放行 api-server（兼容模式中继路径，D-117）；
@@ -644,6 +646,8 @@ volumes:
   zeek-logs:
   evidence-data:  # 存证（G-07），只有 evidence-service 挂载
   recordings:  # recorder 的 1 小时环形录像，不是存证
+  # 视频文件摄像头上传的视频（D-145）：本地磁盘卷而非 tmpfs（单个可达 2 GB），api-server 读写、ingest 只读
+  camera-videos:
   helper-run:  # privileged-helper 的套接字，只与 playbook-executor 共享
 
 # 口令由 make demo-up 首次运行时生成，不入库（G-14）

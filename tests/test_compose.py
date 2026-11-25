@@ -533,3 +533,18 @@ def test_usb_cameras_device_access_least_privilege() -> None:
         "vision-engine",
     }  # vision-engine 的 GPU 透传在 compose.gpu.yaml，这里不应出现
     assert "device_cgroup_rules" not in SERVICES["api-server"]
+
+
+def test_camera_videos_only_api_server_writes_and_ingest_reads() -> None:
+    """视频文件摄像头（D-145）：api-server 读写上传的视频，ingest 只读播放；不用 tmpfs，大文件不占内存。"""
+    mounts = {
+        name: v
+        for name, s in SERVICES.items()
+        for v in s.get("volumes", [])
+        if v.startswith("camera-videos:")
+    }
+    assert mounts == {
+        "api-server": "camera-videos:/var/lib/hyd/camera-videos",
+        "ingest": "camera-videos:/videos:ro",
+    }
+    assert "camera-videos" in COMPOSE["volumes"]

@@ -34,3 +34,14 @@ def test_upgrade_downgrade_upgrade(scratch_db: tuple[ApiConfig, ApiConfig]) -> N
         "llm_settings",
         "scene_areas",
     } <= asyncio.run(tables())
+
+    async def columns() -> set[str]:
+        async with transaction(app) as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'cameras'"
+                )
+            )
+            return {r[0] for r in rows}
+
+    assert "file_name" in asyncio.run(columns())  # 0015：视频文件摄像头（D-145）

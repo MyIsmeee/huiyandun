@@ -12,7 +12,8 @@ COPY services services
 RUN uv sync --frozen --no-dev --no-editable --package api-server
 
 FROM python:3.12.15-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
-RUN useradd --system --uid 10001 --no-create-home hyd
+# 卷 camera-videos 的挂载点：新建的命名卷沿用镜像中该目录的属主，非 root 的服务才能写入（D-145）
+RUN useradd --system --uid 10001 --no-create-home hyd     && install -d -o hyd -g hyd /var/lib/hyd/camera-videos
 COPY --from=build /app/.venv /app/.venv
 ENV PATH=/app/.venv/bin:$PATH
 # C-OPS-04：非 root 运行

@@ -38,6 +38,7 @@ from api_server import (
     scene,
     site,
     video,
+    video_file,
     ws,
 )
 from api_server.auto_pose import AutoPose
@@ -222,6 +223,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     )
     app.state.investigator = investigator.Investigator(app.state)
     app.state.cameras = cameras.Registry(app.state)
+    app.state.videos = video_file.VideoFiles(config.camera_video_dir)
     app.include_router(auth.router)
     app.include_router(cameras.router)
     app.include_router(audit.router)
@@ -239,6 +241,7 @@ def create_app(config: ApiConfig) -> FastAPI:
     app.include_router(site.router)
     app.include_router(ws.router)
     app.include_router(video.router)
+    app.include_router(video_file.router)
 
     @app.get("/healthz", status_code=204)
     async def healthz() -> Response:

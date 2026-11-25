@@ -169,6 +169,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cameras/video-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description 上传视频文件摄像头的视频（D-145、FR-914）：请求体为文件原始字节，单个不超过 2 GiB。暂存于边缘主机，10 分钟内未被
+         *     摄像头引用即删除，api-server 重启时全部删除。上传本身不写审计，被摄像头引用时随 camera.created / camera.updated 记入
+         */
+        post: operations["uploadVideoFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cameras": {
         parameters: {
             query?: never;
@@ -854,14 +874,16 @@ export interface components {
             name: string;
             ip: string;
             /**
-             * @description pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>；usb 为插在边缘主机上的 USB 摄像头，由 ingest 读取设备
+             * @description pull 为系统拉流；push 为设备推流到 rtsp://<边缘主机>:8554/<id>；usb 为插在边缘主机上的 USB 摄像头，由 ingest 读取设备；file 为视频文件摄像头（D-145）：ingest 循环播放上传的视频，api-server 或 ingest 重启后失效，不能与其他接入方式互转
              * @enum {unknown}
              */
-            ingest: "pull" | "push" | "usb";
+            ingest: "pull" | "push" | "usb" | "file";
             /** @description 推流与 USB 时为 null */
             source: components["schemas"]["CameraSource"] | null;
             /** @description USB 摄像头的设备标识（/dev/v4l/by-id 下的名字，拔插后不变）；其余接入方式为 null */
             device: string | null;
+            /** @description 视频文件摄像头上传时的原始文件名，只用于显示；其余接入方式为 null */
+            file_name: string | null;
             username: string | null;
             /** @description 口令只写不读（C-ST-03） */
             password_set: boolean;
@@ -887,13 +909,17 @@ export interface components {
         };
         CameraCreate: {
             name: string;
-            /** @description 设备 IP，拉流与推流时必填；USB 摄像头没有网络地址，省略时自动分配本机占位地址 127.0.1.N */
+            /** @description 设备 IP，拉流与推流时必填；USB 与视频文件摄像头没有网络地址，省略时自动分配本机占位地址 127.0.1.N */
             ip?: string;
-            /** @enum {unknown} */
-            ingest: "pull" | "push" | "usb";
+            /**
+             * @description file 为临时的视频文件摄像头（D-145），创建后不能改为其他接入方式
+             * @enum {unknown}
+             */
+            ingest: "pull" | "push" | "usb" | "file";
             /** @description 拉流时必填 */
             source?: components["schemas"]["CameraSource"] | null;
             device?: components["schemas"]["UsbDeviceId"];
+            video_file?: components["schemas"]["VideoFileId"];
             username?: string | null;
             /** Format: password */
             password?: string;
@@ -904,10 +930,14 @@ export interface components {
         CameraUpdate: {
             name?: string;
             ip?: string;
-            /** @enum {unknown} */
-            ingest?: "pull" | "push" | "usb";
+            /**
+             * @description 视频文件摄像头与其他接入方式不能互转（D-145）
+             * @enum {unknown}
+             */
+            ingest?: "pull" | "push" | "usb" | "file";
             source?: components["schemas"]["CameraSource"] | null;
             device?: components["schemas"]["UsbDeviceId"];
+            video_file?: components["schemas"]["VideoFileId"];
             username?: string | null;
             /**
              * Format: password
@@ -922,6 +952,14 @@ export interface components {
         };
         /** @description USB 摄像头的设备标识：边缘主机 /dev/v4l/by-id 下的名字（拔插后不变），改为 USB 接入时必填 */
         UsbDeviceId: string;
+        /** @description 上传的视频编号（服务端生成），新增视频文件摄像头时必填，更换视频时给出新编号 */
+        VideoFileId: string;
+        VideoFile: {
+            id: components["schemas"]["VideoFileId"];
+            /** @description 原始文件名（去掉路径部分），只用于显示 */
+            name: string;
+            size_bytes: number;
+        };
         UsbDevice: {
             device: components["schemas"]["UsbDeviceId"];
             /** @description 便于辨认的设备名 */
@@ -2176,6 +2214,66 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    uploadVideoFile: {
+        parameters: {
+            query: {
+                /** @description 浏览器给出的原始文件名，只用于显示；去掉路径部分，超过 200 字截断 */
+                name: string;
+            };
+            header: {
+                /** @description 全链路透传至审计日志与事件（C-BE-08） */
+                "X-Request-ID": components["parameters"]["RequestId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description 已暂存 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoFile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 缺少 Content-Length */
+            411: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 视频超过 2 GiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 边缘主机磁盘空间不足：写入后剩余空间须不少于 2 GiB（录像与数据库同盘） */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listCameras: {

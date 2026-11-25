@@ -24,7 +24,7 @@ TARGETS = [
     (Path("contracts/config"), "jsonschema", Path("src/py_contracts/config"), []),
     (Path("contracts/llm"), "jsonschema", Path("src/py_contracts/llm"), []),
     (
-        Path("contracts/openapi/api-server.v6.yaml"),
+        Path("contracts/openapi/api-server.v7.yaml"),
         "openapi",
         Path("src/py_contracts/api.py"),
         OPENAPI_ARGS,
