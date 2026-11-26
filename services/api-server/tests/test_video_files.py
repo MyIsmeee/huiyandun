@@ -132,3 +132,18 @@ def test_orphan_upload_removed(videos: Path) -> None:
     with pytest.raises(HTTPException):
         files.name(old)
     assert files.name(fresh) == "fresh.mp4"
+
+
+def test_concurrent_claim_only_one_wins(videos: Path) -> None:
+    """两个请求都已通过 name()（如重复提交）：只有先取走的一方能引用，后者 400，不会两路共用一个文件；
+    保存失败放回后仍可引用。"""
+    files = video_file.VideoFiles(videos)
+    video = asyncio.run(files.save(chunks(VIDEO), len(VIDEO), "门口.mp4")).id.root
+    name = files.name(video)
+    assert files.name(video) == name
+    files.claim(video)
+    with pytest.raises(HTTPException) as exc:
+        files.claim(video)
+    assert (exc.value.status_code, exc.value.detail) == (400, video_file.MISSING)
+    files.release(video, name)
+    assert files.name(video) == name

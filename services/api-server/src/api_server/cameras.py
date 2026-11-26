@@ -435,11 +435,15 @@ class Registry:
                             await conn.execute(select(func.setval(ID_SEQUENCE, _seeded_max(rows))))
                         log.info("cameras.seeded")
                     await scene.ensure_default_area(conn, *self._size)
-                await self._state.videos.clear()
                 break
             except Exception:
                 log.exception("cameras.bootstrap_failed")
                 await asyncio.sleep(RETRY_S)
+        try:
+            await self._state.videos.clear()
+        except OSError:
+            # 卷缺失或不可写只影响视频文件摄像头，不拖住其余摄像头的下发
+            log.exception("cameras.videos_clear_failed")
         await self.apply()
         while True:
             # 下发或失效删除未完成时 2 s 后重试；否则每 30 s 比对 go2rtc（其重启会丢掉动态添加的流）
@@ -702,12 +706,16 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         video,
     )
     _check(values)
+    held = None  # 已取走、尚未保存的上传：保存失败时放回
     try:
         async with request.app.state.engine.begin() as conn:
             # 并发新增串行化：否则可能同时通过路数上限的检查
             await conn.execute(select(func.pg_advisory_xact_lock(CREATE_LOCK)))
             if len(await _rows(conn)) >= MAX_CAMERAS:
                 raise HTTPException(409, f"最多登记 {MAX_CAMERAS} 路摄像头")
+            if video:
+                videos.claim(video[0])
+                held = video
             if values["ip"] is None:
                 values["ip"] = usb.placeholder_ip({str(r["ip"]) for r in await _rows(conn)})
             values["id"] = await _next_id(conn)
@@ -722,10 +730,12 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
                 after=audit_view(camera),
                 request_id=request.state.request_id,
             )
+        held = None
     except IntegrityError as e:
         raise _integrity(e, values["ip"]) from e
-    if video:
-        videos.claim(video[0])
+    finally:
+        if held:
+            videos.release(*held)
     await request.app.state.cameras.apply()
     return with_push_password(request, camera, camera.ingest == "push")
 
@@ -786,6 +796,8 @@ def _video(request: Request, row: Any, body: CameraUpdate) -> tuple[str, str] | 
 async def update_camera(
     camera_id: str, body: CameraUpdate, request: Request, principal: Admin
 ) -> Camera:
+    videos: video_file.VideoFiles = request.app.state.videos
+    held = None  # 已取走、尚未保存的新上传：保存失败时放回
     try:
         async with request.app.state.engine.begin() as conn:
             await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
@@ -794,6 +806,9 @@ async def update_camera(
             if body.ingest is not None and (body.ingest == "file") != (row["ingest"] == "file"):
                 raise HTTPException(400, "ingest: 视频文件摄像头不能与其他接入方式互转")
             video = _video(request, row, body)
+            if video is not None and video[0] != row["path"]:
+                videos.claim(video[0])
+                held = video
             values = _updated(row, body, request.app.state.config.device_key_file, video)
             _check(values)
             values["updated_at"] = datetime.now(UTC)
@@ -814,16 +829,18 @@ async def update_camera(
                 after=audit_view(camera),
                 request_id=request.state.request_id,
             )
+        held = None
     except IntegrityError as e:
         raise _integrity(e, values["ip"]) from e
+    finally:
+        if held:
+            videos.release(*held)
     if values["pose"] != row["pose"]:
         request.app.state.pose_checks.forget(camera_id)  # 旧建议是相对旧参数说的
     replaced = video is not None and video[0] != row["path"]
-    if replaced:
-        request.app.state.videos.claim(values["path"])
     await request.app.state.cameras.apply()
     if replaced:  # ingest 已换用新视频
-        await request.app.state.videos.remove(row["path"])
+        await videos.remove(row["path"])
     return with_push_password(request, camera, camera.ingest == "push" and before.ingest != "push")
 
 

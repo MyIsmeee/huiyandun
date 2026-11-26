@@ -3,6 +3,7 @@
 
 import asyncio
 import base64
+import logging
 import os
 import time
 import uuid
@@ -1163,8 +1164,13 @@ def test_video_file_counts_toward_limit(
 ) -> None:
     """AC-10：计入路数上限。"""
     monkeypatch.setattr(cameras, "MAX_CAMERAS", 2)  # 初始导入已有 2 路
-    r = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    video = upload(client)
+    r = client.post("/api/cameras", json=file_body(video), headers=headers())
     assert r.status_code == 409
+    # 保存失败时上传放回：不必重新上传即可再次引用
+    monkeypatch.setattr(cameras, "MAX_CAMERAS", 3)
+    r = client.post("/api/cameras", json=file_body(video), headers=headers())
+    assert r.status_code == 201, r.text
 
 
 def wait_gone(config: ApiConfig, camera_id: str) -> None:
@@ -1221,6 +1227,27 @@ def test_startup_expires_video_file_cameras(
     assert area_updated(db[1], area) > touched
     assert [c["id"] for c in client.get("/api/cameras").json()["items"]] == ["cam-01", "cam-02"]
     assert list(videos_dir(client).iterdir()) == []
+
+
+def test_startup_continues_when_video_dir_unusable(
+    db: tuple[ApiConfig, ApiConfig],
+    key_file: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """视频卷缺失或不可写：启动时清空失败只记日志，其余摄像头照常下发（不无限重试、走不到 apply）。
+    不用 client 夹具：只有这一个 api-server 在运行，下发日志不会来自别处。"""
+    config = db[1].model_copy(
+        update={"device_key_file": key_file, "camera_video_dir": tmp_path / "missing"}
+    )
+    caplog.set_level(logging.INFO, logger="api_server.cameras")
+    caplog.clear()
+    with TestClient(create_app(config), base_url="https://testserver"):
+        deadline = time.monotonic() + 10
+        while not any(r.getMessage() == "cameras.published" for r in caplog.records):
+            assert time.monotonic() < deadline, "启动后未下发登记表"
+            time.sleep(0.1)
+    assert any(r.getMessage() == "cameras.videos_clear_failed" for r in caplog.records)
 
 
 def test_ingest_restart_expires_video_file_cameras(
