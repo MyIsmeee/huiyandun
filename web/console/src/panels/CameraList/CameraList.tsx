@@ -23,8 +23,9 @@ const errorMessage = (e: unknown) => (e instanceof ApiError ? e.message : "无�
 const button = buttonVariants({ variant: "outline", size: "sm" });
 const PROTOCOL = { rtsp: "RTSP", rtmp: "RTMP", http: "HTTP", onvif: "ONVIF" } as const;
 
-/** 不含凭据的拉流地址；推流为推流地址与用户名（V-CAM1） */
+/** 不含凭据的拉流地址；推流为推流地址与用户名；视频文件为上传时的文件名（V-CAM1） */
 export function address(camera: Camera): string {
+  if (camera.ingest === "file") return camera.file_name ?? "";
   const s = camera.source;
   if (!s) return `推流地址 ${pushUrl(camera.id)} · 用户 ${PUSH_USER}`;
   const host = s.host.includes(":") ? `[${s.host}]` : s.host;
@@ -146,7 +147,7 @@ export function CameraListView(props: {
               <TableRow className="text-meta">
                 <TableHead className="w-24 pl-4">编号</TableHead>
                 <TableHead>名称与地址</TableHead>
-                <TableHead className="w-28">接入</TableHead>
+                <TableHead className="w-36">接入</TableHead>
                 <TableHead className="w-36">区域</TableHead>
                 <TableHead className="w-16">状态</TableHead>
                 <TableHead className="w-40">地面映射</TableHead>
@@ -169,7 +170,7 @@ export function CameraListView(props: {
                     </TableCell>
                     {/* 地址已在名称下方列出，这里只写接入方式；设备 IP 用于关联网络告警，悬停可见 */}
                     <TableCell className="truncate text-xs text-muted-foreground" title={`设备 IP ${camera.ip}`}>
-                      {camera.source ? `拉流 · ${PROTOCOL[camera.source.protocol]}` : "推流"}
+                      {camera.ingest === "file" ? "视频文件 · 重启后失效" : camera.source ? `拉流 · ${PROTOCOL[camera.source.protocol]}` : "推流"}
                     </TableCell>
                     <TableCell className="text-xs">
                       <AreaLink areaId={camera.area_id} areas={site?.areas ?? []} />

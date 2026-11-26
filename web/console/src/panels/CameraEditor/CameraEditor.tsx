@@ -3,6 +3,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -79,8 +80,18 @@ export const PUSH_USER = "hyd";
 
 const RELAYABLE = new Set<Protocol>(["rtsp", "rtmp"]);
 
-/** 主机留空时取设备 IP（常见情况：摄像头本身提供取流服务）；推流不带拉流地址与凭据 */
-export function body(form: CameraForm): Schemas["CameraCreate"] {
+/** 视频文件摄像头的视频上限（D-145），与服务端一致 */
+export const MAX_VIDEO_BYTES = 2 * 1024 ** 3;
+const INGEST_LOCKED = "视频文件摄像头不能与其他接入方式互转";
+
+/**
+ * 主机留空时取设备 IP（常见情况：摄像头本身提供取流服务）；推流不带拉流地址与凭据。
+ * video 为本次新上传的视频编号：视频文件摄像头没给出时沿用已保存的视频
+ */
+export function body(form: CameraForm, video?: string): Schemas["CameraCreate"] {
+  // 视频文件摄像头同 USB 没有网络地址（D-145）
+  if (form.ingest === "file")
+    return { name: form.name.trim(), pose: form.pose, climb_lines: form.climb_lines, ingest: "file", source: null, username: null, ...(video ? { video_file: video } : {}) };
   // USB 摄像头没有网络地址：不提交设备 IP，新增时由服务端分配占位地址，修改时保持不变
   if (form.ingest === "usb")
     return { name: form.name.trim(), pose: form.pose, climb_lines: form.climb_lines, ingest: "usb", device: form.device, source: null, username: null };
@@ -173,6 +184,15 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
   const [calibrating, setCalibrating] = useState(false);
   /** 数字字段编辑中的文本；未编辑过的字段显示表单中的数值 */
   const [texts, setTexts] = useState<Partial<Record<NumberField, string>>>({});
+  /** 视频文件摄像头新选的视频，保存时才上传；上传中为进度（0～1），期间不可保存、不可关闭 */
+  const [video, setVideo] = useState<File | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  /** 新选视频已上传、摄像头尚未保存成功时的上传编号：重试保存不再上传，重新选视频时清空（服务端保留 10 分钟） */
+  const [uploaded, setUploaded] = useState<string | null>(null);
+  const tooLarge = form.ingest === "file" && (video?.size ?? 0) > MAX_VIDEO_BYTES;
+  const close = () => progress === null && props.onClose();
+  /** 编辑已有摄像头时，视频文件与其他接入方式不能互转（D-145） */
+  const locked = (ingest: CameraForm["ingest"]) => !!saved && (saved.ingest === "file") !== (ingest === "file");
   /** 保存时改了安装参数：服务端丢弃按旧参数推算的自检，提示新结果要等视觉引擎重新推算 */
   const [poseChanged, setPoseChanged] = useState(false);
   const set = (patch: Partial<CameraForm>) => setForm((f) => ({ ...f, ...patch }));
@@ -230,10 +250,28 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
       setMessage("请先改正标出的数值");
       return;
     }
+    if (form.ingest === "file" && !video && saved?.ingest !== "file") {
+      setMessage("请选择视频");
+      return;
+    }
     setPending(true);
     setMessage(null);
+    let id = uploaded;
+    if (form.ingest === "file" && video && !id) {
+      setProgress(0);
+      try {
+        id = (await api.uploadVideoFile(video, setProgress)).id;
+        setUploaded(id);
+      } catch (e) {
+        setMessage(e instanceof ApiError ? e.message : "上传中断，请重试");
+        setPending(false);
+        return;
+      } finally {
+        setProgress(null);
+      }
+    }
     try {
-      const request = body(form);
+      const request = body(form, id ?? undefined);
       const camera = saved ? await api.updateCamera(saved.id, request) : await api.createCamera(request);
       // 保存的响应不含自检：安装参数未变时服务端保留原自检，照旧显示；变了则旧建议作废
       const changed = !!saved && JSON.stringify(saved.pose) !== JSON.stringify(request.pose);
@@ -241,6 +279,8 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
       setPoseChanged(changed && !!saved?.pose_check);
       if (camera.push_password) setPushPassword(camera.push_password);
       set({ password: "" });
+      setVideo(null);
+      setUploaded(null);
       props.onSaved();
       void preview(camera.id);
     } catch (e) {
@@ -263,7 +303,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && props.onClose()}>
+    <Dialog open onOpenChange={(open) => !open && close()}>
       {/* 点对话框外不关闭，避免丢掉未保存的填写；Esc 与取消按钮照常关闭 */}
       <DialogContent aria-describedby={undefined} showCloseButton={false} onInteractOutside={(e) => e.preventDefault()} className="max-h-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-3xl">
       <form
@@ -275,7 +315,7 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
       >
         <header className="flex items-center justify-between">
           <DialogTitle className="text-base font-medium">{saved ? `编辑摄像头 ${saved.id}` : "添加摄像头"}</DialogTitle>
-          <button type="button" aria-label="关闭" onClick={props.onClose} className="grid size-8 place-items-center rounded-full hover:bg-secondary">
+          <button type="button" aria-label="关闭" disabled={progress !== null} onClick={close} className="grid size-8 place-items-center rounded-full hover:bg-secondary">
             <X aria-hidden className="size-4" />
           </button>
         </header>
@@ -284,8 +324,8 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           <Label htmlFor="cam-name">名称</Label>
           <Input id="cam-name" required maxLength={40} value={form.name} onChange={(e) => set({ name: e.target.value })} />
           <Label htmlFor="cam-ip">设备 IP</Label>
-          {form.ingest === "usb" ? (
-            <span id="cam-ip" className="text-sm text-muted-foreground">USB 摄像头无需填写</span>
+          {form.ingest === "usb" || form.ingest === "file" ? (
+            <span id="cam-ip" className="text-sm text-muted-foreground">{form.ingest === "usb" ? "USB 摄像头" : "视频文件"}无需填写</span>
           ) : (
             <Input id="cam-ip" required placeholder="192.168.8.31" value={form.ip} onChange={(e) => set({ ip: e.target.value })} />
           )}
@@ -294,22 +334,34 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
             aria-label="接入方式"
             value={form.ingest}
             onValueChange={(value) => set({ ingest: value as typeof form.ingest })}
-            className="col-span-3 flex gap-4"
+            className="col-span-3 flex flex-wrap gap-x-4 gap-y-1"
           >
             {(
               [
                 ["pull", "拉流（系统从摄像头取流）"],
                 ["push", "推流（设备推到本机）"],
                 ["usb", "USB 摄像头（插在本机）"],
+                ["file", "视频文件（模拟摄像头）"],
               ] as const
             ).map(([value, label]) => (
-              <Label key={value}>
-                <RadioGroupItem value={value} />
+              <Label key={value} title={locked(value) ? INGEST_LOCKED : undefined}>
+                <RadioGroupItem value={value} disabled={locked(value)} />
                 {label}
               </Label>
             ))}
           </RadioGroup>
-          {form.ingest === "usb" ? (
+          {form.ingest === "file" ? (
+            <VideoPicker
+              file={video}
+              savedName={saved?.file_name ?? null}
+              progress={progress}
+              onChange={(file) => {
+                setVideo(file);
+                setUploaded(null);
+                set({ name: form.name || file.name.replace(/\.[^.]*$/, "").slice(0, 40) });
+              }}
+            />
+          ) : form.ingest === "usb" ? (
             <UsbPicker value={form.device} self={saved?.id ?? null} onChange={(device, name) => set({ device, name: form.name || name })} />
           ) : form.ingest === "push" ? (
             <PushInfo id={saved?.id ?? null} password={pushPassword} />
@@ -448,10 +500,10 @@ export function CameraEditor(props: { camera: Camera | null; onClose: () => void
           </p>
         )}
         <footer className="flex justify-end gap-2">
-          <button type="button" onClick={props.onClose} className={button}>
+          <button type="button" disabled={progress !== null} onClick={close} className={button}>
             关闭
           </button>
-          <button type="submit" disabled={pending} className={buttonVariants({ size: "sm" })}>
+          <button type="submit" disabled={pending || tooLarge} className={buttonVariants({ size: "sm" })}>
             {pending ? "保存中…" : "保存"}
           </button>
         </footer>
@@ -554,6 +606,52 @@ export function UsbPicker(props: { value: string; self: string | null; onChange:
       </div>
       <p className="col-span-4 text-xs text-subtle-foreground">
         只列出插在慧眼盾主机上的 USB 摄像头；插在其他电脑上的请用"推流"。插上新摄像头后点刷新。
+      </p>
+    </>
+  );
+}
+
+const megabytes = (bytes: number) => `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+
+/**
+ * 视频文件摄像头的视频（V-CAM11）：未选时为"选择视频…"，已选或已保存时显示文件名（新选的带大小）、按钮为"更换视频"。
+ * 文件在保存时才上传；超过 2 GB 立即提示、不可保存
+ */
+function VideoPicker(props: { file: File | null; savedName: string | null; progress: number | null; onChange: (file: File) => void }) {
+  const { file, savedName, progress } = props;
+  const input = useRef<HTMLInputElement>(null);
+  const chosen = file ? `${file.name}（${megabytes(file.size)}）` : savedName;
+  const percent = Math.round((progress ?? 0) * 100);
+  return (
+    <>
+      <Label htmlFor="cam-video">视频</Label>
+      <div className="col-span-3 flex min-w-0 items-center gap-2">
+        <input
+          ref={input}
+          id="cam-video"
+          type="file"
+          accept="video/*"
+          hidden
+          onChange={(e) => {
+            const picked = e.target.files?.[0];
+            if (picked) props.onChange(picked);
+            e.target.value = ""; // 再选同一文件也触发
+          }}
+        />
+        <button type="button" disabled={progress !== null} onClick={() => input.current?.click()} className={button}>
+          {chosen ? "更换视频" : "选择视频…"}
+        </button>
+        {chosen && <span className="min-w-0 truncate">{chosen}</span>}
+      </div>
+      {file && file.size > MAX_VIDEO_BYTES && <p className="col-span-4 text-xs text-destructive">视频超过 2 GB</p>}
+      {progress !== null && (
+        <div className="col-span-4 flex items-center gap-2">
+          <Progress value={percent} aria-label="上传进度" className="flex-1" />
+          <span className="w-10 text-right text-xs text-subtle-foreground">{percent}%</span>
+        </div>
+      )}
+      <p className="col-span-4 text-xs text-subtle-foreground">
+        循环播放，作为一路摄像头识别。api-server 或推流服务重启后失效，需重新添加。短于 3 分钟的视频循环时会被识别为画面重放。
       </p>
     </>
   );
