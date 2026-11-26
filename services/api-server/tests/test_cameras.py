@@ -1043,3 +1043,216 @@ def test_usb_camera_read_by_ingest(key_file: Path) -> None:
     ingest.calls.clear()
     asyncio.run(cameras.Registry(state)._sync_ingest([camera]))
     assert ingest.calls == []  # 未变化不重复下发
+
+
+# 视频文件摄像头（D-145、FR-914、FR-915）：ingest 循环播放上传的视频，api-server 或 ingest 重启后失效
+VIDEO = b"\x00\x00\x00\x18ftypmp42" + bytes(1024)
+
+
+def upload(client: TestClient, name: str = "走廊.mp4") -> str:
+    r = client.post(
+        "/api/cameras/video-files",
+        params={"name": name},
+        content=VIDEO,
+        headers=headers() | {"Content-Type": "application/octet-stream"},
+    )
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+def latest(config: ApiConfig, action: str) -> dict[str, Any]:
+    """审计表在用例之间不清空：取该动作最新的一条。"""
+    return max(audits(config, action), key=lambda a: a["id"])
+
+
+def file_body(video: str) -> dict[str, Any]:
+    return {"name": "录像回放", "ingest": "file", "video_file": video, "pose": POSE}
+
+
+@pytest.fixture
+def ingest(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> FakeIngest:
+    fake = FakeIngest({})
+    monkeypatch.setattr(cast(Any, client.app).state, "ingest", fake)
+    return fake
+
+
+def videos_dir(client: TestClient) -> Path:
+    return cast(Path, cast(Any, client.app).state.config.camera_video_dir)
+
+
+def test_create_video_file_camera(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig], ingest: FakeIngest
+) -> None:
+    """AC-1：占位 IP、原始文件名、审计；ingest 中同名路径循环播放该视频；同一上传不能再被引用。"""
+    video = upload(client)
+    r = client.post("/api/cameras", json=file_body(video), headers=headers())
+    assert r.status_code == 201, r.text
+    camera = r.json()
+    assert (camera["ingest"], camera["file_name"], camera["source"], camera["device"]) == (
+        "file",
+        "走廊.mp4",
+        None,
+        None,
+    )
+    assert camera["ip"].startswith("127.0.1.")
+    audit = latest(db[1], "camera.created")
+    assert audit["after"]["file_name"] == "走廊.mp4"
+    command = ingest.paths[camera["id"]]["runOnInit"]
+    assert f"-re -stream_loop -1 -i /videos/{video} " in command
+    assert "走廊" not in command  # 原始文件名不进入命令（D-103）
+
+    again = client.post("/api/cameras", json=file_body(video), headers=headers())
+    assert (again.status_code, again.json()["message"]) == (400, cameras.video_file.MISSING)
+
+
+@pytest.mark.parametrize("video", [{"video_file": "0" * 32}, {}])
+def test_create_with_missing_video(client: TestClient, video: dict[str, str]) -> None:
+    """AC-11：上传编号不存在（已清理或从未上传）、或没给出时 400。"""
+    body = {"name": "录像回放", "ingest": "file", "pose": POSE} | video
+    r = client.post("/api/cameras", json=body, headers=headers())
+    assert r.status_code == 400
+    assert r.json()["message"].startswith("video_file: ")
+
+
+def test_replace_video_keeps_config(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig], ingest: FakeIngest, area: str
+) -> None:
+    """AC-5：换视频后编号、区域、标定、规则不变，ingest 换播新视频，旧视频删除。"""
+    old = upload(client, "旧.mp4")
+    body = file_body(old) | {"rules": [LINE_RULE], "climb_lines": [[0, 50, 100, 60]]}
+    camera_id = client.post("/api/cameras", json=body, headers=headers()).json()["id"]
+
+    async def place() -> None:
+        async with transaction(db[1]) as conn:
+            await conn.execute(
+                update(cameras.cameras)
+                .where(cameras.cameras.c.id == camera_id)
+                .values(area_id=area, calibration=CALIBRATION, calibration_error_m=0.2)
+            )
+
+    asyncio.run(place())
+    before = stored(db[1], camera_id)
+    new = upload(client, "新.mp4")
+    r = client.patch(f"/api/cameras/{camera_id}", json={"video_file": new}, headers=headers())
+    assert r.status_code == 200, r.text
+    after = stored(db[1], camera_id)
+    same = ("area_id", "calibration", "calibration_error_m", "rules", "climb_lines", "pose", "ip")
+    assert {k: after[k] for k in same} == {k: before[k] for k in same}
+    assert (after["path"], after["file_name"]) == (new, "新.mp4")
+    assert f"/videos/{new} " in ingest.paths[camera_id]["runOnInit"]
+    assert {p.name for p in videos_dir(client).iterdir()} >= {new}
+    assert not (videos_dir(client) / old).exists()
+    audit = latest(db[1], "camera.updated")
+    assert (audit["before"]["file_name"], audit["after"]["file_name"]) == ("旧.mp4", "新.mp4")
+
+    client.delete(f"/api/cameras/{camera_id}", headers=headers())
+    assert not (videos_dir(client) / new).exists()  # 删除摄像头同时删除视频
+
+
+def test_file_ingest_not_convertible(client: TestClient, ingest: FakeIngest) -> None:
+    """AC-6：视频文件摄像头与其他接入方式不能互转。"""
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    for target, ingest_to in ((camera_id.json()["id"], "pull"), ("cam-01", "file")):
+        r = client.patch(f"/api/cameras/{target}", json={"ingest": ingest_to}, headers=headers())
+        assert r.status_code == 400
+        assert r.json()["message"] == "ingest: 视频文件摄像头不能与其他接入方式互转"
+
+
+def test_video_file_counts_toward_limit(
+    client: TestClient, ingest: FakeIngest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-10：计入路数上限。"""
+    monkeypatch.setattr(cameras, "MAX_CAMERAS", 2)  # 初始导入已有 2 路
+    r = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    assert r.status_code == 409
+
+
+def wait_gone(config: ApiConfig, camera_id: str) -> None:
+    async def exists() -> bool:
+        async with transaction(config) as conn:
+            query = select(cameras.cameras.c.id).where(cameras.cameras.c.id == camera_id)
+            return await conn.scalar(query) is not None
+
+    deadline = time.monotonic() + 10
+    while asyncio.run(exists()):
+        assert time.monotonic() < deadline, "视频文件摄像头未失效"
+        time.sleep(0.1)
+
+
+def area_updated(config: ApiConfig, area_id: str) -> datetime:
+    async def query() -> datetime:
+        async with transaction(config) as conn:
+            return cast(
+                datetime,
+                await conn.scalar(
+                    select(scene.scene_areas.c.updated_at).where(scene.scene_areas.c.id == area_id)
+                ),
+            )
+
+    return asyncio.run(query())
+
+
+def test_startup_expires_video_file_cameras(
+    client: TestClient, db: tuple[ApiConfig, ApiConfig], ingest: FakeIngest, area: str
+) -> None:
+    """AC-7：api-server 启动时删除视频文件摄像头并清空卷；其余摄像头不受影响，表非空时不初始导入。"""
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    camera_id = camera_id.json()["id"]
+
+    async def place() -> None:
+        async with transaction(db[1]) as conn:
+            await conn.execute(
+                update(cameras.cameras)
+                .where(cameras.cameras.c.id == camera_id)
+                .values(area_id=area)
+            )
+
+    asyncio.run(place())
+    touched = area_updated(db[1], area)
+    config = cast(Any, client.app).state.config
+    with TestClient(create_app(config), base_url="https://testserver"):  # 重启的 api-server
+        wait_gone(db[1], camera_id)
+    audit = latest(db[1], "camera.expired")
+    assert (audit["actor"], audit["target"], audit["after"]) == (
+        "system",
+        camera_id,
+        {"reason": "api-server 重启"},
+    )
+    assert area_updated(db[1], area) > touched
+    assert [c["id"] for c in client.get("/api/cameras").json()["items"]] == ["cam-01", "cam-02"]
+    assert list(videos_dir(client).iterdir()) == []
+
+
+def test_ingest_restart_expires_video_file_cameras(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    ingest: FakeIngest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-8：写入过 ingest 的路径不见了即 ingest 已重启：删除、写审计、删视频、重新下发；ingest 不可达时不判定。"""
+    state = cast(Any, client.app).state
+    video = upload(client)
+    camera_id = client.post("/api/cameras", json=file_body(video), headers=headers()).json()["id"]
+    assert camera_id in ingest.paths
+    published: list[Any] = []
+
+    async def capture(subject: str, event: Any) -> None:
+        published.append(event)
+
+    monkeypatch.setattr(state.bus, "js_publish", capture)
+    monkeypatch.setattr(state, "go2rtc", FakeGo2rtc({}))  # 定期比对同时同步 go2rtc
+    ingest.paths.clear()  # ingest 重启：动态添加的路径都没了
+    monkeypatch.setattr(state, "ingest", DownIngest({}))
+    portal = client.portal
+    assert portal is not None
+    portal.call(state.cameras.reconcile)
+    assert stored(db[1], camera_id)["path"] == video  # 不可达时不判定
+
+    monkeypatch.setattr(state, "ingest", ingest)
+    portal.call(state.cameras.reconcile)
+    wait_gone(db[1], camera_id)
+    audit = latest(db[1], "camera.expired")
+    assert (audit["target"], audit["after"]) == (camera_id, {"reason": "推流服务重启"})
+    assert not (videos_dir(client) / video).exists()
+    assert camera_id not in ingest.paths
+    assert [c.id for c in published[-1].cameras] == ["cam-01", "cam-02"]

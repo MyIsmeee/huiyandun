@@ -6,6 +6,8 @@
 go2rtc 的 exec: 等源可执行命令（D-103）。口令只写不读（C-ST-03），日志不含地址（G-14、SD-06）。
 
 地面标定（FR-910、D-132）：拟合由 vision-engine 应答，本模块只校验、保存与下发；改安装参数不影响标定（D-134）。
+
+视频文件摄像头（D-145、FR-914、FR-915）是临时的：api-server 启动时、或发现 ingest 重启后，删除并写审计 camera.expired。
 """
 
 import asyncio
@@ -44,7 +46,7 @@ from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from api_server import scene, usb
+from api_server import scene, usb, video_file
 from api_server.audit import record
 from api_server.auth import Principal, require
 from api_server.llm import seal, unseal
@@ -250,6 +252,8 @@ def _check(values: dict[str, Any]) -> None:
     """契约之外的校验：拉流须有地址且不指向本机，警戒线不能竖直（FR-104）。"""
     if values["ingest"] == "usb" and not values.get("path"):
         raise HTTPException(400, "device: USB 方式须选择设备")
+    if values["ingest"] == "file" and not values.get("path"):
+        raise HTTPException(400, "video_file: 视频文件方式须上传视频")
     if values["ingest"] == "pull" and values.get("protocol") is None:
         raise HTTPException(400, "source: 拉流方式须填写协议、主机、端口与路径")
     if values["ingest"] == "pull" and _local(values["host"]):
@@ -300,14 +304,24 @@ RELAY_PROTOCOLS = {"rtsp", "rtmp"}  # MediaMTX 能作为来源拉取的协议（
 
 
 def _source_columns(
-    source: dict[str, Any] | None, ingest: str, device: str | None = None
+    source: dict[str, Any] | None,
+    ingest: str,
+    device: str | None = None,
+    video: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
-    """推流不保存拉流地址，也没有兼容模式；USB 摄像头的设备标识存于 path。"""
+    """推流不保存拉流地址，也没有兼容模式；USB 摄像头的设备标识存于 path；视频文件的上传编号存于 path，
+    video 为（上传编号, 原始文件名）。"""
+    if ingest == "file":
+        path, name = video or (None, None)
+        return dict.fromkeys(SOURCE_FIELDS) | {"path": path, "relay": False, "file_name": name}
     if ingest == "usb":
-        return dict.fromkeys(SOURCE_FIELDS) | {"path": device, "relay": False}
+        return dict.fromkeys(SOURCE_FIELDS) | {"path": device, "relay": False, "file_name": None}
     if ingest != "pull" or source is None:
-        return dict.fromkeys(SOURCE_FIELDS) | {"relay": False}
-    return {k: source[k] for k in SOURCE_FIELDS} | {"relay": bool(source.get("relay"))}
+        return dict.fromkeys(SOURCE_FIELDS) | {"relay": False, "file_name": None}
+    return {k: source[k] for k in SOURCE_FIELDS} | {
+        "relay": bool(source.get("relay")),
+        "file_name": None,
+    }
 
 
 def _integrity(e: IntegrityError, ip: Any) -> HTTPException:
@@ -361,6 +375,26 @@ def seeds(site_file: Path, now: datetime) -> list[dict[str, Any]]:
     return rows
 
 
+async def _expire(conn: AsyncConnection, rows: list[Any], reason: str) -> None:
+    """视频文件摄像头失效（FR-915）：与删除相同，审计 camera.expired 的操作者为 system。调用方已取场景咨询锁。"""
+    now = datetime.now(UTC)
+    for row in rows:
+        if row["area_id"]:
+            await scene.touch(conn, row["area_id"], now)
+        await conn.execute(delete(cameras).where(cameras.c.id == row["id"]))
+        await record(
+            conn,
+            actor="system",
+            action="camera.expired",
+            target=row["id"],
+            before=audit_view(view(row)),
+            after={"reason": reason},
+            request_id=str(uuid.uuid4()),
+        )
+    if rows:
+        log.info("cameras.expired", extra={"cameras": [r["id"] for r in rows], "reason": reason})
+
+
 class Registry:
     """登记表在内存中的副本与变更后的下发。state 为 app.state。"""
 
@@ -373,12 +407,20 @@ class Registry:
         self._mode = info.mode
         self._size = (info.width_m, info.height_m)  # 首次启动时默认区域的尺寸
         self._pending = False  # 最近一次下发未完成（如总线不可达），尽快重试
+        # 本进程已写入 ingest 的视频文件摄像头：其路径从 ingest 的列表中消失即说明 ingest 已重启（FR-915）
+        self._written: set[str] = set()
 
     async def run(self) -> None:
-        """启动时初始导入并下发（数据库或总线不可达时重试），之后定期比对 go2rtc。"""
+        """启动时删除上次运行的视频文件摄像头、初始导入并下发（数据库或总线不可达时重试），之后定期比对 go2rtc。"""
         while True:
             try:
                 async with self._state.engine.begin() as conn:
+                    # 先于初始导入：只剩视频文件摄像头时，删除后表为空，按 site.yaml 导入（FR-901）
+                    await scene.lock(conn)
+                    query = select(cameras).where(cameras.c.ingest == "file").with_for_update()
+                    await _expire(
+                        conn, list((await conn.execute(query)).mappings()), "api-server 重启"
+                    )
                     if not await conn.scalar(select(cameras.c.id).limit(1)):
                         now = datetime.now(UTC)
                         rows = seeds(self._state.config.site_file, now)
@@ -388,6 +430,7 @@ class Registry:
                             await conn.execute(select(func.setval(ID_SEQUENCE, _seeded_max(rows))))
                         log.info("cameras.seeded")
                     await scene.ensure_default_area(conn, *self._size)
+                await self._state.videos.clear()
                 break
             except Exception:
                 log.exception("cameras.bootstrap_failed")
@@ -406,15 +449,18 @@ class Registry:
 
     async def reconcile(self) -> None:
         """定期比对：按库补齐 ingest 的中继路径与 go2rtc 的流，删除未被引用的上传视频（D-145）。"""
+        expired: set[str] = set()
         async with self._lock:
             rows = await self._load()
             try:
-                await self._sync_ingest(rows)
+                expired = await self._sync_ingest(rows)
             except (httpx2.HTTPError, ValueError):
                 # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
                 log.exception("cameras.ingest_unavailable")
-            await self._sync_go2rtc(rows)
+            await self._sync_go2rtc([r for r in rows if r["id"] not in expired])
             await self._state.videos.prune({r["path"] for r in rows if r["ingest"] == "file"})
+        if expired:  # 推送新站点、下发不含失效摄像头的登记表
+            await self.apply()
 
     async def _load(self) -> list[Any]:
         async with self._state.engine.connect() as conn:
@@ -437,6 +483,12 @@ class Registry:
 
     async def _apply(self) -> None:
         rows = await self._load()
+        # ingest 先行：其间判定失效的视频文件摄像头不再出现在站点与登记表中
+        try:
+            expired = await self._sync_ingest(rows)
+            rows = [r for r in rows if r["id"] not in expired]
+        except (httpx2.HTTPError, ValueError):
+            log.exception("cameras.ingest_unavailable")
         areas = await self._areas()
         site: Site = self._state.site
         devices = [device(r, self._mode) for r in rows]
@@ -448,10 +500,6 @@ class Registry:
                 WsFrame(channel="site", data=self._state.site.model_dump(mode="json"))
             )
         try:
-            await self._sync_ingest(rows)
-        except (httpx2.HTTPError, ValueError):
-            log.exception("cameras.ingest_unavailable")
-        try:
             await self._sync_go2rtc(rows)
         except (httpx2.HTTPError, ValueError):
             # 视频服务暂不可达：登记表照常下发，定期比对时补齐
@@ -459,9 +507,10 @@ class Registry:
         await self._state.bus.js_publish(SUBJECT, registry(rows))
         log.info("cameras.published", extra={"cameras": [r["id"] for r in rows]})
 
-    async def _sync_ingest(self, rows: list[Any]) -> None:
+    async def _sync_ingest(self, rows: list[Any]) -> set[str]:
         """兼容模式（D-117）：ingest 中每台开启兼容模式的摄像头一条同名中继路径，来源为摄像头本身的地址；
-        其余 cam-NN 显式路径删除（推流走正则路径，不受影响）。口令只在内存中解密后写入 MediaMTX 配置。"""
+        其余 cam-NN 显式路径删除（推流走正则路径，不受影响）。口令只在内存中解密后写入 MediaMTX 配置。
+        写入过的视频文件摄像头路径不见了，即 ingest 已重启：删除这些摄像头（FR-915），返回其编号。"""
         client = self._state.ingest
         res = await client.get("/v3/config/paths/list")
         res.raise_for_status()
@@ -470,6 +519,15 @@ class Registry:
             for item in res.json().get("items") or []
             if re.fullmatch(r"cam-\d+", item["name"])
         }
+        gone = [
+            r["id"]
+            for r in rows
+            if r["ingest"] == "file" and r["id"] in self._written and r["id"] not in current
+        ]
+        expired = await self._expire_restarted(gone) if gone else set()
+        rows = [r for r in rows if r["id"] not in expired]
+        files = {r["id"] for r in rows if r["ingest"] == "file"}
+        self._written &= files
         key_file = self._state.config.device_key_file
         desired: dict[str, dict[str, Any]] = {}
         for r in rows:
@@ -483,17 +541,37 @@ class Registry:
             elif r["ingest"] == "usb" and r["path"]:
                 # USB 摄像头：ingest 本机 ffmpeg 读设备推到同名路径（usb.py）
                 desired[r["id"]] = usb.ingest_path(r["path"])
+            elif r["ingest"] == "file":
+                # 视频文件摄像头：ingest 本机 ffmpeg 循环播放上传的视频（video_file.py）
+                desired[r["id"]] = video_file.ingest_path(r["path"])
         for name in current.keys() - desired.keys():
             (await client.delete(f"/v3/config/paths/delete/{name}")).raise_for_status()
             log.info("cameras.relay_removed", extra={"camera_id": name})
         for name, conf in desired.items():
-            if current.get(name) == (conf["source"], conf.get("runOnInit", "")):
-                continue
-            # 整体替换：兼容模式与 USB 互换时不残留另一种的字段
-            action = "replace" if name in current else "add"
-            res = await client.post(f"/v3/config/paths/{action}/{name}", json=conf)
-            res.raise_for_status()
-            log.info("cameras.relay_synced", extra={"camera_id": name})
+            if current.get(name) != (conf["source"], conf.get("runOnInit", "")):
+                # 整体替换：兼容模式与 USB 互换时不残留另一种的字段
+                action = "replace" if name in current else "add"
+                res = await client.post(f"/v3/config/paths/{action}/{name}", json=conf)
+                res.raise_for_status()
+                log.info("cameras.relay_synced", extra={"camera_id": name})
+            if name in files:
+                self._written.add(name)
+        return expired
+
+    async def _expire_restarted(self, ids: list[str]) -> set[str]:
+        """ingest 重启后删除其上的视频文件摄像头与视频（FR-915）；期间已被删除的跳过。"""
+        async with self._state.engine.begin() as conn:
+            await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
+            query = (
+                select(cameras)
+                .where(cameras.c.id.in_(ids), cameras.c.ingest == "file")
+                .with_for_update()
+            )
+            rows = list((await conn.execute(query)).mappings())
+            await _expire(conn, rows, "推流服务重启")
+        for row in rows:
+            await self._state.videos.remove(row["path"])
+        return {r["id"] for r in rows}
 
     async def _sync_go2rtc(self, rows: list[Any]) -> None:
         """go2rtc 只按登记表拉流；登记表外的流删除。go2rtc 的 PATCH 只改地址不重连，修改时先删再加。"""
@@ -567,8 +645,12 @@ async def list_cameras(request: Request) -> CameraList:
 @router.post("/cameras", status_code=201)
 async def create_camera(body: CameraCreate, request: Request, principal: Admin) -> Camera:
     now = datetime.now(UTC)
-    if body.ip is None and body.ingest != "usb":
+    if body.ip is None and body.ingest not in ("usb", "file"):
         raise HTTPException(400, "ip: 拉流与推流方式须填写设备 IP")
+    videos: video_file.VideoFiles = request.app.state.videos
+    video = None
+    if body.ingest == "file" and body.video_file:
+        video = (body.video_file.root, videos.name(body.video_file.root))
     values: dict[str, Any] = {
         "name": body.name,
         "ip": str(body.ip) if body.ip is not None else None,
@@ -587,6 +669,7 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         body.source.model_dump() if body.source else None,
         body.ingest,
         body.device.root if body.device else None,
+        video,
     )
     _check(values)
     try:
@@ -611,6 +694,8 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
             )
     except IntegrityError as e:
         raise _integrity(e, values["ip"]) from e
+    if video:
+        videos.claim(video[0])
     await request.app.state.cameras.apply()
     return with_push_password(request, camera, camera.ingest == "push")
 
@@ -626,8 +711,10 @@ def _sealed(key_file: Path, password: SecretStr | None) -> str | None:
     return seal(key_file, secret) if secret else None
 
 
-def _updated(row: Any, body: CameraUpdate, key_file: Path) -> dict[str, Any]:
-    """库中的一行按 PATCH 请求合并后的列值（尚未校验）。"""
+def _updated(
+    row: Any, body: CameraUpdate, key_file: Path, video: tuple[str, str] | None = None
+) -> dict[str, Any]:
+    """库中的一行按 PATCH 请求合并后的列值（尚未校验）。video 为视频文件摄像头的（上传编号, 原始文件名）。"""
     changes = body.model_dump(exclude_unset=True)
     values: dict[str, Any] = dict(row)
     if body.name is not None:
@@ -647,12 +734,22 @@ def _updated(row: Any, body: CameraUpdate, key_file: Path) -> dict[str, Any]:
     source = changes.get("source", None if row["protocol"] is None else dict(row))
     current_device = row["path"] if row["ingest"] == "usb" else None
     device_id = body.device.root if body.device else current_device
-    values |= _source_columns(source, values["ingest"], device_id)
+    values |= _source_columns(source, values["ingest"], device_id, video)
     if body.clear_password:
         values["password_enc"] = None
     elif (sealed := _sealed(key_file, body.password)) is not None:
         values["password_enc"] = sealed
     return values
+
+
+def _video(request: Request, row: Any, body: CameraUpdate) -> tuple[str, str] | None:
+    """视频文件摄像头的（上传编号, 原始文件名）：给出新上传时换用，否则沿用库中的。"""
+    if row["ingest"] != "file":
+        return None
+    new = body.video_file.root if body.video_file else None
+    if new is None or new == row["path"]:
+        return (row["path"], row["file_name"])
+    return (new, request.app.state.videos.name(new))
 
 
 @router.patch("/cameras/{camera_id}")
@@ -664,7 +761,10 @@ async def update_camera(
             await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
             row = await _locked(conn, camera_id)
             before = view(row)
-            values = _updated(row, body, request.app.state.config.device_key_file)
+            if body.ingest is not None and (body.ingest == "file") != (row["ingest"] == "file"):
+                raise HTTPException(400, "ingest: 视频文件摄像头不能与其他接入方式互转")
+            video = _video(request, row, body)
+            values = _updated(row, body, request.app.state.config.device_key_file, video)
             _check(values)
             values["updated_at"] = datetime.now(UTC)
             if row["area_id"] and any(values["pose"][k] != row["pose"][k] for k in PLACEMENT):
@@ -688,7 +788,12 @@ async def update_camera(
         raise _integrity(e, values["ip"]) from e
     if values["pose"] != row["pose"]:
         request.app.state.pose_checks.forget(camera_id)  # 旧建议是相对旧参数说的
+    replaced = video is not None and video[0] != row["path"]
+    if replaced:
+        request.app.state.videos.claim(values["path"])
     await request.app.state.cameras.apply()
+    if replaced:  # ingest 已换用新视频
+        await request.app.state.videos.remove(row["path"])
     return with_push_password(request, camera, camera.ingest == "push" and before.ingest != "push")
 
 
@@ -710,6 +815,8 @@ async def delete_camera(camera_id: str, request: Request, principal: Admin) -> R
             request_id=request.state.request_id,
         )
     await request.app.state.cameras.apply()
+    if row["ingest"] == "file":
+        await request.app.state.videos.remove(row["path"])
     return Response(status_code=204)
 
 

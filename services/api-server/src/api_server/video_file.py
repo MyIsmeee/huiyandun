@@ -10,7 +10,7 @@ import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path, PurePosixPath
 from shutil import disk_usage
-from typing import Annotated
+from typing import Annotated, Any
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -24,6 +24,25 @@ ORPHAN_S = 600  # 上传后这么久仍未被摄像头引用即删除
 NAME_MAX = 200
 ID_RE = re.compile(r"[0-9a-f]{32}")  # 与契约 VideoFileId 一致；拼进 ffmpeg 命令（D-103）
 MISSING = "video_file: 视频已失效，请重新选择"
+INGEST_DIR = "/videos"  # ingest 容器内卷 camera-videos 的只读挂载点
+# 编码参数与 USB 摄像头相同（usb.COMMAND）：浏览器可播放的 H.264，15 fps 足够识别
+COMMAND = (
+    "ffmpeg -hide_banner -loglevel error -re -stream_loop -1 -i " + INGEST_DIR + "/{video_id} "
+    "-an -r 15 -c:v libx264 -preset ultrafast -tune zerolatency -g 30 -pix_fmt yuv420p "
+    "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH"
+)
+
+
+def ingest_path(video_id: str) -> dict[str, Any]:
+    """ingest 中该摄像头路径的整份配置：本机 ffmpeg 循环播放视频推到同名路径，退出后重启。
+    命令中只有服务端生成并校验过的上传编号，原始文件名不进入命令（D-103）。"""
+    if not ID_RE.fullmatch(video_id):
+        raise ValueError(f"非法的上传编号：{video_id!r}")
+    return {
+        "source": "publisher",
+        "runOnInit": COMMAND.format(video_id=video_id),
+        "runOnInitRestart": True,
+    }
 
 
 class VideoFiles:
