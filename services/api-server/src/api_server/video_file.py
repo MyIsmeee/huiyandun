@@ -85,8 +85,14 @@ class VideoFiles:
         return self._pending[video_id]
 
     def claim(self, video_id: str) -> None:
-        """摄像头已保存引用：文件名改由登记表保存，同一上传不能再被其他摄像头引用。"""
-        self._pending.pop(video_id, None)
+        """在保存引用的事务中取走上传：同一上传只给一路摄像头，并发引用时后取者 400（删除一路会删掉另一路的视频）。
+        保存失败时由调用方 release 放回。"""
+        if self._pending.pop(video_id, None) is None:
+            raise HTTPException(400, MISSING)
+
+    def release(self, video_id: str, name: str) -> None:
+        """取走后保存失败：放回，10 分钟内仍可被引用。"""
+        self._pending[video_id] = name
 
     async def remove(self, video_id: str) -> None:
         self._pending.pop(video_id, None)

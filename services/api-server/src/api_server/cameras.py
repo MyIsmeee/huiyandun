@@ -11,6 +11,7 @@ go2rtc 的 exec: 等源可执行命令（D-103）。口令只写不读（C-ST-03
 """
 
 import asyncio
+import contextlib
 import ipaddress
 import logging
 import re
@@ -266,6 +267,8 @@ def _check(values: dict[str, Any]) -> None:
     _check_rules(values.get("rules") or [])
 
 
+# 视频文件摄像头只用服务端分配的回环占位地址，不参与网络告警关联（D-145）
+NO_FILE_IP = "ip: 视频文件摄像头没有设备 IP"
 MIN_EDGE_M = 0.1  # 规则几何相邻两点的最小间距：重合的点使方向与边界无从定义
 
 
@@ -409,6 +412,10 @@ class Registry:
         self._pending = False  # 最近一次下发未完成（如总线不可达），尽快重试
         # 本进程已写入 ingest 的视频文件摄像头：其路径从 ingest 的列表中消失即说明 ingest 已重启（FR-915）
         self._written: set[str] = set()
+        # 已判定失效、尚未从库中删除的视频文件摄像头：不再出现在站点、登记表、ingest 与 go2rtc 中。
+        # 删除要取场景锁，只在释放 _lock 后进行（_expire_pending）：场景保存持有场景锁时会调用 apply()
+        self._expiring: set[str] = set()
+        self._wake = asyncio.Event()  # 新判定失效时叫醒 run 立即删除，不等本轮间隔
 
     async def run(self) -> None:
         """启动时删除上次运行的视频文件摄像头、初始导入并下发（数据库或总线不可达时重试），之后定期比对 go2rtc。"""
@@ -430,15 +437,24 @@ class Registry:
                             await conn.execute(select(func.setval(ID_SEQUENCE, _seeded_max(rows))))
                         log.info("cameras.seeded")
                     await scene.ensure_default_area(conn, *self._size)
-                await self._state.videos.clear()
                 break
             except Exception:
                 log.exception("cameras.bootstrap_failed")
                 await asyncio.sleep(RETRY_S)
+        try:
+            await self._state.videos.clear()
+        except OSError:
+            # 卷缺失或不可写只影响视频文件摄像头，不拖住其余摄像头的下发
+            log.exception("cameras.videos_clear_failed")
         await self.apply()
         while True:
-            # 下发未完成时 2 s 后重试；否则每 30 s 比对 go2rtc（其重启会丢掉动态添加的流）
-            await asyncio.sleep(RETRY_S if self._pending else SYNC_S)
+            # 下发或失效删除未完成时 2 s 后重试；否则每 30 s 比对 go2rtc（其重启会丢掉动态添加的流）
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self._wake.wait(), RETRY_S if self._pending or self._expiring else SYNC_S
+                )
+            self._wake.clear()
+            await self._expire_pending()
             if self._pending:
                 await self.apply()
                 continue
@@ -448,19 +464,40 @@ class Registry:
                 log.exception("cameras.sync_failed")
 
     async def reconcile(self) -> None:
-        """定期比对：按库补齐 ingest 的中继路径与 go2rtc 的流，删除未被引用的上传视频（D-145）。"""
-        expired: set[str] = set()
-        async with self._lock:
-            rows = await self._load()
-            try:
-                expired = await self._sync_ingest(rows)
-            except (httpx2.HTTPError, ValueError):
-                # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
-                log.exception("cameras.ingest_unavailable")
-            await self._sync_go2rtc([r for r in rows if r["id"] not in expired])
-            await self._state.videos.prune({r["path"] for r in rows if r["ingest"] == "file"})
-        if expired:  # 推送新站点、下发不含失效摄像头的登记表
-            await self.apply()
+        """定期比对：按库补齐 ingest 的中继路径与 go2rtc 的流，删除未被引用的上传视频（D-145）。
+        其间判定失效的视频文件摄像头在释放 _lock 后删除并重新下发；go2rtc 等不可达同样照删。"""
+        try:
+            async with self._lock:
+                rows = await self._load()
+                try:
+                    await self._sync_ingest(self._live(rows))
+                except (httpx2.HTTPError, ValueError):
+                    # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
+                    log.exception("cameras.ingest_unavailable")
+                # 先于 go2rtc 的比对：go2rtc 不可达时同样清理
+                await self._state.videos.prune({r["path"] for r in rows if r["ingest"] == "file"})
+                await self._sync_go2rtc(self._live(rows))
+        finally:
+            await self._expire_pending()
+
+    def _live(self, rows: list[Any]) -> list[Any]:
+        """去掉已判定失效、待删除的视频文件摄像头。"""
+        return [r for r in rows if r["id"] not in self._expiring]
+
+    async def _expire_pending(self) -> None:
+        """删除已判定失效的视频文件摄像头并重新下发（FR-915）。不抛出：失败时保留，由 run 在 2 s 后重试。
+        不得在持有 _lock 时调用：删除要取场景锁，与场景保存（持场景锁后调用 apply）的加锁顺序相反。"""
+        if not self._expiring:
+            return
+        ids = sorted(self._expiring)
+        try:
+            await self._expire_restarted(ids)
+        except Exception:
+            log.exception("cameras.expire_failed")
+            return
+        # 期间已被删除或改为其他接入方式的不再删除，一并移出
+        self._expiring -= set(ids)
+        await self.apply()
 
     async def _load(self) -> list[Any]:
         async with self._state.engine.connect() as conn:
@@ -482,13 +519,7 @@ class Registry:
             return await scene.list_areas(conn)
 
     async def _apply(self) -> None:
-        rows = await self._load()
-        # ingest 先行：其间判定失效的视频文件摄像头不再出现在站点与登记表中
-        try:
-            expired = await self._sync_ingest(rows)
-            rows = [r for r in rows if r["id"] not in expired]
-        except (httpx2.HTTPError, ValueError):
-            log.exception("cameras.ingest_unavailable")
+        rows = self._live(await self._load())
         areas = await self._areas()
         site: Site = self._state.site
         devices = [device(r, self._mode) for r in rows]
@@ -500,6 +531,12 @@ class Registry:
                 WsFrame(channel="site", data=self._state.site.model_dump(mode="json"))
             )
         try:
+            await self._sync_ingest(rows)
+        except (httpx2.HTTPError, ValueError):
+            log.exception("cameras.ingest_unavailable")
+        # 其间新判定失效的不再拉流、不进登记表；站点由 run 删除后重新下发时更新
+        rows = self._live(rows)
+        try:
             await self._sync_go2rtc(rows)
         except (httpx2.HTTPError, ValueError):
             # 视频服务暂不可达：登记表照常下发，定期比对时补齐
@@ -507,10 +544,10 @@ class Registry:
         await self._state.bus.js_publish(SUBJECT, registry(rows))
         log.info("cameras.published", extra={"cameras": [r["id"] for r in rows]})
 
-    async def _sync_ingest(self, rows: list[Any]) -> set[str]:
+    async def _sync_ingest(self, rows: list[Any]) -> None:
         """兼容模式（D-117）：ingest 中每台开启兼容模式的摄像头一条同名中继路径，来源为摄像头本身的地址；
         其余 cam-NN 显式路径删除（推流走正则路径，不受影响）。口令只在内存中解密后写入 MediaMTX 配置。
-        写入过的视频文件摄像头路径不见了，即 ingest 已重启：删除这些摄像头（FR-915），返回其编号。"""
+        写入过的视频文件摄像头路径不见了，即 ingest 已重启：记入 _expiring（FR-915），此处不删除——调用方持有 _lock。"""
         client = self._state.ingest
         res = await client.get("/v3/config/paths/list")
         res.raise_for_status()
@@ -519,13 +556,15 @@ class Registry:
             for item in res.json().get("items") or []
             if re.fullmatch(r"cam-\d+", item["name"])
         }
-        gone = [
+        gone = {
             r["id"]
             for r in rows
             if r["ingest"] == "file" and r["id"] in self._written and r["id"] not in current
-        ]
-        expired = await self._expire_restarted(gone) if gone else set()
-        rows = [r for r in rows if r["id"] not in expired]
+        }
+        if gone - self._expiring:
+            self._expiring |= gone
+            self._wake.set()
+        rows = self._live(rows)
         files = {r["id"] for r in rows if r["ingest"] == "file"}
         self._written &= files
         key_file = self._state.config.device_key_file
@@ -556,9 +595,8 @@ class Registry:
                 log.info("cameras.relay_synced", extra={"camera_id": name})
             if name in files:
                 self._written.add(name)
-        return expired
 
-    async def _expire_restarted(self, ids: list[str]) -> set[str]:
+    async def _expire_restarted(self, ids: list[str]) -> None:
         """ingest 重启后删除其上的视频文件摄像头与视频（FR-915）；期间已被删除的跳过。"""
         async with self._state.engine.begin() as conn:
             await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
@@ -571,7 +609,6 @@ class Registry:
             await _expire(conn, rows, "推流服务重启")
         for row in rows:
             await self._state.videos.remove(row["path"])
-        return {r["id"] for r in rows}
 
     async def _sync_go2rtc(self, rows: list[Any]) -> None:
         """go2rtc 只按登记表拉流；登记表外的流删除。go2rtc 的 PATCH 只改地址不重连，修改时先删再加。"""
@@ -647,6 +684,8 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
     now = datetime.now(UTC)
     if body.ip is None and body.ingest not in ("usb", "file"):
         raise HTTPException(400, "ip: 拉流与推流方式须填写设备 IP")
+    if body.ip is not None and body.ingest == "file":
+        raise HTTPException(400, NO_FILE_IP)
     videos: video_file.VideoFiles = request.app.state.videos
     video = None
     if body.ingest == "file" and body.video_file:
@@ -672,12 +711,16 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
         video,
     )
     _check(values)
+    held = None  # 已取走、尚未保存的上传：保存失败时放回
     try:
         async with request.app.state.engine.begin() as conn:
             # 并发新增串行化：否则可能同时通过路数上限的检查
             await conn.execute(select(func.pg_advisory_xact_lock(CREATE_LOCK)))
             if len(await _rows(conn)) >= MAX_CAMERAS:
                 raise HTTPException(409, f"最多登记 {MAX_CAMERAS} 路摄像头")
+            if video:
+                videos.claim(video[0])
+                held = video
             if values["ip"] is None:
                 values["ip"] = usb.placeholder_ip({str(r["ip"]) for r in await _rows(conn)})
             values["id"] = await _next_id(conn)
@@ -692,10 +735,12 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
                 after=audit_view(camera),
                 request_id=request.state.request_id,
             )
+        held = None
     except IntegrityError as e:
         raise _integrity(e, values["ip"]) from e
-    if video:
-        videos.claim(video[0])
+    finally:
+        if held:
+            videos.release(*held)
     await request.app.state.cameras.apply()
     return with_push_password(request, camera, camera.ingest == "push")
 
@@ -756,6 +801,8 @@ def _video(request: Request, row: Any, body: CameraUpdate) -> tuple[str, str] | 
 async def update_camera(
     camera_id: str, body: CameraUpdate, request: Request, principal: Admin
 ) -> Camera:
+    videos: video_file.VideoFiles = request.app.state.videos
+    held = None  # 已取走、尚未保存的新上传：保存失败时放回
     try:
         async with request.app.state.engine.begin() as conn:
             await scene.lock(conn)  # 先于摄像头行加锁，与场景保存的加锁顺序一致
@@ -763,7 +810,12 @@ async def update_camera(
             before = view(row)
             if body.ingest is not None and (body.ingest == "file") != (row["ingest"] == "file"):
                 raise HTTPException(400, "ingest: 视频文件摄像头不能与其他接入方式互转")
+            if body.ip is not None and row["ingest"] == "file":
+                raise HTTPException(400, NO_FILE_IP)
             video = _video(request, row, body)
+            if video is not None and video[0] != row["path"]:
+                videos.claim(video[0])
+                held = video
             values = _updated(row, body, request.app.state.config.device_key_file, video)
             _check(values)
             values["updated_at"] = datetime.now(UTC)
@@ -784,16 +836,18 @@ async def update_camera(
                 after=audit_view(camera),
                 request_id=request.state.request_id,
             )
+        held = None
     except IntegrityError as e:
         raise _integrity(e, values["ip"]) from e
+    finally:
+        if held:
+            videos.release(*held)
     if values["pose"] != row["pose"]:
         request.app.state.pose_checks.forget(camera_id)  # 旧建议是相对旧参数说的
     replaced = video is not None and video[0] != row["path"]
-    if replaced:
-        request.app.state.videos.claim(values["path"])
     await request.app.state.cameras.apply()
     if replaced:  # ingest 已换用新视频
-        await request.app.state.videos.remove(row["path"])
+        await videos.remove(row["path"])
     return with_push_password(request, camera, camera.ingest == "push" and before.ingest != "push")
 
 

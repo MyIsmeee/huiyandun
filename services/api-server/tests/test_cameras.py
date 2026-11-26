@@ -3,6 +3,7 @@
 
 import asyncio
 import base64
+import logging
 import os
 import time
 import uuid
@@ -1158,13 +1159,46 @@ def test_file_ingest_not_convertible(client: TestClient, ingest: FakeIngest) -> 
         assert r.json()["message"] == "ingest: 视频文件摄像头不能与其他接入方式互转"
 
 
+def test_file_camera_rejects_ip(client: TestClient, ingest: FakeIngest) -> None:
+    """视频文件摄像头只用占位 IP：给出真实 IP 会参与网络告警关联（D-145），新增与修改都拒绝。"""
+    body = file_body(upload(client)) | {"ip": "192.168.8.50"}
+    r = client.post("/api/cameras", json=body, headers=headers())
+    assert (r.status_code, r.json()["message"]) == (400, cameras.NO_FILE_IP)
+
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    camera_id = camera_id.json()["id"]
+    r = client.patch(f"/api/cameras/{camera_id}", json={"ip": "192.168.8.50"}, headers=headers())
+    assert (r.status_code, r.json()["message"]) == (400, cameras.NO_FILE_IP)
+
+
+def test_orphan_upload_pruned_when_go2rtc_down(
+    client: TestClient, ingest: FakeIngest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-9：go2rtc 不可达时定期比对照样删除未被引用的上传。"""
+    state = cast(Any, client.app).state
+    orphan = videos_dir(client) / upload(client)
+    stale = time.time() - video_file.ORPHAN_S - 60
+    os.utime(orphan, (stale, stale))
+    monkeypatch.setattr(state, "go2rtc", DownGo2rtc({}))
+    portal = client.portal
+    assert portal is not None
+    with pytest.raises(httpx2.ConnectError):
+        portal.call(state.cameras.reconcile)
+    assert not orphan.exists()
+
+
 def test_video_file_counts_toward_limit(
     client: TestClient, ingest: FakeIngest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC-10：计入路数上限。"""
     monkeypatch.setattr(cameras, "MAX_CAMERAS", 2)  # 初始导入已有 2 路
-    r = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    video = upload(client)
+    r = client.post("/api/cameras", json=file_body(video), headers=headers())
     assert r.status_code == 409
+    # 保存失败时上传放回：不必重新上传即可再次引用
+    monkeypatch.setattr(cameras, "MAX_CAMERAS", 3)
+    r = client.post("/api/cameras", json=file_body(video), headers=headers())
+    assert r.status_code == 201, r.text
 
 
 def wait_gone(config: ApiConfig, camera_id: str) -> None:
@@ -1223,6 +1257,27 @@ def test_startup_expires_video_file_cameras(
     assert list(videos_dir(client).iterdir()) == []
 
 
+def test_startup_continues_when_video_dir_unusable(
+    db: tuple[ApiConfig, ApiConfig],
+    key_file: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """视频卷缺失或不可写：启动时清空失败只记日志，其余摄像头照常下发（不无限重试、走不到 apply）。
+    不用 client 夹具：只有这一个 api-server 在运行，下发日志不会来自别处。"""
+    config = db[1].model_copy(
+        update={"device_key_file": key_file, "camera_video_dir": tmp_path / "missing"}
+    )
+    caplog.set_level(logging.INFO, logger="api_server.cameras")
+    caplog.clear()
+    with TestClient(create_app(config), base_url="https://testserver"):
+        deadline = time.monotonic() + 10
+        while not any(r.getMessage() == "cameras.published" for r in caplog.records):
+            assert time.monotonic() < deadline, "启动后未下发登记表"
+            time.sleep(0.1)
+    assert any(r.getMessage() == "cameras.videos_clear_failed" for r in caplog.records)
+
+
 def test_ingest_restart_expires_video_file_cameras(
     client: TestClient,
     db: tuple[ApiConfig, ApiConfig],
@@ -1256,3 +1311,71 @@ def test_ingest_restart_expires_video_file_cameras(
     assert not (videos_dir(client) / video).exists()
     assert camera_id not in ingest.paths
     assert [c.id for c in published[-1].cameras] == ["cam-01", "cam-02"]
+
+
+class DownGo2rtc(FakeGo2rtc):
+    """go2rtc 不可达：任何请求都连不上。"""
+
+    async def get(self, path: str, **_: Any) -> Any:
+        raise httpx2.ConnectError("go2rtc")
+
+
+def test_expiry_detected_under_scene_lock_does_not_deadlock(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    ingest: FakeIngest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """场景自动调整持有场景锁时调用 apply()，其间判定视频文件摄像头失效：apply 不取场景锁、不卡住，
+    登记表即不含它；释放场景锁后由 run 删除（FR-915）。原先 apply 持 _lock 再取场景锁，与之互相等待。"""
+    state = cast(Any, client.app).state
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    camera_id = camera_id.json()["id"]
+    published: list[Any] = []
+
+    async def capture(subject: str, event: Any) -> None:
+        published.append(event)
+
+    monkeypatch.setattr(state.bus, "js_publish", capture)
+    monkeypatch.setattr(state, "go2rtc", FakeGo2rtc({}))
+    ingest.paths.clear()  # ingest 重启
+
+    async def fit_like() -> None:
+        async with state.engine.begin() as conn:
+            await scene.lock(conn)
+            await asyncio.wait_for(state.cameras.apply(), timeout=5)
+            assert [c.id for c in published[-1].cameras] == ["cam-01", "cam-02"]
+
+    portal = client.portal
+    assert portal is not None
+    portal.call(fit_like)
+    wait_gone(db[1], camera_id)
+    assert latest(db[1], "camera.expired")["target"] == camera_id
+
+
+def test_expiry_republished_when_go2rtc_down(
+    client: TestClient,
+    db: tuple[ApiConfig, ApiConfig],
+    ingest: FakeIngest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """定期比对判定失效后 go2rtc 不可达：照样删除并重新下发不含该摄像头的站点与登记表（FR-915）。
+    原先比对抛出后到不了重新下发，下一轮库中已无此行、不再判定，WS 与登记表一直保留它。"""
+    state = cast(Any, client.app).state
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    camera_id = camera_id.json()["id"]
+    published: list[Any] = []
+
+    async def capture(subject: str, event: Any) -> None:
+        published.append(event)
+
+    monkeypatch.setattr(state.bus, "js_publish", capture)
+    monkeypatch.setattr(state, "go2rtc", DownGo2rtc({}))
+    ingest.paths.clear()
+    portal = client.portal
+    assert portal is not None
+    with pytest.raises(httpx2.ConnectError):
+        portal.call(state.cameras.reconcile)
+    wait_gone(db[1], camera_id)
+    assert [c.id for c in published[-1].cameras] == ["cam-01", "cam-02"]
+    assert camera_id not in [d.id for d in state.site.devices]

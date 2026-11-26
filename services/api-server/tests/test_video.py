@@ -29,11 +29,13 @@ def client(db: tuple[ApiConfig, ApiConfig], password: str) -> Iterator[TestClien
 
 
 def go2rtc(client: TestClient, handler: Handler) -> list[httpx2.Request]:
-    """以假 go2rtc 替换真实连接，返回其收到的请求。"""
+    """以假 go2rtc 替换真实连接，返回其收到的 SDP 请求。
+    登记表的下发与定期比对在后台同步流（/api/streams），时机不定，不记录。"""
     seen: list[httpx2.Request] = []
 
     def record(request: httpx2.Request) -> httpx2.Response:
-        seen.append(request)
+        if request.url.path == "/api/webrtc":
+            seen.append(request)
         return handler(request)
 
     state = client.app.state
