@@ -390,3 +390,113 @@ describe("USB 摄像头", () => {
     await waitFor(() => expect(screen.getByText("未发现 USB 摄像头")).toBeTruthy());
   });
 });
+
+describe("视频文件摄像头（D-145、V-CAM11）", () => {
+  const FILE_CAM: Camera = { ...CAM, id: "cam-07", name: "走廊录像", ip: "127.0.1.2", ingest: "file", source: null, username: null, password_set: false, file_name: "走廊.mp4" };
+  const video = (name = "门口 东.mp4", size = 30 * 1024 ** 2) => {
+    const file = new File(["x"], name, { type: "video/mp4" });
+    Object.defineProperty(file, "size", { value: size });
+    return file;
+  };
+  const choose = (file: File) => fireEvent.change(document.getElementById("cam-video") as HTMLInputElement, { target: { files: [file] } });
+  const pickFile = () => fireEvent.click(screen.getByRole("radio", { name: "视频文件（模拟摄像头）" }));
+
+  it("请求体：不带设备 IP 与拉流地址，有新上传时带上传编号", () => {
+    const form = { name: "门口", ip: "", ingest: "file" as const, protocol: "rtsp" as const, host: "", port: 554, path: "", relay: false, device: "", username: "", password: "", pose: POSE, climb_lines: [] };
+    expect(body(form, "a".repeat(32))).toEqual({ name: "门口", pose: POSE, climb_lines: [], ingest: "file", source: null, username: null, video_file: "a".repeat(32) });
+    expect(body(form)).not.toHaveProperty("video_file");
+  });
+
+  it("保存时先上传（显示进度）再新增；名称为空时以文件名填入", async () => {
+    let progress: (fraction: number) => void = () => {};
+    let finish: (v: { id: string; name: string; size_bytes: number }) => void = () => {};
+    const upload = vi.spyOn(api, "uploadVideoFile").mockImplementation((_file, onProgress) => {
+      progress = onProgress;
+      return new Promise((resolve) => (finish = resolve));
+    });
+    const create = vi.spyOn(api, "createCamera").mockResolvedValue(FILE_CAM);
+    vi.spyOn(api, "getCameraSnapshot").mockReturnValue(new Promise(() => {}));
+    render(<CameraEditor camera={null} onClose={() => {}} onSaved={() => {}} />);
+    pickFile();
+    expect(screen.getByText("视频文件无需填写")).toBeTruthy();
+    choose(video());
+    expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe("门口 东");
+    expect(screen.getByText(/门口 东\.mp4（30\.0 MB）/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await flush();
+    act(() => progress(0.5));
+    expect(screen.getByRole("progressbar", { name: "上传进度" })).toBeTruthy();
+    expect(screen.getByText("50%")).toBeTruthy();
+    for (const close of screen.getAllByRole("button", { name: "关闭" })) expect(close).toHaveProperty("disabled", true);
+    expect(create).not.toHaveBeenCalled();
+    await act(async () => finish({ id: "b".repeat(32), name: "门口 东.mp4", size_bytes: 1 }));
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ ingest: "file", video_file: "b".repeat(32), name: "门口 东" });
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("超过 2 GB 立即提示、不可保存", async () => {
+    const upload = vi.spyOn(api, "uploadVideoFile");
+    render(<CameraEditor camera={null} onClose={() => {}} onSaved={() => {}} />);
+    pickFile();
+    choose(video("大.mp4", 2 * 1024 ** 3 + 1));
+    expect(screen.getByText("视频超过 2 GB")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "保存" })).toHaveProperty("disabled", true);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("上传失败给出白话原因并保留表单；网络中断提示重试", async () => {
+    const upload = vi.spyOn(api, "uploadVideoFile").mockRejectedValueOnce(new ApiError(507, "边缘主机磁盘空间不足")).mockRejectedValueOnce(new Error("network"));
+    const create = vi.spyOn(api, "createCamera");
+    render(<CameraEditor camera={null} onClose={() => {}} onSaved={() => {}} />);
+    pickFile();
+    choose(video());
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await flush();
+    expect(screen.getByRole("alert").textContent).toContain("边缘主机磁盘空间不足");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await flush();
+    expect(screen.getByRole("alert").textContent).toContain("上传中断，请重试");
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(create).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe("门口 东");
+  });
+
+  it("上传成功、新增失败：重试不再上传，沿用同一上传编号；重新选视频后再上传", async () => {
+    const upload = vi.spyOn(api, "uploadVideoFile").mockResolvedValueOnce({ id: "c".repeat(32), name: "门口 东.mp4", size_bytes: 1 }).mockResolvedValueOnce({ id: "d".repeat(32), name: "后门.mp4", size_bytes: 1 });
+    const create = vi.spyOn(api, "createCamera").mockRejectedValue(new ApiError(409, "最多登记 16 路摄像头"));
+    render(<CameraEditor camera={null} onClose={() => {}} onSaved={() => {}} />);
+    pickFile();
+    choose(video());
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      await flush();
+      expect(screen.getByRole("alert").textContent).toContain("最多登记 16 路摄像头");
+    }
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls.map(([request]) => request)).toMatchObject([{ video_file: "c".repeat(32) }, { video_file: "c".repeat(32) }]);
+    choose(video("后门.mp4"));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await flush();
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[2]?.[0]).toMatchObject({ video_file: "d".repeat(32) });
+  });
+
+  it("编辑时不能与其他接入方式互转；已保存的视频显示文件名，可更换", async () => {
+    vi.spyOn(api, "getCameraSnapshot").mockReturnValue(new Promise(() => {}));
+    const { unmount } = render(<CameraEditor camera={FILE_CAM} onClose={() => {}} onSaved={() => {}} />);
+    for (const name of ["拉流（系统从摄像头取流）", "推流（设备推到本机）", "USB 摄像头（插在本机）"]) expect(screen.getByRole("radio", { name })).toHaveProperty("disabled", true);
+    expect(screen.getByText("走廊.mp4")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "更换视频" })).toBeTruthy();
+    unmount();
+    render(<CameraEditor camera={CAM} onClose={() => {}} onSaved={() => {}} />);
+    expect(screen.getByRole("radio", { name: "视频文件（模拟摄像头）" })).toHaveProperty("disabled", true);
+  });
+
+  it("列表：接入方式为视频文件 · 重启后失效，名称下显示文件名", () => {
+    render(<CameraListView load={{ status: "ready", cameras: [FILE_CAM] }} notice={null} deleting={null} onClose={() => {}} onRetry={() => {}} onAdd={() => {}} onEdit={() => {}} onDelete={() => {}} onConfirmDelete={() => {}} onCancelDelete={() => {}} />);
+    const row = within(screen.getByRole("table", { name: "摄像头列表" })).getAllByRole("row")[1];
+    expect(row?.textContent).toContain("视频文件 · 重启后失效");
+    expect(address(FILE_CAM)).toBe("走廊.mp4");
+  });
+});

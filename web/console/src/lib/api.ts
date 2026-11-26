@@ -12,6 +12,8 @@ const REPORT_TIMEOUT_MS = 70_000;
 const EVIDENCE_TIMEOUT_MS = 60_000;
 // api-server 等 vision-engine 识别的时限为 15 s（scene.py 的 RECOGNIZE_TIMEOUT_S），超时返回 503；这里须更长，否则先于它放弃
 const RECOGNIZE_TIMEOUT_MS = 20_000;
+// 视频文件摄像头的上传（D-145）：2 GB 经较慢的无线局域网约需十余分钟
+const UPLOAD_TIMEOUT_MS = 30 * 60_000;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -54,6 +56,34 @@ async function request<T>(
     ? send(method, path, undefined, undefined, timeoutMs)
     : send(method, path, JSON.stringify(body), "application/json", timeoutMs));
   return (res.status === 204 ? undefined : await res.json()) as T;
+}
+
+/**
+ * 上传视频文件摄像头的视频（D-145）：用 XMLHttpRequest 以取得上传进度（fetch 不提供）；请求 ID 与凭证同其他 /api 请求。
+ * 网络中断、超时为 Error，服务端拒绝为 ApiError
+ */
+function uploadVideoFile(file: File, onProgress: (fraction: number) => void): Promise<Schemas["VideoFile"]> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/cameras/video-files?name=${encodeURIComponent(file.name.slice(0, 255))}`);
+    xhr.setRequestHeader("X-Request-ID", crypto.randomUUID());
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.timeout = UPLOAD_TIMEOUT_MS;
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // 非 JSON 响应（如反向代理的错误页）按连接失败处理
+      }
+      if (xhr.status === 201) return resolve(body as Schemas["VideoFile"]);
+      const message = (body as Partial<Schemas["Error"]> | null)?.message;
+      reject(typeof message === "string" ? new ApiError(xhr.status, message) : new Error(`HTTP ${xhr.status}`));
+    };
+    xhr.onerror = xhr.ontimeout = xhr.onabort = () => reject(new Error("upload interrupted"));
+    xhr.send(file);
+  });
 }
 
 export const api = {
@@ -117,6 +147,7 @@ export const api = {
   listCameras: () => request<Schemas["CameraList"]>("GET", "/api/cameras"),
   /** 边缘主机上的 USB 摄像头：每次重新读取，拔插后刷新即可 */
   listUsbDevices: () => request<Schemas["UsbDeviceList"]>("GET", "/api/cameras/usb-devices"),
+  uploadVideoFile,
   createCamera: (body: Schemas["CameraCreate"]) => request<Schemas["Camera"]>("POST", "/api/cameras", body),
   updateCamera: (id: string, body: Schemas["CameraUpdate"]) =>
     request<Schemas["Camera"]>("PATCH", `/api/cameras/${encodeURIComponent(id)}`, body),

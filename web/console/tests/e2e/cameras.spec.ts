@@ -149,3 +149,70 @@ for (const [name, calibration, fail, text] of [
     await expect(dialog).toHaveScreenshot(`calibration-dialog-${name}.png`);
   });
 }
+
+// 视频文件摄像头（D-145、V-CAM11）：列表注明重启后失效、名称下为文件名；编辑框选视频后显示文件名与大小
+const VIDEO_CAM = { ...CAMERA, id: "cam-05", name: "走廊录像", ip: "127.0.1.1", ingest: "file", source: null, username: null, password_set: false, file_name: "走廊 东侧 2026-11-20.mp4" };
+
+test("摄像头列表：视频文件摄像头", async ({ page }) => {
+  await openCameras(page, [CAMERA, VIDEO_CAM]);
+  await expect(page.getByText("视频文件 · 重启后失效")).toBeVisible();
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("cameras-video-file.png");
+});
+
+async function chooseVideo(page: Page): Promise<void> {
+  await openCameras(page, [CAMERA]);
+  await page.getByRole("button", { name: "添加", exact: true }).click();
+  await page.getByRole("radio", { name: "视频文件（模拟摄像头）" }).click();
+  await page.locator("#cam-video").setInputFiles({ name: "门口 东.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(1024 * 1024) });
+}
+
+test("添加摄像头：选视频文件", async ({ page }) => {
+  await chooseVideo(page);
+  await expect(page.getByText("门口 东.mp4（1.0 MB）")).toBeVisible();
+  await expect(page.getByLabel("名称")).toHaveValue("门口 东");
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("camera-editor-video-file.png");
+});
+
+// 选视频其余状态的截图基线（V-G3）：上传中、超过 2 GB、上传失败
+test("添加摄像头：视频上传中", async ({ page }) => {
+  // 上传用 XMLHttpRequest：固定报告 42% 后不再响应，进度条与百分比稳定
+  await page.addInitScript(() => {
+    XMLHttpRequest.prototype.send = function () {
+      this.upload.dispatchEvent(new ProgressEvent("progress", { lengthComputable: true, loaded: 42, total: 100 }));
+    };
+  });
+  await chooseVideo(page);
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText("42%")).toBeVisible();
+  await expect(page.getByRole("button", { name: "关闭" }).last()).toBeDisabled();
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("camera-editor-video-uploading.png");
+});
+
+test("添加摄像头：视频超过 2 GB", async ({ page }) => {
+  await chooseVideo(page);
+  // 不真造 2 GB 的文件：换成大小改写过的 File，再触发 change
+  await page.locator("#cam-video").evaluate((input: HTMLInputElement) => {
+    const file = new File(["x"], "整晚录像.mp4", { type: "video/mp4" });
+    Object.defineProperty(file, "size", { value: 3 * 1024 ** 3 });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page.getByText("视频超过 2 GB")).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存" })).toBeDisabled();
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("camera-editor-video-too-large.png");
+});
+
+test("添加摄像头：视频上传失败", async ({ page }) => {
+  await page.route(/\/api\/cameras\/video-files\?/, (route) =>
+    route.fulfill({ status: 507, json: { code: "insufficient_storage", message: "边缘主机磁盘空间不足", request_id: "r" } }),
+  );
+  await chooseVideo(page);
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByRole("alert")).toContainText("边缘主机磁盘空间不足");
+  await expectNoOverflow(page);
+  await expect(page).toHaveScreenshot("camera-editor-video-upload-failed.png");
+});
