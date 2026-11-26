@@ -1159,6 +1159,34 @@ def test_file_ingest_not_convertible(client: TestClient, ingest: FakeIngest) -> 
         assert r.json()["message"] == "ingest: 视频文件摄像头不能与其他接入方式互转"
 
 
+def test_file_camera_rejects_ip(client: TestClient, ingest: FakeIngest) -> None:
+    """视频文件摄像头只用占位 IP：给出真实 IP 会参与网络告警关联（D-145），新增与修改都拒绝。"""
+    body = file_body(upload(client)) | {"ip": "192.168.8.50"}
+    r = client.post("/api/cameras", json=body, headers=headers())
+    assert (r.status_code, r.json()["message"]) == (400, cameras.NO_FILE_IP)
+
+    camera_id = client.post("/api/cameras", json=file_body(upload(client)), headers=headers())
+    camera_id = camera_id.json()["id"]
+    r = client.patch(f"/api/cameras/{camera_id}", json={"ip": "192.168.8.50"}, headers=headers())
+    assert (r.status_code, r.json()["message"]) == (400, cameras.NO_FILE_IP)
+
+
+def test_orphan_upload_pruned_when_go2rtc_down(
+    client: TestClient, ingest: FakeIngest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-9：go2rtc 不可达时定期比对照样删除未被引用的上传。"""
+    state = cast(Any, client.app).state
+    orphan = videos_dir(client) / upload(client)
+    stale = time.time() - video_file.ORPHAN_S - 60
+    os.utime(orphan, (stale, stale))
+    monkeypatch.setattr(state, "go2rtc", DownGo2rtc({}))
+    portal = client.portal
+    assert portal is not None
+    with pytest.raises(httpx2.ConnectError):
+        portal.call(state.cameras.reconcile)
+    assert not orphan.exists()
+
+
 def test_video_file_counts_toward_limit(
     client: TestClient, ingest: FakeIngest, monkeypatch: pytest.MonkeyPatch
 ) -> None:

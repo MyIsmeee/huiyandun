@@ -267,6 +267,8 @@ def _check(values: dict[str, Any]) -> None:
     _check_rules(values.get("rules") or [])
 
 
+# 视频文件摄像头只用服务端分配的回环占位地址，不参与网络告警关联（D-145）
+NO_FILE_IP = "ip: 视频文件摄像头没有设备 IP"
 MIN_EDGE_M = 0.1  # 规则几何相邻两点的最小间距：重合的点使方向与边界无从定义
 
 
@@ -472,8 +474,9 @@ class Registry:
                 except (httpx2.HTTPError, ValueError):
                     # ingest 不可达不耽误 go2rtc 的比对；兼容模式的摄像头待其恢复后补齐
                     log.exception("cameras.ingest_unavailable")
-                await self._sync_go2rtc(self._live(rows))
+                # 先于 go2rtc 的比对：go2rtc 不可达时同样清理
                 await self._state.videos.prune({r["path"] for r in rows if r["ingest"] == "file"})
+                await self._sync_go2rtc(self._live(rows))
         finally:
             await self._expire_pending()
 
@@ -681,6 +684,8 @@ async def create_camera(body: CameraCreate, request: Request, principal: Admin) 
     now = datetime.now(UTC)
     if body.ip is None and body.ingest not in ("usb", "file"):
         raise HTTPException(400, "ip: 拉流与推流方式须填写设备 IP")
+    if body.ip is not None and body.ingest == "file":
+        raise HTTPException(400, NO_FILE_IP)
     videos: video_file.VideoFiles = request.app.state.videos
     video = None
     if body.ingest == "file" and body.video_file:
@@ -805,6 +810,8 @@ async def update_camera(
             before = view(row)
             if body.ingest is not None and (body.ingest == "file") != (row["ingest"] == "file"):
                 raise HTTPException(400, "ingest: 视频文件摄像头不能与其他接入方式互转")
+            if body.ip is not None and row["ingest"] == "file":
+                raise HTTPException(400, NO_FILE_IP)
             video = _video(request, row, body)
             if video is not None and video[0] != row["path"]:
                 videos.claim(video[0])
